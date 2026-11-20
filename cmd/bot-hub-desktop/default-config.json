@@ -1,0 +1,12 @@
+{
+  "http": { "host": "127.0.0.1", "port": 3789 },
+  "bots": [
+    {
+      "id": "assistant",
+      "name": "Assistant",
+      "description": "日常助理：待办、日程、信息整理与日常问答",
+      "workspace": "./workspaces/assistant",
+      "harness": "opencode"
+    }
+  ]
+}
