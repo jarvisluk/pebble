@@ -1156,10 +1156,10 @@ try {
 
             <section class="set-card">
               <div class="set-card-hd">
-                <h2>开箱引导</h2>
-                <button type="button" id="sReopenUnbox" class="mp">重新打开引导</button>
+                <h2 data-i18n="ubCardTitle">开箱引导</h2>
+                <button type="button" id="sReopenUnbox" class="mp" data-i18n="ubReopenBtn">重新打开引导</button>
               </div>
-              <p class="set-card-desc">重新检查本机 Agent 引擎、Magpie 模型配置与远程配对二维码。</p>
+              <p class="set-card-desc" data-i18n="ubCardDesc">重新检查本机 Agent 引擎、Magpie 模型配置与远程配对二维码。</p>
             </section>
           </div>
 
@@ -1298,27 +1298,27 @@ try {
   </form>
 </div>
 
-<div id="unboxDlg" class="dlg-wrap" aria-label="首次开箱引导">
+<div id="unboxDlg" class="dlg-wrap" data-i18n-aria="ubAria" aria-label="首次开箱引导">
   <div class="dlg unbox">
     <div class="dlg-h" style="flex-direction:column;align-items:stretch;gap:0">
       <div class="unbox-top">
         <div>
-          <h3 id="ubTitle">配置 Bot Hub</h3>
-          <p id="ubSub">确认运行引擎，快速开始使用</p>
+          <h3 id="ubTitle">选择 Agent 引擎</h3>
+          <p id="ubSub">检测本机可用 CLI 并绑定默认通用助理</p>
         </div>
-        <button type="button" id="ubSkipTop" class="link-btn">跳过</button>
+        <button type="button" id="ubSkipTop" class="link-btn" data-i18n="ubSkip">跳过</button>
       </div>
-      <div class="unbox-steps" aria-label="步骤">
-        <div class="unbox-step" data-ub-step="1">1 引擎</div>
-        <div class="unbox-step" data-ub-step="2">2 模型</div>
-        <div class="unbox-step" data-ub-step="3">3 远程配对</div>
+      <div class="unbox-steps" data-i18n-aria="ubStepsAria" aria-label="步骤">
+        <div class="unbox-step" data-ub-step="1" data-i18n="ubStep1Label">1 引擎</div>
+        <div class="unbox-step" data-ub-step="2" data-i18n="ubStep2Label">2 模型</div>
+        <div class="unbox-step" data-ub-step="3" data-i18n="ubStep3Label">3 远程配对</div>
       </div>
     </div>
     <div class="dlg-b">
       <div id="ubStep1" class="set-stack">
         <div class="set-card-hd">
-          <span class="set-card-desc">检测本机 Agent 引擎并绑定默认通用助理</span>
-          <button type="button" id="ubRecheck" class="mp">重新检测</button>
+          <span class="set-card-desc" data-i18n="ubStep1Hint">检测本机 Agent 引擎并绑定默认通用助理</span>
+          <button type="button" id="ubRecheck" class="mp" data-i18n="ubRecheck">重新检测</button>
         </div>
         <div id="ubHarnessList" class="unbox-list"></div>
       </div>
@@ -1328,64 +1328,64 @@ try {
         <div id="ubAddProvBox" class="add-prov" hidden>
           <div class="two">
             <div class="fld">
-              <label>添加方式</label>
+              <label data-i18n="addMethod">添加方式</label>
               <select id="ubApKind">
-                <option value="preset">预设厂商</option>
-                <option value="custom">自定义兼容接口</option>
+                <option value="preset" data-i18n="presetVendor">预设厂商</option>
+                <option value="custom" data-i18n="customEndpoint">自定义兼容接口</option>
               </select>
             </div>
             <div class="fld" id="ubApPresetFld">
-              <label>预设厂商</label>
+              <label data-i18n="presetVendor">预设厂商</label>
               <select id="ubApPreset"></select>
             </div>
             <div class="fld" id="ubApProtoFld" hidden>
-              <label>接口协议</label>
+              <label data-i18n="apiProtocol">接口协议</label>
               <select id="ubApProtocol">
-                <option value="openai">OpenAI 兼容 (/v1)</option>
-                <option value="anthropic">Anthropic 兼容</option>
+                <option value="openai" data-i18n="protoOpenAI">OpenAI 兼容 (/v1)</option>
+                <option value="anthropic" data-i18n="protoAnthropic">Anthropic 兼容</option>
                 <option value="responses">OpenAI Responses</option>
                 <option value="gemini">Google Gemini</option>
               </select>
             </div>
           </div>
           <div class="two">
-            <div class="fld"><label id="ubApNameLbl">别名 <em>可选</em></label><input id="ubApName" placeholder="例如 my-relay" /></div>
-            <div class="fld"><label>API Key <em>直传给 magpie</em></label><input id="ubApKey" type="password" class="mono" placeholder="sk-..." autocomplete="new-password" /></div>
+            <div class="fld"><label id="ubApNameLbl" data-i18n-html="aliasOptional">别名 <em>可选</em></label><input id="ubApName" data-i18n-ph="aliasPh" placeholder="例如 my-relay" /></div>
+            <div class="fld"><label data-i18n-html="apiKeyLabel">API Key <em>直传给 magpie</em></label><input id="ubApKey" type="password" class="mono" placeholder="sk-..." autocomplete="new-password" /></div>
           </div>
           <div id="ubApCustomRow" class="two" hidden>
             <div class="fld"><label>Base URL</label><input id="ubApUrl" class="mono" placeholder="https://api.example.com/v1" /></div>
-            <div class="fld"><label>模型列表 <em>可选，逗号分隔</em></label><input id="ubApModels" class="mono" placeholder="model-a,model-b" /></div>
+            <div class="fld"><label data-i18n-html="modelsListOptional">模型列表 <em>可选，逗号分隔</em></label><input id="ubApModels" class="mono" placeholder="model-a,model-b" /></div>
           </div>
           <div style="display:flex;justify-content:flex-end;gap:6px">
-            <button type="button" id="ubApCancel" class="mp">取消</button>
-            <button type="button" id="ubApSubmit" class="mp go">确认添加</button>
+            <button type="button" id="ubApCancel" class="mp" data-i18n="cancel">取消</button>
+            <button type="button" id="ubApSubmit" class="mp go" data-i18n="confirmAdd">确认添加</button>
           </div>
         </div>
         <div id="ubConnectBox" class="note" hidden>
           <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
             <span id="ubConnectText"></span>
-            <button type="button" id="ubConnectMagpie" class="mp go">一键接入 Magpie</button>
+            <button type="button" id="ubConnectMagpie" class="mp go" data-i18n="ubConnectMagpieBtn">一键接入 Magpie</button>
           </div>
         </div>
         <div class="fld">
-          <label>默认模型 <em>可选，留空用 CLI 当前配置</em></label>
-          <input id="ubDefaultModel" class="mono" spellcheck="false" list="models-global" placeholder="留空继承 CLI 默认模型" />
+          <label data-i18n-html="ubDefaultModelLbl">默认模型 <em>可选，留空用 CLI 当前配置</em></label>
+          <input id="ubDefaultModel" class="mono" spellcheck="false" list="models-global" data-i18n-ph="ubDefaultModelPh" placeholder="留空继承 CLI 默认模型" />
         </div>
       </div>
 
       <div id="ubStep3" class="set-stack" hidden>
-        <p class="set-card-desc">开启 Tailcat 加密隧道后，可在手机 App 或另一台电脑通过二维码直接配对。</p>
+        <p class="set-card-desc" data-i18n="ubStep3Hint">开启 Tailcat 加密隧道后，可在手机 App 或另一台电脑通过二维码直接配对。</p>
         <div class="note">
           <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-            <span>Tailcat 状态：<strong id="ubRemoteState">未开启</strong></span>
-            <button type="button" id="ubRemoteEnable" class="mp go">开启远程访问</button>
+            <span><span data-i18n="ubTailcatLabel">Tailcat 状态：</span><strong id="ubRemoteState">未开启</strong></span>
+            <button type="button" id="ubRemoteEnable" class="mp go" data-i18n="enableRemote">开启远程访问</button>
           </div>
           <img id="ubRemoteQR" class="unbox-qr" alt="" hidden />
           <div id="ubRemoteLinkFld" class="fld" hidden>
             <textarea id="ubRemoteLink" class="mono" readonly style="min-height:66px"></textarea>
           </div>
           <div id="ubRemoteCopyWrap" class="row-end" hidden>
-            <button type="button" id="ubRemoteCopy" class="mp go">复制配对链接</button>
+            <button type="button" id="ubRemoteCopy" class="mp go" data-i18n="copyPairLink">复制配对链接</button>
           </div>
         </div>
       </div>
@@ -1393,7 +1393,7 @@ try {
       <div id="ubErr" class="msg-err"></div>
     </div>
     <div class="dlg-f unbox-foot">
-      <button type="button" id="ubPrev" class="btn" hidden>上一步</button>
+      <button type="button" id="ubPrev" class="btn" data-i18n="ubPrev" hidden>上一步</button>
       <span id="ubFootSpacer"></span>
       <div class="unbox-foot-r">
         <button type="button" id="ubNext" class="btn go">下一步</button>
@@ -1463,7 +1463,7 @@ const I18N = {
     deskMode: '模式',
     deskLatency: '延迟',
     deskResolution: '分辨率',
-    deskLockState: '锁状态',
+    deskLockState: '状态',
     idle: '空闲',
     deskTypePh: '输入中文或文本，回车发送',
     send: '发送',
@@ -1528,7 +1528,7 @@ const I18N = {
     resetToken: '更换口令',
     copy: '复制',
     copied: '已复制',
-    localDesktopTitle: '本机远程桌面与自动化',
+    localDesktopTitle: '本机远程桌面',
     allowLocalDeskLabel: '允许 Bot 通过 MCP 操控本机桌面（点击/输入/截图）',
     connectedNodes: '已连接远端设备节点',
     appearance: '外观',
@@ -1739,7 +1739,7 @@ const I18N = {
     deskConnectingShort: '连接中…',
     deskJpegMode: 'HTTP JPEG 实时流',
     deskAiOperating: 'AI 操作中 ({tool})',
-    deskHumanCtrl: '人工控制',
+    deskHumanCtrl: '人工接管',
     deskAlertTakeover: '人工接管：{reason}',
     deskAlertAi: 'AI 正在操作屏幕（{tool}）',
     forceTakeover: '强制接管',
@@ -1747,6 +1747,54 @@ const I18N = {
     deskConnectFailed: '桌面连接失败',
     deskUnreachable: '目标桌面暂不可达',
     accentResetToast: '已恢复默认重点色',
+    ubCardTitle: '开箱引导',
+    ubReopenBtn: '重新打开引导',
+    ubCardDesc: '重新检查本机 Agent 引擎、Magpie 模型配置与远程配对二维码。',
+    ubAria: '首次开箱引导',
+    ubStepsAria: '步骤',
+    ubSkip: '跳过',
+    ubStep1Label: '1 引擎',
+    ubStep2Label: '2 模型',
+    ubStep3Label: '3 远程配对',
+    ubStep1Title: '选择 Agent 引擎',
+    ubStep1Sub: '检测本机可用 CLI 并绑定默认通用助理',
+    ubStep2Title: '配置模型与 Magpie',
+    ubStep2Sub: '使用 Magpie 统一管理或沿用 CLI 原生配置',
+    ubStep3Title: '远程访问与手机配对',
+    ubStep3Sub: '可选开启 Tailcat 加密隧道，在手机端扫码直连',
+    ubStep1Hint: '检测本机 Agent 引擎并绑定默认通用助理',
+    ubRecheck: '重新检测',
+    ubPrev: '上一步',
+    ubNext: '下一步',
+    ubContinue: '继续',
+    ubFinish: '完成并开始对话',
+    ubNoHarnesses: '未读取到引擎信息',
+    ubReady: '已就绪',
+    ubNotDetectedHint: '未检测到命令，可展开查看安装方式',
+    ubViewDocs: '查看安装文档',
+    ubManualInstall: '请参考 {name} 官方文档完成安装',
+    ubInstalled: '已安装',
+    ubNotInstalled: '未安装',
+    ubHideInstall: '收起',
+    ubViewInstall: '查看安装',
+    ubMagpieNotInstalledHtml: '<strong>Magpie 未安装</strong> · 当前可直接使用 {label} 原生配置',
+    ubMagpieInstallHint: '如需跨 CLI 统一管理 API Key 与额度回退，可安装 Magpie：',
+    ubGatewayRunning: '网关运行中',
+    ubGatewayNotStarted: '网关未启动',
+    ubProviderCount: '模型源 {n}',
+    ubHasProvidersDesc: '已配置模型源，可将当前引擎接入 Magpie 或继续使用原生配置。',
+    ubNoProvidersDesc: '尚未添加模型源，可直接在下方填写 API Key 添加，或留空沿用 CLI 原生配置。',
+    ubConnectedMagpie: '{label} 已接入 Magpie（{model}）',
+    ubNativeCliUsing: '{label} 当前使用 CLI 原生配置',
+    ubConnectMagpieBtn: '一键接入 Magpie',
+    ubDefaultModelLbl: '默认模型 <em>可选，留空用 CLI 当前配置</em>',
+    ubDefaultModelPh: '留空继承 CLI 默认模型',
+    ubStep3Hint: '开启 Tailcat 加密隧道后，可在手机 App 或另一台电脑通过二维码直接配对。',
+    ubTailcatLabel: 'Tailcat 状态：',
+    ubRecheckDone: '已重新检测',
+    ubFinishToast: '已完成初始化配置',
+    ubPickModelFirst: '请先在下方输入或选择一个模型，再接入 Magpie',
+    ubConnectedToast: '{label} 已接入 Magpie',
   },
   en: {
     newBot: 'New Bot',
@@ -1781,7 +1829,7 @@ const I18N = {
     deskMode: 'Mode',
     deskLatency: 'Latency',
     deskResolution: 'Resolution',
-    deskLockState: 'Lock',
+    deskLockState: 'State',
     idle: 'Idle',
     deskTypePh: 'Type text and press Enter',
     send: 'Send',
@@ -1846,7 +1894,7 @@ const I18N = {
     resetToken: 'Rotate',
     copy: 'Copy',
     copied: 'Copied',
-    localDesktopTitle: 'Local Desktop & Automation',
+    localDesktopTitle: 'Local Remote Desktop',
     allowLocalDeskLabel: 'Allow bots to control local desktop via MCP (click/type/screenshot)',
     connectedNodes: 'Connected Remote Nodes',
     appearance: 'Appearance',
@@ -2057,7 +2105,7 @@ const I18N = {
     deskConnectingShort: 'Connecting…',
     deskJpegMode: 'HTTP JPEG Stream',
     deskAiOperating: 'AI active ({tool})',
-    deskHumanCtrl: 'Human control',
+    deskHumanCtrl: 'Human takeover',
     deskAlertTakeover: 'Takeover: {reason}',
     deskAlertAi: 'AI is controlling screen ({tool})',
     forceTakeover: 'Take Over',
@@ -2065,6 +2113,54 @@ const I18N = {
     deskConnectFailed: 'Desktop connection failed',
     deskUnreachable: 'Target desktop unreachable',
     accentResetToast: 'Accent color reset to default',
+    ubCardTitle: 'Setup Wizard',
+    ubReopenBtn: 'Reopen Wizard',
+    ubCardDesc: 'Re-check local agent harnesses, Magpie models, and remote pairing QR code.',
+    ubAria: 'Setup Wizard',
+    ubStepsAria: 'Steps',
+    ubSkip: 'Skip',
+    ubStep1Label: '1 Harness',
+    ubStep2Label: '2 Model',
+    ubStep3Label: '3 Remote Pairing',
+    ubStep1Title: 'Choose Agent Harness',
+    ubStep1Sub: 'Detect local CLIs and bind the default general assistant',
+    ubStep2Title: 'Models & Magpie',
+    ubStep2Sub: 'Manage providers with Magpie or keep your CLI native config',
+    ubStep3Title: 'Remote Access & Mobile Pairing',
+    ubStep3Sub: 'Optionally enable Tailcat tunnel to scan and pair from mobile',
+    ubStep1Hint: 'Detect installed harnesses and bind the default assistant',
+    ubRecheck: 'Re-check',
+    ubPrev: 'Back',
+    ubNext: 'Next',
+    ubContinue: 'Continue',
+    ubFinish: 'Finish & Start Chatting',
+    ubNoHarnesses: 'No harness info available',
+    ubReady: 'Ready',
+    ubNotDetectedHint: 'Command not found; expand for install instructions',
+    ubViewDocs: 'View install docs',
+    ubManualInstall: 'Follow the official {name} installation docs',
+    ubInstalled: 'Installed',
+    ubNotInstalled: 'Not installed',
+    ubHideInstall: 'Hide',
+    ubViewInstall: 'Install',
+    ubMagpieNotInstalledHtml: '<strong>Magpie not installed</strong> · Using {label} native config directly',
+    ubMagpieInstallHint: 'Install Magpie to manage API keys and quota fallback across CLIs:',
+    ubGatewayRunning: 'Gateway running',
+    ubGatewayNotStarted: 'Gateway stopped',
+    ubProviderCount: 'Providers {n}',
+    ubHasProvidersDesc: 'Providers configured. Connect this harness to Magpie or keep native CLI config.',
+    ubNoProvidersDesc: 'No providers yet. Add an API key below or leave blank to use CLI native config.',
+    ubConnectedMagpie: '{label} connected to Magpie ({model})',
+    ubNativeCliUsing: '{label} is using native CLI config',
+    ubConnectMagpieBtn: 'Connect Magpie',
+    ubDefaultModelLbl: 'Default model <em>optional, blank uses CLI default</em>',
+    ubDefaultModelPh: 'Leave blank to use CLI default',
+    ubStep3Hint: 'Enable Tailcat encrypted tunnel to pair directly from mobile or another computer.',
+    ubTailcatLabel: 'Tailcat: ',
+    ubRecheckDone: 'Re-checked environment',
+    ubFinishToast: 'Setup completed',
+    ubPickModelFirst: 'Enter or select a model below before connecting Magpie',
+    ubConnectedToast: '{label} connected to Magpie',
   }
 };
 
@@ -2116,6 +2212,7 @@ function applyI18n() {
     if (settingsTab === 'remote') refreshRemoteTab();
     else if (settingsTab === 'general') loadGlobalMemories();
   }
+  if ($('unboxDlg')?.classList.contains('open')) renderUnbox();
 }
 
 /* ---------- utils ---------- */
@@ -3551,9 +3648,9 @@ function defaultUnboxHarness(s) {
 
 function renderUnboxHeader() {
   const meta = {
-    1: { title: '选择 Agent 引擎', sub: '检测本机可用 CLI 并绑定默认通用助理' },
-    2: { title: '配置模型与 Magpie', sub: '使用 Magpie 统一管理或沿用 CLI 原生配置' },
-    3: { title: '远程访问与手机配对', sub: '可选开启 Tailcat 加密隧道，在手机端扫码直连' },
+    1: { title: t('ubStep1Title'), sub: t('ubStep1Sub') },
+    2: { title: t('ubStep2Title'), sub: t('ubStep2Sub') },
+    3: { title: t('ubStep3Title'), sub: t('ubStep3Sub') },
   }[unboxStep];
   $('ubTitle').textContent = meta.title;
   $('ubSub').textContent = meta.sub;
@@ -3567,7 +3664,7 @@ function renderUnboxHeader() {
   $('ubStep3').hidden = unboxStep !== 3;
   $('ubPrev').hidden = unboxStep === 1;
   const anyInstalled = (state.settings?.harnesses || []).some(h => h.installed);
-  $('ubNext').textContent = unboxStep === 3 ? '完成并开始对话' : (unboxStep === 1 && !anyInstalled ? '继续' : '下一步');
+  $('ubNext').textContent = unboxStep === 3 ? t('ubFinish') : (unboxStep === 1 && !anyInstalled ? t('ubContinue') : t('ubNext'));
 }
 
 function renderUnboxStep1() {
@@ -3577,20 +3674,22 @@ function renderUnboxStep1() {
   }
   const listEl = $('ubHarnessList');
   if (!harnesses.length) {
-    listEl.innerHTML = '<div class="set-card-desc">未读取到引擎信息</div>';
+    listEl.innerHTML = `<div class="set-card-desc">${esc(t('ubNoHarnesses'))}</div>`;
     return;
   }
   listEl.innerHTML = harnesses.map(h => {
     const selected = h.id === unboxHarness;
     const expanded = unboxExpandedInstall.has(h.id);
-    const cmd = h.install?.command || '';
+    const rawCmd = h.install?.command || '';
+    const isShellCmd = rawCmd.includes(' ') && !rawCmd.startsWith('查看');
+    const cmdText = isShellCmd ? rawCmd : (rawCmd ? t('ubManualInstall', { name: h.label }) : '');
     const url = h.install?.url || '';
     const sub = h.installed
-      ? (h.binaryPath || '已就绪')
-      : '未检测到命令，可展开查看安装方式';
+      ? (h.binaryPath || t('ubReady'))
+      : t('ubNotDetectedHint');
     const installHtml = expanded ? `<div class="unbox-install">
-      ${cmd ? `<div class="cmd"><code>${esc(cmd)}</code>${cmd.includes(' ') && !cmd.startsWith('查看') ? `<button type="button" data-copy="${esc(cmd)}">复制</button>` : ''}</div>` : ''}
-      ${url ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">查看安装文档</a>` : ''}
+      ${cmdText ? `<div class="cmd"><code>${esc(cmdText)}</code>${isShellCmd ? `<button type="button" data-copy="${esc(rawCmd)}">${esc(t('copy'))}</button>` : ''}</div>` : ''}
+      ${url ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(t('ubViewDocs'))}</a>` : ''}
     </div>` : '';
     return `<div class="unbox-item${selected ? ' on' : ''}" data-ub-row="${esc(h.id)}">
       <div class="unbox-item-hd">
@@ -3599,8 +3698,8 @@ function renderUnboxStep1() {
           <span class="unbox-item-path">${esc(sub)}</span>
         </button>
         <div class="unbox-item-acts">
-          <span class="mp${h.installed ? ' ok' : ''}">${h.installed ? '已安装' : '未安装'}</span>
-          ${!h.installed ? `<button type="button" class="mp" data-ub-inst="${esc(h.id)}">${expanded ? '收起' : '查看安装'}</button>` : ''}
+          <span class="mp${h.installed ? ' ok' : ''}">${esc(h.installed ? t('ubInstalled') : t('ubNotInstalled'))}</span>
+          ${!h.installed ? `<button type="button" class="mp" data-ub-inst="${esc(h.id)}">${esc(expanded ? t('ubHideInstall') : t('ubViewInstall'))}</button>` : ''}
         </div>
       </div>
       ${installHtml}
@@ -3646,12 +3745,12 @@ function renderUnboxStep2() {
     $('ubAddProvBox').hidden = true;
     $('ubConnectBox').hidden = true;
     const inst = mp.install || {};
-    const cmdRow = c => c ? `<div class="cmd"><code>${esc(c)}</code><button type="button" data-copy="${esc(c)}">复制</button></div>` : '';
+    const cmdRow = c => c ? `<div class="cmd"><code>${esc(c)}</code><button type="button" data-copy="${esc(c)}">${esc(t('copy'))}</button></div>` : '';
     panel.innerHTML = `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
-      <span><strong>Magpie 未安装</strong> · 当前可直接使用 ${esc(hLabel)} 原生配置</span>
-      <button type="button" id="ubRecheck2" class="mp">重新检测</button>
+      <span>${t('ubMagpieNotInstalledHtml', { label: esc(hLabel) })}</span>
+      <button type="button" id="ubRecheck2" class="mp">${esc(t('ubRecheck'))}</button>
     </div>
-    <div>如需跨 CLI 统一管理 API Key 与额度回退，可安装 Magpie：</div>
+    <div>${esc(t('ubMagpieInstallHint'))}</div>
     ${cmdRow(inst.script)}${cmdRow(inst.brew)}`;
     $('ubRecheck2').onclick = () => recheckUnbox($('ubRecheck2'));
     return;
@@ -3664,20 +3763,20 @@ function renderUnboxStep2() {
   if (curPreset && presets.some(p => p.id === curPreset)) $('ubApPreset').value = curPreset;
 
   const statusTag = mp.healthy
-    ? '<span class="mp ok">网关运行中</span>'
-    : '<span class="mp bad">网关未启动</span>';
+    ? `<span class="mp ok">${esc(t('ubGatewayRunning'))}</span>`
+    : `<span class="mp bad">${esc(t('ubGatewayNotStarted'))}</span>`;
   panel.innerHTML = `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
       <strong>Magpie</strong>
       ${statusTag}
-      <span class="mp">模型源 ${provs.length}</span>
+      <span class="mp">${esc(t('ubProviderCount', { n: provs.length }))}</span>
     </div>
     <div style="display:flex;gap:6px">
-      <button type="button" id="ubRecheck2" class="mp">重新检测</button>
-      ${(provs.length > 0 || unboxProvDismissed) ? '<button type="button" id="ubShowAddProv" class="mp go">+ 添加模型源</button>' : ''}
+      <button type="button" id="ubRecheck2" class="mp">${esc(t('ubRecheck'))}</button>
+      ${(provs.length > 0 || unboxProvDismissed) ? `<button type="button" id="ubShowAddProv" class="mp go">${esc(t('addProviderBtn'))}</button>` : ''}
     </div>
   </div>
-  <div>${provs.length ? '已配置模型源，可将当前引擎接入 Magpie 或继续使用原生配置。' : '尚未添加模型源，可直接在下方填写 API Key 添加，或留空沿用 CLI 原生配置。'}</div>`;
+  <div>${esc(provs.length ? t('ubHasProvidersDesc') : t('ubNoProvidersDesc'))}</div>`;
   $('ubRecheck2').onclick = () => recheckUnbox($('ubRecheck2'));
   if ($('ubShowAddProv')) {
     $('ubShowAddProv').onclick = () => {
@@ -3690,11 +3789,11 @@ function renderUnboxStep2() {
   const connBox = $('ubConnectBox');
   if (hInfo?.magpie?.connected) {
     connBox.hidden = false;
-    $('ubConnectText').textContent = `${hLabel} 已接入 Magpie（${hInfo.magpie.model || '默认'}）`;
+    $('ubConnectText').textContent = t('ubConnectedMagpie', { label: hLabel, model: hInfo.magpie.model || t('defaultTag') });
     $('ubConnectMagpie').hidden = true;
   } else if (provs.length > 0) {
     connBox.hidden = false;
-    $('ubConnectText').textContent = `${hLabel} 当前使用 CLI 原生配置`;
+    $('ubConnectText').textContent = t('ubNativeCliUsing', { label: hLabel });
     $('ubConnectMagpie').hidden = false;
     $('ubConnectMagpie').disabled = false;
   } else {
@@ -3702,27 +3801,32 @@ function renderUnboxStep2() {
   }
 }
 
-function renderUnboxTailcat(t) {
-  const ready = t.state === 'ready';
-  const connecting = t.state === 'connecting';
-  $('ubRemoteState').textContent = { disabled: '未开启', connecting: '正在连接中继…', ready: '已就绪', error: '出错' }[t.state] || t.state;
+function renderUnboxTailcat(tState) {
+  const ready = tState.state === 'ready';
+  const connecting = tState.state === 'connecting';
+  $('ubRemoteState').textContent = {
+    disabled: t('disabled'),
+    connecting: t('remoteConnecting'),
+    ready: t('remoteReady'),
+    error: t('remoteError'),
+  }[tState.state] || tState.state;
   const btn = $('ubRemoteEnable');
   btn.hidden = ready || connecting;
   btn.disabled = false;
-  btn.textContent = t.state === 'error' ? '重试开启' : '开启远程访问';
+  btn.textContent = tState.state === 'error' ? t('remoteRetry') : t('enableRemote');
   $('ubRemoteQR').hidden = !ready;
   $('ubRemoteLinkFld').hidden = !ready;
   $('ubRemoteCopyWrap').hidden = !ready;
   if (ready) {
-    if ($('ubRemoteQR').dataset.link !== t.link) {
+    if ($('ubRemoteQR').dataset.link !== tState.link) {
       $('ubRemoteQR').src = '/api/tailcat/qr.png?t=' + Date.now();
-      $('ubRemoteQR').dataset.link = t.link;
+      $('ubRemoteQR').dataset.link = tState.link;
     }
-    $('ubRemoteLink').value = t.link || '';
+    $('ubRemoteLink').value = tState.link || '';
   } else {
     delete $('ubRemoteQR').dataset.link;
   }
-  if (t.error) $('ubErr').textContent = t.error;
+  if (tState.error) $('ubErr').textContent = tState.error;
   clearTimeout(unboxTailcatTimer);
   if (connecting && $('unboxDlg').classList.contains('open') && unboxStep === 3) {
     unboxTailcatTimer = setTimeout(refreshUnboxTailcat, 800);
@@ -3752,7 +3856,7 @@ async function recheckUnbox(btn) {
     await loadSettings(true);
     state.models = {};
     renderUnbox();
-    toast('已重新检测');
+    toast(t('ubRecheckDone'));
   } catch (e) {
     if (e.message !== 'unauthorized') $('ubErr').textContent = e.message;
   } finally {
@@ -3847,7 +3951,7 @@ $('ubNext').onclick = async () => {
     clearTimeout(unboxTailcatTimer);
     $('unboxDlg').classList.remove('open');
     await loadBots();
-    toast('已完成初始化配置');
+    toast(t('ubFinishToast'));
     if (matchMedia('(min-width: 821px)').matches) $('input').focus();
   } catch (e) {
     if (e.message !== 'unauthorized') $('ubErr').textContent = e.message;
@@ -3860,7 +3964,7 @@ $('ubApKind').onchange = () => {
   $('ubApPresetFld').hidden = custom;
   $('ubApProtoFld').hidden = !custom;
   $('ubApCustomRow').hidden = !custom;
-  $('ubApNameLbl').innerHTML = custom ? '名称' : '别名 <em>可选</em>';
+  $('ubApNameLbl').innerHTML = custom ? esc(t('aliasRequired')) : t('aliasOptional');
 };
 $('ubApCancel').onclick = () => {
   unboxProvDismissed = true;
@@ -3887,7 +3991,7 @@ $('ubApSubmit').onclick = async () => {
     state.models = {};
     await loadSettings(true);
     await loadModels(unboxHarness, true);
-    toast('已添加模型源');
+    toast(t('providerAdded'));
     renderUnboxStep2();
   } catch (e) {
     if (e.message !== 'unauthorized') $('ubErr').textContent = e.message;
@@ -3902,7 +4006,7 @@ $('ubConnectMagpie').onclick = async () => {
     await loadModels(unboxHarness);
     const model = $('ubDefaultModel').value.trim() || (state.models[unboxHarness] || [])[0] || '';
     if (!model) {
-      $('ubErr').textContent = '请先在下方输入或选择一个模型，再接入 Magpie';
+      $('ubErr').textContent = t('ubPickModelFirst');
       $('ubConnectMagpie').disabled = false;
       return;
     }
@@ -3912,7 +4016,7 @@ $('ubConnectMagpie').onclick = async () => {
     });
     if (!$('ubDefaultModel').value.trim()) $('ubDefaultModel').value = model;
     delete state.models[unboxHarness];
-    toast(`${harnessLabel(unboxHarness)} 已接入 Magpie`);
+    toast(t('ubConnectedToast', { label: harnessLabel(unboxHarness) }));
     renderUnboxStep2();
   } catch (e) {
     $('ubConnectMagpie').disabled = false;
@@ -3924,15 +4028,15 @@ $('ubRemoteEnable').onclick = async () => {
   $('ubRemoteEnable').disabled = true;
   try {
     renderUnboxTailcat(await api('/api/tailcat', { method: 'POST', body: { enabled: true } }));
-    toast('已开启远程访问');
+    toast(t('remoteEnabledToast'));
   } catch (e) {
     $('ubRemoteEnable').disabled = false;
     if (e.message !== 'unauthorized') $('ubErr').textContent = e.message;
   }
 };
 $('ubRemoteCopy').onclick = async () => {
-  try { await navigator.clipboard.writeText($('ubRemoteLink').value); toast('已复制配对链接'); }
-  catch { toast('复制失败'); }
+  try { await navigator.clipboard.writeText($('ubRemoteLink').value); toast(t('pairLinkCopied')); }
+  catch { toast(t('copyFailed')); }
 };
 $('sReopenUnbox').onclick = () => {
   closeSettings();

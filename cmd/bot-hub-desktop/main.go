@@ -46,6 +46,7 @@ var desktopHarnesses = []struct {
 	{"claude", "Claude Code"},
 	{"pi", "Pi"},
 	{"dsh", "DeepSeek Harness"},
+	{"agy", "Antigravity CLI"},
 }
 
 func main() {

@@ -11,15 +11,16 @@ func TestDetectHarnessAndPreference(t *testing.T) {
 	origLookPath := lookPathFunc
 	t.Cleanup(func() { lookPathFunc = origLookPath })
 
-	// Isolate HOME so ~/.opencode/bin/opencode doesn't leak from host machine.
+	// Isolate HOME and AGY_BIN so host machine binaries don't leak.
 	fakeHome := t.TempDir()
 	t.Setenv("HOME", fakeHome)
+	t.Setenv("AGY_BIN", "")
 
 	// Case 1: None installed.
 	lookPathFunc = func(string) (string, error) {
 		return "", errors.New("not found")
 	}
-	for _, kind := range []string{"opencode", "claude", "pi", "dsh"} {
+	for _, kind := range []string{"opencode", "claude", "pi", "dsh", "agy"} {
 		if ok, p := DetectHarness(kind); ok || p != "" {
 			t.Fatalf("expected %s not installed, got ok=%v path=%q", kind, ok, p)
 		}
@@ -28,7 +29,23 @@ func TestDetectHarnessAndPreference(t *testing.T) {
 		t.Fatalf("PreferredInstalledHarness = %q, want empty", got)
 	}
 
-	// Case 2: Only claude and pi installed -> claude preferred over pi.
+	// Case 2: agy fallback path in ~/.local/bin/agy.
+	localBin := filepath.Join(fakeHome, ".local", "bin")
+	if err := os.MkdirAll(localBin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	agyBin := filepath.Join(localBin, "agy")
+	if err := os.WriteFile(agyBin, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if ok, p := DetectHarness("agy"); !ok || p != agyBin {
+		t.Fatalf("DetectHarness(agy) fallback = (%v, %q), want %q", ok, p, agyBin)
+	}
+	if got := PreferredInstalledHarness(); got != "agy" {
+		t.Fatalf("PreferredInstalledHarness = %q, want agy", got)
+	}
+
+	// Case 3: Only claude, pi, and agy installed -> claude preferred.
 	lookPathFunc = func(bin string) (string, error) {
 		switch bin {
 		case "claude":

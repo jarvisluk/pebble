@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 )
 
 // HarnessInstallInfo describes how to obtain and install a supported agent runtime.
@@ -36,6 +37,10 @@ var harnessInstallMeta = map[string]HarnessInstallInfo{
 		Command: "查看 DeepSeek Harness 安装说明",
 		URL:     "https://github.com/deepseek-ai/deepseek-harness",
 	},
+	"agy": {
+		Binary:  "agy",
+		Command: "查看 Antigravity CLI 安装说明",
+	},
 }
 
 // HarnessInstallMeta returns install guidance metadata for a harness kind.
@@ -48,6 +53,13 @@ func HarnessInstallMeta(kind string) HarnessInstallInfo {
 
 // DetectHarness checks whether the CLI binary for kind is installed on this machine.
 func DetectHarness(kind string) (installed bool, binPath string) {
+	if kind == "agy" {
+		if v := strings.TrimSpace(os.Getenv("AGY_BIN")); v != "" {
+			if info, err := os.Stat(v); err == nil && !info.IsDir() {
+				return true, v
+			}
+		}
+	}
 	meta := HarnessInstallMeta(kind)
 	if meta.Binary == "" {
 		return false, ""
@@ -55,9 +67,15 @@ func DetectHarness(kind string) (installed bool, binPath string) {
 	if p, err := lookPathFunc(meta.Binary); err == nil && p != "" {
 		return true, p
 	}
-	if kind == "opencode" {
-		if home, err := os.UserHomeDir(); err == nil && home != "" {
-			candidate := filepath.Join(home, ".opencode", "bin", "opencode")
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		var candidate string
+		switch kind {
+		case "opencode":
+			candidate = filepath.Join(home, ".opencode", "bin", "opencode")
+		case "agy":
+			candidate = filepath.Join(home, ".local", "bin", "agy")
+		}
+		if candidate != "" {
 			if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
 				return true, candidate
 			}
@@ -69,7 +87,7 @@ func DetectHarness(kind string) (installed bool, binPath string) {
 // PreferredInstalledHarness returns the first installed harness in default priority order,
 // or empty string when none is installed.
 func PreferredInstalledHarness() string {
-	for _, kind := range []string{"opencode", "claude", "pi", "dsh"} {
+	for _, kind := range []string{"opencode", "claude", "pi", "dsh", "agy"} {
 		if ok, _ := DetectHarness(kind); ok {
 			return kind
 		}
