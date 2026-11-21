@@ -108,7 +108,7 @@
 
   * { box-sizing: border-box; margin: 0; padding: 0; }
   [hidden] { display: none !important; }
-  html, body { height: 100%; overflow: hidden; overscroll-behavior: none; }
+  html, body, #root { height: 100%; overflow: hidden; overscroll-behavior: none; }
   body { background: var(--page); color: var(--text); font: var(--fs-base)/1.6 var(--font); -webkit-font-smoothing: antialiased; }
   button, input, textarea, select { font: inherit; color: inherit; background: none; border: 0; }
   button { cursor: pointer; }
