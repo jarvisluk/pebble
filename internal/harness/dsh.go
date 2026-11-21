@@ -251,6 +251,9 @@ func (h *DshHarness) request(ctx context.Context, p *lineProc, method string, pa
 // starts a new one when there is none (or it can no longer be resumed).
 func (h *DshHarness) openSession(ctx context.Context, p *lineProc, opts RunOptions) (string, error) {
 	sid := opts.SessionID
+	if opts.Ephemeral {
+		sid = ""
+	}
 	h.mu.Lock()
 	s := h.open[sid]
 	h.mu.Unlock()
@@ -340,6 +343,13 @@ func (h *DshHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnResult,
 	sid, err := h.openSession(ctx, p, opts)
 	if err != nil {
 		return nil, err
+	}
+	if opts.Ephemeral && sid != "" {
+		defer func(ephemeralSID string) {
+			h.mu.Lock()
+			delete(h.open, ephemeralSID)
+			h.mu.Unlock()
+		}(sid)
 	}
 	partial := &TurnResult{BotID: bot.ID, SessionID: sid}
 

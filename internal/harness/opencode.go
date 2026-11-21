@@ -263,14 +263,20 @@ func (h *OpenCodeHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnRe
 	model := modelRef(bot.Model)
 
 	sid := opts.SessionID
-	if sid != "" {
+	if opts.Ephemeral {
+		sid = ""
+	} else if sid != "" {
 		if code, _ := api.do(ctx, http.MethodGet, "/api/session/"+sid, nil, nil); code == http.StatusNotFound {
 			sid = ""
 		}
 	}
 	if sid == "" {
+		title := "bot:" + bot.ID
+		if opts.Ephemeral {
+			title = "routine:" + bot.ID
+		}
 		body := map[string]any{
-			"title":    "bot:" + bot.ID,
+			"title":    title,
 			"location": map[string]string{"directory": bot.Workspace},
 		}
 		if model != nil {
@@ -294,6 +300,14 @@ func (h *OpenCodeHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnRe
 			return nil, fmt.Errorf("switch model: %w", err)
 		}
 		h.applied.Store(sid, bot.Model)
+	}
+	if opts.Ephemeral && sid != "" {
+		defer func(ephemeralSID string) {
+			h.applied.Delete(ephemeralSID)
+			dctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			_, _ = api.do(dctx, http.MethodDelete, "/api/session/"+ephemeralSID, nil, nil)
+		}(sid)
 	}
 
 	partial := &TurnResult{BotID: bot.ID, SessionID: sid}

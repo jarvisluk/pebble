@@ -1,6 +1,7 @@
 package harness
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 type PiHarness struct {
 	binary string
 	mu     sync.Mutex
+	mcpMu  sync.Mutex
 	procs  map[string]*piProc
 
 	modelsOnce sync.Once
@@ -130,11 +132,26 @@ func (h *PiHarness) proc(opts RunOptions, sessionID string) (*piProc, error) {
 		delete(h.procs, bot.ID)
 	}
 
-	if err := writePiMCPConfig(bot.Workspace, opts); err != nil {
+	p, err := h.startProc(opts, sessionID, false)
+	if err != nil {
+		return nil, err
+	}
+	h.procs[bot.ID] = p
+	return p, nil
+}
+
+func (h *PiHarness) startProc(opts RunOptions, sessionID string, ephemeral bool) (*piProc, error) {
+	bot := opts.Bot
+	if err := h.writePiMCPConfig(bot.Workspace, opts); err != nil {
 		return nil, err
 	}
 	// --approve trusts the workspace's .pi/mcp.json for this run.
-	args := []string{"--mode", "rpc", "--approve", "--session-id", sessionID}
+	args := []string{"--mode", "rpc", "--approve"}
+	if ephemeral {
+		args = append(args, "--no-session")
+	} else {
+		args = append(args, "--session-id", sessionID)
+	}
 	if bot.Model != "" {
 		args = append(args, "--model", bot.Model)
 	}
@@ -150,17 +167,18 @@ func (h *PiHarness) proc(opts RunOptions, sessionID string) (*piProc, error) {
 	if err != nil {
 		return nil, err
 	}
-	p := &piProc{lineProc: lp, model: bot.Model, sessionID: sessionID}
-	h.procs[bot.ID] = p
-	return p, nil
+	return &piProc{lineProc: lp, model: bot.Model, sessionID: sessionID}, nil
 }
 
 // writePiMCPConfig exposes the bot-hub MCP server through the workspace's
 // .pi/mcp.json. It may hold the hub API token, so it is private.
-func writePiMCPConfig(workspace string, opts RunOptions) error {
+func (h *PiHarness) writePiMCPConfig(workspace string, opts RunOptions) error {
 	if len(opts.MCPCommand) == 0 {
 		return nil
 	}
+	h.mcpMu.Lock()
+	defer h.mcpMu.Unlock()
+
 	dir := filepath.Join(workspace, ".pi")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
@@ -170,11 +188,20 @@ func writePiMCPConfig(workspace string, opts RunOptions) error {
 		server["env"] = opts.MCPEnv
 	}
 	b, _ := json.MarshalIndent(map[string]any{"mcpServers": map[string]any{"bot-hub": server}}, "", "  ")
+	want := append(b, '\n')
 	path := filepath.Join(dir, "mcp.json")
-	if err := os.WriteFile(path, append(b, '\n'), 0o600); err != nil {
+	if cur, err := os.ReadFile(path); err == nil && bytes.Equal(cur, want) {
+		return nil
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, want, 0o600); err != nil {
 		return err
 	}
-	return os.Chmod(path, 0o600)
+	if err := os.Chmod(tmp, 0o600); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return os.Rename(tmp, path)
 }
 
 func (h *PiHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnResult, error) {
@@ -185,13 +212,33 @@ func (h *PiHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnResult, 
 		ctx, cancel = context.WithTimeout(ctx, time.Duration(bot.TimeoutSec)*time.Second)
 		defer cancel()
 	}
-	sessionID := opts.SessionID
-	if sessionID == "" {
-		sessionID = newUUID()
+	var (
+		sessionID string
+		p         *piProc
+		err       error
+	)
+	if opts.Ephemeral {
+		p, err = h.startProc(opts, "", true)
+		if err != nil {
+			return nil, err
+		}
+		defer p.kill()
+	} else {
+		sessionID = opts.SessionID
+		if sessionID == "" {
+			sessionID = newUUID()
+		}
+		p, err = h.proc(opts, sessionID)
+		if err != nil {
+			return nil, err
+		}
 	}
-	p, err := h.proc(opts, sessionID)
-	if err != nil {
-		return nil, err
+	dropProc := func() {
+		if opts.Ephemeral {
+			p.kill()
+		} else {
+			h.drop(bot.ID, p)
+		}
 	}
 	partial := &TurnResult{BotID: bot.ID, SessionID: sessionID}
 
@@ -220,12 +267,12 @@ func (h *PiHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnResult, 
 			abortDeadline = time.After(10 * time.Second)
 		case <-abortDeadline:
 			partial.Text = strings.Join(texts, "\n")
-			h.drop(bot.ID, p)
+			dropProc()
 			return partial, ctxErr(ctx, bot.ID, bot.TimeoutSec)
 		case line, ok := <-p.lines:
 			if !ok {
 				partial.Text = strings.Join(texts, "\n")
-				h.drop(bot.ID, p)
+				dropProc()
 				return partial, fmt.Errorf("pi failed for bot %q: %s", bot.ID, p.exitDetail())
 			}
 			var evt piEvent

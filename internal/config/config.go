@@ -8,20 +8,113 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
+const (
+	RoutineDeliveryReceipt = "receipt"
+	RoutineDeliveryNotify  = "notify"
+	RoutineDeliveryNone    = "none"
+)
+
 type ScheduleConfig struct {
+	ID                   string `json:"id,omitempty"`
 	Name                 string `json:"name"`
 	EveryMinutes         int    `json:"everyMinutes,omitempty"`
 	DailyAt              string `json:"dailyAt,omitempty"` // "HH:MM" local time
 	Prompt               string `json:"prompt"`
+	Model                string `json:"model,omitempty"`
+	MainDelivery         string `json:"mainDelivery,omitempty"` // "receipt" (default) | "notify" | "none"
 	NotifyTelegramChatID string `json:"notifyTelegramChatId,omitempty"`
 	Enabled              *bool  `json:"enabled,omitempty"`
 }
 
 func (s ScheduleConfig) IsEnabled() bool {
 	return s.Enabled == nil || *s.Enabled
+}
+
+// EffectiveID returns the routine's ID, or a normalized slug derived from Name.
+func (s ScheduleConfig) EffectiveID() string {
+	if id := strings.TrimSpace(s.ID); id != "" {
+		return id
+	}
+	return slugifyRoutineID(s.Name)
+}
+
+// EffectiveMainDelivery returns the normalized main-session delivery mode ("receipt", "notify", or "none").
+func (s ScheduleConfig) EffectiveMainDelivery() string {
+	switch strings.ToLower(strings.TrimSpace(s.MainDelivery)) {
+	case "", RoutineDeliveryReceipt:
+		return RoutineDeliveryReceipt
+	case RoutineDeliveryNotify:
+		return RoutineDeliveryNotify
+	case RoutineDeliveryNone:
+		return RoutineDeliveryNone
+	default:
+		return strings.ToLower(strings.TrimSpace(s.MainDelivery))
+	}
+}
+
+// Validate checks that the routine has a valid ID/name, trigger, prompt, and delivery mode.
+func (s ScheduleConfig) Validate() error {
+	if strings.TrimSpace(s.Name) == "" {
+		return errors.New("routine name is required")
+	}
+	if strings.TrimSpace(s.Prompt) == "" {
+		return errors.New("routine prompt is required")
+	}
+	if id := strings.TrimSpace(s.ID); id != "" && !botIDRe.MatchString(id) {
+		return fmt.Errorf("invalid routine id %q (use letters, digits, - or _)", id)
+	}
+	if s.EveryMinutes < 0 {
+		return errors.New("everyMinutes must be >= 0")
+	}
+	daily := strings.TrimSpace(s.DailyAt)
+	if daily != "" {
+		if !isValidDailyAt(daily) {
+			return fmt.Errorf("invalid dailyAt %q (expected HH:MM)", s.DailyAt)
+		}
+	}
+	if s.EveryMinutes == 0 && daily == "" {
+		return errors.New("either everyMinutes > 0 or dailyAt is required")
+	}
+	switch strings.ToLower(strings.TrimSpace(s.MainDelivery)) {
+	case "", RoutineDeliveryReceipt, RoutineDeliveryNotify, RoutineDeliveryNone:
+	default:
+		return fmt.Errorf("invalid mainDelivery %q (expected receipt, notify, or none)", s.MainDelivery)
+	}
+	return nil
+}
+
+func isValidDailyAt(v string) bool {
+	if len(v) != 5 || v[2] != ':' {
+		return false
+	}
+	hh, err1 := strconv.Atoi(v[:2])
+	mm, err2 := strconv.Atoi(v[3:])
+	return err1 == nil && err2 == nil && hh >= 0 && hh <= 23 && mm >= 0 && mm <= 59
+}
+
+func slugifyRoutineID(name string) string {
+	lower := strings.ToLower(strings.TrimSpace(name))
+	var b strings.Builder
+	prevDash := false
+	for _, r := range lower {
+		isAlnum := (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_'
+		if isAlnum {
+			b.WriteRune(r)
+			prevDash = false
+		} else if !prevDash && b.Len() > 0 {
+			b.WriteByte('-')
+			prevDash = true
+		}
+	}
+	slug := strings.Trim(b.String(), "-")
+	if slug == "" {
+		return "routine"
+	}
+	return slug
 }
 
 type TelegramBotConfig struct {
@@ -125,6 +218,11 @@ func ValidateBotID(id string) error {
 		return fmt.Errorf("bot id %q is reserved", id)
 	}
 	return nil
+}
+
+// ContainsEnvRef reports whether s contains a `${VAR}` environment variable reference.
+func ContainsEnvRef(s string) bool {
+	return envRefRe.MatchString(s)
 }
 
 func expandEnv(s string) string {
@@ -282,6 +380,38 @@ func NormalizeBot(b *BotConfig, cfg *HubConfig) {
 			b.Telegram.AllowedChatIDs[j] = expandEnv(b.Telegram.AllowedChatIDs[j])
 		}
 	}
+	b.Schedules = NormalizeSchedules(b.Schedules)
+}
+
+// NormalizeSchedules expands environment references and normalizes IDs and
+// delivery modes across a bot's schedules, preserving unique IDs.
+func NormalizeSchedules(in []ScheduleConfig) []ScheduleConfig {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]ScheduleConfig, len(in))
+	usedIDs := make(map[string]int, len(in))
+	for j, sc := range in {
+		sc.Name = strings.TrimSpace(sc.Name)
+		sc.DailyAt = strings.TrimSpace(sc.DailyAt)
+		sc.Model = strings.TrimSpace(expandEnv(sc.Model))
+		sc.NotifyTelegramChatID = strings.TrimSpace(expandEnv(sc.NotifyTelegramChatID))
+		sc.MainDelivery = sc.EffectiveMainDelivery()
+		baseID := sc.EffectiveID()
+		if n, exists := usedIDs[baseID]; exists {
+			n++
+			usedIDs[baseID] = n
+			baseID = fmt.Sprintf("%s-%d", sc.EffectiveID(), n)
+			for usedIDs[baseID] > 0 {
+				n++
+				baseID = fmt.Sprintf("%s-%d", sc.EffectiveID(), n)
+			}
+		}
+		usedIDs[baseID] = 1
+		sc.ID = baseID
+		out[j] = sc
+	}
+	return out
 }
 
 // LocalDesktopAllowed reports whether bots may drive the hub host's GUI desktop via MCP.
@@ -339,9 +469,10 @@ func PlatformInstructionsText() string {
 		"  - When Magpie Memory tools (`memory_search` / `memory_save`) are available, store cross-project preferences with `scope=\"global\"` and this bot's durable notes with `scope=\"project\"` and tag `bot:<your-bot-id>` (and pass that tag when searching so sibling workspaces inside a git repo never mix). Otherwise store durable notes in `memory/`.",
 		"- **Teammates (`bot-hub` MCP)**: `list_bots`, `get_bot`, `create_bot`, `message_bot`.",
 		"- **Session Recall & Hygiene**:",
-		"  - On a new session after `/reset` or an error, use `list_sessions` and `recall_session` (omit `sessionId` or pass `\"previous\"` for your prior session; keep slices small and fetch single oversized messages by `messageId` to avoid re-polluting context).",
+		"  - On a new session after `/reset` or an error, or inside an isolated routine, use `list_sessions` and `recall_session` (pass `\"previous\"` for your prior archived session or `\"active\"` for the active main session; keep slices small and fetch single oversized messages by `messageId` to avoid re-polluting context).",
 		"  - If `list_sessions` returns a `magpieSession` (e.g. `opencode:...` or `claude:...`) and you need raw tool transcripts, pass it to `magpie-sessions__read_session`.",
 		"  - When context gets noisy or off-track, call `rotate_session(handoffNote)` to cleanly archive this session after the turn.",
+		"- **Scheduled Routines (`bot-hub` MCP)**: `list_routines`, `upsert_routine`, `delete_routine`, `run_routine`. Routines run in isolated turns with `AGENTS.md` + `memory/` and deliver findings via `receipt` (queued for the next main turn), `notify` (immediate main turn), or `none`.",
 		"- **Devices & Human Takeover**: `list_nodes`, `node_exec`, `node_file`, `node_desktop`, `request_takeover`.",
 		"",
 	}, "\n")

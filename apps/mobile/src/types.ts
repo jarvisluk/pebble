@@ -167,3 +167,52 @@ export interface ServerProfile {
   address: string;
   token: string;
 }
+
+export type RoutineDelivery = 'receipt' | 'notify' | 'none';
+
+export interface RoutineRun {
+  id: string;
+  botId: string;
+  routineId: string;
+  routineName?: string;
+  trigger: 'schedule' | 'manual' | string;
+  status: 'ok' | 'silent' | 'error' | string;
+  delivery: RoutineDelivery | string;
+  model?: string;
+  output?: string;
+  error?: string;
+  durationMs?: number;
+  costUsd?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  startedAt: string;
+  finishedAt: string;
+  injectedAt?: string;
+}
+
+export interface RoutineItem {
+  id: string;
+  name: string;
+  everyMinutes?: number;
+  dailyAt?: string;
+  prompt: string;
+  model?: string;
+  mainDelivery: RoutineDelivery;
+  notifyTelegramChatId?: string;
+  enabled: boolean;
+  running: boolean;
+  nextRunAt?: string;
+  lastRun?: RoutineRun;
+}
+
+export interface RoutineUpsertInput {
+  id?: string;
+  name: string;
+  everyMinutes?: number;
+  dailyAt?: string;
+  prompt: string;
+  model?: string;
+  mainDelivery?: RoutineDelivery;
+  notifyTelegramChatId?: string;
+  enabled?: boolean;
+}

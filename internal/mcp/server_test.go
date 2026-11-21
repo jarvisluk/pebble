@@ -57,8 +57,8 @@ func TestMCPStdioToolsFlow(t *testing.T) {
 	if err := json.Unmarshal([]byte(lines[1]), &listResp); err != nil {
 		t.Fatalf("parse tools/list: %v", err)
 	}
-	if len(listResp.Result.Tools) != 12 {
-		t.Fatalf("expected 12 tools, got %d", len(listResp.Result.Tools))
+	if len(listResp.Result.Tools) != 16 {
+		t.Fatalf("expected 16 tools, got %d", len(listResp.Result.Tools))
 	}
 	if !strings.Contains(lines[3], "Reply from bot:researcher") {
 		t.Fatalf("expected message_bot reply, got %s", lines[3])
@@ -202,5 +202,46 @@ func TestMCPNodeToolsAndTokenRotation(t *testing.T) {
 		!strings.Contains(lines[2], "file-body") || !strings.Contains(lines[3], "/tmp/shot.jpg") ||
 		!strings.Contains(lines[4], `"isError":false`) || !strings.Contains(lines[5], "人类已扫码完成") {
 		t.Fatalf("unexpected node/takeover tool outputs:\n%s", out.String())
+	}
+}
+
+func TestMCPRoutineTools(t *testing.T) {
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/bots/assistant/routines":
+			_, _ = w.Write([]byte(`{"routines":[{"id":"morning","name":"Morning Brief","dailyAt":"09:00","mainDelivery":"receipt"}]}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/bots/assistant/routines" && r.URL.Query().Get("upsert") == "1":
+			_, _ = w.Write([]byte(`{"id":"morning","name":"Morning Brief","dailyAt":"09:00","mainDelivery":"receipt","enabled":true}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/bots/assistant/routines/morning/run":
+			_, _ = w.Write([]byte(`{"id":"run_1","status":"ok","output":"all clear"}`))
+		case r.Method == http.MethodDelete && r.URL.Path == "/api/bots/assistant/routines/morning":
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer api.Close()
+
+	input := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_routines","arguments":{}}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"upsert_routine","arguments":{"name":"Morning Brief","dailyAt":"09:00","prompt":"check memory/"}}}`,
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"run_routine","arguments":{"routineId":"morning"}}}`,
+		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"delete_routine","arguments":{"routineId":"morning"}}}`,
+		"",
+	}, "\n")
+
+	var out bytes.Buffer
+	srv := NewServer(api.URL, "assistant")
+	if err := srv.ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatalf("ServeStdio failed: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 4 {
+		t.Fatalf("expected 4 responses, got %d:\n%s", len(lines), out.String())
+	}
+	if !strings.Contains(lines[0], "Morning Brief") || !strings.Contains(lines[1], "receipt") ||
+		!strings.Contains(lines[2], "all clear") || !strings.Contains(lines[3], `"isError":false`) {
+		t.Fatalf("unexpected routine MCP outputs:\n%s", out.String())
 	}
 }

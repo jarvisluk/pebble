@@ -30,6 +30,7 @@ type RunOptions struct {
 	Bot                      config.BotConfig
 	Prompt                   string
 	SessionID                string
+	Ephemeral                bool
 	PlatformInstructionsPath string
 	// MCPCommand/MCPEnv describe the bot-hub MCP server for harnesses that
 	// take MCP config per process rather than from the workspace.

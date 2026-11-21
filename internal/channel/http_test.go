@@ -14,6 +14,7 @@ import (
 	"bot-hub/internal/config"
 	"bot-hub/internal/harness"
 	"bot-hub/internal/hub"
+	"bot-hub/internal/scheduler"
 	"bot-hub/internal/state"
 )
 
@@ -301,5 +302,103 @@ func TestSessionRecallRotatePrivateAndMemoryRoutes(t *testing.T) {
 	mux.ServeHTTP(memRec, memReq)
 	if memRec.Code != http.StatusOK || !strings.Contains(memRec.Body.String(), `"items":`) {
 		t.Fatalf("GET /api/memory failed: %d %s", memRec.Code, memRec.Body.String())
+	}
+}
+
+type routineEchoHarness struct{}
+
+func (routineEchoHarness) Kind() string                             { return "opencode" }
+func (routineEchoHarness) Label() string                            { return "OpenCode" }
+func (routineEchoHarness) Models(context.Context) ([]string, error) { return nil, nil }
+func (routineEchoHarness) Close()                                   {}
+func (routineEchoHarness) RunTurn(_ context.Context, opts harness.RunOptions) (*harness.TurnResult, error) {
+	return &harness.TurnResult{BotID: opts.Bot.ID, SessionID: "rt_ses", Text: "巡检报告：一切正常"}, nil
+}
+
+func TestRoutineHTTPRoutes(t *testing.T) {
+	tmp := t.TempDir()
+	store, err := state.NewStore(filepath.Join(tmp, "sessions.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := harness.NewRegistry()
+	reg.Register(routineEchoHarness{})
+
+	cfg := &config.HubConfig{
+		ProjectRoot: tmp,
+		SharedDir:   filepath.Join(tmp, "workspaces", "_shared"),
+		StateFile:   filepath.Join(tmp, "sessions.json"),
+		Bots: []config.BotConfig{
+			{ID: "ops", Name: "Ops", Workspace: filepath.Join(tmp, "workspaces", "ops"), Harness: "opencode"},
+		},
+	}
+	h := hub.New(cfg, store, nil, reg)
+	defer h.Close()
+
+	sched := scheduler.New(h, nil)
+	h.SetOnSchedulesChanged(sched.Sync)
+	sctx, scancel := context.WithCancel(context.Background())
+	defer func() {
+		scancel()
+		sched.Wait()
+	}()
+	sched.Start(sctx)
+
+	s := NewHTTPServer(h, config.HTTPConfig{Host: "127.0.0.1"})
+	s.SetScheduler(sched)
+	defer s.Shutdown(t.Context())
+	mux := s.srv.Handler
+
+	// Create routine
+	createReq := httptest.NewRequest(http.MethodPost, "/api/bots/ops/routines", bytes.NewBufferString(`{"name":"Disk Check","everyMinutes":15,"prompt":"check df","mainDelivery":"receipt"}`))
+	createReq.Host = "127.0.0.1:3789"
+	createRec := httptest.NewRecorder()
+	mux.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusCreated || !strings.Contains(createRec.Body.String(), `"id":"disk-check"`) {
+		t.Fatalf("POST routines failed: %d %s", createRec.Code, createRec.Body.String())
+	}
+
+	// Update routine
+	patchReq := httptest.NewRequest(http.MethodPatch, "/api/bots/ops/routines/disk-check", bytes.NewBufferString(`{"everyMinutes":30,"mainDelivery":"receipt"}`))
+	patchReq.Host = "127.0.0.1:3789"
+	patchRec := httptest.NewRecorder()
+	mux.ServeHTTP(patchRec, patchReq)
+	if patchRec.Code != http.StatusOK || !strings.Contains(patchRec.Body.String(), `"everyMinutes":30`) {
+		t.Fatalf("PATCH routine failed: %d %s", patchRec.Code, patchRec.Body.String())
+	}
+
+	// Run routine synchronously
+	runReq := httptest.NewRequest(http.MethodPost, "/api/bots/ops/routines/disk-check/run", nil)
+	runReq.Host = "127.0.0.1:3789"
+	runRec := httptest.NewRecorder()
+	mux.ServeHTTP(runRec, runReq)
+	if runRec.Code != http.StatusOK || !strings.Contains(runRec.Body.String(), "巡检报告") {
+		t.Fatalf("POST run failed: %d %s", runRec.Code, runRec.Body.String())
+	}
+
+	// List routines and runs
+	listReq := httptest.NewRequest(http.MethodGet, "/api/bots/ops/routines", nil)
+	listReq.Host = "127.0.0.1:3789"
+	listRec := httptest.NewRecorder()
+	mux.ServeHTTP(listRec, listReq)
+	if listRec.Code != http.StatusOK || !strings.Contains(listRec.Body.String(), `"disk-check"`) || !strings.Contains(listRec.Body.String(), `"lastRun"`) {
+		t.Fatalf("GET routines failed: %d %s", listRec.Code, listRec.Body.String())
+	}
+
+	runsReq := httptest.NewRequest(http.MethodGet, "/api/bots/ops/routine-runs?routineId=disk-check", nil)
+	runsReq.Host = "127.0.0.1:3789"
+	runsRec := httptest.NewRecorder()
+	mux.ServeHTTP(runsRec, runsReq)
+	if runsRec.Code != http.StatusOK || !strings.Contains(runsRec.Body.String(), `"runs":[`) {
+		t.Fatalf("GET routine-runs failed: %d %s", runsRec.Code, runsRec.Body.String())
+	}
+
+	// Delete routine
+	delReq := httptest.NewRequest(http.MethodDelete, "/api/bots/ops/routines/disk-check", nil)
+	delReq.Host = "127.0.0.1:3789"
+	delRec := httptest.NewRecorder()
+	mux.ServeHTTP(delRec, delReq)
+	if delRec.Code != http.StatusOK {
+		t.Fatalf("DELETE routine failed: %d %s", delRec.Code, delRec.Body.String())
 	}
 }

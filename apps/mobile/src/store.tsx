@@ -12,6 +12,9 @@ import type {
   DesktopTarget,
   MagpieMemoryList,
   NodeInfo,
+  RoutineItem,
+  RoutineRun,
+  RoutineUpsertInput,
   ScreenState,
   ServerProfile,
   SettingsData,
@@ -102,6 +105,13 @@ interface HubContextValue {
   fetchMemories: (opts: { scope?: 'global' | 'project' | 'all'; botId?: string; query?: string; limit?: number }) => Promise<MagpieMemoryList>;
   saveMemory: (body: { scope?: 'global' | 'project'; botId?: string; kind?: string; text: string; tags?: string[] }) => Promise<void>;
   deleteMemory: (id: string) => Promise<void>;
+  routines: Record<string, RoutineItem[]>;
+  fetchRoutines: (botId: string) => Promise<RoutineItem[]>;
+  createRoutine: (botId: string, body: RoutineUpsertInput) => Promise<RoutineItem>;
+  updateRoutine: (botId: string, routineId: string, body: Partial<RoutineUpsertInput>) => Promise<RoutineItem>;
+  deleteRoutine: (botId: string, routineId: string) => Promise<void>;
+  runRoutine: (botId: string, routineId: string) => Promise<void>;
+  fetchRoutineRuns: (botId: string, routineId?: string, limit?: number) => Promise<RoutineRun[]>;
   loadSettings: () => Promise<SettingsData>;
   loadModels: (harness: string) => Promise<string[]>;
   saveSettings: (opts: {
@@ -157,6 +167,7 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
   const [tailcat, setTailcat] = useState<TailcatStatus | null>(null);
   const [takeovers, setTakeovers] = useState<TakeoverRequest[]>([]);
   const [desktopTargets, setDesktopTargets] = useState<DesktopTarget[]>([]);
+  const [routines, setRoutines] = useState<Record<string, RoutineItem[]>>({});
 
   const activeChatRef = useRef<string | null>(null);
   const sseCloseRef = useRef<(() => void) | null>(null);
@@ -268,6 +279,11 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
             setNodes(payload.nodes);
           } else if (type === 'takeover' && Array.isArray(payload?.items)) {
             setTakeovers(payload.items);
+          } else if ((type === 'routine_updated' || type === 'routine_run') && payload?.botId) {
+            const rbid = String(payload.botId);
+            apiRequest<{ routines: RoutineItem[] }>(url, tok, `/api/bots/${encodeURIComponent(rbid)}/routines`)
+              .then((res) => setRoutines((prev) => ({ ...prev, [rbid]: res.routines || [] })))
+              .catch(() => {});
           }
         },
       });
@@ -325,6 +341,7 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
         setUnread({});
         setTools({});
         setModels({});
+        setRoutines({});
         setConnState('connected');
         setConnError('');
 
@@ -644,6 +661,83 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
+  const fetchRoutines = useCallback(async (botId: string) => {
+    const res = await apiRequest<{ routines: RoutineItem[] }>(
+      baseURLRef.current,
+      authTokenRef.current,
+      `/api/bots/${encodeURIComponent(botId)}/routines`
+    );
+    const list = res.routines || [];
+    setRoutines((prev) => ({ ...prev, [botId]: list }));
+    return list;
+  }, []);
+
+  const createRoutine = useCallback(
+    async (botId: string, body: RoutineUpsertInput) => {
+      const created = await apiRequest<RoutineItem>(
+        baseURLRef.current,
+        authTokenRef.current,
+        `/api/bots/${encodeURIComponent(botId)}/routines`,
+        { method: 'POST', body }
+      );
+      await fetchRoutines(botId);
+      return created;
+    },
+    [fetchRoutines]
+  );
+
+  const updateRoutine = useCallback(
+    async (botId: string, routineId: string, body: Partial<RoutineUpsertInput>) => {
+      const updated = await apiRequest<RoutineItem>(
+        baseURLRef.current,
+        authTokenRef.current,
+        `/api/bots/${encodeURIComponent(botId)}/routines/${encodeURIComponent(routineId)}`,
+        { method: 'PATCH', body }
+      );
+      await fetchRoutines(botId);
+      return updated;
+    },
+    [fetchRoutines]
+  );
+
+  const deleteRoutine = useCallback(
+    async (botId: string, routineId: string) => {
+      await apiRequest(
+        baseURLRef.current,
+        authTokenRef.current,
+        `/api/bots/${encodeURIComponent(botId)}/routines/${encodeURIComponent(routineId)}`,
+        { method: 'DELETE' }
+      );
+      await fetchRoutines(botId);
+    },
+    [fetchRoutines]
+  );
+
+  const runRoutine = useCallback(
+    async (botId: string, routineId: string) => {
+      await apiRequest(
+        baseURLRef.current,
+        authTokenRef.current,
+        `/api/bots/${encodeURIComponent(botId)}/routines/${encodeURIComponent(routineId)}/run?async=1`,
+        { method: 'POST' }
+      );
+      await fetchRoutines(botId);
+    },
+    [fetchRoutines]
+  );
+
+  const fetchRoutineRuns = useCallback(async (botId: string, routineId?: string, limit = 10) => {
+    const q = new URLSearchParams();
+    if (routineId) q.set('routineId', routineId);
+    q.set('limit', String(limit));
+    const res = await apiRequest<{ runs: RoutineRun[] }>(
+      baseURLRef.current,
+      authTokenRef.current,
+      `/api/bots/${encodeURIComponent(botId)}/routine-runs?${q.toString()}`
+    );
+    return res.runs || [];
+  }, []);
+
   const loadSettings = useCallback(async () => {
     const s = await apiRequest<SettingsData>(baseURLRef.current, authTokenRef.current, '/api/settings');
     setSettings(s);
@@ -860,6 +954,13 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
         fetchMemories,
         saveMemory,
         deleteMemory,
+        routines,
+        fetchRoutines,
+        createRoutine,
+        updateRoutine,
+        deleteRoutine,
+        runRoutine,
+        fetchRoutineRuns,
         loadSettings,
         loadModels,
         saveSettings,

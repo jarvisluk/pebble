@@ -634,6 +634,12 @@ try {
   .mem-txt { font-size: var(--fs-sm); color: var(--text); white-space: pre-wrap; word-break: break-word; line-height: 1.55; }
   .mem-row .mp:not(.go):not(.ok):not(.bad), .mem-add .mp:not(.go):not(.ok):not(.bad) { background: var(--card); }
   .mem-row .mp:not(.go):not(.ok):not(.bad):hover, .mem-add .mp:not(.go):not(.ok):not(.bad):hover { background: var(--s2); }
+  .rt-title { font-size: var(--fs-base); font-weight: 600; color: var(--text); }
+  .rt-runs { display: flex; flex-direction: column; gap: 4px; padding-top: 4px; border-top: 1px solid var(--s2); }
+  .rt-runs[hidden] { display: none; }
+  .rt-run { display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-xs); color: var(--text-2); padding: 4px 8px; border-radius: 8px; background: var(--card); }
+  .rt-run-hd { display: flex; align-items: center; justify-content: space-between; gap: 6px; color: var(--mute); }
+  .rt-run-err { color: var(--danger); word-break: break-word; }
 
   .perms { display: flex; flex-wrap: wrap; gap: 6px; }
   .perm { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px 0 10px; border-radius: 999px; background: var(--s1); color: var(--text-2); font-size: var(--fs-sm); cursor: pointer; transition: background .15s, color .15s; user-select: none; }
@@ -1119,6 +1125,50 @@ try {
       </div>
       <div id="pMemList" class="stack6"></div>
       <div id="pMemErr" class="msg-err"></div>
+      <div class="sec" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+        <span>定时任务</span>
+        <button type="button" id="pRtAddToggle" class="mp go">+ 添加</button>
+      </div>
+      <div id="pRtFormBox" class="add-prov mem-add" style="margin-bottom:8px" hidden>
+        <input type="hidden" id="pRtEditId" />
+        <div class="fld"><label>名称</label><input id="pRtName" placeholder="晨间简报" /></div>
+        <div class="two">
+          <div class="fld">
+            <label>触发方式</label>
+            <select id="pRtMode">
+              <option value="interval">按间隔（分钟）</option>
+              <option value="daily">每天定时</option>
+            </select>
+          </div>
+          <div class="fld" id="pRtEveryWrap"><label>间隔分钟</label><input id="pRtEvery" class="mono" type="number" min="1" value="60" /></div>
+          <div class="fld" id="pRtDailyWrap" hidden><label>时间 <em>HH:MM</em></label><input id="pRtDaily" class="mono" placeholder="09:00" value="09:00" /></div>
+        </div>
+        <div class="fld">
+          <label>主会话投递</label>
+          <select id="pRtDelivery">
+            <option value="receipt">回执（下次对话自动带入）</option>
+            <option value="notify">通知主会话（立即唤醒）</option>
+            <option value="none">仅记录（不写入主时间线）</option>
+          </select>
+        </div>
+        <div class="two">
+          <div class="fld"><label>模型覆盖 <em>可选</em></label><input id="pRtModel" class="mono" list="models-global" placeholder="留空沿用 Bot 默认" spellcheck="false" /></div>
+          <div class="fld"><label>Telegram Chat ID <em>可选</em></label><input id="pRtTgChat" class="mono" placeholder="${TELEGRAM_OWNER_USER_ID}" spellcheck="false" /></div>
+        </div>
+        <div class="fld">
+          <label>任务指令</label>
+          <textarea id="pRtPrompt" rows="3" style="min-height:66px;font-family:var(--font)" placeholder="检查 memory/ 与近期状态；若无重要事项仅回复 NO_REPLY。"></textarea>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
+          <label class="perm" style="background:var(--card)"><input type="checkbox" id="pRtEnabled" checked />启用定时</label>
+          <div style="display:flex;gap:6px">
+            <button type="button" id="pRtCancel" class="mp">取消</button>
+            <button type="button" id="pRtSave" class="mp go">保存</button>
+          </div>
+        </div>
+      </div>
+      <div id="pRtList" class="stack6"></div>
+      <div id="pRtErr" class="msg-err"></div>
     </div>
     <form id="pEditForm" class="panel-edit" autocomplete="off" hidden>
       <div class="fld"><label>名称</label><input id="peName" required /></div>
@@ -1367,8 +1417,10 @@ function msgHTML(m) {
       const via = m.from && !['web', 'user', 'cli'].includes(m.from) ? `<div class="label">来自 ${esc(m.from)}</div>` : '';
       return `<div class="msg me${fresh}">${via}<div class="bubble">${md(m.text)}</div></div>`;
     }
-    case 'assistant':
-      return `<div class="msg bot${fresh}"><div class="bubble">${md(m.text)}</div>${footHTML}</div>`;
+    case 'assistant': {
+      const rt = m.from && m.from.startsWith('routine:') ? `<div class="label">定时回执 · ${esc(m.from.slice(8))}</div>` : '';
+      return `<div class="msg bot${fresh}">${rt}<div class="bubble">${md(m.text)}</div>${footHTML}</div>`;
+    }
     case 'bot_out':
     case 'bot_in': {
       const out = m.role === 'bot_out';
@@ -1528,6 +1580,14 @@ function connect() {
     state.takeovers = payload?.items || [];
     renderTakeovers();
   });
+  on('routine_updated', ({ botId }) => {
+    if (panelDetail?.id === botId && $('panel').classList.contains('open')) loadBotRoutines(botId);
+  });
+  on('routine_run', ({ payload: run }) => {
+    if (run?.botId && panelDetail?.id === run.botId && $('panel').classList.contains('open')) {
+      loadBotRoutines(run.botId);
+    }
+  });
 }
 
 /* ---------- overlays ---------- */
@@ -1597,10 +1657,16 @@ async function openPanel() {
     $('pInst').textContent = d.instructions || '(空)';
     $('pMemAddBox').hidden = true;
     $('pMemErr').textContent = '';
+    panelRoutines = [];
+    $('pRtFormBox').hidden = true;
+    $('pRtErr').textContent = '';
+    $('pRtModel').setAttribute('list', 'models-' + (d.harness || 'global'));
     $('pDelete').disabled = state.bots.length <= 1;
     $('pDelete').title = state.bots.length <= 1 ? '至少需要保留一个 Bot' : '';
     open('panel'); open('shade');
     loadBotMemories(d.id);
+    loadBotRoutines(d.id);
+    if (d.harness) loadModels(d.harness);
   } catch (e) { if (e.message !== 'unauthorized') toast(e.message); }
 }
 
@@ -2670,6 +2736,206 @@ $('pMemAddSubmit').onclick = async () => {
     if (e.message !== 'unauthorized') $('pMemErr').textContent = e.message;
   } finally { $('pMemAddSubmit').disabled = false; }
 };
+
+let panelRoutines = [];
+function syncRoutineModeFields() {
+  const daily = $('pRtMode').value === 'daily';
+  $('pRtEveryWrap').hidden = daily;
+  $('pRtDailyWrap').hidden = !daily;
+}
+$('pRtMode').onchange = syncRoutineModeFields;
+
+function openRoutineForm(rt = null) {
+  $('pRtErr').textContent = '';
+  $('pRtEditId').value = rt?.id || '';
+  $('pRtName').value = rt?.name || '';
+  const isDaily = !!rt?.dailyAt && !(rt?.everyMinutes > 0);
+  $('pRtMode').value = isDaily ? 'daily' : 'interval';
+  $('pRtEvery').value = rt?.everyMinutes > 0 ? String(rt.everyMinutes) : '60';
+  $('pRtDaily').value = rt?.dailyAt || '09:00';
+  $('pRtDelivery').value = rt?.mainDelivery || 'receipt';
+  $('pRtModel').value = rt?.model || '';
+  $('pRtTgChat').value = rt?.notifyTelegramChatId || '';
+  $('pRtPrompt').value = rt?.prompt || '';
+  $('pRtEnabled').checked = rt ? rt.enabled !== false : true;
+  syncRoutineModeFields();
+  $('pRtFormBox').hidden = false;
+  $('pRtName').focus();
+}
+
+$('pRtAddToggle').onclick = () => {
+  if ($('pRtFormBox').hidden || $('pRtEditId').value) openRoutineForm(null);
+  else $('pRtFormBox').hidden = true;
+};
+$('pRtCancel').onclick = () => { $('pRtFormBox').hidden = true; $('pRtErr').textContent = ''; };
+
+$('pRtSave').onclick = async () => {
+  if (!panelDetail) return;
+  const botId = panelDetail.id;
+  const editId = $('pRtEditId').value.trim();
+  const name = $('pRtName').value.trim();
+  const prompt = $('pRtPrompt').value.trim();
+  if (!name) { $('pRtErr').textContent = '请填写任务名称'; $('pRtName').focus(); return; }
+  if (!prompt) { $('pRtErr').textContent = '请填写任务指令'; $('pRtPrompt').focus(); return; }
+  const daily = $('pRtMode').value === 'daily';
+  const everyMinutes = daily ? 0 : parseInt($('pRtEvery').value, 10);
+  const dailyAt = daily ? $('pRtDaily').value.trim() : '';
+  if (!daily && !(everyMinutes > 0)) { $('pRtErr').textContent = '间隔分钟需大于 0'; $('pRtEvery').focus(); return; }
+  if (daily && !/^\d{2}:\d{2}$/.test(dailyAt)) { $('pRtErr').textContent = '时间格式需为 HH:MM'; $('pRtDaily').focus(); return; }
+
+  const body = {
+    name,
+    everyMinutes,
+    dailyAt,
+    prompt,
+    model: $('pRtModel').value.trim(),
+    mainDelivery: $('pRtDelivery').value,
+    notifyTelegramChatId: $('pRtTgChat').value.trim(),
+    enabled: $('pRtEnabled').checked,
+  };
+  $('pRtSave').disabled = true; $('pRtErr').textContent = '';
+  try {
+    if (editId) {
+      await api(`/api/bots/${encodeURIComponent(botId)}/routines/${encodeURIComponent(editId)}`, { method: 'PATCH', body });
+      toast('已更新定时任务');
+    } else {
+      await api(`/api/bots/${encodeURIComponent(botId)}/routines`, { method: 'POST', body });
+      toast('已创建定时任务');
+    }
+    $('pRtFormBox').hidden = true;
+    await loadBotRoutines(botId);
+  } catch (e) {
+    if (e.message !== 'unauthorized') $('pRtErr').textContent = e.message;
+  } finally { $('pRtSave').disabled = false; }
+};
+
+function routineDeliveryLabel(d) {
+  if (d === 'notify') return '通知主会话';
+  if (d === 'none') return '仅记录';
+  return '回执';
+}
+
+function routineRunStatusPill(rt) {
+  if (rt.running) return '<span class="mp ok">执行中</span>';
+  const r = rt.lastRun;
+  if (!r) return '';
+  if (r.status === 'ok') return '<span class="mp ok">已产出</span>';
+  if (r.status === 'silent') return '<span class="mp">无变化</span>';
+  if (r.status === 'error') return '<span class="mp bad">失败</span>';
+  return '';
+}
+
+function renderBotRoutines(botId) {
+  const listEl = $('pRtList');
+  if (!panelRoutines.length) {
+    listEl.innerHTML = '<div class="set-card-desc">暂无定时任务</div>';
+    return;
+  }
+  listEl.innerHTML = '';
+  for (const rt of panelRoutines) {
+    const row = document.createElement('div');
+    row.className = 'mem-row';
+    const trig = [rt.everyMinutes > 0 && `每 ${rt.everyMinutes}m`, rt.dailyAt && `每日 ${rt.dailyAt}`].filter(Boolean).join(' · ');
+    const nextTxt = rt.enabled && rt.nextRunAt ? `下次 ${new Date(rt.nextRunAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}` : (rt.enabled ? '' : '已停用');
+    const lastTxt = rt.lastRun ? `${stamp(rt.lastRun.finishedAt)} · ${(rt.lastRun.durationMs / 1000).toFixed(1)}s` : '';
+    const meta = [trig, routineDeliveryLabel(rt.mainDelivery), rt.model, nextTxt, lastTxt].filter(Boolean).join(' · ');
+
+    row.innerHTML = `
+      <div class="mem-top">
+        <div class="mem-meta">
+          <span class="rt-title">${esc(rt.name)}</span>
+          ${routineRunStatusPill(rt)}
+        </div>
+        <div class="prov-acts">
+          <button type="button" class="mp" data-rt-toggle>${rt.enabled ? '停用' : '启用'}</button>
+          <button type="button" class="mp" data-rt-run ${rt.running ? 'disabled' : ''}>${rt.running ? '运行中' : '运行'}</button>
+          <button type="button" class="mp" data-rt-runs>记录</button>
+          <button type="button" class="mp" data-rt-edit>编辑</button>
+          <button type="button" class="mp bad" data-rt-del>删除</button>
+        </div>
+      </div>
+      <div class="mem-time">${esc(meta)}</div>
+      <div class="mem-txt">${esc(rt.prompt)}</div>
+      <div class="rt-runs" hidden></div>
+    `;
+
+    row.querySelector('[data-rt-toggle]').onclick = async btnEv => {
+      const btn = btnEv.currentTarget;
+      btn.disabled = true; $('pRtErr').textContent = '';
+      try {
+        await api(`/api/bots/${encodeURIComponent(botId)}/routines/${encodeURIComponent(rt.id)}`, {
+          method: 'PATCH',
+          body: { enabled: !rt.enabled },
+        });
+        await loadBotRoutines(botId);
+      } catch (e) { btn.disabled = false; if (e.message !== 'unauthorized') $('pRtErr').textContent = e.message; }
+    };
+
+    row.querySelector('[data-rt-run]').onclick = async btnEv => {
+      const btn = btnEv.currentTarget;
+      btn.disabled = true; $('pRtErr').textContent = '';
+      try {
+        await api(`/api/bots/${encodeURIComponent(botId)}/routines/${encodeURIComponent(rt.id)}/run?async=1`, { method: 'POST' });
+        toast(`已触发 ${rt.name}`);
+        await loadBotRoutines(botId);
+      } catch (e) { btn.disabled = false; if (e.message !== 'unauthorized') $('pRtErr').textContent = e.message; }
+    };
+
+    row.querySelector('[data-rt-edit]').onclick = () => openRoutineForm(rt);
+
+    row.querySelector('[data-rt-del]').onclick = () => {
+      confirmAction({
+        title: `删除定时任务「${rt.name}」？`,
+        text: '将从配置中移除此任务并立即停止计时器。',
+        okText: '删除',
+        okClass: 'bad',
+        onOk: async () => {
+          $('confirmDlg').classList.remove('open');
+          try {
+            await api(`/api/bots/${encodeURIComponent(botId)}/routines/${encodeURIComponent(rt.id)}`, { method: 'DELETE' });
+            toast('已删除定时任务');
+            await loadBotRoutines(botId);
+          } catch (e) { if (e.message !== 'unauthorized') $('pRtErr').textContent = e.message; }
+        }
+      });
+    };
+
+    const runsBox = row.querySelector('.rt-runs');
+    row.querySelector('[data-rt-runs]').onclick = async () => {
+      if (!runsBox.hidden) { runsBox.hidden = true; return; }
+      runsBox.hidden = false;
+      runsBox.innerHTML = '<div class="set-card-desc">加载中…</div>';
+      try {
+        const d = await api(`/api/bots/${encodeURIComponent(botId)}/routine-runs?routineId=${encodeURIComponent(rt.id)}&limit=8`);
+        const runs = d.runs || [];
+        if (!runs.length) { runsBox.innerHTML = '<div class="set-card-desc">暂无执行记录</div>'; return; }
+        runsBox.innerHTML = runs.map(r => {
+          const stText = r.status === 'ok' ? '已产出' : r.status === 'silent' ? '无变化' : '失败';
+          const costTxt = r.costUsd ? ` · $${Number(r.costUsd).toFixed(4)}` : '';
+          const body = r.error ? `<div class="rt-run-err">${esc(r.error)}</div>` : r.output ? `<div>${esc(r.output.slice(0, 180))}${r.output.length > 180 ? '…' : ''}</div>` : '';
+          return `<div class="rt-run"><div class="rt-run-hd"><span>${esc(stText)} · ${esc(r.trigger)} · ${(r.durationMs / 1000).toFixed(1)}s${esc(costTxt)}</span><span>${esc(stamp(r.finishedAt))}</span></div>${body}</div>`;
+        }).join('');
+      } catch (e) { runsBox.innerHTML = `<div class="rt-run-err">${esc(e.message)}</div>`; }
+    };
+
+    listEl.appendChild(row);
+  }
+}
+
+async function loadBotRoutines(botId) {
+  const listEl = $('pRtList');
+  const errEl = $('pRtErr');
+  errEl.textContent = '';
+  if (!panelRoutines.length) listEl.innerHTML = '<div class="set-card-desc">加载中…</div>';
+  try {
+    const d = await api(`/api/bots/${encodeURIComponent(botId)}/routines`);
+    if (panelDetail?.id !== botId) return;
+    panelRoutines = d.routines || [];
+    renderBotRoutines(botId);
+  } catch (e) {
+    if (e.message !== 'unauthorized') errEl.textContent = e.message;
+  }
+}
 
 /* ---------- Live Screen (WebRTC + JPEG fallback + ScreenLock + Takeover) ---------- */
 const deskState = {

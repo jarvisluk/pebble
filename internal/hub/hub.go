@@ -25,6 +25,9 @@ const MaxBotHopDepth = 4
 // ErrBotNotFound indicates that the requested bot ID is not registered in the hub.
 var ErrBotNotFound = errors.New("bot not found")
 
+// ErrRoutineNotFound indicates that the requested routine ID does not exist on the bot.
+var ErrRoutineNotFound = errors.New("routine not found")
+
 // ErrForbidden indicates the caller is not permitted to access another bot's private sessions.
 var ErrForbidden = errors.New("forbidden")
 
@@ -34,6 +37,23 @@ type SendOptions struct {
 	Hop       int
 	OnText    func(chunk string)
 	OnToolUse func(toolName string)
+}
+
+type IsolatedOptions struct {
+	Source    string
+	Model     string
+	OnToolUse func(toolName string)
+}
+
+type RoutinePatch struct {
+	Name                 *string `json:"name,omitempty"`
+	EveryMinutes         *int    `json:"everyMinutes,omitempty"`
+	DailyAt              *string `json:"dailyAt,omitempty"`
+	Prompt               *string `json:"prompt,omitempty"`
+	Model                *string `json:"model,omitempty"`
+	MainDelivery         *string `json:"mainDelivery,omitempty"`
+	NotifyTelegramChatID *string `json:"notifyTelegramChatId,omitempty"`
+	Enabled              *bool   `json:"enabled,omitempty"`
 }
 
 type BotStatus struct {
@@ -152,6 +172,12 @@ type Hub struct {
 	reloadMu      sync.Mutex
 	pendingReload map[string]bool
 
+	activeEphemeralMu sync.Mutex
+	activeEphemeral   map[string]int
+
+	schedMu            sync.RWMutex
+	onSchedulesChanged func()
+
 	subsMu sync.Mutex
 	subs   map[uint64]chan Event
 	subSeq atomic.Uint64
@@ -178,11 +204,12 @@ func New(cfg *config.HubConfig, store *state.Store, messages *state.MessageStore
 		messages:      messages,
 		registry:      reg,
 		localDesk:     desktop.NewEngine(),
-		lanes:         make(map[string]*botLane, len(cfg.Bots)),
-		order:         make([]string, 0, len(cfg.Bots)),
-		pendingReload: make(map[string]bool),
-		subs:          make(map[uint64]chan Event),
-		hops:          make(map[string]int),
+		lanes:           make(map[string]*botLane, len(cfg.Bots)),
+		order:           make([]string, 0, len(cfg.Bots)),
+		pendingReload:   make(map[string]bool),
+		activeEphemeral: make(map[string]int),
+		subs:            make(map[uint64]chan Event),
+		hops:            make(map[string]int),
 	}
 	h.nodes = node.NewRegistry(func() {
 		h.broadcast(Event{
@@ -462,9 +489,9 @@ func (h *Hub) CreateBot(req CreateBotRequest) (*BotStatus, error) {
 	}
 
 	h.lanesMu.Lock()
-	defer h.lanesMu.Unlock()
 
 	if _, exists := h.lanes[req.ID]; exists {
+		h.lanesMu.Unlock()
 		return nil, fmt.Errorf("bot %q already exists", req.ID)
 	}
 
@@ -478,6 +505,7 @@ func (h *Hub) CreateBot(req CreateBotRequest) (*BotStatus, error) {
 	}
 	config.NormalizeBot(&bot, h.cfg)
 	if err := config.EnsureWorkspace(&bot, h.cfg, req.Instructions); err != nil {
+		h.lanesMu.Unlock()
 		return nil, fmt.Errorf("init workspace for %q: %w", req.ID, err)
 	}
 
@@ -486,18 +514,38 @@ func (h *Hub) CreateBot(req CreateBotRequest) (*BotStatus, error) {
 		if _, err := config.SaveLocal(h.cfg); err != nil {
 			// Roll back slice entry if persisting fails
 			h.cfg.Bots = h.cfg.Bots[:len(h.cfg.Bots)-1]
+			h.lanesMu.Unlock()
 			return nil, fmt.Errorf("save config: %w", err)
 		}
 	}
 
 	h.startLaneLocked(bot)
 	st := h.statusOfLocked(h.lanes[bot.ID])
+	h.lanesMu.Unlock()
+
 	h.broadcast(Event{
 		Type:    "bot_created",
 		BotID:   bot.ID,
 		Payload: st,
 	})
+	h.notifySchedulesChanged()
 	return &st, nil
+}
+
+// SetOnSchedulesChanged registers a callback invoked whenever bots or routines change.
+func (h *Hub) SetOnSchedulesChanged(fn func()) {
+	h.schedMu.Lock()
+	h.onSchedulesChanged = fn
+	h.schedMu.Unlock()
+}
+
+func (h *Hub) notifySchedulesChanged() {
+	h.schedMu.RLock()
+	fn := h.onSchedulesChanged
+	h.schedMu.RUnlock()
+	if fn != nil {
+		fn()
+	}
 }
 
 func (h *Hub) ResetSession(botID string) (state.SessionRecord, bool, error) {
@@ -522,6 +570,9 @@ func (h *Hub) ResetSession(botID string) (state.SessionRecord, bool, error) {
 	}
 
 	prev, existed, err := h.store.ArchiveActive(botID, "reset", "", "")
+	if err == nil {
+		_ = h.store.DismissPendingReceipts(botID)
+	}
 	if err == nil && existed {
 		h.appendMessage(state.ChatMessage{
 			BotID:     botID,
@@ -562,6 +613,9 @@ func (h *Hub) RotateSession(botID, handoffNote string, deferUntilTurnEnd bool) (
 	prev, existed, err := h.store.ArchiveActive(botID, "reset", "", note)
 	if err != nil {
 		return nil, err
+	}
+	if h.store != nil {
+		_ = h.store.DismissPendingReceipts(botID)
 	}
 	if existed {
 		h.appendMessage(state.ChatMessage{
@@ -852,35 +906,71 @@ func (h *Hub) platformInstructionsPath() string {
 	return filepath.Join(sharedDir, config.PlatformInstructionsFilename)
 }
 
-func (h *Hub) buildTurnPrompt(bot config.BotConfig, prompt string, isFirstTurn bool, platPath string) string {
-	if !isFirstTurn {
-		return prompt
-	}
+func (h *Hub) buildTurnPrompt(bot config.BotConfig, prompt string, isFirstTurn bool, platPath string, pendingReceipts []state.RoutineRun) string {
 	var prefixParts []string
-	if h.store != nil {
-		if prev, ok := h.store.LatestArchivedSession(bot.ID); ok {
-			details := []string{fmt.Sprintf("%d turns", prev.TurnCount), "status=" + prev.Status}
-			if prev.LastError != "" {
-				details = append(details, fmt.Sprintf("lastError=%q", firstLineSummary(prev.LastError, 120)))
+	if isFirstTurn {
+		if h.store != nil {
+			if prev, ok := h.store.LatestArchivedSession(bot.ID); ok {
+				details := []string{fmt.Sprintf("%d turns", prev.TurnCount), "status=" + prev.Status}
+				if prev.LastError != "" {
+					details = append(details, fmt.Sprintf("lastError=%q", firstLineSummary(prev.LastError, 120)))
+				}
+				if prev.HandoffNote != "" {
+					details = append(details, fmt.Sprintf("handoff=%q", firstLineSummary(prev.HandoffNote, 120)))
+				}
+				prefixParts = append(prefixParts, fmt.Sprintf(
+					"[System Note: New session started. Previous session %s (%s) is archived. Use recall_session if you need prior context.]",
+					prev.ID, strings.Join(details, ", "),
+				))
 			}
-			if prev.HandoffNote != "" {
-				details = append(details, fmt.Sprintf("handoff=%q", firstLineSummary(prev.HandoffNote, 120)))
+		}
+		if bot.Harness == "dsh" && platPath != "" {
+			if raw, err := os.ReadFile(platPath); err == nil && len(raw) > 0 {
+				prefixParts = append(prefixParts, strings.TrimSpace(string(raw)))
 			}
-			prefixParts = append(prefixParts, fmt.Sprintf(
-				"[System Note: New session started. Previous session %s (%s) is archived. Use recall_session if you need prior context.]",
-				prev.ID, strings.Join(details, ", "),
-			))
 		}
 	}
-	if bot.Harness == "dsh" && platPath != "" {
-		if raw, err := os.ReadFile(platPath); err == nil && len(raw) > 0 {
-			prefixParts = append(prefixParts, strings.TrimSpace(string(raw)))
-		}
+	if len(pendingReceipts) > 0 {
+		prefixParts = append(prefixParts, formatRoutineReceiptsPrefix(pendingReceipts))
 	}
 	if len(prefixParts) == 0 {
 		return prompt
 	}
 	return strings.Join(prefixParts, "\n\n") + "\n\n" + prompt
+}
+
+func formatRoutineReceiptsPrefix(receipts []state.RoutineRun) string {
+	var lines []string
+	lines = append(lines, "[后台定时任务回执 — 以下为此前后台巡检结果，仅供参考，无需重复汇报]")
+	for _, r := range receipts {
+		name := r.RoutineName
+		if name == "" {
+			name = r.RoutineID
+		}
+		ts := r.FinishedAt
+		if parsed, err := time.Parse(time.RFC3339Nano, ts); err == nil {
+			ts = parsed.In(time.Local).Format("01-02 15:04")
+		} else if parsed, err := time.Parse(time.RFC3339, ts); err == nil {
+			ts = parsed.In(time.Local).Format("01-02 15:04")
+		}
+		excerpt := truncateRunes(strings.TrimSpace(r.Output), 1500)
+		lines = append(lines, fmt.Sprintf("- [%s @ %s]: %s", name, ts, excerpt))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func truncateRunes(s string, max int) string {
+	if max <= 0 {
+		return s
+	}
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	if max <= 1 {
+		return string(r[:max])
+	}
+	return string(r[:max-1]) + "…"
 }
 
 func formatToolCounts(order []string, counts map[string]int) []string {
@@ -992,7 +1082,11 @@ func (h *Hub) executeTurn(ctx context.Context, lane *botLane, bot config.BotConf
 			}
 		}
 		turnNum := sess.TurnCount + 1
-		effectivePrompt := h.buildTurnPrompt(bot, prompt, sess.TurnCount == 0, platPath)
+		var pendingReceipts []state.RoutineRun
+		if h.store != nil {
+			pendingReceipts, _ = h.store.ListPendingReceipts(bot.ID, 5)
+		}
+		effectivePrompt := h.buildTurnPrompt(bot, prompt, sess.TurnCount == 0, platPath, pendingReceipts)
 
 		var toolMu sync.Mutex
 		var toolOrder []string
@@ -1133,6 +1227,13 @@ func (h *Hub) executeTurn(ctx context.Context, lane *botLane, bot config.BotConf
 				return res, fmt.Errorf("turn succeeded but failed to persist session: %w", saveErr)
 			}
 		}
+		if h.store != nil && len(pendingReceipts) > 0 {
+			receiptIDs := make([]string, 0, len(pendingReceipts))
+			for _, pr := range pendingReceipts {
+				receiptIDs = append(receiptIDs, pr.ID)
+			}
+			_ = h.store.MarkReceiptsInjected(receiptIDs)
+		}
 
 		res.Tools = tools
 		if res.Text != "" {
@@ -1160,6 +1261,7 @@ func (h *Hub) executeTurn(ctx context.Context, lane *botLane, bot config.BotConf
 
 		if doRotate && h.store != nil && gen == lane.sessionGen.Load() {
 			if _, archived, _ := h.store.ArchiveSessionByID(sess.ID, "reset", "", handoff); archived {
+				_ = h.store.DismissPendingReceipts(bot.ID)
 				h.appendMessage(state.ChatMessage{
 					BotID: bot.ID, SessionID: sess.ID, Turn: turnNum,
 					Role: "system", From: "system",
@@ -1222,6 +1324,12 @@ func (h *Hub) flushPendingReload(kind string) {
 }
 
 func (h *Hub) isHarnessBusy(kind string) bool {
+	h.activeEphemeralMu.Lock()
+	ephBusy := h.activeEphemeral[kind] > 0
+	h.activeEphemeralMu.Unlock()
+	if ephBusy {
+		return true
+	}
 	h.lanesMu.RLock()
 	defer h.lanesMu.RUnlock()
 	for _, lane := range h.lanes {
@@ -1506,6 +1614,7 @@ func (h *Hub) DeleteBot(botID string) error {
 		BotID:   botID,
 		Payload: map[string]any{"id": botID},
 	})
+	h.notifySchedulesChanged()
 	return nil
 }
 
@@ -1729,4 +1838,468 @@ func (h *Hub) MemorySave(ctx context.Context, req harness.MagpieMemorySaveReq) (
 // MemoryForget forgets/deletes a Magpie Memory entry by ID.
 func (h *Hub) MemoryForget(ctx context.Context, id string) (string, error) {
 	return harness.MagpieMemoryForget(ctx, id)
+}
+
+// RunIsolated runs a single ephemeral turn for botID without touching or blocking
+// the bot's active main session.
+func (h *Hub) RunIsolated(ctx context.Context, botID, prompt string, opts IsolatedOptions) (*harness.TurnResult, error) {
+	h.lanesMu.RLock()
+	lane, ok := h.lanes[botID]
+	var bot config.BotConfig
+	var apiToken string
+	var mcpCmd []string
+	if ok {
+		bot = lane.bot
+		apiToken = h.cfg.HTTP.APIToken
+		mcpCmd = config.MCPCommand(h.cfg, bot.ID)
+	}
+	h.lanesMu.RUnlock()
+	if !ok {
+		return nil, fmt.Errorf("bot %q not found: %w", botID, ErrBotNotFound)
+	}
+
+	if m := strings.TrimSpace(opts.Model); m != "" {
+		bot.Model = m
+		bot.ModelInherited = false
+	}
+
+	runner, err := h.registry.Get(bot.Harness)
+	if err != nil {
+		return nil, err
+	}
+
+	h.activeEphemeralMu.Lock()
+	h.activeEphemeral[bot.Harness]++
+	h.activeEphemeralMu.Unlock()
+	defer func() {
+		h.activeEphemeralMu.Lock()
+		if h.activeEphemeral[bot.Harness] > 0 {
+			h.activeEphemeral[bot.Harness]--
+		}
+		h.activeEphemeralMu.Unlock()
+		h.flushPendingReload(bot.Harness)
+	}()
+
+	platPath := h.platformInstructionsPath()
+	effectivePrompt := prompt
+	if bot.Harness == "dsh" && platPath != "" {
+		if raw, err := os.ReadFile(platPath); err == nil && len(raw) > 0 {
+			effectivePrompt = strings.TrimSpace(string(raw)) + "\n\n" + prompt
+		}
+	}
+
+	extraEnv := map[string]string{
+		"BOT_HUB_BOT_ID": bot.ID,
+		"BOT_HUB_HOP":    "0",
+	}
+	var mcpEnv map[string]string
+	if apiToken != "" {
+		extraEnv["BOT_HUB_API_TOKEN"] = apiToken
+		mcpEnv = map[string]string{"BOT_HUB_API_TOKEN": apiToken}
+	}
+
+	var toolMu sync.Mutex
+	var toolOrder []string
+	toolCounts := make(map[string]int)
+
+	res, err := runner.RunTurn(ctx, harness.RunOptions{
+		Bot:                      bot,
+		Prompt:                   effectivePrompt,
+		SessionID:                "",
+		Ephemeral:                true,
+		PlatformInstructionsPath: platPath,
+		MCPCommand:               mcpCmd,
+		MCPEnv:                   mcpEnv,
+		ExtraEnv:                 extraEnv,
+		OnToolUse: func(toolName string) {
+			if toolName != "" {
+				toolMu.Lock()
+				if toolCounts[toolName] == 0 {
+					toolOrder = append(toolOrder, toolName)
+				}
+				toolCounts[toolName]++
+				toolMu.Unlock()
+			}
+			if opts.OnToolUse != nil {
+				opts.OnToolUse(toolName)
+			}
+		},
+	})
+	if err != nil {
+		return res, err
+	}
+	toolMu.Lock()
+	res.Tools = formatToolCounts(toolOrder, toolCounts)
+	toolMu.Unlock()
+	return res, nil
+}
+
+// AppendRoutineReceipt writes a routine receipt onto the bot's main timeline
+// without waking the main LLM session.
+func (h *Hub) AppendRoutineReceipt(botID, routineName, text string, durMs int64, costUSD float64, inTok, outTok int) state.ChatMessage {
+	var sessID string
+	var turn int
+	if h.store != nil {
+		if rec, ok := h.store.Get(botID); ok {
+			sessID = rec.ID
+			turn = rec.TurnCount
+		}
+	}
+	return h.appendMessage(state.ChatMessage{
+		BotID:        botID,
+		SessionID:    sessID,
+		Turn:         turn,
+		Role:         "assistant",
+		From:         "routine:" + routineName,
+		Text:         text,
+		DurationMs:   durMs,
+		CostUSD:      costUSD,
+		InputTokens:  inTok,
+		OutputTokens: outTok,
+	})
+}
+
+func (h *Hub) ListRoutines(botID string) ([]config.ScheduleConfig, error) {
+	h.lanesMu.RLock()
+	defer h.lanesMu.RUnlock()
+	lane, ok := h.lanes[botID]
+	if !ok {
+		return nil, fmt.Errorf("bot %q not found: %w", botID, ErrBotNotFound)
+	}
+	out := make([]config.ScheduleConfig, len(lane.bot.Schedules))
+	copy(out, lane.bot.Schedules)
+	return out, nil
+}
+
+// CreateRoutine adds a new routine on botID (auto-assigning a unique ID if omitted).
+func (h *Hub) CreateRoutine(botID string, raw config.ScheduleConfig) (config.ScheduleConfig, error) {
+	return h.saveRoutine(botID, raw, "", true)
+}
+
+// UpsertRoutine creates or updates a routine by ID (or by matching name when ID is omitted).
+func (h *Hub) UpsertRoutine(botID string, raw config.ScheduleConfig) (config.ScheduleConfig, error) {
+	return h.saveRoutine(botID, raw, strings.TrimSpace(raw.ID), false)
+}
+
+// UpdateRoutine applies a partial patch to an existing routine.
+func (h *Hub) UpdateRoutine(botID, routineID string, patch RoutinePatch) (config.ScheduleConfig, error) {
+	routineID = strings.TrimSpace(routineID)
+	if routineID == "" {
+		return config.ScheduleConfig{}, fmt.Errorf("routine id is required: %w", ErrRoutineNotFound)
+	}
+
+	h.lanesMu.RLock()
+	lane, ok := h.lanes[botID]
+	if !ok {
+		h.lanesMu.RUnlock()
+		return config.ScheduleConfig{}, fmt.Errorf("bot %q not found: %w", botID, ErrBotNotFound)
+	}
+	var base config.ScheduleConfig
+	found := false
+	for _, sc := range lane.bot.Schedules {
+		if sc.EffectiveID() == routineID {
+			base = sc
+			found = true
+			break
+		}
+	}
+	h.lanesMu.RUnlock()
+	if !found {
+		return config.ScheduleConfig{}, fmt.Errorf("routine %q not found: %w", routineID, ErrRoutineNotFound)
+	}
+
+	if patch.Name != nil {
+		base.Name = strings.TrimSpace(*patch.Name)
+	}
+	if patch.EveryMinutes != nil {
+		base.EveryMinutes = *patch.EveryMinutes
+	}
+	if patch.DailyAt != nil {
+		base.DailyAt = strings.TrimSpace(*patch.DailyAt)
+	}
+	if patch.Prompt != nil {
+		base.Prompt = strings.TrimSpace(*patch.Prompt)
+	}
+	if patch.Model != nil {
+		base.Model = strings.TrimSpace(*patch.Model)
+	}
+	if patch.MainDelivery != nil {
+		base.MainDelivery = strings.TrimSpace(*patch.MainDelivery)
+	}
+	if patch.NotifyTelegramChatID != nil {
+		base.NotifyTelegramChatID = strings.TrimSpace(*patch.NotifyTelegramChatID)
+	}
+	if patch.Enabled != nil {
+		v := *patch.Enabled
+		base.Enabled = &v
+	}
+	return h.saveRoutine(botID, base, routineID, false)
+}
+
+func (h *Hub) saveRoutine(botID string, raw config.ScheduleConfig, targetID string, createOnly bool) (config.ScheduleConfig, error) {
+	clean := cleanScheduleInput(raw)
+	if err := clean.Validate(); err != nil {
+		return config.ScheduleConfig{}, err
+	}
+
+	h.lanesMu.Lock()
+	lane, ok := h.lanes[botID]
+	if !ok {
+		h.lanesMu.Unlock()
+		return config.ScheduleConfig{}, fmt.Errorf("bot %q not found: %w", botID, ErrBotNotFound)
+	}
+
+	curExpanded := make([]config.ScheduleConfig, len(lane.bot.Schedules))
+	copy(curExpanded, lane.bot.Schedules)
+
+	idx := -1
+	if createOnly {
+		if clean.ID != "" {
+			for _, sc := range curExpanded {
+				if sc.EffectiveID() == clean.ID {
+					h.lanesMu.Unlock()
+					return config.ScheduleConfig{}, fmt.Errorf("routine %q already exists", clean.ID)
+				}
+			}
+		}
+	} else {
+		matchID := strings.TrimSpace(targetID)
+		if matchID == "" {
+			matchID = clean.ID
+		}
+		if matchID != "" {
+			for i, sc := range curExpanded {
+				if sc.EffectiveID() == matchID {
+					idx = i
+					break
+				}
+			}
+			if targetID != "" && idx == -1 && clean.ID == "" {
+				h.lanesMu.Unlock()
+				return config.ScheduleConfig{}, fmt.Errorf("routine %q not found: %w", targetID, ErrRoutineNotFound)
+			}
+		} else {
+			for i, sc := range curExpanded {
+				if strings.EqualFold(strings.TrimSpace(sc.Name), clean.Name) {
+					idx = i
+					break
+				}
+			}
+		}
+		if idx >= 0 && clean.ID == "" {
+			clean.ID = curExpanded[idx].EffectiveID()
+		}
+	}
+
+	var prevExpanded config.ScheduleConfig
+	if idx >= 0 {
+		prevExpanded = curExpanded[idx]
+	}
+
+	nextRawList := make([]config.ScheduleConfig, len(curExpanded))
+	copy(nextRawList, curExpanded)
+	if idx >= 0 {
+		nextRawList[idx] = clean
+	} else {
+		nextRawList = append(nextRawList, clean)
+		idx = len(nextRawList) - 1
+	}
+
+	if h.cfg.ConfigPath != "" {
+		err := config.UpdateRaw(h.cfg, func(rawCfg *config.HubConfig) error {
+			for i := range rawCfg.Bots {
+				rb := &rawCfg.Bots[i]
+				if rb.ID != botID {
+					continue
+				}
+				normExisting := config.NormalizeSchedules(rb.Schedules)
+				diskIdx := -1
+				if idx < len(normExisting) && normExisting[idx].EffectiveID() == prevExpanded.EffectiveID() && prevExpanded.EffectiveID() != "" {
+					diskIdx = idx
+				} else if prevExpanded.EffectiveID() != "" {
+					for j, ns := range normExisting {
+						if ns.EffectiveID() == prevExpanded.EffectiveID() {
+							diskIdx = j
+							break
+						}
+					}
+				}
+				toDisk := clean
+				if diskIdx >= 0 {
+					toDisk = preserveRoutineEnvRefs(toDisk, rb.Schedules[diskIdx], prevExpanded)
+					if toDisk.ID == "" {
+						toDisk.ID = normExisting[diskIdx].EffectiveID()
+					}
+					rb.Schedules[diskIdx] = toDisk
+				} else {
+					normAll := config.NormalizeSchedules(append(append([]config.ScheduleConfig(nil), rb.Schedules...), toDisk))
+					toDisk.ID = normAll[len(normAll)-1].ID
+					rb.Schedules = append(rb.Schedules, toDisk)
+				}
+				return nil
+			}
+			return fmt.Errorf("bot %q is not in %s", botID, h.cfg.ConfigPath)
+		})
+		if err != nil {
+			h.lanesMu.Unlock()
+			return config.ScheduleConfig{}, fmt.Errorf("save config: %w", err)
+		}
+	}
+
+	normalized := config.NormalizeSchedules(nextRawList)
+	h.setBotSchedulesLocked(lane, normalized)
+	saved := normalized[idx]
+	h.lanesMu.Unlock()
+
+	h.broadcast(Event{
+		Type:    "routine_updated",
+		BotID:   botID,
+		Payload: map[string]any{"botId": botID, "routine": saved},
+	})
+	h.notifySchedulesChanged()
+	return saved, nil
+}
+
+func (h *Hub) DeleteRoutine(botID, routineID string) error {
+	routineID = strings.TrimSpace(routineID)
+	if routineID == "" {
+		return fmt.Errorf("routine %q not found: %w", routineID, ErrRoutineNotFound)
+	}
+
+	h.lanesMu.Lock()
+	lane, ok := h.lanes[botID]
+	if !ok {
+		h.lanesMu.Unlock()
+		return fmt.Errorf("bot %q not found: %w", botID, ErrBotNotFound)
+	}
+	next := make([]config.ScheduleConfig, 0, len(lane.bot.Schedules))
+	found := false
+	for _, sc := range lane.bot.Schedules {
+		if sc.EffectiveID() == routineID {
+			found = true
+			continue
+		}
+		next = append(next, sc)
+	}
+	if !found {
+		h.lanesMu.Unlock()
+		return fmt.Errorf("routine %q not found: %w", routineID, ErrRoutineNotFound)
+	}
+
+	if h.cfg.ConfigPath != "" {
+		err := config.UpdateRaw(h.cfg, func(rawCfg *config.HubConfig) error {
+			for i := range rawCfg.Bots {
+				rb := &rawCfg.Bots[i]
+				if rb.ID != botID {
+					continue
+				}
+				normExisting := config.NormalizeSchedules(rb.Schedules)
+				filtered := make([]config.ScheduleConfig, 0, len(rb.Schedules))
+				for j, sc := range rb.Schedules {
+					if j < len(normExisting) && normExisting[j].EffectiveID() == routineID {
+						continue
+					}
+					filtered = append(filtered, sc)
+				}
+				rb.Schedules = filtered
+				return nil
+			}
+			return fmt.Errorf("bot %q is not in %s", botID, h.cfg.ConfigPath)
+		})
+		if err != nil {
+			h.lanesMu.Unlock()
+			return fmt.Errorf("save config: %w", err)
+		}
+	}
+
+	h.setBotSchedulesLocked(lane, config.NormalizeSchedules(next))
+	h.lanesMu.Unlock()
+
+	h.broadcast(Event{
+		Type:    "routine_updated",
+		BotID:   botID,
+		Payload: map[string]any{"botId": botID, "deletedId": routineID},
+	})
+	h.notifySchedulesChanged()
+	return nil
+}
+
+func (h *Hub) setBotSchedulesLocked(lane *botLane, schedules []config.ScheduleConfig) {
+	lane.bot.Schedules = schedules
+	for i := range h.cfg.Bots {
+		if h.cfg.Bots[i].ID == lane.bot.ID {
+			h.cfg.Bots[i].Schedules = schedules
+		}
+	}
+}
+
+func cleanScheduleInput(raw config.ScheduleConfig) config.ScheduleConfig {
+	raw.ID = strings.TrimSpace(raw.ID)
+	raw.Name = strings.TrimSpace(raw.Name)
+	raw.DailyAt = strings.TrimSpace(raw.DailyAt)
+	raw.Prompt = strings.TrimSpace(raw.Prompt)
+	raw.Model = strings.TrimSpace(raw.Model)
+	raw.MainDelivery = raw.EffectiveMainDelivery()
+	raw.NotifyTelegramChatID = strings.TrimSpace(raw.NotifyTelegramChatID)
+	if raw.Enabled == nil {
+		v := true
+		raw.Enabled = &v
+	}
+	return raw
+}
+
+func preserveRoutineEnvRefs(next, curDisk, curExpanded config.ScheduleConfig) config.ScheduleConfig {
+	if next.NotifyTelegramChatID == curExpanded.NotifyTelegramChatID && config.ContainsEnvRef(curDisk.NotifyTelegramChatID) {
+		next.NotifyTelegramChatID = curDisk.NotifyTelegramChatID
+	}
+	if next.Model == curExpanded.Model && config.ContainsEnvRef(curDisk.Model) {
+		next.Model = curDisk.Model
+	}
+	return next
+}
+
+func (h *Hub) RecordRoutineRun(run state.RoutineRun) (state.RoutineRun, error) {
+	if h.store == nil {
+		return run, nil
+	}
+	return h.store.RecordRoutineRun(run)
+}
+
+func (h *Hub) ListRoutineRuns(botID, routineID string, limit int) ([]state.RoutineRun, error) {
+	if _, ok := h.GetBot(botID); !ok {
+		return nil, fmt.Errorf("bot %q not found: %w", botID, ErrBotNotFound)
+	}
+	if h.store == nil {
+		return []state.RoutineRun{}, nil
+	}
+	return h.store.ListRoutineRuns(botID, routineID, limit)
+}
+
+func (h *Hub) LatestRoutineRun(botID, routineID string) (state.RoutineRun, bool) {
+	if h.store == nil {
+		return state.RoutineRun{}, false
+	}
+	return h.store.LatestRoutineRun(botID, routineID)
+}
+
+func (h *Hub) HasDailyRunOnDate(botID, routineID, localDate string) bool {
+	if h.store == nil {
+		return false
+	}
+	return h.store.HasDailyRunOnDate(botID, routineID, localDate)
+}
+
+func (h *Hub) MarkReceiptsInjected(ids []string) error {
+	if h.store == nil {
+		return nil
+	}
+	return h.store.MarkReceiptsInjected(ids)
+}
+
+func (h *Hub) BroadcastRoutineRun(run state.RoutineRun) {
+	h.broadcast(Event{
+		Type:    "routine_run",
+		BotID:   run.BotID,
+		Payload: run,
+	})
 }

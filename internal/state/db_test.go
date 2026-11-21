@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestStoreSQLiteLifecycleSearchAndRecall(t *testing.T) {
@@ -225,5 +226,102 @@ func TestLegacyMigrationFromJSONAndJSONL(t *testing.T) {
 	all, err := store.ListMessages("assistant", 50)
 	if err != nil || len(all) != 5 {
 		t.Fatalf("expected 5 migrated messages, got %d (err=%v)", len(all), err)
+	}
+}
+
+func TestRoutineRunsReceiptsAndActiveRecall(t *testing.T) {
+	tmp := t.TempDir()
+	store, err := NewStore(filepath.Join(tmp, "sessions.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	// Active session recall via "active"
+	sess, err := store.EnsureActiveSession("ops", "opencode", "magpie/flash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.AppendMessage(ChatMessage{
+		BotID: "ops", SessionID: sess.ID, Turn: 1, Role: "user", From: "web", Text: "部署进度如何？",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	actRecall, err := store.RecallSession(RecallOptions{BotID: "ops", SessionID: "active"})
+	if err != nil {
+		t.Fatalf("RecallSession active: %v", err)
+	}
+	if actRecall.Session.SessionID != sess.ID || len(actRecall.Messages) != 1 {
+		t.Fatalf("unexpected active recall: %+v", actRecall)
+	}
+
+	// Routine runs + pending receipts lifecycle
+	nowLocal := time.Now().In(time.Local)
+	r1, err := store.RecordRoutineRun(RoutineRun{
+		BotID: "ops", RoutineID: "disk-check", RoutineName: "磁盘巡检",
+		Trigger: "schedule", Status: "ok", Delivery: "receipt",
+		Output: "磁盘使用率 82%", StartedAt: nowLocal.UTC().Format(time.RFC3339),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.RecordRoutineRun(RoutineRun{
+		BotID: "ops", RoutineID: "silent-check", RoutineName: "静默巡检",
+		Trigger: "schedule", Status: "silent", Delivery: "receipt", Output: "",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	r2, err := store.RecordRoutineRun(RoutineRun{
+		BotID: "ops", RoutineID: "err-check", RoutineName: "日志巡检",
+		Trigger: "manual", Status: "ok", Delivery: "receipt", Output: "发现 2 条错误",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.RecordRoutineRun(RoutineRun{
+		BotID: "ops", RoutineID: "notify-only", RoutineName: "即时告警",
+		Trigger: "schedule", Status: "ok", Delivery: "notify", Output: "CPU 99%",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if !store.HasDailyRunOnDate("ops", "disk-check", nowLocal.Format("2006-01-02")) {
+		t.Fatal("expected HasDailyRunOnDate=true")
+	}
+	if store.HasDailyRunOnDate("ops", "err-check", nowLocal.Format("2006-01-02")) {
+		t.Fatal("manual run should not count as daily schedule run")
+	}
+
+	pending, err := store.ListPendingReceipts("ops", 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending) != 2 || pending[0].ID != r1.ID || pending[1].ID != r2.ID {
+		t.Fatalf("expected 2 pending receipts oldest-first, got %+v", pending)
+	}
+
+	if err := store.MarkReceiptsInjected([]string{r1.ID}); err != nil {
+		t.Fatal(err)
+	}
+	pending, _ = store.ListPendingReceipts("ops", 5)
+	if len(pending) != 1 || pending[0].ID != r2.ID {
+		t.Fatalf("expected only r2 pending after marking r1, got %+v", pending)
+	}
+
+	if err := store.DismissPendingReceipts("ops"); err != nil {
+		t.Fatal(err)
+	}
+	pending, _ = store.ListPendingReceipts("ops", 5)
+	if len(pending) != 0 {
+		t.Fatalf("expected 0 pending after dismiss, got %+v", pending)
+	}
+
+	runs, err := store.ListRoutineRuns("ops", "", 10)
+	if err != nil || len(runs) != 4 {
+		t.Fatalf("expected 4 runs, got %d (err=%v)", len(runs), err)
+	}
+	latest, ok := store.LatestRoutineRun("ops", "disk-check")
+	if !ok || latest.ID != r1.ID {
+		t.Fatalf("unexpected LatestRoutineRun: %+v ok=%v", latest, ok)
 	}
 }
