@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"net"
 	"net/http"
 	"net/url"
+	"path"
 	"strconv"
 	"strings"
 	"sync"
@@ -205,7 +207,11 @@ func (s *HTTPServer) guard(next http.Handler) http.Handler {
 				return
 			}
 		}
-		if (s.apiToken() != "" || tunneled) && r.URL.Path != "/" && r.URL.Path != "/api/login" && !s.authorized(r) {
+		if (s.apiToken() != "" || tunneled) &&
+			r.URL.Path != "/" &&
+			!strings.HasPrefix(r.URL.Path, "/assets/") &&
+			r.URL.Path != "/api/login" &&
+			!s.authorized(r) {
 			writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "unauthorized"})
 			return
 		}
@@ -253,13 +259,28 @@ func (s *HTTPServer) handleLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *HTTPServer) handleIndex(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/" {
-		http.NotFound(w, r)
+	dist := web.DistFS()
+	clean := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
+	if clean == "" || clean == "." {
+		data, err := fs.ReadFile(dist, "index.html")
+		if err != nil {
+			http.Error(w, "web ui not built", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(data)
 		return
 	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(web.IndexHTML)
+	if info, err := fs.Stat(dist, clean); err == nil && !info.IsDir() {
+		if strings.HasPrefix(clean, "assets/") {
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		}
+		http.FileServer(http.FS(dist)).ServeHTTP(w, r)
+		return
+	}
+	http.NotFound(w, r)
 }
 
 func (s *HTTPServer) handleHealth(w http.ResponseWriter, _ *http.Request) {

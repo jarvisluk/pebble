@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>bot-hub</title>
+    <script>
+      try { sessionStorage.removeItem('bothub.shell'); } catch {}
+      const isNativeMacShell = Boolean(
+        window.__bothubMacShell ||
+        window._wails ||
+        window.webkit?.messageHandlers?.bothubDrag ||
+        /wails\.io|BotHubMac/.test(navigator.userAgent)
+      );
+      const isMobileUA = /iPhone|iPad|iPod|Android|Mobile/i.test(navigator.userAgent);
+      if (isNativeMacShell && !isMobileUA && /Mac/.test(navigator.platform)) {
+        document.documentElement.classList.add('mac-app');
+      }
+      try {
+        const t = localStorage.getItem('bothub.theme');
+        if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
+        const l = localStorage.getItem('bothub.lang');
+        const resolvedLang = (l === 'zh-CN' || l === 'en') ? l : (/^zh\b/i.test(navigator.language || '') ? 'zh-CN' : 'en');
+        document.documentElement.lang = resolvedLang;
+        const ac = localStorage.getItem('bothub.accent');
+        if (ac && /^#[0-9a-fA-F]{6}$/.test(ac)) {
+          document.documentElement.style.setProperty('--accent', ac);
+        }
+      } catch {}
+    </script>
+    <script type="module" crossorigin src="/assets/index-C-k8mlkq.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-i-pjxWRB.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>

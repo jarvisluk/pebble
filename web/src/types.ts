@@ -1,0 +1,233 @@
+export type LangPref = 'system' | 'zh-CN' | 'en';
+export type ResolvedLang = 'zh-CN' | 'en';
+export type ThemePref = 'system' | 'light' | 'dark';
+export type SettingsTab = 'models' | 'remote' | 'general';
+
+export interface BotSessionInfo {
+  sessionId?: string;
+  turnCount?: number;
+  totalCostUsd?: number;
+}
+
+export interface BotStatus {
+  id: string;
+  name: string;
+  description?: string;
+  harness?: string;
+  model?: string;
+  modelInherited?: boolean;
+  workspace?: string;
+  busy?: boolean;
+  privateSessions?: boolean;
+}
+
+export interface BotDetail extends BotStatus {
+  session?: BotSessionInfo;
+  archivedSessions?: number;
+  instructions?: string;
+}
+
+export interface ChatMessage {
+  id: string;
+  botId: string;
+  role: 'user' | 'assistant' | 'bot_out' | 'bot_in' | 'system' | string;
+  from?: string;
+  to?: string;
+  text: string;
+  createdAt: string;
+  durationMs?: number;
+  costUsd?: number;
+}
+
+export interface MagpieProvider {
+  id: string;
+  name: string;
+  enabled: boolean;
+  endpoint?: string;
+  status?: string;
+  modelsInfo?: string;
+  usedBy?: string;
+}
+
+export interface MagpiePreset {
+  id: string;
+  name: string;
+}
+
+export interface HarnessInfo {
+  id: string;
+  label: string;
+  installed?: boolean;
+  binaryPath?: string;
+  defaultModel?: string;
+  install?: {
+    command?: string;
+    url?: string;
+  };
+  magpie?: {
+    connected?: boolean;
+    model?: string;
+    nativeModel?: string;
+  };
+}
+
+export interface SettingsData {
+  magpie?: {
+    installed: boolean;
+    healthy?: boolean;
+    providers?: MagpieProvider[];
+    presets?: MagpiePreset[];
+    install?: {
+      script?: string;
+      brew?: string;
+      docs?: string;
+    };
+  };
+  onboarding?: {
+    completed?: boolean;
+    needsSetup?: boolean;
+  };
+  defaultModel?: string;
+  defaultModels?: Record<string, string>;
+  sharedUserMd?: string;
+  desktopHarness?: string;
+  desktopModel?: string;
+  harnesses: HarnessInfo[];
+}
+
+export interface NodeInfo {
+  id: string;
+  name?: string;
+  os?: string;
+  arch?: string;
+  permissions?: string[];
+  connected: boolean;
+}
+
+export interface LocalNodeState {
+  available?: boolean;
+  enabled?: boolean;
+  connected?: boolean;
+  status: string;
+  name?: string;
+  permissions?: string[];
+}
+
+export interface TailcatStatus {
+  state: 'disabled' | 'connecting' | 'ready' | 'error' | string;
+  link?: string;
+  error?: string;
+  hasToken?: boolean;
+  tokenEnvRef?: string;
+  apiToken?: string;
+}
+
+export interface MemoryItem {
+  id: string;
+  kind?: string;
+  tags?: string[];
+  text: string;
+  updatedAt?: string;
+}
+
+export interface MemoryResponse {
+  installed?: boolean;
+  available?: boolean;
+  error?: string;
+  items?: MemoryItem[];
+}
+
+export interface RoutineRun {
+  id?: string;
+  botId?: string;
+  status: 'ok' | 'silent' | 'error' | string;
+  trigger?: string;
+  durationMs: number;
+  costUsd?: number;
+  output?: string;
+  error?: string;
+  finishedAt: string;
+}
+
+export interface RoutineItem {
+  id: string;
+  name: string;
+  everyMinutes?: number;
+  dailyAt?: string;
+  prompt: string;
+  model?: string;
+  mainDelivery: 'receipt' | 'notify' | 'none' | string;
+  notifyTelegramChatId?: string;
+  enabled: boolean;
+  running?: boolean;
+  nextRunAt?: string;
+  lastRun?: RoutineRun;
+}
+
+export interface ScreenState {
+  target: string;
+  owner: 'idle' | 'human' | string;
+  botId?: string;
+  botName?: string;
+}
+
+export interface TakeoverRequest {
+  id: string;
+  target: string;
+  botId: string;
+  botName?: string;
+  reason: string;
+  app?: string;
+  createdAt?: string;
+}
+
+export interface DesktopTarget {
+  id: string;
+  name: string;
+  local?: boolean;
+  supported?: boolean;
+  webrtcAvailable?: boolean;
+  screen?: ScreenState;
+}
+
+export interface DesktopWindow {
+  id: string;
+  app?: string;
+  title?: string;
+}
+
+export interface DesktopHostStatus {
+  supported?: boolean;
+  webrtcAvailable?: boolean;
+  screenRecording?: string;
+  accessibility?: string;
+  logicalX?: number;
+  logicalY?: number;
+  logicalWidth?: number;
+  logicalHeight?: number;
+}
+
+export interface DesktopFrame {
+  jpegBase64: string;
+  imageWidth: number;
+  imageHeight: number;
+  logicalX?: number;
+  logicalY?: number;
+  logicalWidth?: number;
+  logicalHeight?: number;
+}
+
+export interface ConfirmOptions {
+  title: string;
+  text: string;
+  okText?: string;
+  okClass?: 'bad' | 'go' | '';
+  onOk: () => Promise<void> | void;
+}
+
+export interface SettingsDraft {
+  defaultModel: string;
+  defaultModels: Record<string, string>;
+  sharedUserMd: string;
+  bots: Record<string, { harness: string; model: string }>;
+}

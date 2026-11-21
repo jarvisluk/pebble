@@ -1,4 +1,7 @@
-.PHONY: build desktop app serve chat status test ios-tunnel android-tunnel
+.PHONY: web build desktop app serve chat status test ios-tunnel android-tunnel
+
+web:
+	cd web && npm run build
 
 build:
 	go build -o bin/bot-hub ./cmd/bot-hub

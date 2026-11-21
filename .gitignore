@@ -18,3 +18,4 @@ apps/mobile/modules/bothub-tunnel/android/src/main/jniLibs/
 apps/mobile/modules/bothub-tunnel/android/build/
 apps/mobile/modules/bothub-tunnel/android/.gradle/
 apps/mobile/.claude/
+web/node_modules/
