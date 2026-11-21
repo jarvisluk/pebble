@@ -1,4 +1,4 @@
-.PHONY: build desktop app serve chat status test
+.PHONY: build desktop app serve chat status test ios-tunnel android-tunnel
 
 build:
 	go build -o bin/bot-hub ./cmd/bot-hub
@@ -25,3 +25,9 @@ status:
 
 test:
 	go test ./...
+
+ios-tunnel:
+	./scripts/build-tunnel-ios.sh
+
+android-tunnel:
+	./scripts/build-tunnel-android.sh

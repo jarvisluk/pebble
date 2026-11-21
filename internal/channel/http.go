@@ -12,20 +12,35 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"bot-hub/internal/config"
+	"bot-hub/internal/desktop"
 	"bot-hub/internal/harness"
 	"bot-hub/internal/hub"
+	"bot-hub/internal/node"
 	"bot-hub/internal/web"
 )
 
 type HTTPServer struct {
-	hub *hub.Hub
-	cfg config.HTTPConfig
-	srv *http.Server
+	hub   *hub.Hub
+	cfgMu sync.RWMutex
+	cfg   config.HTTPConfig
+	srv   *http.Server
 
-	tailcat tailcatServe
+	tailcat        tailcatServe
+	nodesOnce      sync.Once
+	fallbackNodes  *node.Registry
+	deskOnce       sync.Once
+	fallbackDesk   *desktop.Coordinator
+	fallbackEngine *desktop.Engine
+}
+
+func (s *HTTPServer) apiToken() string {
+	s.cfgMu.RLock()
+	defer s.cfgMu.RUnlock()
+	return s.cfg.APIToken
 }
 
 func NewHTTPServer(h *hub.Hub, cfg config.HTTPConfig) *HTTPServer {
@@ -48,15 +63,39 @@ func NewHTTPServer(h *hub.Hub, cfg config.HTTPConfig) *HTTPServer {
 	mux.HandleFunc("POST /api/bots/{id}/message", s.handleMessage)
 	mux.HandleFunc("POST /api/bots/{id}/reset", s.handleReset)
 	mux.HandleFunc("PATCH /api/bots/{id}", s.handleUpdateBot)
+	mux.HandleFunc("DELETE /api/bots/{id}", s.handleDeleteBot)
 	mux.HandleFunc("POST /api/bots/{id}/interrupt", s.handleInterrupt)
 	mux.HandleFunc("GET /api/settings", s.handleSettings)
 	mux.HandleFunc("PUT /api/settings", s.handlePutSettings)
 	mux.HandleFunc("GET /api/models", s.handleModels)
 	mux.HandleFunc("POST /api/harnesses/{id}/magpie", s.handleMagpieConnect)
+	mux.HandleFunc("POST /api/magpie/providers", s.handleMagpieProvider)
+
+	mux.HandleFunc("GET /api/desktop/targets", s.handleDesktopTargets)
+	mux.HandleFunc("GET /api/desktop/state", s.handleDesktopState)
+	mux.HandleFunc("GET /api/desktop/windows", s.handleDesktopWindows)
+	mux.HandleFunc("POST /api/desktop/focus", s.handleDesktopFocus)
+	mux.HandleFunc("GET /api/desktop/frame", s.handleDesktopFrame)
+	mux.HandleFunc("POST /api/desktop/input", s.handleDesktopInput)
+	mux.HandleFunc("POST /api/desktop/stream/offer", s.handleDesktopStreamOffer)
+	mux.HandleFunc("POST /api/desktop/stream/close", s.handleDesktopStreamClose)
+	mux.HandleFunc("POST /api/desktop/force-takeover", s.handleDesktopForceTakeover)
+	mux.HandleFunc("GET /api/desktop/takeovers", s.handleDesktopTakeovers)
+	mux.HandleFunc("POST /api/desktop/takeover/request", s.handleDesktopTakeoverRequest)
+	mux.HandleFunc("POST /api/desktop/takeover/resolve", s.handleDesktopTakeoverResolve)
+	mux.HandleFunc("POST /api/desktop/mcp", s.handleDesktopMCP)
 
 	mux.HandleFunc("POST /api/login", s.handleLogin)
 	mux.HandleFunc("GET /api/tailcat", s.handleTailcat)
+	mux.HandleFunc("POST /api/tailcat", s.handleSetTailcat)
 	mux.HandleFunc("GET /api/tailcat/qr.png", s.handleTailcatQR)
+
+	mux.HandleFunc("GET /api/nodes", s.handleNodes)
+	mux.HandleFunc("GET /api/local-node", s.handleLocalNodeStub)
+	mux.HandleFunc("POST /api/nodes/poll", s.handleNodePoll)
+	mux.HandleFunc("POST /api/nodes/result", s.handleNodeResult)
+	mux.HandleFunc("POST /api/nodes/disconnect", s.handleNodeDisconnect)
+	mux.HandleFunc("POST /api/nodes/{id}/call", s.handleNodeCall)
 
 	// External Webhooks
 	mux.HandleFunc("POST /hooks/{id}", s.handleWebhook)
@@ -87,6 +126,9 @@ func (s *HTTPServer) Start() error {
 
 func (s *HTTPServer) Shutdown(ctx context.Context) error {
 	s.tailcat.shutdown(ctx)
+	if s.fallbackEngine != nil {
+		s.fallbackEngine.Close()
+	}
 	return s.srv.Shutdown(ctx)
 }
 
@@ -121,7 +163,7 @@ func (s *HTTPServer) guard(next http.Handler) http.Handler {
 				return
 			}
 		}
-		if (s.cfg.APIToken != "" || tunneled) && r.URL.Path != "/" && r.URL.Path != "/api/login" && !s.authorized(r) {
+		if (s.apiToken() != "" || tunneled) && r.URL.Path != "/" && r.URL.Path != "/api/login" && !s.authorized(r) {
 			writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "unauthorized"})
 			return
 		}
@@ -136,7 +178,7 @@ func (s *HTTPServer) authorized(r *http.Request) bool {
 			got = c.Value
 		}
 	}
-	return subtle.ConstantTimeCompare([]byte(got), []byte(s.cfg.APIToken)) == 1
+	return subtle.ConstantTimeCompare([]byte(got), []byte(s.apiToken())) == 1
 }
 
 func (s *HTTPServer) handleLogin(w http.ResponseWriter, r *http.Request) {
@@ -147,17 +189,18 @@ func (s *HTTPServer) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json body"})
 		return
 	}
-	if s.cfg.APIToken == "" {
+	token := s.apiToken()
+	if token == "" {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 		return
 	}
-	if subtle.ConstantTimeCompare([]byte(req.Token), []byte(s.cfg.APIToken)) != 1 {
+	if subtle.ConstantTimeCompare([]byte(req.Token), []byte(token)) != 1 {
 		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "token 不正确"})
 		return
 	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     authCookie,
-		Value:    s.cfg.APIToken,
+		Value:    token,
 		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteStrictMode,
@@ -316,16 +359,32 @@ func (s *HTTPServer) handleMessage(w http.ResponseWriter, r *http.Request) {
 
 func (s *HTTPServer) handleUpdateBot(w http.ResponseWriter, r *http.Request) {
 	var upd hub.BotUpdate
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&upd); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&upd); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json body"})
 		return
 	}
 	st, err := s.hub.UpdateBot(r.PathValue("id"), upd)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		status := http.StatusBadRequest
+		if errors.Is(err, hub.ErrBotNotFound) {
+			status = http.StatusNotFound
+		}
+		writeJSON(w, status, map[string]any{"error": err.Error()})
 		return
 	}
 	writeJSON(w, http.StatusOK, st)
+}
+
+func (s *HTTPServer) handleDeleteBot(w http.ResponseWriter, r *http.Request) {
+	if err := s.hub.DeleteBot(r.PathValue("id")); err != nil {
+		status := http.StatusBadRequest
+		if errors.Is(err, hub.ErrBotNotFound) {
+			status = http.StatusNotFound
+		}
+		writeJSON(w, status, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (s *HTTPServer) handleInterrupt(w http.ResponseWriter, r *http.Request) {
@@ -338,59 +397,132 @@ func (s *HTTPServer) handleInterrupt(w http.ResponseWriter, r *http.Request) {
 }
 
 type settingsBody struct {
-	DefaultModel  string            `json:"defaultModel"`
-	DefaultModels map[string]string `json:"defaultModels"`
-	ModelAccess   *string           `json:"modelAccess"` // nil keeps the current mode
+	DefaultModel      *string           `json:"defaultModel,omitempty"`
+	DefaultModels     map[string]string `json:"defaultModels,omitempty"`
+	AllowLocalDesktop *bool             `json:"allowLocalDesktop,omitempty"`
+	SharedUserMD      *string           `json:"sharedUserMd,omitempty"`
 }
 
 func (s *HTTPServer) handleSettings(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
 	cfg := s.hub.Config()
-	mode := "magpie"
-	if !cfg.UseMagpie() {
-		mode = "self"
+	defaultModel, defaultModels := s.hub.DefaultModelsSnapshot()
+	installed := harness.MagpieInstalled()
+	var (
+		healthy   bool
+		providers []harness.MagpieProvider
+		presets   []harness.MagpiePreset
+	)
+	if installed {
+		var wg sync.WaitGroup
+		wg.Add(3)
+		go func() { defer wg.Done(); healthy = harness.MagpieGatewayHealthy(ctx) }()
+		go func() { defer wg.Done(); providers = harness.MagpieListProviders(ctx) }()
+		go func() { defer wg.Done(); presets = harness.MagpiePresets(ctx) }()
+		wg.Wait()
+	}
+	if providers == nil {
+		providers = []harness.MagpieProvider{}
+	}
+	if presets == nil {
+		presets = []harness.MagpiePreset{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"modelAccess":   mode,
-		"magpie":        map[string]any{"installed": harness.MagpieInstalled(), "install": harness.MagpieInstall},
-		"defaultModel":  cfg.DefaultModel,
-		"defaultModels": cfg.DefaultModels,
-		"harnesses":     s.hub.Harnesses(ctx),
+		"magpie": map[string]any{
+			"installed": installed,
+			"healthy":   healthy,
+			"install":   harness.MagpieInstall,
+			"providers": providers,
+			"presets":   presets,
+		},
+		"allowLocalDesktop": cfg.LocalDesktopAllowed(),
+		"defaultModel":      defaultModel,
+		"defaultModels":     defaultModels,
+		"sharedUserMd":      s.hub.SharedUserMD(),
+		"harnesses":         s.hub.Harnesses(ctx),
 	})
 }
 
 func (s *HTTPServer) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	var body settingsBody
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&body); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json body"})
 		return
 	}
-	if body.ModelAccess != nil {
-		if err := s.hub.SetModelAccess(*body.ModelAccess); err != nil {
+	if body.AllowLocalDesktop != nil {
+		if err := s.hub.SetAllowLocalDesktop(*body.AllowLocalDesktop); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
 			return
 		}
 	}
-	if err := s.hub.SetDefaultModels(body.DefaultModel, body.DefaultModels); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
-		return
+	if body.DefaultModel != nil || body.DefaultModels != nil {
+		curDefault, curPerHarness := s.hub.DefaultModelsSnapshot()
+		if body.DefaultModel != nil {
+			curDefault = *body.DefaultModel
+		}
+		if body.DefaultModels != nil {
+			curPerHarness = body.DefaultModels
+		}
+		if err := s.hub.SetDefaultModels(curDefault, curPerHarness); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
+	}
+	if body.SharedUserMD != nil {
+		if err := s.hub.SetSharedUserMD(*body.SharedUserMD); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
 	}
 	s.handleSettings(w, r)
 }
 
 func (s *HTTPServer) handleMagpieConnect(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Model string `json:"model"`
+		Action string `json:"action"` // connect (default) | disconnect
+		Model  string `json:"model"`
 	}
 	_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<12)).Decode(&body)
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
-	if err := s.hub.MagpieConnect(ctx, r.PathValue("id"), body.Model); err != nil {
+
+	kind := r.PathValue("id")
+	var err error
+	if strings.EqualFold(strings.TrimSpace(body.Action), "disconnect") {
+		err = s.hub.MagpieDisconnect(ctx, kind)
+	} else {
+		err = s.hub.MagpieConnect(ctx, kind, body.Model)
+	}
+	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
 		return
 	}
 	s.handleSettings(w, r)
+}
+
+func (s *HTTPServer) handleMagpieProvider(w http.ResponseWriter, r *http.Request) {
+	var req harness.MagpieProviderReq
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<14)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json body"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+	out, err := s.hub.MagpieProviderAction(ctx, req)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		return
+	}
+	providers := harness.MagpieListProviders(ctx)
+	if providers == nil {
+		providers = []harness.MagpieProvider{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":        true,
+		"output":    out,
+		"providers": providers,
+	})
 }
 
 func (s *HTTPServer) handleModels(w http.ResponseWriter, r *http.Request) {

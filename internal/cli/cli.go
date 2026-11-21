@@ -7,6 +7,8 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"strings"
@@ -18,6 +20,7 @@ import (
 	"bot-hub/internal/harness"
 	"bot-hub/internal/hub"
 	"bot-hub/internal/mcp"
+	"bot-hub/internal/node"
 	"bot-hub/internal/scheduler"
 	"bot-hub/internal/state"
 	"bot-hub/internal/tunnel"
@@ -82,23 +85,75 @@ func printUsage() {
   bot-hub serve  [-config path]                    Start Web UI, HTTP API, Telegram pollers, and scheduler
   bot-hub chat   [-config path] [bot]              Interactive terminal chat with a bot
   bot-hub status [-config path]                    Show configured bots and persisted sessions
-  bot-hub mcp    [--hub-url url] [--bot-id id]     Run stdio MCP server exposing bot management & messaging tools
-  bot-hub connect [-listen addr] <tailcat-link>    Reach a remote bot-hub over Tailcat at a local URL`)
+  bot-hub mcp     [--hub-url url] [--bot-id id] [--config path]  Run stdio MCP server exposing bot & node tools
+  bot-hub connect [-listen addr] [-node] <tailcat-link>        Reach a remote bot-hub over Tailcat (optionally register as a node)`)
 }
 
 func runConnect(args []string) {
 	fs := flag.NewFlagSet("connect", flag.ExitOnError)
 	listen := fs.String("listen", "127.0.0.1:3790", "local address to serve the remote bot-hub on")
+	asNode := fs.Bool("node", false, "also expose this computer as a remote device node")
+	token := fs.String("token", "", "hub apiToken for node registration (or BOT_HUB_API_TOKEN)")
+	nodeID := fs.String("node-id", "", "node ID (defaults to hostname)")
+	perms := fs.String("perms", "files,exec,desktop", "comma-separated node permissions: files,exec,desktop")
 	_ = fs.Parse(args)
 	if fs.NArg() != 1 {
 		printUsage()
 		os.Exit(1)
 	}
+	link, linkTok := tunnel.ExtractTokenFromLink(fs.Arg(0))
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	log.Printf("[tailcat] connecting...")
-	err := tunnel.Forward(ctx, fs.Arg(0), *listen, func(u string) { log.Printf("[tailcat] connected: open %s", u) })
-	if err != nil && ctx.Err() == nil {
+	if !*asNode {
+		err := tunnel.Forward(ctx, link, *listen, func(u string) { log.Printf("[tailcat] connected: open %s", u) })
+		if err != nil && ctx.Err() == nil {
+			log.Fatalf("%v", err)
+		}
+		return
+	}
+
+	if _, _, err := tunnel.ParseLink(link); err != nil {
+		log.Fatal(err)
+	}
+	ln, err := net.Listen("tcp", *listen)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer ln.Close()
+	go func() { <-ctx.Done(); ln.Close() }()
+
+	dial, closeClient, err := tunnel.Connect(ctx, link)
+	if err != nil {
+		log.Fatalf("%v", err)
+	}
+	defer closeClient()
+
+	tok := strings.TrimSpace(*token)
+	if tok == "" {
+		tok = strings.TrimSpace(os.Getenv("BOT_HUB_API_TOKEN"))
+	}
+	if tok == "" {
+		tok = linkTok
+	}
+	tr := &http.Transport{
+		DialContext: func(dctx context.Context, _, _ string) (net.Conn, error) { return dial(dctx) },
+	}
+	defer tr.CloseIdleConnections()
+
+	agent := node.NewAgent(node.AgentOptions{
+		NodeID:      *nodeID,
+		BaseURL:     "http://" + ln.Addr().String(),
+		Token:       tok,
+		Permissions: node.ValidPerms(strings.Split(*perms, ",")),
+		Enabled:     true,
+		HTTPClient:  &http.Client{Transport: tr},
+		OnState:     nil,
+	})
+	defer agent.Close()
+	st := agent.Status()
+	log.Printf("[tailcat] connected: open http://%s (node=%s perms=%v)", ln.Addr().String(), st.NodeID, st.Permissions)
+	if err := tunnel.ServeForward(ctx, ln, dial); err != nil && ctx.Err() == nil {
 		log.Fatalf("%v", err)
 	}
 }
@@ -107,9 +162,10 @@ func runMCP(args []string) {
 	fs := flag.NewFlagSet("mcp", flag.ExitOnError)
 	hubURL := fs.String("hub-url", "http://127.0.0.1:3789", "running bot-hub HTTP base URL")
 	botID := fs.String("bot-id", "", "caller bot ID")
+	cfgPath := fs.String("config", "", "path to bots.json config file")
 	_ = fs.Parse(args)
 
-	srv := mcp.NewServer(*hubURL, *botID)
+	srv := mcp.NewServerWithConfig(*hubURL, *botID, *cfgPath)
 	if err := srv.ServeStdio(context.Background(), os.Stdin, os.Stdout); err != nil {
 		fmt.Fprintf(os.Stderr, "mcp server error: %v\n", err)
 		os.Exit(1)

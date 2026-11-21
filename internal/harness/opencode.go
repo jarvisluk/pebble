@@ -155,6 +155,24 @@ func (h *OpenCodeHarness) Close() {
 	h.resetLocked()
 }
 
+// Reload terminates the idle opencode serve process (keeping the harness open)
+// so subsequent turns restart it with updated CLI/provider configs.
+func (h *OpenCodeHarness) Reload() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.closed {
+		return
+	}
+	if h.cmd != nil && h.cmd.Process != nil {
+		_ = syscall.Kill(-h.cmd.Process.Pid, syscall.SIGTERM)
+	}
+	h.resetLocked()
+	h.applied.Range(func(k, _ any) bool {
+		h.applied.Delete(k)
+		return true
+	})
+}
+
 func (h *OpenCodeHarness) eventLoop(ctx context.Context, base, pw string, ready chan struct{}) {
 	q := url.Values{}
 	for _, t := range ocEventTypes {

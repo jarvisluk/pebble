@@ -49,6 +49,12 @@ type Harness interface {
 	Close()
 }
 
+// Reloader is optionally implemented by harnesses whose cached runtime process
+// or catalog should be restarted after CLI model/provider changes.
+type Reloader interface {
+	Reload()
+}
+
 type Registry struct {
 	items map[string]Harness
 }

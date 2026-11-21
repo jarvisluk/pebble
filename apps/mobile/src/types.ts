@@ -1,0 +1,151 @@
+export interface SessionRecord {
+  sessionId?: string;
+  turnCount?: number;
+  totalCostUsd?: number;
+}
+
+export interface BotStatus {
+  id: string;
+  name: string;
+  description?: string;
+  workspace: string;
+  harness: string;
+  model?: string;
+  modelInherited?: boolean;
+  busy?: boolean;
+  queued?: number;
+  session?: SessionRecord;
+}
+
+export interface BotDetail extends BotStatus {
+  instructions: string;
+}
+
+export interface ChatMessage {
+  id: string;
+  botId: string;
+  role: 'user' | 'assistant' | 'bot_out' | 'bot_in' | 'system';
+  from?: string;
+  to?: string;
+  text: string;
+  createdAt: string;
+  durationMs?: number;
+  costUsd?: number;
+}
+
+export interface HarnessInfo {
+  id: string;
+  label: string;
+  defaultModel: string;
+  magpie: {
+    installed?: boolean;
+    connected: boolean;
+    model?: string;
+    nativeModel?: string;
+  };
+}
+
+export interface MagpieProvider {
+  id: string;
+  name: string;
+  endpoint?: string;
+  status?: string;
+  modelsInfo?: string;
+  usedBy?: string;
+  enabled: boolean;
+}
+
+export interface MagpiePreset {
+  id: string;
+  name: string;
+}
+
+export interface SettingsData {
+  magpie?: {
+    installed: boolean;
+    healthy?: boolean;
+    providers?: MagpieProvider[];
+    presets?: MagpiePreset[];
+    install?: {
+      script?: string;
+      brew?: string;
+      download?: string;
+      docs?: string;
+    };
+  };
+  allowLocalDesktop?: boolean;
+  defaultModel: string;
+  defaultModels?: Record<string, string>;
+  sharedUserMd?: string;
+  harnesses: HarnessInfo[];
+}
+
+export interface TailcatStatus {
+  state: 'disabled' | 'connecting' | 'ready' | 'error';
+  link?: string;
+  error?: string;
+  hasToken?: boolean;
+  tokenEnvRef?: string;
+}
+
+export interface NodeInfo {
+  id: string;
+  name: string;
+  os: string;
+  arch: string;
+  hostname?: string;
+  homeDir?: string;
+  permissions: string[];
+  connected: boolean;
+  lastSeenAt?: string;
+}
+
+export interface ScreenState {
+  target: string;
+  owner: 'idle' | 'agent' | 'human';
+  botId?: string;
+  botName?: string;
+  tool?: string;
+  lockedAt?: string;
+}
+
+export interface TakeoverRequest {
+  id: string;
+  target: string;
+  botId: string;
+  botName?: string;
+  reason: string;
+  app?: string;
+  createdAt: string;
+}
+
+export interface DesktopTarget {
+  id: string;
+  name: string;
+  local: boolean;
+  os?: string;
+  arch?: string;
+  supported: boolean;
+  webrtcAvailable?: boolean;
+  backend?: string;
+  screen: ScreenState;
+}
+
+export interface DesktopFrame {
+  jpegBase64: string;
+  imageWidth: number;
+  imageHeight: number;
+  logicalX: number;
+  logicalY: number;
+  logicalWidth: number;
+  logicalHeight: number;
+  backend: string;
+  timestamp: number;
+}
+
+export interface ServerProfile {
+  id: string;
+  label: string;
+  address: string;
+  token: string;
+}

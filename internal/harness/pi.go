@@ -96,6 +96,19 @@ func (h *PiHarness) Close() {
 	}
 }
 
+// Reload terminates cached pi RPC processes and clears the cached model list so
+// updated provider settings take effect on the next call.
+func (h *PiHarness) Reload() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for id, p := range h.procs {
+		p.kill()
+		delete(h.procs, id)
+	}
+	h.modelsOnce = sync.Once{}
+	h.models = nil
+}
+
 func (h *PiHarness) drop(botID string, p *piProc) {
 	h.mu.Lock()
 	if h.procs[botID] == p {

@@ -77,6 +77,11 @@ func (h *ClaudeHarness) Close() {
 	}
 }
 
+// Reload terminates cached claude processes so updated settings apply on the next turn.
+func (h *ClaudeHarness) Reload() {
+	h.Close()
+}
+
 func (h *ClaudeHarness) proc(opts RunOptions) (*claudeProc, error) {
 	bot := opts.Bot
 	h.mu.Lock()

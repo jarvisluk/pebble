@@ -100,18 +100,15 @@ type HubConfig struct {
 	ConfigPath  string `json:"-"`
 	// DefaultModel applies to opencode and pi bots (they share provider/model
 	// IDs); DefaultModels overrides it per harness.
-	DefaultModel  string            `json:"defaultModel,omitempty"`
-	DefaultModels map[string]string `json:"defaultModels,omitempty"`
-	// ModelAccess picks who wires the harness CLIs to models: "magpie"
-	// (default) reuses magpie's gateway and catalog; "self" leaves each
-	// CLI's own provider config alone and turns the magpie integration off.
-	ModelAccess       string      `json:"modelAccess,omitempty"`
-	OpenCodeServerURL string      `json:"opencodeServerUrl,omitempty"`
-	SharedDir         string      `json:"sharedDir,omitempty"`
-	StateFile         string      `json:"stateFile,omitempty"`
-	MessagesDir       string      `json:"messagesDir,omitempty"`
-	HTTP              HTTPConfig  `json:"http,omitempty"`
-	Bots              []BotConfig `json:"bots"`
+	DefaultModel      string            `json:"defaultModel,omitempty"`
+	DefaultModels     map[string]string `json:"defaultModels,omitempty"`
+	AllowLocalDesktop *bool             `json:"allowLocalDesktop,omitempty"` // default: true
+	OpenCodeServerURL string            `json:"opencodeServerUrl,omitempty"`
+	SharedDir         string            `json:"sharedDir,omitempty"`
+	StateFile         string            `json:"stateFile,omitempty"`
+	MessagesDir       string            `json:"messagesDir,omitempty"`
+	HTTP              HTTPConfig        `json:"http,omitempty"`
+	Bots              []BotConfig       `json:"bots"`
 }
 
 var (
@@ -205,9 +202,6 @@ func Load(projectRoot, explicitPath string) (*HubConfig, string, error) {
 	cfg.OpenCodeServerURL = expandEnv(cfg.OpenCodeServerURL)
 	cfg.HTTP.WebhookSecret = expandEnv(cfg.HTTP.WebhookSecret)
 	cfg.HTTP.APIToken = expandEnv(cfg.HTTP.APIToken)
-	if err := ValidateModelAccess(cfg.ModelAccess); err != nil {
-		return nil, cfgPath, err
-	}
 
 	if cfg.SharedDir == "" {
 		cfg.SharedDir = "./workspaces/_shared"
@@ -289,17 +283,10 @@ func NormalizeBot(b *BotConfig, cfg *HubConfig) {
 	}
 }
 
-// ValidateModelAccess accepts "" (= magpie), "magpie" or "self".
-func ValidateModelAccess(mode string) error {
-	switch mode {
-	case "", "magpie", "self":
-		return nil
-	}
-	return fmt.Errorf("modelAccess must be \"magpie\" or \"self\", got %q", mode)
+// LocalDesktopAllowed reports whether bots may drive the hub host's GUI desktop via MCP.
+func (c *HubConfig) LocalDesktopAllowed() bool {
+	return c.AllowLocalDesktop == nil || *c.AllowLocalDesktop
 }
-
-// UseMagpie reports whether harnesses get their models through magpie.
-func (c *HubConfig) UseMagpie() bool { return c.ModelAccess != "self" }
 
 // DefaultModelFor returns the model a bot of this harness inherits; empty
 // means the harness's own default.
@@ -307,12 +294,19 @@ func (c *HubConfig) DefaultModelFor(harness string) string {
 	if m := c.DefaultModels[harness]; m != "" {
 		return expandEnv(m)
 	}
+	if c.DefaultModel == "" {
+		return ""
+	}
 	// A magpie model works in every harness magpie wires up (claude takes
-	// the bare gateway ID); any other default only fits opencode and pi.
+	// the bare gateway ID); a bare ID/alias works across all harnesses;
+	// provider/model only fits opencode and pi.
 	if strings.HasPrefix(c.DefaultModel, "magpie/") {
 		if harness == "claude" {
 			return strings.TrimPrefix(c.DefaultModel, "magpie/")
 		}
+		return c.DefaultModel
+	}
+	if !strings.Contains(c.DefaultModel, "/") {
 		return c.DefaultModel
 	}
 	switch harness {
@@ -361,7 +355,7 @@ func EnsureWorkspace(bot *BotConfig, cfg *HubConfig, customInstructions string) 
 			"- This directory is your dedicated workspace (1 Bot = 1 Workspace = 1 Session).",
 			"- Read `_shared/USER.md` for global user preferences and shared context.",
 			"- Persist important decisions, ongoing tasks, and facts into `memory/` so you can recover even if the session is reset.",
-			"- You have `bot-hub` MCP tools (`list_bots`, `get_bot`, `create_bot`, `message_bot`) to inspect bots, create new specialized bots, and collaborate with other bots.",
+			"- You have `bot-hub` MCP tools (`list_bots`, `get_bot`, `create_bot`, `message_bot` for teammates; `list_nodes`, `node_exec`, `node_file`, `node_desktop`, `request_takeover` for local/remote computers and human takeover).",
 			"- Keep replies concise and direct.",
 			"",
 		}, "\n")
@@ -380,7 +374,53 @@ func EnsureWorkspace(bot *BotConfig, cfg *HubConfig, customInstructions string) 
 
 // MCPCommand is the stdio command that exposes bot-hub's tools to a bot's agent.
 func MCPCommand(cfg *HubConfig, botID string) []string {
-	return []string{resolveBotHubBinary(cfg.ProjectRoot), "mcp", "--hub-url", cfg.HTTP.BaseURL(), "--bot-id", botID}
+	cmd := []string{resolveBotHubBinary(cfg.ProjectRoot), "mcp", "--hub-url", cfg.HTTP.BaseURL(), "--bot-id", botID}
+	if cfg.ConfigPath != "" {
+		cmd = append(cmd, "--config", cfg.ConfigPath)
+	}
+	return cmd
+}
+
+type rawTokenDoc struct {
+	HTTP struct {
+		APIToken string `json:"apiToken"`
+	} `json:"http"`
+}
+
+func readRawAPIToken(configPath string) string {
+	if configPath == "" {
+		return ""
+	}
+	raw, err := os.ReadFile(configPath)
+	if err != nil {
+		return ""
+	}
+	var doc rawTokenDoc
+	if json.Unmarshal(raw, &doc) != nil {
+		return ""
+	}
+	return strings.TrimSpace(doc.HTTP.APIToken)
+}
+
+// RawAPITokenEnvRef returns the raw http.apiToken string if it contains an
+// unexpanded `${VAR}` environment reference, or empty string otherwise.
+func RawAPITokenEnvRef(configPath string) string {
+	tok := readRawAPIToken(configPath)
+	if envRefRe.MatchString(tok) {
+		return tok
+	}
+	return ""
+}
+
+// ReadAPIToken reads and expands http.apiToken from configPath (loading any
+// sibling .env file from its project root).
+func ReadAPIToken(configPath string) string {
+	tok := readRawAPIToken(configPath)
+	if tok == "" {
+		return ""
+	}
+	loadDotEnv(filepath.Dir(filepath.Dir(configPath)))
+	return strings.TrimSpace(expandEnv(tok))
 }
 
 func ensureOpenCodeMCPConfig(bot *BotConfig, cfg *HubConfig) error {

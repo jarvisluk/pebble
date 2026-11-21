@@ -1,54 +1,304 @@
-# bot-hub (Stage 1)
+<h1 align="center">bot-hub</h1>
 
-基于 **Go** 编写的极简 Personal Bot 编排底座（零第三方依赖），严格落实 **`1 Bot = 1 Workspace = 1 Session`** 模型，直接复用本机 **OpenCode v2 + Magpie** 的 Agent Loop、模型路由、配额 Fallback、MCP 与 `billion-context` 能力。
+<p align="center"><b>A minimal personal bot orchestrator running locally on your computer.</b></p>
 
-## 核心能力
+<p align="center">
+  <b>1 Bot = 1 Workspace = 1 Session</b>&nbsp;&nbsp;·&nbsp;&nbsp;<b>Bring Your Own Harness</b>&nbsp;&nbsp;·&nbsp;&nbsp;<b>Local-First</b>
+</p>
 
-- **多 Bot 网页聊天界面**：`bot-hub serve` 启动后访问 `http://127.0.0.1:3789`，支持多 Bot 左侧切换、实时 SSE 推送、持久化聊天记录、工具调用动态提示、查看 `AGENTS.md`、一键新建 Bot 与重置 Session。
-- **原生 Bot 管理与协作 MCP 工具**：每个 Bot 的 Workspace 自动生成 `opencode.json`，挂载本地 `bot-hub mcp`（stdio JSON-RPC 2.0），直接向 Bot 暴露 4 个工具：
-  - `list_bots`：查看所有 Bot 及其状态
-  - `get_bot`：查看指定 Bot 的配置与 `AGENTS.md`
-  - `create_bot`：热创建并立即上线一个新 Bot（自动初始化独立 Workspace 与串行队列）
-  - `message_bot`：向另一个 Bot 发消息并获取回复（带 `hop <= 4` 防死循环保护，双方聊天栏实时可见协作记录）
-- **远程访问（Tailcat）**：内置 [tailcat](https://github.com/tailscale/tailcat)，经 DERP 中继打洞直连，两端都不需要 Tailscale 账号、登录或系统 VPN。Web UI 左上角「远程访问」显示链接与二维码，另一台机器运行 `bot-hub connect <链接>` 即可在本地打开。
-- **多通道接入**：Web UI + 本地 HTTP/Webhook API + Telegram 长轮询 + 终端交互 CLI + 轻量定时唤醒器。
+<p align="center">
+  <img height="26" alt="Go Standard Library" src="https://img.shields.io/badge/Go-Stdlib%20First-1d1b19?logo=go&logoColor=white&style=for-the-badge">
+  <a href="https://usemagpie.ai"><img height="26" alt="Powered by Magpie" src="https://img.shields.io/badge/Gateway-Magpie-d9774b?style=for-the-badge"></a>
+  <a href="https://github.com/tailscale/tailcat"><img height="26" alt="Remote via Tailcat" src="https://img.shields.io/badge/Tunnel-Tailcat-1d1b19?style=for-the-badge"></a>
+  <a href="https://wails.io"><img height="26" alt="Desktop via Wails" src="https://img.shields.io/badge/Desktop-Wails%20v3-1d1b19?style=for-the-badge"></a>
+</p>
 
-## 快速开始
+<p align="center">
+  <b>English</b>&nbsp;&nbsp;·&nbsp;&nbsp;<a href="README.zh-CN.md">简体中文</a>
+</p>
 
-### 1. 编译
-```bash
-make build
+- **A persistent bot team on your machine.** Built strictly around `1 Bot = 1 Workspace = 1 Session`: every bot gets its own directory, `AGENTS.md` instructions, serialized execution queue, and long-lived session.
+- **Bring your own agent runtime.** Drives **OpenCode**, **Claude Code**, **Pi**, and **DeepSeek Harness (`dsh`)** directly on your computer—routed through **Magpie** with automatic quota fallback, or running on the CLI subscriptions you already pay for.
+- **Local data, reachable anywhere.** One Go binary ships the Web UI, Telegram long-polling, scheduled routines, and a **Tailcat** peer-to-peer tunnel—no public IP, no Tailscale account, and no system VPN required.
+
+## Cool features
+
+### Isolated workspaces, shared memory: `1 Bot = 1 Workspace = 1 Session`
+
+Mixing daily tasks, deep research, and ops checks in a single chat thread pollutes context fast. `bot-hub` gives every bot an isolated workspace on disk, one persistent session, and a dedicated serial lane (`botLane`): messages from the Web UI, Telegram, schedules, or other bots run in order without stepping on each other, and any running turn can be interrupted on the spot.
+
+Every workspace also symlinks a shared `_shared/` folder while keeping its own `memory/` directory. Write your preferences once in `_shared/USER.md` and every bot reads them; save ongoing decisions in `memory/` and they survive even when a session is reset.
+
+<details>
+<summary><b>On disk:</b> how workspaces, memory, and state are laid out</summary>
+
+```text
+bot-hub/
+├── config/bots.json              # Bot roster, model access, Telegram & schedules (keeps ${VAR} refs)
+├── state/
+│   ├── sessions.json             # Active session ID, turn count & cumulative cost per bot
+│   └── messages/                 # Persisted chat and bot-to-bot collaboration history
+└── workspaces/
+    ├── _shared/                  # Global context shared across all bots (e.g. USER.md)
+    └── assistant/                # Dedicated workspace for one bot
+        ├── AGENTS.md             # Role definition and workspace rules
+        ├── memory/               # Durable notes that survive session resets
+        ├── _shared -> ../_shared # Automatic symlink to shared context
+        └── opencode.json         # Auto-wired local bot-hub MCP server config
 ```
 
-### 2. 启动网页界面与常驻服务
+Resetting a bot (`POST /api/bots/{id}/reset` or `/reset`) clears only the underlying runtime Session ID to free up the context window; `AGENTS.md`, `memory/`, and workspace files stay untouched.
+
+</details>
+
+### Self-organizing bots: Spin up specialists and delegate work
+
+Every bot automatically receives the built-in `bot-hub mcp` server (stdio JSON-RPC 2.0). When a task goes beyond one bot's role, it can inspect existing teammates, hot-create a new persistent specialist bot with its own workspace and instructions, or message another bot directly and wait for its answer.
+
+Bot-to-bot calls enforce `hop <= 4` loop protection and appear live in **both** bots' chat timelines. You can also delegate directly from any chat input with `/ask <bot> <message>`.
+
+<details>
+<summary><b>MCP tools:</b> four native primitives wired into every bot</summary>
+
+<table>
+  <tr>
+    <th align="left" width="160">Tool</th>
+    <th align="left" width="540">What it does</th>
+  </tr>
+  <tr>
+    <td><code>list_bots</code></td>
+    <td>Lists every configured bot with its ID, name, description, workspace, active model, busy state, and session stats.</td>
+  </tr>
+  <tr>
+    <td><code>get_bot</code></td>
+    <td>Returns a bot's live status together with its full <code>AGENTS.md</code> instructions.</td>
+  </tr>
+  <tr>
+    <td><code>create_bot</code></td>
+    <td>Provisions and immediately starts a new persistent bot with its own workspace, <code>AGENTS.md</code>, model, and serial queue.</td>
+  </tr>
+  <tr>
+    <td><code>message_bot</code></td>
+    <td>Sends a task to another bot and returns its reply, recording the exchange in both timelines (capped at <code>hop &lt;= 4</code>).</td>
+  </tr>
+</table>
+
+</details>
+
+### Bring your own harness: OpenCode, Claude Code, Pi or DeepSeek
+
+`bot-hub` does not lock you into a custom agent loop or provider SDK. Different bots in the same hub can run on different harnesses side by side, with two `modelAccess` modes switchable straight from the Web UI:
+
+- **Magpie gateway (`magpie`, default):** Shares [Magpie](https://usemagpie.ai)'s local model catalog, routing rules, and quota fallback across harnesses, with one-click CLI binding from the settings panel.
+- **Native CLI config (`self`):** Leaves global CLI configs untouched so each runtime uses its own subscription or API keys as-is.
+
+<details>
+<summary><b>Supported harnesses:</b> process model, protocol, and session persistence</summary>
+
+<table>
+  <tr>
+    <th align="left" width="120">Harness</th>
+    <th align="left" width="180">Runtime</th>
+    <th align="left" width="400">How bot-hub drives it</th>
+  </tr>
+  <tr>
+    <td><code>opencode</code></td>
+    <td>OpenCode (default)</td>
+    <td>Manages one shared <code>opencode serve</code> process (or connects to an external server), driving sessions over HTTP + a single SSE stream with workspace <code>opencode.json</code> MCP wiring.</td>
+  </tr>
+  <tr>
+    <td><code>claude</code></td>
+    <td>Claude Code</td>
+    <td>Keeps one long-lived <code>claude -p --input-format stream-json</code> process per bot, bridging <code>CLAUDE.md</code> → <code>@AGENTS.md</code> and passing MCP config per process.</td>
+  </tr>
+  <tr>
+    <td><code>pi</code></td>
+    <td>Pi</td>
+    <td>Keeps one long-lived <code>pi --mode rpc</code> process per bot; the hub owns the session ID so restarted processes reopen the exact same session.</td>
+  </tr>
+  <tr>
+    <td><code>dsh</code></td>
+    <td>DeepSeek Harness</td>
+    <td>Multiplexes bots as independent ACP sessions over a single long-lived <code>dsh --profile acp</code> stdio connection.</td>
+  </tr>
+</table>
+
+</details>
+
+### Proactive routines: It reaches out when it matters
+
+Bots do not just wait in a browser tab. Built-in `schedules` wake a bot up at a fixed interval (`everyMinutes`) or time of day (`dailyAt`) to review `memory/`, check ongoing work, and push a brief straight to Telegram. External scripts, CI pipelines, and monitors can also wake any bot on demand through `/hooks/{id}`.
+
+<details>
+<summary><b>Configuration:</b> multi-bot setup, Telegram allowlists, and daily briefs in <code>config/bots.json</code></summary>
+
+```json
+{
+  "defaultModel": "magpie/mac-mini/auto/hy4flash-free",
+  "http": {
+    "host": "127.0.0.1",
+    "port": 3789,
+    "apiToken": "${BOT_HUB_API_TOKEN}",
+    "webhookSecret": "${BOT_HUB_WEBHOOK_SECRET}",
+    "tailcat": { "enabled": false }
+  },
+  "bots": [
+    {
+      "id": "assistant",
+      "name": "Personal Assistant",
+      "description": "Daily tasks, notes, and personal briefings",
+      "harness": "opencode",
+      "telegram": {
+        "token": "${TELEGRAM_ASSISTANT_TOKEN}",
+        "allowedUserIds": ["${TELEGRAM_OWNER_USER_ID}"]
+      },
+      "schedules": [
+        {
+          "name": "morning-brief",
+          "dailyAt": "09:00",
+          "prompt": "Check today's priorities and open items in memory/, then write a concise morning brief.",
+          "notifyTelegramChatId": "${TELEGRAM_OWNER_USER_ID}",
+          "enabled": true
+        }
+      ]
+    }
+  ]
+}
+```
+
+`.env` in the project root is loaded automatically. Whenever bots or settings are updated from the UI or MCP tools, `${VAR}` references stay as references on disk—secrets are never rewritten in plaintext.
+
+</details>
+
+### More features
+
+- **Account-free remote access (Tailcat):** Built-in [tailcat](https://github.com/tailscale/tailcat) punches through NAT over WireGuard + DERP without a Tailscale account, login, or system-wide VPN on either machine. Open **远程访问** in the Web UI to copy the `tailcat://` link or scan the QR code.
+- **Native desktop app (Wails):** Lives in the system menu bar / tray and switches cleanly between **Run on this computer** and **Connect to remote Bot Hub**.
+- **Single-file embedded Web UI:** Ships inside the binary (`internal/web/index.html`) with zero frontend frameworks, CDNs, or web fonts—instant to load offline or over a tunnel, with light and pure-black dark modes, live SSE streaming, tool-call indicators, and slash commands (`/status`, `/reset`, `/bots`, `/ask`).
+- **Terminal CLI & cost tracking:** Chat directly from a shell with `bot-hub chat` and track per-bot session turns, latency, and cumulative USD cost with `bot-hub status`.
+
+## Quick start
+
+You need **Go** and at least one supported agent CLI on `PATH` (`opencode` by default, or `claude`, `pi`, `dsh`).
+
+### Option 1: CLI & background server
+
+Best for running the hub on your workstation, Mac mini, or home server:
+
 ```bash
+# 1. Build bin/bot-hub
+make build
+
+# 2. (Optional) Create your local config from the example
+cp config/bots.example.json config/bots.json
+
+# 3. Start Web UI, HTTP/SSE API, Telegram pollers, and scheduler
 ./bin/bot-hub serve
 ```
-打开浏览器访问：`http://127.0.0.1:3789`
 
-### 3. 终端直接试聊（可选）
+Open <http://127.0.0.1:3789> in your browser. To chat or inspect sessions straight from the terminal:
+
 ```bash
 ./bin/bot-hub chat assistant
+./bin/bot-hub status
 ```
 
-## HTTP / SSE API（默认仅监听 `127.0.0.1:3789`）
+### Option 2: the desktop app
 
-- `GET  /`：内嵌多 Bot 网页聊天界面
-- `GET  /api/events`：SSE 实时事件流（`message` / `tool_use` / `bot_status` / `bot_created`）
-- `GET  /api/bots`：查看所有 Bot 状态
-- `POST /api/bots`：热创建新 Bot
-- `GET  /api/bots/{id}`：查看 Bot 详情与 `AGENTS.md`
-- `GET  /api/bots/{id}/messages`：获取持久化聊天记录
-- `POST /api/bots/{id}/message`：发送消息（支持 `fromBotId` / `hop` 跨 Bot 调用）
-- `POST /api/bots/{id}/reset`：重置 Session（保留 Workspace 和 `memory/`）
-- `POST /hooks/{id}`：外部 Webhook 唤醒（可选 `X-Webhook-Secret` 校验）
-- `POST /api/login`：用 `http.apiToken` 换取 HttpOnly Cookie（Web UI 使用）
-- `GET  /api/tailcat`、`GET /api/tailcat/qr.png`：Tailcat 状态、链接与二维码
+Best for everyday single-machine use, or as a native window connected to a remote `bot-hub`:
 
-## 安全
+```bash
+# macOS: build ad-hoc signed bin/Bot Hub.app
+make app
 
-- 所有请求校验 `Origin`，拒绝跨站请求（防 CSRF）；仅监听回环地址时还校验 `Host`（防 DNS rebinding）。
-- `http.apiToken`（如 `${BOT_HUB_API_TOKEN}`）启用后，`/api/*` 需要 `Authorization: Bearer <token>` 或登录 Cookie；`host` 不是回环地址时必须设置，否则拒绝启动。Bot 内的 `bot-hub mcp` 会自动通过环境变量带上令牌。
-- Telegram 必须配置 `allowedUserIds` 或 `allowedChatIds`，为空时不启动该 Bot 的轮询。
-- `http.tailcat.enabled` 必须配合 `http.apiToken`；经隧道进来的请求一律校验令牌。链接含服务端密钥，只发给自己的设备；删除 `state/tailcat-identity.json` 并重启即可作废旧链接。默认使用 Tailscale 公共 DERP，可用 `derpMapURL` 指向自建 DERP。
-- 新建 Bot 写回 `config/bots.json` 时保留 `${VAR}` 引用，密钥不会以明文落盘。
+# Other platforms: build native bin/bot-hub-desktop binary
+make desktop
+```
+
+On first launch, pick how this computer should run (you can switch anytime from the menu bar icon):
+
+1. **Run locally:** Initializes `config/bots.json`, `state/`, and `workspaces/` under your OS user config directory and starts the hub in-process.
+2. **Connect to a remote Bot Hub:** Paste a `tailcat://` link from another machine—no Tailscale installation required.
+
+### Option 3: remote access over Tailcat
+
+To reach a `bot-hub` running at home or in the office from your laptop:
+
+1. Set `BOT_HUB_API_TOKEN` and `"tailcat": { "enabled": true }` on the server, then start `./bin/bot-hub serve`.
+2. Click **远程访问** in the server's Web UI and copy the `tailcat://connect/...` link.
+3. Paste the link into the Desktop App on your second machine, or forward it to a local port via CLI:
+
+```bash
+./bin/bot-hub connect '<tailcat-link>'
+# Open http://127.0.0.1:3790 in your browser
+```
+
+## Reference
+
+### CLI commands
+
+| Command | Description |
+| --- | --- |
+| `bot-hub serve [-config path]` | Start Web UI, HTTP/SSE API, Telegram pollers, and scheduler |
+| `bot-hub chat [-config path] [bot]` | Interactive terminal chat (`/status`, `/reset`, `/bots`, `/ask`, `/exit`) |
+| `bot-hub status [-config path]` | Show configured bots, workspaces, and persisted session stats |
+| `bot-hub connect [-listen addr] <link>` | Expose a remote `bot-hub` over Tailcat on a local address (default `127.0.0.1:3790`) |
+| `bot-hub mcp [--hub-url url] [--bot-id id]` | Run stdio MCP server (auto-wired into bots by the hub) |
+
+### HTTP / SSE API (listens on `127.0.0.1:3789` by default)
+
+- `GET  /` — Embedded multi-bot Web UI
+- `GET  /healthz` — Liveness check
+- `GET  /api/events` — Real-time SSE stream (`message` / `tool_use` / `bot_status` / `bot_created`)
+- `GET  /api/bots` (alias `/api/status`) — List all bots and session stats
+- `POST /api/bots` — Hot-create and start a new bot
+- `GET  /api/bots/{id}` — Bot details and full `AGENTS.md` content
+- `PATCH /api/bots/{id}` — Update a bot's name, description, harness, or model
+- `GET  /api/bots/{id}/messages` — Persisted chat history (`?limit=`)
+- `POST /api/bots/{id}/message` — Send a message (supports `fromBotId` / `hop` for cross-bot calls)
+- `POST /api/bots/{id}/interrupt` — Interrupt the bot's in-flight turn
+- `POST /api/bots/{id}/reset` — Reset session ID while keeping workspace and `memory/`
+- `GET  /api/settings`, `PUT /api/settings` — Read or update `modelAccess` (`magpie` / `self`) and default models
+- `GET  /api/models` — List available model IDs for `?harness=`
+- `POST /api/harnesses/{id}/magpie` — Connect a harness CLI to Magpie with a chosen model
+- `POST /api/login` — Exchange `http.apiToken` for an `HttpOnly` session cookie (used by Web UI)
+- `GET  /api/tailcat`, `GET /api/tailcat/qr.png` — Tailcat tunnel status, link, and QR code
+- `POST /hooks/{id}` — Wake a bot from an external webhook (optional `X-Webhook-Secret` or `Bearer` auth)
+
+### Project docs
+
+<table>
+  <tr>
+    <th align="left" width="180">Document</th>
+    <th align="left" width="520">What it covers</th>
+  </tr>
+  <tr>
+    <td><a href="AGENTS.md"><code>AGENTS.md</code></a></td>
+    <td>Repository layout, build &amp; test commands, and engineering rules.</td>
+  </tr>
+  <tr>
+    <td><a href="DESIGN.md"><code>DESIGN.md</code></a></td>
+    <td>Visual design system, color tokens, spacing, and motion rules for the Web &amp; desktop UI.</td>
+  </tr>
+  <tr>
+    <td><a href="config/bots.example.json"><code>config/bots.example.json</code></a></td>
+    <td>Starter configuration with multiple bots, Telegram allowlists, and scheduled routines.</td>
+  </tr>
+</table>
+
+## Security
+
+- **CSRF & DNS-rebinding protection:** Every request checks `Origin` and rejects cross-origin calls; when bound to a loopback address, the server also validates `Host` against loopback names.
+- **API token enforcement:** When `http.apiToken` (e.g. `${BOT_HUB_API_TOKEN}`) is set, `/api/*` requires `Authorization: Bearer <token>` or a `SameSite=Strict`, `HttpOnly` login cookie. Binding to a non-loopback `host` without `http.apiToken` refuses to start. Bots' `bot-hub mcp` subprocesses receive the token automatically.
+- **Telegram allowlists:** Each Telegram bot must configure `allowedUserIds` or `allowedChatIds`; polling will not start when both are empty.
+- **Authenticated Tailcat tunnel:** Enabling `http.tailcat.enabled` requires `http.apiToken`, and every tunneled request must present the token. The `tailcat://` link embeds the server identity key—share it only with your own devices; delete `state/tailcat-identity.json` and restart to revoke old links immediately. Tailscale's public DERP map is used by default, or point `derpMapURL` at a self-hosted DERP server.
+- **Webhook & secret hygiene:** `http.webhookSecret` is verified in constant time on `/hooks/{id}`. Creating or updating bots rewrites `config/bots.json` from the unexpanded source so `${VAR}` references never turn into plaintext secrets on disk.
+
+## Acknowledgements
+
+`bot-hub` builds on these projects:
+
+- **[OpenCode](https://opencode.ai)**, **Claude Code**, **Pi**, and **DeepSeek Harness:** The agent runtimes that execute tools and turns inside each workspace.
+- **[Magpie](https://usemagpie.ai):** Local model gateway providing a unified model catalog, routing rules, and quota fallback across CLIs.
+- **[Tailcat](https://github.com/tailscale/tailcat):** Account-free peer-to-peer encrypted tunneling over WireGuard and DERP.
+- **[Wails](https://wails.io):** Lightweight native desktop window and system tray wrapper.

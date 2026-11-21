@@ -11,13 +11,19 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"bot-hub/internal/config"
+	"bot-hub/internal/desktop"
 	"bot-hub/internal/harness"
+	"bot-hub/internal/node"
 	"bot-hub/internal/state"
 )
 
 const MaxBotHopDepth = 4
+
+// ErrBotNotFound indicates that the requested bot ID is not registered in the hub.
+var ErrBotNotFound = errors.New("bot not found")
 
 type SendOptions struct {
 	Source    string
@@ -58,10 +64,11 @@ type CreateBotRequest struct {
 // BotUpdate changes a bot's settings; nil fields stay as they are. An empty
 // Model means "inherit the hub default".
 type BotUpdate struct {
-	Name        *string `json:"name,omitempty"`
-	Description *string `json:"description,omitempty"`
-	Harness     *string `json:"harness,omitempty"`
-	Model       *string `json:"model,omitempty"`
+	Name         *string `json:"name,omitempty"`
+	Description  *string `json:"description,omitempty"`
+	Harness      *string `json:"harness,omitempty"`
+	Model        *string `json:"model,omitempty"`
+	Instructions *string `json:"instructions,omitempty"`
 }
 
 // HarnessInfo describes one available harness.
@@ -73,7 +80,7 @@ type HarnessInfo struct {
 }
 
 type Event struct {
-	Type    string `json:"type"` // "message" | "tool_use" | "bot_status" | "bot_created"
+	Type    string `json:"type"` // "message" | "tool_use" | "bot_status" | "bot_created" | "bot_deleted"
 	BotID   string `json:"botId,omitempty"`
 	Payload any    `json:"payload"`
 }
@@ -91,26 +98,38 @@ type turnResponse struct {
 }
 
 type botLane struct {
-	bot     config.BotConfig
-	ch      chan turnJob
-	busy    atomic.Bool
-	queued  atomic.Int64
-	stopCh  chan struct{}
-	stopped chan struct{}
+	bot      config.BotConfig
+	ch       chan turnJob
+	busy     atomic.Bool
+	queued   atomic.Int64
+	stopCh   chan struct{}
+	stopped  chan struct{}
+	stopOnce sync.Once
 
 	cancelMu sync.Mutex
 	cancel   context.CancelFunc // interrupts the running turn
 }
 
+func (l *botLane) stop() {
+	l.stopOnce.Do(func() { close(l.stopCh) })
+	<-l.stopped
+}
+
 type Hub struct {
-	cfg      *config.HubConfig
-	store    *state.Store
-	messages *state.MessageStore
-	registry *harness.Registry
+	cfg       *config.HubConfig
+	store     *state.Store
+	messages  *state.MessageStore
+	registry  *harness.Registry
+	nodes     *node.Registry
+	localDesk *desktop.Engine
+	desktop   *desktop.Coordinator
 
 	lanesMu sync.RWMutex
 	lanes   map[string]*botLane
 	order   []string
+
+	reloadMu      sync.Mutex
+	pendingReload map[string]bool
 
 	subsMu sync.Mutex
 	subs   map[uint64]chan Event
@@ -133,15 +152,40 @@ func New(cfg *config.HubConfig, store *state.Store, messages *state.MessageStore
 		reg = harness.NewDefaultRegistry(cfg)
 	}
 	h := &Hub{
-		cfg:      cfg,
-		store:    store,
-		messages: messages,
-		registry: reg,
-		lanes:    make(map[string]*botLane, len(cfg.Bots)),
-		order:    make([]string, 0, len(cfg.Bots)),
-		subs:     make(map[uint64]chan Event),
-		hops:     make(map[string]int),
+		cfg:           cfg,
+		store:         store,
+		messages:      messages,
+		registry:      reg,
+		localDesk:     desktop.NewEngine(),
+		lanes:         make(map[string]*botLane, len(cfg.Bots)),
+		order:         make([]string, 0, len(cfg.Bots)),
+		pendingReload: make(map[string]bool),
+		subs:          make(map[uint64]chan Event),
+		hops:          make(map[string]int),
 	}
+	h.nodes = node.NewRegistry(func() {
+		h.broadcast(Event{
+			Type:    "nodes_changed",
+			Payload: map[string]any{"nodes": h.nodes.List()},
+		})
+	})
+	h.desktop = desktop.NewCoordinator(
+		func(st desktop.ScreenState) {
+			h.broadcast(Event{Type: "desktop", Payload: st})
+		},
+		func(items []desktop.TakeoverRequest) {
+			h.broadcast(Event{Type: "takeover", Payload: map[string]any{"items": items}})
+		},
+		func(target string, enabled bool) {
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			if desktop.NormalizeTarget(target) == "local" {
+				_ = h.localDesk.SetStreamInput(ctx, enabled)
+				return
+			}
+			_, _, _ = h.nodes.Call(ctx, target, "desktop_stream_set_input", map[string]any{"enabled": enabled}, 3*time.Second)
+		},
+	)
 	for _, bot := range cfg.Bots {
 		h.startLaneLocked(bot)
 	}
@@ -177,14 +221,53 @@ func (h *Hub) Close() {
 	h.lanesMu.RUnlock()
 
 	for _, lane := range lanes {
-		close(lane.stopCh)
-		<-lane.stopped
+		lane.stop()
 	}
+	h.localDesk.Close()
 	h.registry.Close()
 }
 
 func (h *Hub) Config() *config.HubConfig {
 	return h.cfg
+}
+
+func (h *Hub) Nodes() *node.Registry {
+	return h.nodes
+}
+
+func (h *Hub) LocalDesktop() *desktop.Engine {
+	return h.localDesk
+}
+
+func (h *Hub) Desktop() *desktop.Coordinator {
+	return h.desktop
+}
+
+func (h *Hub) BotName(botID string) string {
+	if b, ok := h.GetBot(botID); ok {
+		return b.Name
+	}
+	return botID
+}
+
+func (h *Hub) BotWorkspace(botID string) string {
+	h.lanesMu.RLock()
+	defer h.lanesMu.RUnlock()
+	if lane := h.lanes[botID]; lane != nil {
+		return lane.bot.Workspace
+	}
+	return ""
+}
+
+// SetAPIToken updates the in-memory API token and re-syncs workspace MCP
+// configs so bots receive the updated token on disk and on subsequent turns.
+func (h *Hub) SetAPIToken(token string) {
+	h.lanesMu.Lock()
+	defer h.lanesMu.Unlock()
+	h.cfg.HTTP.APIToken = token
+	for i := range h.cfg.Bots {
+		_ = config.EnsureWorkspace(&h.cfg.Bots[i], h.cfg, "")
+	}
 }
 
 func (h *Hub) Subscribe() (uint64, <-chan Event) {
@@ -625,6 +708,7 @@ func (h *Hub) runLane(lane *botLane) {
 			lane.cancelMu.Unlock()
 			cancel()
 			lane.busy.Store(false)
+			h.flushPendingReload(bot.Harness)
 			h.emitStatus(lane)
 			job.respCh <- turnResponse{res: res, err: err}
 		}
@@ -642,12 +726,17 @@ func (h *Hub) executeTurn(ctx context.Context, bot config.BotConfig, prompt stri
 		existingSessionID = rec.SessionID
 	}
 
+	h.lanesMu.RLock()
+	apiToken := h.cfg.HTTP.APIToken
+	mcpCmd := config.MCPCommand(h.cfg, bot.ID)
+	h.lanesMu.RUnlock()
+
 	extraEnv := map[string]string{
 		"BOT_HUB_BOT_ID": bot.ID,
 		"BOT_HUB_HOP":    strconv.Itoa(opts.Hop),
 	}
-	if h.cfg.HTTP.APIToken != "" {
-		extraEnv["BOT_HUB_API_TOKEN"] = h.cfg.HTTP.APIToken
+	if apiToken != "" {
+		extraEnv["BOT_HUB_API_TOKEN"] = apiToken
 	}
 
 	h.hopsMu.Lock()
@@ -660,14 +749,14 @@ func (h *Hub) executeTurn(ctx context.Context, bot config.BotConfig, prompt stri
 	}()
 
 	var mcpEnv map[string]string
-	if h.cfg.HTTP.APIToken != "" {
-		mcpEnv = map[string]string{"BOT_HUB_API_TOKEN": h.cfg.HTTP.APIToken}
+	if apiToken != "" {
+		mcpEnv = map[string]string{"BOT_HUB_API_TOKEN": apiToken}
 	}
 	res, err := runner.RunTurn(ctx, harness.RunOptions{
 		Bot:        bot,
 		Prompt:     prompt,
 		SessionID:  existingSessionID,
-		MCPCommand: config.MCPCommand(h.cfg, bot.ID),
+		MCPCommand: mcpCmd,
 		MCPEnv:     mcpEnv,
 		ExtraEnv:   extraEnv,
 		OnText:     opts.OnText,
@@ -732,7 +821,49 @@ func (h *Hub) Interrupt(botID string) (bool, error) {
 		return false, nil
 	}
 	cancel()
+	h.desktop.CancelTakeoversByBot(botID)
 	return true, nil
+}
+
+func (h *Hub) reloadHarness(kind string) {
+	r, err := h.registry.Get(kind)
+	if err != nil {
+		return
+	}
+	rl, ok := r.(harness.Reloader)
+	if !ok {
+		return
+	}
+	if h.isHarnessBusy(kind) {
+		h.reloadMu.Lock()
+		h.pendingReload[kind] = true
+		h.reloadMu.Unlock()
+		return
+	}
+	h.reloadMu.Lock()
+	delete(h.pendingReload, kind)
+	h.reloadMu.Unlock()
+	rl.Reload()
+}
+
+func (h *Hub) flushPendingReload(kind string) {
+	h.reloadMu.Lock()
+	need := h.pendingReload[kind]
+	h.reloadMu.Unlock()
+	if need {
+		h.reloadHarness(kind)
+	}
+}
+
+func (h *Hub) isHarnessBusy(kind string) bool {
+	h.lanesMu.RLock()
+	defer h.lanesMu.RUnlock()
+	for _, lane := range h.lanes {
+		if lane.bot.Harness == kind && lane.busy.Load() {
+			return true
+		}
+	}
+	return false
 }
 
 // Harnesses lists the registered harnesses with the model their bots
@@ -743,11 +874,7 @@ func (h *Hub) Harnesses(ctx context.Context) []HarnessInfo {
 	for _, r := range h.registry.All() {
 		out = append(out, HarnessInfo{ID: r.Kind(), Label: r.Label(), DefaultModel: h.cfg.DefaultModelFor(r.Kind())})
 	}
-	useMagpie := h.cfg.UseMagpie()
 	h.lanesMu.RUnlock()
-	if !useMagpie {
-		return out
-	}
 	var wg sync.WaitGroup
 	for i := range out {
 		wg.Add(1)
@@ -760,18 +887,15 @@ func (h *Hub) Harnesses(ctx context.Context) []HarnessInfo {
 	return out
 }
 
-// Models lists the models a harness offers: magpie's catalog first, then
-// the harness's own (best effort).
+// Models lists the models a harness offers: magpie's catalog (when installed)
+// merged with the harness's own models.
 func (h *Hub) Models(ctx context.Context, kind string) ([]string, error) {
 	r, err := h.registry.Get(kind)
 	if err != nil {
 		return nil, err
 	}
-	h.lanesMu.RLock()
-	useMagpie := h.cfg.UseMagpie()
-	h.lanesMu.RUnlock()
 	var models []string
-	if useMagpie {
+	if harness.MagpieInstalled() {
 		models = harness.MagpieModels(ctx, kind)
 	}
 	native, err := r.Models(ctx)
@@ -791,26 +915,54 @@ func (h *Hub) Models(ctx context.Context, kind string) ([]string, error) {
 }
 
 // MagpieConnect asks magpie to point a harness's CLI at its gateway, using
-// the given model or the harness's default.
+// the given model or the harness's default, and reloads the harness when idle.
 func (h *Hub) MagpieConnect(ctx context.Context, kind, model string) error {
 	if _, err := h.registry.Get(kind); err != nil {
 		return err
 	}
 	h.lanesMu.RLock()
-	useMagpie := h.cfg.UseMagpie()
 	if strings.TrimSpace(model) == "" {
 		model = h.cfg.DefaultModelFor(kind)
 	}
 	h.lanesMu.RUnlock()
-	if !useMagpie {
-		return fmt.Errorf("model access is self-hosted; switch to magpie mode first")
+	if err := harness.MagpieConnect(ctx, kind, model); err != nil {
+		return err
 	}
-	return harness.MagpieConnect(ctx, kind, model)
+	h.reloadHarness(kind)
+	return nil
 }
 
-// UpdateBot changes a bot's name, description, harness or model, persists it,
-// and applies it from the bot's next turn. Switching harness starts a new
-// session, since sessions do not carry across harnesses.
+// MagpieDisconnect asks magpie to restore a harness's CLI to its native config
+// (`magpie <agent> default`), and reloads the harness when idle.
+func (h *Hub) MagpieDisconnect(ctx context.Context, kind string) error {
+	if _, err := h.registry.Get(kind); err != nil {
+		return err
+	}
+	if err := harness.MagpieDisconnect(ctx, kind); err != nil {
+		return err
+	}
+	h.reloadHarness(kind)
+	return nil
+}
+
+// MagpieProviderAction invokes `magpie provider ...` and schedules harness reloads
+// when provider definitions change.
+func (h *Hub) MagpieProviderAction(ctx context.Context, req harness.MagpieProviderReq) (string, error) {
+	out, err := harness.MagpieProviderAction(ctx, req)
+	if err != nil {
+		return "", err
+	}
+	if req.Action != "test" {
+		for _, r := range h.registry.All() {
+			h.reloadHarness(r.Kind())
+		}
+	}
+	return out, nil
+}
+
+// UpdateBot changes a bot's name, description, harness, model or instructions
+// (AGENTS.md), persists it, and applies it from the bot's next turn. Switching
+// harness starts a new session, since sessions do not carry across harnesses.
 func (h *Hub) UpdateBot(botID string, upd BotUpdate) (*BotStatus, error) {
 	if upd.Harness != nil {
 		*upd.Harness = strings.TrimSpace(*upd.Harness)
@@ -818,15 +970,18 @@ func (h *Hub) UpdateBot(botID string, upd BotUpdate) (*BotStatus, error) {
 			return nil, err
 		}
 	}
+	if upd.Name != nil && strings.TrimSpace(*upd.Name) == "" {
+		return nil, errors.New("名称不能为空")
+	}
 	h.lanesMu.Lock()
 	lane, ok := h.lanes[botID]
 	if !ok {
 		h.lanesMu.Unlock()
-		return nil, fmt.Errorf("bot %q not found", botID)
+		return nil, fmt.Errorf("bot %q not found: %w", botID, ErrBotNotFound)
 	}
 	bot := lane.bot
 	harnessChanged := upd.Harness != nil && *upd.Harness != bot.Harness
-	if upd.Name != nil && strings.TrimSpace(*upd.Name) != "" {
+	if upd.Name != nil {
 		bot.Name = strings.TrimSpace(*upd.Name)
 	}
 	if upd.Description != nil {
@@ -843,26 +998,42 @@ func (h *Hub) UpdateBot(botID string, upd BotUpdate) (*BotStatus, error) {
 		bot.Model = h.cfg.DefaultModelFor(bot.Harness)
 	}
 
-	err := config.UpdateRaw(h.cfg, func(raw *config.HubConfig) error {
-		for i := range raw.Bots {
-			rb := &raw.Bots[i]
-			if rb.ID != botID {
-				continue
-			}
-			rb.Name, rb.Description, rb.Harness = bot.Name, bot.Description, bot.Harness
-			if upd.Model != nil || harnessChanged {
-				rb.Model = ""
-				if !bot.ModelInherited {
-					rb.Model = bot.Model
+	if h.cfg.ConfigPath != "" {
+		err := config.UpdateRaw(h.cfg, func(raw *config.HubConfig) error {
+			for i := range raw.Bots {
+				rb := &raw.Bots[i]
+				if rb.ID != botID {
+					continue
 				}
+				rb.Name, rb.Description, rb.Harness = bot.Name, bot.Description, bot.Harness
+				if upd.Model != nil || harnessChanged {
+					rb.Model = ""
+					if !bot.ModelInherited {
+						rb.Model = bot.Model
+					}
+				}
+				return nil
 			}
-			return nil
+			return fmt.Errorf("bot %q is not in %s", botID, h.cfg.ConfigPath)
+		})
+		if err != nil {
+			h.lanesMu.Unlock()
+			return nil, fmt.Errorf("save config: %w", err)
 		}
-		return fmt.Errorf("bot %q is not in %s", botID, h.cfg.ConfigPath)
-	})
-	if err != nil {
-		h.lanesMu.Unlock()
-		return nil, fmt.Errorf("save config: %w", err)
+	}
+	if upd.Instructions != nil {
+		if err := os.MkdirAll(bot.Workspace, 0o755); err != nil {
+			h.lanesMu.Unlock()
+			return nil, fmt.Errorf("create workspace: %w", err)
+		}
+		content := strings.TrimSpace(*upd.Instructions)
+		if content != "" {
+			content += "\n"
+		}
+		if err := writeFileAtomic(filepath.Join(bot.Workspace, "AGENTS.md"), []byte(content), 0o644); err != nil {
+			h.lanesMu.Unlock()
+			return nil, fmt.Errorf("write AGENTS.md: %w", err)
+		}
 	}
 	lane.bot = bot
 	for i := range h.cfg.Bots {
@@ -886,6 +1057,90 @@ func (h *Hub) UpdateBot(botID string, upd BotUpdate) (*BotStatus, error) {
 	return &st, nil
 }
 
+// DeleteBot stops the bot's serial lane and removes it from config, keeping its
+// workspace directory and chat history files intact on disk.
+func (h *Hub) DeleteBot(botID string) error {
+	h.lanesMu.Lock()
+	lane, ok := h.lanes[botID]
+	if !ok {
+		h.lanesMu.Unlock()
+		return fmt.Errorf("bot %q not found: %w", botID, ErrBotNotFound)
+	}
+	if len(h.order) <= 1 {
+		h.lanesMu.Unlock()
+		return errors.New("至少需要保留一个 Bot")
+	}
+	if h.cfg.ConfigPath != "" {
+		err := config.UpdateRaw(h.cfg, func(raw *config.HubConfig) error {
+			filtered := make([]config.BotConfig, 0, len(raw.Bots))
+			for _, rb := range raw.Bots {
+				if rb.ID != botID {
+					filtered = append(filtered, rb)
+				}
+			}
+			if len(filtered) == len(raw.Bots) {
+				return fmt.Errorf("bot %q is not in %s", botID, h.cfg.ConfigPath)
+			}
+			raw.Bots = filtered
+			return nil
+		})
+		if err != nil {
+			h.lanesMu.Unlock()
+			return fmt.Errorf("save config: %w", err)
+		}
+	}
+
+	delete(h.lanes, botID)
+	nextOrder := make([]string, 0, len(h.order)-1)
+	for _, id := range h.order {
+		if id != botID {
+			nextOrder = append(nextOrder, id)
+		}
+	}
+	h.order = nextOrder
+	nextBots := make([]config.BotConfig, 0, len(h.cfg.Bots))
+	for _, b := range h.cfg.Bots {
+		if b.ID != botID {
+			nextBots = append(nextBots, b)
+		}
+	}
+	h.cfg.Bots = nextBots
+	h.lanesMu.Unlock()
+
+	lane.cancelMu.Lock()
+	cancel := lane.cancel
+	lane.cancelMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	if h.desktop != nil {
+		h.desktop.CancelTakeoversByBot(botID)
+	}
+	lane.stop()
+
+	if h.store != nil {
+		_, _, _ = h.store.Reset(botID)
+	}
+	h.broadcast(Event{
+		Type:    "bot_deleted",
+		BotID:   botID,
+		Payload: map[string]any{"id": botID},
+	})
+	return nil
+}
+
+// DefaultModelsSnapshot returns the hub-wide default model and a copy of the
+// per-harness overrides safely under the hub lock.
+func (h *Hub) DefaultModelsSnapshot() (string, map[string]string) {
+	h.lanesMu.RLock()
+	defer h.lanesMu.RUnlock()
+	m := make(map[string]string, len(h.cfg.DefaultModels))
+	for k, v := range h.cfg.DefaultModels {
+		m[k] = v
+	}
+	return h.cfg.DefaultModel, m
+}
+
 // SetDefaultModels sets the hub-wide default model and per-harness overrides
 // (an empty override is removed), then re-resolves every inheriting bot.
 func (h *Hub) SetDefaultModels(defaultModel string, perHarness map[string]string) error {
@@ -901,16 +1156,18 @@ func (h *Hub) SetDefaultModels(defaultModel string, perHarness map[string]string
 	defaultModel = strings.TrimSpace(defaultModel)
 	h.lanesMu.Lock()
 	defer h.lanesMu.Unlock()
-	err := config.UpdateRaw(h.cfg, func(raw *config.HubConfig) error {
-		raw.DefaultModel = defaultModel
-		raw.DefaultModels = clean
-		if len(clean) == 0 {
-			raw.DefaultModels = nil
+	if h.cfg.ConfigPath != "" {
+		err := config.UpdateRaw(h.cfg, func(raw *config.HubConfig) error {
+			raw.DefaultModel = defaultModel
+			raw.DefaultModels = clean
+			if len(clean) == 0 {
+				raw.DefaultModels = nil
+			}
+			return nil
+		})
+		if err != nil {
+			return fmt.Errorf("save config: %w", err)
 		}
-		return nil
-	})
-	if err != nil {
-		return fmt.Errorf("save config: %w", err)
 	}
 	h.cfg.DefaultModel = defaultModel
 	h.cfg.DefaultModels = clean
@@ -926,27 +1183,67 @@ func (h *Hub) SetDefaultModels(defaultModel string, perHarness map[string]string
 	return nil
 }
 
-// SetModelAccess switches between magpie mode and self-hosted mode and
-// persists it. It changes no CLI config: in self mode each harness simply
-// keeps using whatever provider its own config names.
-func (h *Hub) SetModelAccess(mode string) error {
-	mode = strings.TrimSpace(mode)
-	if err := config.ValidateModelAccess(mode); err != nil {
-		return err
-	}
-	if mode == "magpie" {
-		mode = ""
-	}
+// SetAllowLocalDesktop persists whether bots may drive the hub host's GUI desktop via MCP.
+func (h *Hub) SetAllowLocalDesktop(allow bool) error {
 	h.lanesMu.Lock()
 	defer h.lanesMu.Unlock()
-	if err := config.UpdateRaw(h.cfg, func(raw *config.HubConfig) error {
-		raw.ModelAccess = mode
-		return nil
-	}); err != nil {
-		return fmt.Errorf("save config: %w", err)
+	val := allow
+	if h.cfg.ConfigPath != "" {
+		if err := config.UpdateRaw(h.cfg, func(raw *config.HubConfig) error {
+			v := allow
+			raw.AllowLocalDesktop = &v
+			return nil
+		}); err != nil {
+			return fmt.Errorf("save config: %w", err)
+		}
 	}
-	h.cfg.ModelAccess = mode
+	h.cfg.AllowLocalDesktop = &val
 	return nil
+}
+
+// SharedUserMD reads the shared _shared/USER.md memory file across all bots.
+func (h *Hub) SharedUserMD() string {
+	h.lanesMu.RLock()
+	sharedDir := h.cfg.SharedDir
+	h.lanesMu.RUnlock()
+	if sharedDir == "" {
+		return ""
+	}
+	raw, err := os.ReadFile(filepath.Join(sharedDir, "USER.md"))
+	if err != nil {
+		return ""
+	}
+	return string(raw)
+}
+
+// SetSharedUserMD writes the shared _shared/USER.md file atomically.
+func (h *Hub) SetSharedUserMD(content string) error {
+	h.lanesMu.RLock()
+	sharedDir := h.cfg.SharedDir
+	h.lanesMu.RUnlock()
+	if sharedDir == "" {
+		return errors.New("sharedDir is not configured")
+	}
+	if err := os.MkdirAll(sharedDir, 0o755); err != nil {
+		return err
+	}
+	trimmed := strings.TrimRight(content, " \t\r\n")
+	if trimmed != "" {
+		trimmed += "\n"
+	}
+	return writeFileAtomic(filepath.Join(sharedDir, "USER.md"), []byte(trimmed), 0o644)
+}
+
+func writeFileAtomic(path string, data []byte, mode os.FileMode) error {
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, mode); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmp, mode); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return os.Rename(tmp, path)
 }
 
 func (h *Hub) statusOne(botID string) (BotStatus, error) {

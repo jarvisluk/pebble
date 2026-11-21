@@ -43,3 +43,61 @@ func TestSaveLocalKeepsEnvRefs(t *testing.T) {
 		t.Fatalf("unexpected saved config:\n%s", s)
 	}
 }
+
+func TestDefaultModelFor(t *testing.T) {
+	cases := []struct {
+		name         string
+		defaultModel string
+		perHarness   map[string]string
+		harness      string
+		want         string
+	}{
+		{"empty", "", nil, "opencode", ""},
+		{"magpie on opencode", "magpie/mac-mini/auto/sonnet", nil, "opencode", "magpie/mac-mini/auto/sonnet"},
+		{"magpie on claude strips prefix", "magpie/mac-mini/auto/sonnet", nil, "claude", "mac-mini/auto/sonnet"},
+		{"magpie on dsh", "magpie/mac-mini/auto/sonnet", nil, "dsh", "magpie/mac-mini/auto/sonnet"},
+		{"provider/model on opencode", "anthropic/claude-sonnet-4-5", nil, "opencode", "anthropic/claude-sonnet-4-5"},
+		{"provider/model on pi", "anthropic/claude-sonnet-4-5", nil, "pi", "anthropic/claude-sonnet-4-5"},
+		{"provider/model ignored on claude", "anthropic/claude-sonnet-4-5", nil, "claude", ""},
+		{"provider/model ignored on dsh", "anthropic/claude-sonnet-4-5", nil, "dsh", ""},
+		{"bare alias on claude", "sonnet", nil, "claude", "sonnet"},
+		{"bare alias on dsh", "sonnet", nil, "dsh", "sonnet"},
+		{"bare alias on opencode", "sonnet", nil, "opencode", "sonnet"},
+		{"per harness override wins", "sonnet", map[string]string{"claude": "opus"}, "claude", "opus"},
+	}
+	for _, tc := range cases {
+		cfg := &HubConfig{DefaultModel: tc.defaultModel, DefaultModels: tc.perHarness}
+		if got := cfg.DefaultModelFor(tc.harness); got != tc.want {
+			t.Errorf("%s: DefaultModelFor(%q) = %q, want %q", tc.name, tc.harness, got, tc.want)
+		}
+	}
+}
+
+func TestAPITokenHelpers(t *testing.T) {
+	root := t.TempDir()
+	cfgPath := filepath.Join(root, "config", "bots.json")
+	if err := os.MkdirAll(filepath.Dir(cfgPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cfgPath, []byte(`{"http":{"apiToken":"${TEST_BOT_HUB_TOK}"},"bots":[{"id":"a"}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TEST_BOT_HUB_TOK", "resolved-secret")
+
+	if ref := RawAPITokenEnvRef(cfgPath); ref != "${TEST_BOT_HUB_TOK}" {
+		t.Fatalf("RawAPITokenEnvRef = %q", ref)
+	}
+	if got := ReadAPIToken(cfgPath); got != "resolved-secret" {
+		t.Fatalf("ReadAPIToken = %q", got)
+	}
+
+	if err := os.WriteFile(cfgPath, []byte(`{"http":{"apiToken":"literal-tok"},"bots":[{"id":"a"}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if ref := RawAPITokenEnvRef(cfgPath); ref != "" {
+		t.Fatalf("expected empty env ref for literal token, got %q", ref)
+	}
+	if got := ReadAPIToken(cfgPath); got != "literal-tok" {
+		t.Fatalf("ReadAPIToken literal = %q", got)
+	}
+}

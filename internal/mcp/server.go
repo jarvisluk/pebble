@@ -8,19 +8,32 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+
+	"bot-hub/internal/config"
+	"bot-hub/internal/node"
 )
 
 type Server struct {
 	hubURL     string
 	selfBotID  string
+	configPath string
 	httpClient *http.Client
+
+	mu          sync.Mutex
+	cachedToken string
 }
 
 func NewServer(hubURL, selfBotID string) *Server {
+	return NewServerWithConfig(hubURL, selfBotID, "")
+}
+
+func NewServerWithConfig(hubURL, selfBotID, configPath string) *Server {
 	hubURL = strings.TrimRight(strings.TrimSpace(hubURL), "/")
 	if hubURL == "" {
 		hubURL = "http://127.0.0.1:3789"
@@ -29,9 +42,11 @@ func NewServer(hubURL, selfBotID string) *Server {
 		selfBotID = os.Getenv("BOT_HUB_BOT_ID")
 	}
 	return &Server{
-		hubURL:     hubURL,
-		selfBotID:  selfBotID,
-		httpClient: &http.Client{Timeout: 10 * time.Minute},
+		hubURL:      hubURL,
+		selfBotID:   selfBotID,
+		configPath:  strings.TrimSpace(configPath),
+		httpClient:  &http.Client{Timeout: 10 * time.Minute},
+		cachedToken: strings.TrimSpace(os.Getenv("BOT_HUB_API_TOKEN")),
 	}
 }
 
@@ -227,6 +242,149 @@ func toolDefinitions() []map[string]any {
 				"required": []string{"botId", "message"},
 			},
 		},
+		{
+			"name":        "list_nodes",
+			"description": "List remote computer nodes connected to bot-hub over Tailcat, including their ID, name, OS, connected status, and granted permission scopes (files, exec, desktop).",
+			"inputSchema": map[string]any{
+				"type":       "object",
+				"properties": map[string]any{},
+			},
+		},
+		{
+			"name":        "node_exec",
+			"description": "Execute a shell command on a connected remote computer node (requires the node's 'exec' permission).",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"nodeId": map[string]any{
+						"type":        "string",
+						"description": "Optional target node ID. Omit when only one remote node is connected.",
+					},
+					"command": map[string]any{
+						"type":        "string",
+						"description": "Shell command to run on the remote computer.",
+					},
+					"cwd": map[string]any{
+						"type":        "string",
+						"description": "Optional working directory on the remote computer (supports ~/).",
+					},
+					"timeoutSec": map[string]any{
+						"type":        "integer",
+						"description": "Optional timeout in seconds (default 60, max 300).",
+					},
+				},
+				"required": []string{"command"},
+			},
+		},
+		{
+			"name":        "node_file",
+			"description": "Read, write, or list files on a connected remote computer node (requires the node's 'files' permission).",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"nodeId": map[string]any{
+						"type":        "string",
+						"description": "Optional target node ID. Omit when only one remote node is connected.",
+					},
+					"op": map[string]any{
+						"type":        "string",
+						"enum":        []string{"read", "write", "list"},
+						"description": "Operation: read, write, or list.",
+					},
+					"path": map[string]any{
+						"type":        "string",
+						"description": "File or directory path on the remote computer (supports ~/).",
+					},
+					"content": map[string]any{
+						"type":        "string",
+						"description": "File content to write (for op='write').",
+					},
+					"append": map[string]any{
+						"type":        "boolean",
+						"description": "Append instead of overwriting (for op='write').",
+					},
+				},
+				"required": []string{"op", "path"},
+			},
+		},
+		{
+			"name":        "node_desktop",
+			"description": "Interact with the GUI desktop on the local hub computer (nodeId='local') or a connected remote node inside the logged-in session: screenshot, osascript (macOS AppleScript/JXA), open app/URL/file, click, double_click, right_click, type text, press key combo, or scroll.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"nodeId": map[string]any{
+						"type":        "string",
+						"description": "Target node ID, or 'local' for the hub host desktop. Omit to auto-select the connected remote node (or 'local' when none are connected).",
+					},
+					"op": map[string]any{
+						"type":        "string",
+						"enum":        []string{"screenshot", "osascript", "open", "click", "double_click", "right_click", "type", "key", "scroll"},
+						"description": "Desktop action.",
+					},
+					"script": map[string]any{
+						"type":        "string",
+						"description": "AppleScript or JavaScript source (for op='osascript').",
+					},
+					"language": map[string]any{
+						"type":        "string",
+						"enum":        []string{"AppleScript", "JavaScript"},
+						"description": "Script language for op='osascript' (default AppleScript).",
+					},
+					"target": map[string]any{
+						"type":        "string",
+						"description": "File path or URL to open (for op='open').",
+					},
+					"app": map[string]any{
+						"type":        "string",
+						"description": "Application name to focus or open.",
+					},
+					"x": map[string]any{
+						"type":        "number",
+						"description": "Logical X coordinate on screen (for click/double_click/right_click/scroll).",
+					},
+					"y": map[string]any{
+						"type":        "number",
+						"description": "Logical Y coordinate on screen (for click/double_click/right_click/scroll).",
+					},
+					"deltaY": map[string]any{
+						"type":        "number",
+						"description": "Scroll amount (positive = up, negative = down, for op='scroll').",
+					},
+					"text": map[string]any{
+						"type":        "string",
+						"description": "Text to type (for op='type').",
+					},
+					"key": map[string]any{
+						"type":        "string",
+						"description": "Key or modifier combo like 'Return', 'Escape', 'cmd+c' (for op='key').",
+					},
+				},
+				"required": []string{"op"},
+			},
+		},
+		{
+			"name":        "request_takeover",
+			"description": "Pause automation and request a human to handle an interactive step (such as QR login, 2FA/OTP code, CAPTCHA, or payment confirmation) via the live Remote Desktop view. Blocks until the user clicks '完成并恢复 AI'.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"reason": map[string]any{
+						"type":        "string",
+						"description": "Clear explanation shown to the user describing what to do on the screen.",
+					},
+					"nodeId": map[string]any{
+						"type":        "string",
+						"description": "Optional target desktop ('local' by default, or remote node ID).",
+					},
+					"app": map[string]any{
+						"type":        "string",
+						"description": "Optional application name involved in the takeover.",
+					},
+				},
+				"required": []string{"reason"},
+			},
+		},
 	}
 }
 
@@ -291,49 +449,263 @@ func (s *Server) callTool(ctx context.Context, name string, rawArgs json.RawMess
 		}
 		return prettyJSON(body), false
 
+	case "list_nodes":
+		body, err := s.doJSON(ctx, http.MethodGet, "/api/nodes", nil)
+		if err != nil {
+			return err.Error(), true
+		}
+		return prettyJSON(body), false
+
+	case "node_exec":
+		var args struct {
+			NodeID     string `json:"nodeId"`
+			Command    string `json:"command"`
+			Cwd        string `json:"cwd"`
+			TimeoutSec int    `json:"timeoutSec"`
+		}
+		if err := json.Unmarshal(rawArgs, &args); err != nil || strings.TrimSpace(args.Command) == "" {
+			return "command is required", true
+		}
+		return s.callNode(ctx, args.NodeID, "exec", map[string]any{
+			"command": args.Command,
+			"cwd":     args.Cwd,
+		}, args.TimeoutSec)
+
+	case "node_file":
+		var args struct {
+			NodeID  string `json:"nodeId"`
+			Op      string `json:"op"`
+			Path    string `json:"path"`
+			Content string `json:"content"`
+			Append  bool   `json:"append"`
+		}
+		if err := json.Unmarshal(rawArgs, &args); err != nil || strings.TrimSpace(args.Path) == "" {
+			return "op and path are required", true
+		}
+		actionMap := map[string]string{
+			"read":  "file_read",
+			"write": "file_write",
+			"list":  "file_list",
+		}
+		action := actionMap[args.Op]
+		if action == "" {
+			return "op must be read, write, or list", true
+		}
+		return s.callNode(ctx, args.NodeID, action, map[string]any{
+			"path":    args.Path,
+			"content": args.Content,
+			"append":  args.Append,
+		}, 0)
+
+	case "node_desktop":
+		var args struct {
+			NodeID   string   `json:"nodeId"`
+			Op       string   `json:"op"`
+			Script   string   `json:"script"`
+			Language string   `json:"language"`
+			Target   string   `json:"target"`
+			App      string   `json:"app"`
+			X        *float64 `json:"x"`
+			Y        *float64 `json:"y"`
+			DeltaY   float64  `json:"deltaY"`
+			Text     string   `json:"text"`
+			Key      string   `json:"key"`
+		}
+		if err := json.Unmarshal(rawArgs, &args); err != nil || strings.TrimSpace(args.Op) == "" {
+			return "op is required", true
+		}
+		switch args.Op {
+		case "screenshot", "open":
+		case "osascript":
+			if strings.TrimSpace(args.Script) == "" {
+				return "script is required for osascript", true
+			}
+		case "click", "double_click", "right_click":
+			if args.X == nil || args.Y == nil {
+				return "x and y are required for " + args.Op, true
+			}
+		case "type":
+			if args.Text == "" {
+				return "text is required for type", true
+			}
+		case "key":
+			if strings.TrimSpace(args.Key) == "" {
+				return "key is required for key", true
+			}
+		case "scroll":
+		default:
+			return "unsupported op " + args.Op, true
+		}
+		payload := map[string]any{
+			"nodeId":   args.NodeID,
+			"botId":    s.selfBotID,
+			"op":       args.Op,
+			"script":   args.Script,
+			"language": args.Language,
+			"target":   args.Target,
+			"app":      args.App,
+			"x":        args.X,
+			"y":        args.Y,
+			"deltaY":   args.DeltaY,
+			"text":     args.Text,
+			"key":      args.Key,
+		}
+		body, err := s.doJSON(ctx, http.MethodPost, "/api/desktop/mcp", payload)
+		if err != nil {
+			return err.Error(), true
+		}
+		var res node.Result
+		if err := json.Unmarshal(body, &res); err != nil {
+			return prettyJSON(body), false
+		}
+		return formatNodeResult(args.Op, &res)
+
+	case "request_takeover":
+		var args struct {
+			Reason string `json:"reason"`
+			NodeID string `json:"nodeId"`
+			App    string `json:"app"`
+		}
+		if err := json.Unmarshal(rawArgs, &args); err != nil || strings.TrimSpace(args.Reason) == "" {
+			return "reason is required", true
+		}
+		body, err := s.doJSON(ctx, http.MethodPost, "/api/desktop/takeover/request", map[string]any{
+			"target": args.NodeID,
+			"botId":  s.selfBotID,
+			"reason": args.Reason,
+			"app":    args.App,
+		})
+		if err != nil {
+			return err.Error(), true
+		}
+		var resp struct {
+			Note string `json:"note"`
+		}
+		if json.Unmarshal(body, &resp) == nil && resp.Note != "" {
+			return resp.Note, false
+		}
+		return "人工接管已完成，可继续执行。", false
+
 	default:
 		return fmt.Sprintf("unknown tool %q", name), true
 	}
 }
 
+func (s *Server) callNode(ctx context.Context, nodeID, action string, args any, timeoutSec int) (string, bool) {
+	targetID := strings.TrimSpace(nodeID)
+	if targetID == "" {
+		targetID = "_default"
+	}
+	payload := map[string]any{
+		"action":     action,
+		"args":       args,
+		"timeoutSec": timeoutSec,
+		"botId":      s.selfBotID,
+	}
+	body, err := s.doJSON(ctx, http.MethodPost, "/api/nodes/"+url.PathEscape(targetID)+"/call", payload)
+	if err != nil {
+		return err.Error(), true
+	}
+	var res node.Result
+	if err := json.Unmarshal(body, &res); err != nil {
+		return prettyJSON(body), false
+	}
+	return formatNodeResult(action, &res)
+}
+
+func formatNodeResult(action string, res *node.Result) (string, bool) {
+	if !res.OK {
+		msg := res.Error
+		if msg == "" {
+			msg = res.Output
+		}
+		if msg == "" {
+			msg = "node command failed"
+		}
+		return msg, true
+	}
+	if res.SavedPath != "" {
+		if res.Output != "" {
+			return fmt.Sprintf("[node:%s saved=%s]\n%s", res.NodeID, res.SavedPath, res.Output), false
+		}
+		return fmt.Sprintf("[node:%s saved=%s]", res.NodeID, res.SavedPath), false
+	}
+	if action == "exec" {
+		return fmt.Sprintf("[node:%s exit=%d]\n%s", res.NodeID, res.ExitCode, res.Output), false
+	}
+	if res.Output != "" {
+		return res.Output, false
+	}
+	return "ok", false
+}
+
+func (s *Server) token() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cachedToken == "" && s.configPath != "" {
+		s.cachedToken = config.ReadAPIToken(s.configPath)
+	}
+	return s.cachedToken
+}
+
 func (s *Server) doJSON(ctx context.Context, method, path string, payload any) ([]byte, error) {
-	var bodyReader io.Reader
+	var rawBody []byte
 	if payload != nil {
-		raw, err := json.Marshal(payload)
+		var err error
+		rawBody, err = json.Marshal(payload)
 		if err != nil {
 			return nil, err
 		}
-		bodyReader = bytes.NewReader(raw)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, s.hubURL+path, bodyReader)
+
+	doOnce := func(tok string) (int, []byte, error) {
+		var bodyReader io.Reader
+		if rawBody != nil {
+			bodyReader = bytes.NewReader(rawBody)
+		}
+		req, err := http.NewRequestWithContext(ctx, method, s.hubURL+path, bodyReader)
+		if err != nil {
+			return 0, nil, err
+		}
+		if rawBody != nil {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		if tok != "" {
+			req.Header.Set("Authorization", "Bearer "+tok)
+		}
+		resp, err := s.httpClient.Do(req)
+		if err != nil {
+			return 0, nil, fmt.Errorf("bot-hub API unreachable at %s (is `bot-hub serve` running?): %w", s.hubURL, err)
+		}
+		defer resp.Body.Close()
+		b, err := io.ReadAll(resp.Body)
+		return resp.StatusCode, b, err
+	}
+
+	tok := s.token()
+	code, b, err := doOnce(tok)
 	if err != nil {
 		return nil, err
 	}
-	if payload != nil {
-		req.Header.Set("Content-Type", "application/json")
+	if code == http.StatusUnauthorized && s.configPath != "" {
+		if fresh := config.ReadAPIToken(s.configPath); fresh != "" && fresh != tok {
+			s.mu.Lock()
+			s.cachedToken = fresh
+			s.mu.Unlock()
+			code, b, err = doOnce(fresh)
+			if err != nil {
+				return nil, err
+			}
+		}
 	}
-	if tok := os.Getenv("BOT_HUB_API_TOKEN"); tok != "" {
-		req.Header.Set("Authorization", "Bearer "+tok)
-	}
-
-	resp, err := s.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("bot-hub API unreachable at %s (is `bot-hub serve` running?): %w", s.hubURL, err)
-	}
-	defer resp.Body.Close()
-
-	b, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode >= 300 {
+	if code >= 300 {
 		var errObj struct {
 			Error string `json:"error"`
 		}
 		if json.Unmarshal(b, &errObj) == nil && errObj.Error != "" {
 			return nil, fmt.Errorf("%s", errObj.Error)
 		}
-		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+		return nil, fmt.Errorf("HTTP %d: %s", code, strings.TrimSpace(string(b)))
 	}
 	return b, nil
 }

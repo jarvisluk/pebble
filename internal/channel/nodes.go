@@ -1,0 +1,147 @@
+package channel
+
+import (
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"os"
+	"path/filepath"
+	"time"
+
+	"bot-hub/internal/node"
+)
+
+func (s *HTTPServer) nodes() *node.Registry {
+	if s.hub != nil && s.hub.Nodes() != nil {
+		return s.hub.Nodes()
+	}
+	s.nodesOnce.Do(func() {
+		s.fallbackNodes = node.NewRegistry(nil)
+	})
+	return s.fallbackNodes
+}
+
+func (s *HTTPServer) handleNodes(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"nodes": s.nodes().List()})
+}
+
+func (s *HTTPServer) handleLocalNodeStub(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"available": false})
+}
+
+func (s *HTTPServer) handleNodePoll(w http.ResponseWriter, r *http.Request) {
+	var req node.PollRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json body"})
+		return
+	}
+	cmd, err := s.nodes().Poll(r.Context(), req, 25*time.Second)
+	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			return
+		}
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		return
+	}
+	if cmd == nil {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	writeJSON(w, http.StatusOK, cmd)
+}
+
+func (s *HTTPServer) handleNodeResult(w http.ResponseWriter, r *http.Request) {
+	var res node.Result
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<20)).Decode(&res); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json body"})
+		return
+	}
+	ok := s.nodes().Deliver(res)
+	writeJSON(w, http.StatusOK, map[string]any{"delivered": ok})
+}
+
+func (s *HTTPServer) handleNodeDisconnect(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json body"})
+		return
+	}
+	s.nodes().Disconnect(req.ID)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (s *HTTPServer) handleNodeCall(w http.ResponseWriter, r *http.Request) {
+	nodeID := r.PathValue("id")
+	if nodeID == "_default" {
+		nodeID = ""
+	}
+	var req struct {
+		Action     string          `json:"action"`
+		Args       json.RawMessage `json:"args"`
+		TimeoutSec int             `json:"timeoutSec"`
+		BotID      string          `json:"botId"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json body"})
+		return
+	}
+	timeout := time.Duration(req.TimeoutSec) * time.Second
+	if timeout <= 0 {
+		timeout = 60 * time.Second
+	}
+	if req.Action == "osascript" || req.Action == "open" || req.Action == "desktop_input" || req.Action == "desktop_focus" {
+		if nodeID != "" {
+			botName := req.BotID
+			if s.hub != nil && req.BotID != "" {
+				botName = s.hub.BotName(req.BotID)
+			}
+			s.desktopCoord().BeginAgentTool(nodeID, req.BotID, botName, req.Action)
+			defer s.desktopCoord().EndAgentTool(nodeID, req.BotID)
+		}
+	}
+	res, resolvedID, err := s.nodes().Call(r.Context(), nodeID, req.Action, req.Args, timeout)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		return
+	}
+	if res != nil && res.OK && res.DataBase64 != "" {
+		if path, saveErr := s.saveNodeBinary(req.BotID, resolvedID, res); saveErr == nil {
+			res.SavedPath = path
+			res.DataBase64 = ""
+		}
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+func (s *HTTPServer) saveNodeBinary(botID, nodeID string, res *node.Result) (string, error) {
+	raw, err := base64.StdEncoding.DecodeString(res.DataBase64)
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Join(os.TempDir(), "bot-hub-remote")
+	if s.hub != nil {
+		if ws := s.hub.BotWorkspace(botID); ws != "" {
+			dir = filepath.Join(ws, "_remote")
+		} else if shared := s.hub.Config().SharedDir; shared != "" {
+			dir = filepath.Join(shared, "remote")
+		}
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	ext := ".jpg"
+	if res.MimeType == "image/png" {
+		ext = ".png"
+	}
+	name := fmt.Sprintf("%s-%d%s", filepath.Base(nodeID), time.Now().UnixMilli(), ext)
+	fullPath := filepath.Join(dir, name)
+	if err := os.WriteFile(fullPath, raw, 0o600); err != nil {
+		return "", err
+	}
+	return fullPath, nil
+}

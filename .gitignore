@@ -5,3 +5,16 @@ config/bots.json
 .DS_Store
 *.log
 workspaces/
+apps/apple/.build/
+apps/apple/.swiftpm/
+build/mobile/
+apps/mobile/node_modules/
+apps/mobile/.expo/
+apps/mobile/dist/
+apps/mobile/ios/
+apps/mobile/android/
+apps/mobile/modules/bothub-tunnel/ios/Frameworks/
+apps/mobile/modules/bothub-tunnel/android/src/main/jniLibs/
+apps/mobile/modules/bothub-tunnel/android/build/
+apps/mobile/modules/bothub-tunnel/android/.gradle/
+apps/mobile/.claude/

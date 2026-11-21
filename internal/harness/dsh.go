@@ -95,6 +95,19 @@ func (h *DshHarness) Close() {
 	}
 }
 
+// Reload terminates the shared dsh ACP process so the next turn picks up updated configs.
+func (h *DshHarness) Reload() {
+	h.mu.Lock()
+	p := h.proc
+	h.proc = nil
+	h.open = make(map[string]*dshSession)
+	h.models = nil
+	h.mu.Unlock()
+	if p != nil {
+		p.kill()
+	}
+}
+
 // ensure starts the ACP server if needed and returns it.
 func (h *DshHarness) ensure(ctx context.Context) (*lineProc, error) {
 	h.startMu.Lock()

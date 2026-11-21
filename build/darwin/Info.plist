@@ -11,5 +11,9 @@
   <key>CFBundleVersion</key><string>1</string>
   <key>LSMinimumSystemVersion</key><string>12.0</string>
   <key>NSHighResolutionCapable</key><true/>
+  <key>NSAppleEventsUsageDescription</key><string>Bot Hub 需要自动化权限，以便在开启「允许主电脑操控本机」后控制本机应用。</string>
+  <key>NSDesktopFolderUsageDescription</key><string>Bot Hub 需要访问桌面文件夹，以便在开启「允许主电脑操控本机」后读写文件。</string>
+  <key>NSDocumentsFolderUsageDescription</key><string>Bot Hub 需要访问文稿文件夹，以便在开启「允许主电脑操控本机」后读写文件。</string>
+  <key>NSDownloadsFolderUsageDescription</key><string>Bot Hub 需要访问下载文件夹，以便在开启「允许主电脑操控本机」后读写文件。</string>
 </dict>
 </plist>

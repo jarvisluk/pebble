@@ -9,3 +9,14 @@ func TestParseLinkRejects(t *testing.T) {
 		}
 	}
 }
+
+func TestExtractTokenFromLink(t *testing.T) {
+	clean, tok := ExtractTokenFromLink("  tailcat://connect/tc123?port=3789#token=abc%2B123  ")
+	if clean != "tailcat://connect/tc123?port=3789" || tok != "abc+123" {
+		t.Fatalf("got clean=%q tok=%q", clean, tok)
+	}
+	clean2, tok2 := ExtractTokenFromLink("tailcat://connect/tc123?port=3789")
+	if clean2 != "tailcat://connect/tc123?port=3789" || tok2 != "" {
+		t.Fatalf("without fragment got clean=%q tok=%q", clean2, tok2)
+	}
+}

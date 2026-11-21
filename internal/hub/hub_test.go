@@ -2,6 +2,8 @@ package hub
 
 import (
 	"context"
+	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -217,5 +219,99 @@ func TestFailedTurnKeepsSession(t *testing.T) {
 	}
 	if fake.gotSecond != "ses_first" {
 		t.Fatalf("second turn session = %q, want ses_first", fake.gotSecond)
+	}
+}
+
+func TestUpdateDeleteBotAndSharedUserMD(t *testing.T) {
+	tmp := t.TempDir()
+	cfgDir := filepath.Join(tmp, "config")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfgPath := filepath.Join(cfgDir, "bots.json")
+	initialCfg := `{
+  "defaultModel": "global-m",
+  "bots": [
+    {"id": "a", "name": "Bot A", "description": "Old", "harness": "fake"},
+    {"id": "b", "name": "Bot B", "harness": "fake"}
+  ]
+}`
+	if err := os.WriteFile(cfgPath, []byte(initialCfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _, err := config.Load(tmp, cfgPath)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	store, err := state.NewStore(cfg.StateFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	msgStore, err := state.NewMessageStore(cfg.MessagesDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := harness.NewRegistry()
+	reg.Register(&fakeHarness{})
+
+	h := New(cfg, store, msgStore, reg)
+	defer h.Close()
+
+	// Empty name should fail
+	empty := "   "
+	if _, err := h.UpdateBot("a", BotUpdate{Name: &empty}); err == nil {
+		t.Fatal("expected error for empty bot name")
+	}
+
+	// Update name, description, and instructions
+	newName := "Bot Alpha"
+	newDesc := "Updated description"
+	newInst := "# Alpha\nFollow strict rules."
+	st, err := h.UpdateBot("a", BotUpdate{Name: &newName, Description: &newDesc, Instructions: &newInst})
+	if err != nil {
+		t.Fatalf("UpdateBot failed: %v", err)
+	}
+	if st.Name != "Bot Alpha" || st.Description != "Updated description" {
+		t.Fatalf("unexpected updated status: %+v", st)
+	}
+	detail, err := h.GetBotDetail("a")
+	if err != nil || detail.Instructions != "# Alpha\nFollow strict rules.\n" {
+		t.Fatalf("unexpected instructions: %q, err=%v", detail.Instructions, err)
+	}
+
+	// Shared USER.md read/write
+	if err := h.SetSharedUserMD("Prefer concise Chinese replies."); err != nil {
+		t.Fatalf("SetSharedUserMD failed: %v", err)
+	}
+	if got := h.SharedUserMD(); got != "Prefer concise Chinese replies.\n" {
+		t.Fatalf("SharedUserMD = %q", got)
+	}
+
+	// DeleteBot removes b from hub and config while preserving its workspace
+	wsB := h.BotWorkspace("b")
+	if err := h.DeleteBot("b"); err != nil {
+		t.Fatalf("DeleteBot(b) failed: %v", err)
+	}
+	if _, ok := h.GetBot("b"); ok {
+		t.Fatal("bot b still present after delete")
+	}
+	if _, err := os.Stat(wsB); err != nil {
+		t.Fatalf("expected workspace %s to remain on disk: %v", wsB, err)
+	}
+	rawBytes, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var diskCfg config.HubConfig
+	if err := json.Unmarshal(rawBytes, &diskCfg); err != nil {
+		t.Fatal(err)
+	}
+	if len(diskCfg.Bots) != 1 || diskCfg.Bots[0].ID != "a" {
+		t.Fatalf("unexpected bots on disk after delete: %+v", diskCfg.Bots)
+	}
+
+	// Deleting the last remaining bot must fail
+	if err := h.DeleteBot("a"); err == nil {
+		t.Fatal("expected error when deleting the last bot")
 	}
 }

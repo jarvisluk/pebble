@@ -1,0 +1,9 @@
+{
+  "platforms": ["apple", "android"],
+  "apple": {
+    "modules": ["BothubTunnelModule"]
+  },
+  "android": {
+    "modules": ["bothub.tunnel.BothubTunnelModule"]
+  }
+}

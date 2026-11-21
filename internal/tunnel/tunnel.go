@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/tailscale/tailcat"
@@ -58,21 +59,15 @@ func Listen(ctx context.Context, identityFile, derpMapURL string) (net.Listener,
 	return ln, link, func() { ln.Close(); srv.Close() }, nil
 }
 
-// Forward serves localAddr, piping each connection to the bot-hub behind link,
-// until ctx is done. ready is called once the server answered a ping.
-func Forward(ctx context.Context, link, localAddr string, ready func(localURL string)) error {
+// Connect validates link, establishes a Tailcat client and waits for the
+// initial ping to succeed, returning a dialer for the target port and a close
+// function.
+func Connect(ctx context.Context, link string) (dial func(context.Context) (net.Conn, error), closeFn func() error, err error) {
 	addr, port, err := ParseLink(link)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 	client := &tailcat.Client{Server: addr, Logf: logf}
-	defer client.Close()
-	ln, err := net.Listen("tcp", localAddr)
-	if err != nil {
-		return err
-	}
-	defer ln.Close()
-	go func() { <-ctx.Done(); ln.Close() }()
 
 	// Ping gives up after 10s whatever ctx says; the first DERP connect can take longer.
 	for deadline := time.Now().Add(60 * time.Second); ; {
@@ -81,11 +76,41 @@ func Forward(ctx context.Context, link, localAddr string, ready func(localURL st
 		}
 	}
 	if err != nil {
-		return fmt.Errorf("tailcat: server unreachable: %w", err)
+		_ = client.Close()
+		return nil, nil, fmt.Errorf("tailcat: server unreachable: %w", err)
 	}
+	return func(dctx context.Context) (net.Conn, error) {
+		return client.DialTCPPort(dctx, port)
+	}, client.Close, nil
+}
+
+// Forward serves localAddr, piping each connection to the bot-hub behind link,
+// until ctx is done. ready is called once the server answered a ping.
+func Forward(ctx context.Context, link, localAddr string, ready func(localURL string)) error {
+	if _, _, err := ParseLink(link); err != nil {
+		return err
+	}
+	ln, err := net.Listen("tcp", localAddr)
+	if err != nil {
+		return err
+	}
+	defer ln.Close()
+	go func() { <-ctx.Done(); ln.Close() }()
+
+	dial, closeClient, err := Connect(ctx, link)
+	if err != nil {
+		return err
+	}
+	defer closeClient()
+
 	if ready != nil {
 		ready("http://" + ln.Addr().String())
 	}
+	return ServeForward(ctx, ln, dial)
+}
+
+// ServeForward accepts connections on ln and proxies each one via dial until ctx is done.
+func ServeForward(ctx context.Context, ln net.Listener, dial func(context.Context) (net.Conn, error)) error {
 	for {
 		c, err := ln.Accept()
 		if err != nil {
@@ -94,7 +119,7 @@ func Forward(ctx context.Context, link, localAddr string, ready func(localURL st
 		go func() {
 			dctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 			defer cancel()
-			remote, err := client.DialTCPPort(dctx, port)
+			remote, err := dial(dctx)
 			if err != nil {
 				c.Close()
 				return
@@ -104,9 +129,27 @@ func Forward(ctx context.Context, link, localAddr string, ready func(localURL st
 	}
 }
 
+// ExtractTokenFromLink splits an optional `#token=<val>` fragment from a
+// tailcat:// pairing link, returning the clean link and extracted token.
+func ExtractTokenFromLink(raw string) (cleanLink, token string) {
+	raw = strings.TrimSpace(raw)
+	u, err := url.Parse(raw)
+	if err != nil {
+		return raw, ""
+	}
+	if frag := u.EscapedFragment(); frag != "" {
+		if q, qerr := url.ParseQuery(frag); qerr == nil {
+			token = strings.TrimSpace(q.Get("token"))
+		}
+		u.Fragment = ""
+		u.RawFragment = ""
+	}
+	return u.String(), token
+}
+
 // ParseLink validates a tailcat://connect/<addr>?port=N link without network I/O.
 func ParseLink(link string) (tailcat.Addr, uint16, error) {
-	u, err := url.Parse(link)
+	u, err := url.Parse(strings.TrimSpace(link))
 	if err != nil || u.Scheme != "tailcat" || u.Host != "connect" {
 		return "", 0, errors.New("invalid tailcat link")
 	}

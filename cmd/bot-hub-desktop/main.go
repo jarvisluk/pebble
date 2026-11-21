@@ -6,12 +6,16 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -26,6 +30,7 @@ import (
 
 	"bot-hub/internal/cli"
 	"bot-hub/internal/config"
+	"bot-hub/internal/node"
 	"bot-hub/internal/tunnel"
 )
 
@@ -52,18 +57,26 @@ func main() {
 }
 
 type prefs struct {
-	Mode string `json:"mode,omitempty"` // "" (ask) | local | remote
-	Link string `json:"link,omitempty"`
+	Mode        string   `json:"mode,omitempty"` // "" (ask) | local | remote
+	Link        string   `json:"link,omitempty"`
+	RemoteToken string   `json:"remoteToken,omitempty"`
+	NodeID      string   `json:"nodeId,omitempty"`
+	NodeName    string   `json:"nodeName,omitempty"`
+	AllowNode   bool     `json:"allowNode,omitempty"`
+	NodePerms   []string `json:"nodePerms"`
 }
 
 type desktop struct {
-	dir    string
-	app    *application.App
-	win    *application.WebviewWindow
-	mu     sync.Mutex
-	prefs  prefs
-	status string // what setup.html shows while starting / after an error
-	stop   func() // stops the running mode
+	dir       string
+	app       *application.App
+	win       *application.WebviewWindow
+	menu      *application.Menu
+	nodeItem  *application.MenuItem
+	mu        sync.Mutex
+	prefs     prefs
+	status    string // what setup.html shows while starting / after an error
+	stop      func() // stops the running mode
+	nodeAgent *node.Agent
 }
 
 func (d *desktop) run() {
@@ -76,6 +89,11 @@ func (d *desktop) run() {
 	})
 	d.win = d.app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title: "Bot Hub", Width: 1100, Height: 760, URL: "/",
+		JS: "if(/Mac/.test(navigator.platform))document.documentElement.classList.add('mac-app');",
+		Mac: application.MacWindow{
+			TitleBar:                application.MacTitleBarHiddenInset,
+			InvisibleTitleBarHeight: 32,
+		},
 	})
 	d.win.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) { d.win.Hide(); e.Cancel() })
 	d.app.Event.OnApplicationEvent(events.Mac.ApplicationShouldHandleReopen, func(*application.ApplicationEvent) { d.win.Show() })
@@ -90,8 +108,15 @@ func (d *desktop) run() {
 	menu.Add("打开 Bot Hub").OnClick(func(*application.Context) { d.win.Show(); d.win.Focus() })
 	menu.Add("切换模式…").OnClick(func(*application.Context) { d.reset(); d.win.Show() })
 	menu.Add("打开数据目录").OnClick(func(*application.Context) { _ = d.app.Browser.OpenFile(d.dir) })
+	d.nodeItem = menu.AddCheckbox("允许主电脑操控本机", d.prefs.AllowNode)
+	d.nodeItem.SetHidden(d.prefs.Mode != "remote")
+	d.nodeItem.OnClick(func(*application.Context) {
+		next := d.nodeItem.Checked()
+		d.setLocalNode(&next, nil, nil)
+	})
 	menu.AddSeparator()
 	menu.Add("退出").OnClick(func(*application.Context) { d.app.Quit() })
+	d.menu = menu
 	tray.SetMenu(menu)
 
 	if d.prefs.Mode != "" {
@@ -123,10 +148,29 @@ func (d *desktop) start(p prefs) {
 		return
 	}
 	d.mu.Lock()
-	d.prefs, d.stop = p, func() { cancel(); <-done }
+	d.prefs.Mode = p.Mode
+	if p.Mode == "remote" {
+		cleanLink, linkTok := tunnel.ExtractTokenFromLink(p.Link)
+		if cleanLink != d.prefs.Link && linkTok == "" {
+			d.prefs.RemoteToken = ""
+		}
+		d.prefs.Link = cleanLink
+		if linkTok != "" {
+			d.prefs.RemoteToken = linkTok
+		}
+	}
+	d.stop = func() { cancel(); <-done }
 	d.mu.Unlock()
 	d.save()
+	d.syncTray()
 	d.setStatus("")
+	if runtime.GOOS == "darwin" {
+		if strings.Contains(url, "?") {
+			url += "&shell=mac"
+		} else {
+			url += "?shell=mac"
+		}
+	}
 	d.win.SetURL(url)
 }
 
@@ -161,26 +205,266 @@ func (d *desktop) startLocal(ctx context.Context, done chan struct{}) (string, e
 	return "", errors.New("本机服务没有响应")
 }
 
-func (d *desktop) startRemote(ctx context.Context, link string, done chan struct{}) (string, error) {
+func (d *desktop) startRemote(ctx context.Context, rawLink string, done chan struct{}) (string, error) {
+	link, linkTok := tunnel.ExtractTokenFromLink(rawLink)
 	if _, _, err := tunnel.ParseLink(link); err != nil {
 		close(done)
 		return "", err
 	}
-	ready := make(chan string, 1)
-	errc := make(chan error, 1)
-	// A fixed local port per link keeps the login cookie across restarts.
-	go func() {
-		errc <- tunnel.Forward(ctx, link, "127.0.0.1:3790", func(u string) { ready <- u })
+	dial, closeClient, err := tunnel.Connect(ctx, link)
+	if err != nil {
 		close(done)
-	}()
-	select {
-	case u := <-ready:
-		return u + "/", nil
-	case err := <-errc:
-		if err == nil {
-			err = errors.New("连接已关闭")
-		}
 		return "", err
+	}
+
+	// A fixed local port keeps the login cookie across restarts.
+	ln, err := net.Listen("tcp", "127.0.0.1:3790")
+	if err != nil {
+		ln, err = net.Listen("tcp", "127.0.0.1:0")
+	}
+	if err != nil {
+		_ = closeClient()
+		close(done)
+		return "", err
+	}
+
+	localURL := "http://" + ln.Addr().String()
+	tr := &http.Transport{
+		DialContext: func(dctx context.Context, _, _ string) (net.Conn, error) { return dial(dctx) },
+	}
+
+	d.mu.Lock()
+	nodeID, nodeName := d.prefs.NodeID, d.prefs.NodeName
+	allowNode, tok := d.prefs.AllowNode, linkTok
+	if tok == "" && d.prefs.Link == link {
+		tok = d.prefs.RemoteToken
+	}
+	perms := append([]string(nil), d.prefs.NodePerms...)
+	d.mu.Unlock()
+
+	agent := node.NewAgent(node.AgentOptions{
+		NodeID:      nodeID,
+		Name:        nodeName,
+		BaseURL:     localURL,
+		Token:       tok,
+		Permissions: perms,
+		Enabled:     allowNode,
+		HTTPClient:  &http.Client{Transport: tr},
+	})
+	d.mu.Lock()
+	d.nodeAgent = agent
+	d.mu.Unlock()
+
+	rp := &httputil.ReverseProxy{
+		Transport:     tr,
+		FlushInterval: -1,
+		Rewrite: func(pr *httputil.ProxyRequest) {
+			pr.Out.URL.Scheme = "http"
+			pr.Out.URL.Host = pr.In.Host
+			pr.Out.Host = pr.In.Host
+		},
+		ModifyResponse: func(resp *http.Response) error {
+			if resp.StatusCode == http.StatusOK && resp.Request != nil {
+				if resp.Request.URL.Path == "/api/login" {
+					for _, c := range resp.Cookies() {
+						if c.Name == "bot_hub_token" && c.Value != "" {
+							d.setRemoteToken(c.Value)
+							break
+						}
+					}
+				} else if strings.HasPrefix(resp.Request.URL.Path, "/api/") {
+					if c, err := resp.Request.Cookie("bot_hub_token"); err == nil && c.Value != "" {
+						d.setRemoteToken(c.Value)
+					}
+				}
+			}
+			return nil
+		},
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/local-node", d.handleLocalNode)
+	mux.Handle("/", rp)
+
+	srv := &http.Server{
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+
+	go func() {
+		defer close(done)
+		defer func() {
+			d.mu.Lock()
+			if d.nodeAgent == agent {
+				d.nodeAgent = nil
+			}
+			d.mu.Unlock()
+			agent.Close()
+			tr.CloseIdleConnections()
+			_ = closeClient()
+		}()
+		<-ctx.Done()
+		sctx, scancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer scancel()
+		_ = srv.Shutdown(sctx)
+	}()
+
+	go func() {
+		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Printf("[remote-proxy] %v", err)
+		}
+	}()
+	return localURL + "/", nil
+}
+
+func (d *desktop) syncTray() {
+	d.mu.Lock()
+	mode, allow := d.prefs.Mode, d.prefs.AllowNode
+	item, menu := d.nodeItem, d.menu
+	d.mu.Unlock()
+	if item != nil {
+		item.SetHidden(mode != "remote")
+		item.SetChecked(allow)
+	}
+	if menu != nil {
+		menu.Update()
+	}
+}
+
+func (d *desktop) remoteToken() string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.prefs.RemoteToken
+}
+
+func (d *desktop) setRemoteToken(tok string) {
+	tok = strings.TrimSpace(tok)
+	if tok == "" {
+		return
+	}
+	d.mu.Lock()
+	changed := d.prefs.RemoteToken != tok
+	if changed {
+		d.prefs.RemoteToken = tok
+	}
+	agent := d.nodeAgent
+	d.mu.Unlock()
+	if changed {
+		d.save()
+	}
+	if agent != nil {
+		agent.SetToken(tok)
+	}
+}
+
+func (d *desktop) setLocalNode(enabled *bool, name *string, perms []string) map[string]any {
+	d.mu.Lock()
+	if enabled != nil {
+		d.prefs.AllowNode = *enabled
+	}
+	if name != nil {
+		if n := strings.TrimSpace(*name); n != "" {
+			d.prefs.NodeName = n
+		}
+	}
+	if perms != nil {
+		d.prefs.NodePerms = node.ValidPerms(perms)
+	}
+	allow := d.prefs.AllowNode
+	nodeName := d.prefs.NodeName
+	curPerms := append([]string(nil), d.prefs.NodePerms...)
+	agent := d.nodeAgent
+	d.mu.Unlock()
+
+	d.save()
+	d.syncTray()
+	if agent != nil {
+		agent.Configure(allow, nodeName, curPerms)
+		st := agent.Status()
+		return map[string]any{
+			"available":   true,
+			"enabled":     st.Enabled,
+			"connected":   st.Connected,
+			"status":      st.Status,
+			"error":       st.Error,
+			"nodeId":      st.NodeID,
+			"name":        st.Name,
+			"permissions": st.Permissions,
+		}
+	}
+	return map[string]any{
+		"available":   false,
+		"enabled":     allow,
+		"nodeId":      d.prefs.NodeID,
+		"name":        nodeName,
+		"permissions": curPerms,
+	}
+}
+
+func (d *desktop) handleLocalNode(w http.ResponseWriter, r *http.Request) {
+	host := r.Host
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	if host != "127.0.0.1" && host != "localhost" && host != "::1" {
+		http.Error(w, `{"error":"invalid host"}`, http.StatusForbidden)
+		return
+	}
+	if origin := r.Header.Get("Origin"); origin != "" {
+		u, err := url.Parse(origin)
+		if err != nil || u.Host != r.Host {
+			http.Error(w, `{"error":"cross-origin request rejected"}`, http.StatusForbidden)
+			return
+		}
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		d.mu.Lock()
+		agent := d.nodeAgent
+		d.mu.Unlock()
+		if agent == nil {
+			writeJSON(w, map[string]any{"available": false})
+			return
+		}
+		st := agent.Status()
+		writeJSON(w, map[string]any{
+			"available":   true,
+			"enabled":     st.Enabled,
+			"connected":   st.Connected,
+			"status":      st.Status,
+			"error":       st.Error,
+			"nodeId":      st.NodeID,
+			"name":        st.Name,
+			"permissions": st.Permissions,
+		})
+
+	case http.MethodPost:
+		if tok := d.remoteToken(); tok != "" {
+			got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+			if got == "" {
+				if c, err := r.Cookie("bot_hub_token"); err == nil {
+					got = c.Value
+				}
+			}
+			if subtle.ConstantTimeCompare([]byte(got), []byte(tok)) != 1 {
+				http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+				return
+			}
+		}
+		var req struct {
+			Enabled     *bool    `json:"enabled"`
+			Name        *string  `json:"name"`
+			Permissions []string `json:"permissions"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil {
+			http.Error(w, `{"error":"invalid json body"}`, http.StatusBadRequest)
+			return
+		}
+		writeJSON(w, d.setLocalNode(req.Enabled, req.Name, req.Permissions))
+
+	default:
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
 	}
 }
 
@@ -200,6 +484,7 @@ func (d *desktop) reset() {
 	d.prefs.Mode = ""
 	d.mu.Unlock()
 	d.save()
+	d.syncTray()
 	d.setStatus("")
 	d.win.SetURL("/")
 }
@@ -239,6 +524,18 @@ func writeJSON(w http.ResponseWriter, v any) {
 func (d *desktop) load() {
 	if raw, err := os.ReadFile(filepath.Join(d.dir, "desktop.json")); err == nil {
 		_ = json.Unmarshal(raw, &d.prefs)
+	}
+	defID, defName := node.DefaultIdentity()
+	if strings.TrimSpace(d.prefs.NodeID) == "" {
+		d.prefs.NodeID = defID
+	}
+	if strings.TrimSpace(d.prefs.NodeName) == "" {
+		d.prefs.NodeName = defName
+	}
+	if d.prefs.NodePerms == nil {
+		d.prefs.NodePerms = []string{node.PermFiles, node.PermExec, node.PermDesktop}
+	} else {
+		d.prefs.NodePerms = node.ValidPerms(d.prefs.NodePerms)
 	}
 }
 
