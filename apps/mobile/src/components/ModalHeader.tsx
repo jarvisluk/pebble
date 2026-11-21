@@ -2,6 +2,7 @@ import React from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { useI18n } from '../i18n';
 import { useTheme } from '../theme';
 
 interface ModalHeaderProps {
@@ -17,19 +18,21 @@ interface ModalHeaderProps {
 export function ModalHeader({
   title,
   onClose,
-  closeLabel = '关闭',
+  closeLabel,
   rightLabel,
   onRightPress,
   rightDisabled,
   rightLoading,
 }: ModalHeaderProps) {
   const theme = useTheme();
+  const { t } = useI18n();
   const insets = useSafeAreaInsets();
+  const resolvedCloseLabel = closeLabel ?? t('close');
 
   return (
     <View style={[styles.bar, { paddingTop: Math.max(insets.top, 12), borderBottomColor: theme.s2, backgroundColor: theme.page }]}>
       <Pressable onPress={onClose} style={[styles.sideBtn, { backgroundColor: theme.s1 }]} hitSlop={8}>
-        <Text style={[styles.sideTxt, { color: theme.text2 }]}>{closeLabel}</Text>
+        <Text style={[styles.sideTxt, { color: theme.text2 }]}>{resolvedCloseLabel}</Text>
       </Pressable>
       <Text numberOfLines={1} style={[styles.title, { color: theme.text }]}>
         {title}

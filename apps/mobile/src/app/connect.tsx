@@ -18,11 +18,13 @@ import { isNativeTunnelAvailable } from '../../modules/bothub-tunnel';
 import { normalizeAddress } from '../api';
 import { QrCodeIcon } from '../components/Icons';
 import { ModalHeader } from '../components/ModalHeader';
+import { useI18n } from '../i18n';
 import { useHub } from '../store';
 import { MONO_FONT, useTheme } from '../theme';
 
 export default function ConnectScreen() {
   const theme = useTheme();
+  const { t } = useI18n();
   const {
     servers,
     activeServer,
@@ -76,10 +78,10 @@ export default function ConnectScreen() {
         token: tok || norm.token || undefined,
       }).catch((err: any) => {
         setSubmitting(false);
-        setLocalError(err?.message || '连接失败');
+        setLocalError(err?.message || t('connFailed'));
       });
     }
-  }, [addAndConnectServer, autoconnect, paramAddr, paramLabel, paramToken]);
+  }, [addAndConnectServer, autoconnect, paramAddr, paramLabel, paramToken, t]);
 
   useEffect(() => {
     if (activeServer && (connState === 'unauthorized' || connState === 'error')) {
@@ -99,9 +101,9 @@ export default function ConnectScreen() {
       }
     } else if (connState === 'error' || connState === 'unauthorized') {
       setSubmitting(false);
-      setLocalError(connError || '连接失败');
+      setLocalError(connError || t('connFailed'));
     }
-  }, [connError, connState, submitting]);
+  }, [connError, connState, submitting, t]);
 
   const parsedPreview = useMemo(() => {
     if (!address.trim()) return null;
@@ -125,7 +127,7 @@ export default function ConnectScreen() {
     if (!permission?.granted) {
       const res = await requestPermission();
       if (!res.granted) {
-        setLocalError('需要相机权限才能扫描配对二维码');
+        setLocalError(t('camPermReq'));
         return;
       }
     }
@@ -140,7 +142,7 @@ export default function ConnectScreen() {
 
     const lower = raw.toLowerCase();
     if (!lower.startsWith('tailcat://') && !lower.startsWith('http://') && !lower.startsWith('https://')) {
-      setLocalError('二维码不是有效的 Bot Hub 连接链接');
+      setLocalError(t('invalidQr'));
       return;
     }
 
@@ -160,14 +162,14 @@ export default function ConnectScreen() {
       token: norm.token || token.trim(),
     }).catch((err: any) => {
       setSubmitting(false);
-      setLocalError(err?.message || '连接失败');
+      setLocalError(err?.message || t('connFailed'));
     });
   };
 
   const onSubmit = async () => {
     setLocalError('');
     if (!address.trim()) {
-      setLocalError('请输入连接地址或扫描二维码');
+      setLocalError(t('enterAddrOrScan'));
       return;
     }
     setSubmitting(true);
@@ -179,7 +181,7 @@ export default function ConnectScreen() {
       });
     } catch (err: any) {
       setSubmitting(false);
-      setLocalError(err?.message || '连接失败');
+      setLocalError(err?.message || t('connFailed'));
     }
   };
 
@@ -190,13 +192,13 @@ export default function ConnectScreen() {
       await selectServer(id);
     } catch (err: any) {
       setSubmitting(false);
-      setLocalError(err?.message || '切换失败');
+      setLocalError(err?.message || t('switchFailed'));
     }
   };
 
   return (
     <View style={[styles.root, { backgroundColor: theme.page }]}>
-      <ModalHeader title="连接主电脑" onClose={closeSheet} />
+      <ModalHeader title={t('connectHost')} onClose={closeSheet} />
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -209,9 +211,9 @@ export default function ConnectScreen() {
             <View style={[styles.card, { backgroundColor: theme.card }]}>
               <View style={styles.rowBetween}>
                 <View style={styles.col}>
-                  <Text style={[styles.cardTitle, { color: theme.text }]}>扫码配对</Text>
+                  <Text style={[styles.cardTitle, { color: theme.text }]}>{t('scanPairTitle')}</Text>
                   <Text style={[styles.cardSub, { color: theme.text2 }]}>
-                    扫描电脑端「远程访问」二维码即可自动带入口令
+                    {t('scanPairDesc')}
                   </Text>
                 </View>
                 <Pressable
@@ -220,7 +222,7 @@ export default function ConnectScreen() {
                 >
                   <QrCodeIcon size={17} color={theme.accent} />
                   <Text style={[styles.qrBtnTxt, { color: theme.accent }]}>
-                    {scanning ? '收起' : '扫码连接'}
+                    {scanning ? t('collapse') : t('scanConnect')}
                   </Text>
                 </Pressable>
               </View>
@@ -242,32 +244,32 @@ export default function ConnectScreen() {
             <View style={[styles.noticeCard, { backgroundColor: theme.s1 }]}>
               <Text style={[styles.noticeTxt, { color: theme.text2 }]}>
                 {Platform.OS === 'web'
-                  ? '当前为浏览器预览模式，请直接填写 http(s):// 地址；iOS / Android 原生构建支持扫码与 Tailcat 加密隧道。'
-                  : 'Expo Go 不含 Tailcat 原生隧道模块；使用 npx expo run:ios 或 run:android 构建后即可扫码直连 tailcat://。'}
+                  ? t('webPreviewNotice')
+                  : t('expoGoNotice')}
               </Text>
             </View>
           )}
 
           <View style={[styles.card, { backgroundColor: theme.card }]}>
-            <Text style={[styles.cardTitle, { color: theme.text }]}>手动输入地址</Text>
+            <Text style={[styles.cardTitle, { color: theme.text }]}>{t('manualAddrTitle')}</Text>
 
             <View style={styles.field}>
-              <Text style={[styles.fieldLbl, { color: theme.text2 }]}>名称（选填）</Text>
+              <Text style={[styles.fieldLbl, { color: theme.text2 }]}>{t('labelOptional')}</Text>
               <TextInput
                 value={label}
                 onChangeText={setLabel}
-                placeholder="家里 Mac mini"
+                placeholder={t('labelExamplePh')}
                 placeholderTextColor={theme.mute}
                 style={[styles.input, { backgroundColor: theme.s1, color: theme.text }]}
               />
             </View>
 
             <View style={styles.field}>
-              <Text style={[styles.fieldLbl, { color: theme.text2 }]}>连接地址</Text>
+              <Text style={[styles.fieldLbl, { color: theme.text2 }]}>{t('connAddr')}</Text>
               <TextInput
                 value={address}
                 onChangeText={setAddress}
-                placeholder="tailcat://connect/... 或 http://192.168.1.x:3789"
+                placeholder="tailcat://connect/... or http://192.168.1.x:3789"
                 placeholderTextColor={theme.mute}
                 autoCapitalize="none"
                 autoCorrect={false}
@@ -275,17 +277,17 @@ export default function ConnectScreen() {
               />
               <Text style={[styles.fieldHint, { color: parsedPreview?.token ? theme.sageInk : theme.mute }]}>
                 {parsedPreview?.token
-                  ? '已从链接自动识别访问口令'
-                  : '若粘贴带 #token= 的配对链接会自动填入'}
+                  ? t('tokenRecognized')
+                  : t('tokenAutoHint')}
               </Text>
             </View>
 
             <View style={styles.field}>
-              <Text style={[styles.fieldLbl, { color: theme.text2 }]}>访问口令（apiToken，选填）</Text>
+              <Text style={[styles.fieldLbl, { color: theme.text2 }]}>{t('tokenOptionalLbl')}</Text>
               <TextInput
                 value={token}
                 onChangeText={setToken}
-                placeholder="主电脑已开启鉴权时填写"
+                placeholder={t('tokenFillHint')}
                 placeholderTextColor={theme.mute}
                 secureTextEntry
                 autoCapitalize="none"
@@ -306,14 +308,14 @@ export default function ConnectScreen() {
               {submitting ? (
                 <ActivityIndicator size="small" color={theme.accentText} />
               ) : (
-                <Text style={[styles.submitTxt, { color: theme.accentText }]}>连接</Text>
+                <Text style={[styles.submitTxt, { color: theme.accentText }]}>{t('connect')}</Text>
               )}
             </Pressable>
           </View>
 
           {servers.length > 0 && (
             <View style={[styles.card, { backgroundColor: theme.card }]}>
-              <Text style={[styles.cardTitle, { color: theme.text }]}>已保存的主电脑</Text>
+              <Text style={[styles.cardTitle, { color: theme.text }]}>{t('savedHosts')}</Text>
               <View style={styles.savedList}>
                 {servers.map((s) => {
                   const isCurrent = activeServer?.id === s.id;
@@ -326,7 +328,7 @@ export default function ConnectScreen() {
                           </Text>
                           {isCurrent && (
                             <View style={[styles.curBadge, { backgroundColor: theme.sage }]}>
-                              <Text style={[styles.curBadgeTxt, { color: theme.sageInk }]}>当前</Text>
+                              <Text style={[styles.curBadgeTxt, { color: theme.sageInk }]}>{t('current')}</Text>
                             </View>
                           )}
                         </View>
@@ -335,7 +337,7 @@ export default function ConnectScreen() {
                         </Text>
                       </Pressable>
                       <Pressable onPress={() => void removeServer(s.id)} hitSlop={8} style={styles.delBtn}>
-                        <Text style={[styles.delTxt, { color: theme.danger }]}>移除</Text>
+                        <Text style={[styles.delTxt, { color: theme.danger }]}>{t('removeBtn')}</Text>
                       </Pressable>
                     </View>
                   );

@@ -3,6 +3,7 @@ import { AppState } from 'react-native';
 
 import { startTunnel, stopTunnel } from '../modules/bothub-tunnel';
 import { apiRequest, connectSSE, normalizeAddress, UnauthorizedError } from './api';
+import { tStatic, type ResolvedLang } from './i18n';
 import { loadSavedServers, saveServers } from './storage';
 import type {
   BotDetail,
@@ -28,7 +29,7 @@ export function resolveDefaultModel(g: string, h: string): string {
   return h === '' || h === 'opencode' || h === 'pi' ? g : '';
 }
 
-export function formatShortTime(iso?: string): string {
+export function formatShortTime(iso?: string, lang: ResolvedLang = 'zh-CN'): string {
   if (!iso) return '';
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
@@ -36,28 +37,28 @@ export function formatShortTime(iso?: string): string {
   const y = new Date(today);
   y.setDate(today.getDate() - 1);
   if (d.toDateString() === today.toDateString()) {
-    return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+    return d.toLocaleTimeString(lang === 'en' ? 'en-US' : 'zh-CN', { hour: '2-digit', minute: '2-digit' });
   }
-  if (d.toDateString() === y.toDateString()) return '昨天';
+  if (d.toDateString() === y.toDateString()) return lang === 'en' ? 'Yesterday' : '昨天';
   return `${d.getMonth() + 1}/${d.getDate()}`;
 }
 
-export function formatStamp(iso?: string): string {
+export function formatStamp(iso?: string, lang: ResolvedLang = 'zh-CN'): string {
   if (!iso) return '';
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
-  const t = d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+  const t = d.toLocaleTimeString(lang === 'en' ? 'en-US' : 'zh-CN', { hour: '2-digit', minute: '2-digit' });
   const today = new Date();
   const y = new Date(today);
   y.setDate(today.getDate() - 1);
-  if (d.toDateString() === today.toDateString()) return `今天 ${t}`;
-  if (d.toDateString() === y.toDateString()) return `昨天 ${t}`;
-  return `${d.getMonth() + 1}月${d.getDate()}日 ${t}`;
+  if (d.toDateString() === today.toDateString()) return `${lang === 'en' ? 'Today' : '今天'} ${t}`;
+  if (d.toDateString() === y.toDateString()) return `${lang === 'en' ? 'Yesterday' : '昨天'} ${t}`;
+  return lang === 'en' ? `${d.getMonth() + 1}/${d.getDate()} ${t}` : `${d.getMonth() + 1}月${d.getDate()}日 ${t}`;
 }
 
-export function plainPreview(s: string): string {
+export function plainPreview(s: string, codeTag = '[代码]'): string {
   return String(s || '')
-    .replace(/```[\s\S]*?```/g, '[代码]')
+    .replace(/```[\s\S]*?```/g, codeTag)
     .replace(/[#>*`_\[\]]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
@@ -232,7 +233,7 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
         onStatus: (ok) => setOnline(ok),
         onUnauthorized: () => {
           setConnState('unauthorized');
-          setConnError('需要访问口令');
+          setConnError(tStatic('needsToken'));
         },
         onEvent: (type, payload: any) => {
           if (type === 'message' && payload?.botId) {
@@ -371,7 +372,7 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
           setConnError(err.message);
         } else {
           setConnState('error');
-          setConnError(err?.message || '连接失败');
+          setConnError(err?.message || tStatic('connFailed'));
         }
       }
     },
@@ -428,10 +429,10 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
   const addAndConnectServer = useCallback(
     async (input: { label?: string; address: string; token?: string }) => {
       const norm = normalizeAddress(input.address);
-      if (!norm.cleanAddress) throw new Error('请输入有效的连接地址');
+      if (!norm.cleanAddress) throw new Error(tStatic('enterValidAddr'));
       const tok = (input.token || norm.token || '').trim();
       const existing = serversRef.current.find((s) => s.address === norm.cleanAddress);
-      const label = (input.label || '').trim() || (norm.isTailcat ? '远端主电脑' : norm.cleanAddress.replace(/^https?:\/\//, ''));
+      const label = (input.label || '').trim() || (norm.isTailcat ? tStatic('remoteHostDefault') : norm.cleanAddress.replace(/^https?:\/\//, ''));
       const target: ServerProfile = existing
         ? { ...existing, label: (input.label || '').trim() || existing.label, token: tok || existing.token }
         : { id: `${Date.now()}`, label, address: norm.cleanAddress, token: tok };
@@ -807,12 +808,12 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
-  const resolveTakeover = useCallback(async (id: string, note = '已在手机端完成人工操作，请继续执行。') => {
+  const resolveTakeover = useCallback(async (id: string, note?: string) => {
     const res = await apiRequest<{ ok: boolean; items: TakeoverRequest[] }>(
       baseURLRef.current,
       authTokenRef.current,
       '/api/desktop/takeover/resolve',
-      { method: 'POST', body: { id, note } }
+      { method: 'POST', body: { id, note: note || tStatic('takeoverResolvedNote') } }
     );
     setTakeovers(res.items || []);
   }, []);

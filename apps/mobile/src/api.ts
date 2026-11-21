@@ -1,6 +1,8 @@
+import { tStatic } from './i18n';
+
 export class UnauthorizedError extends Error {
   constructor() {
-    super('访问令牌无效或未填写');
+    super(tStatic('invalidTokenErr'));
     this.name = 'UnauthorizedError';
   }
 }

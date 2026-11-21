@@ -5,6 +5,7 @@ import { Platform } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
+import { I18nProvider } from '../i18n';
 import { HubProvider } from '../store';
 import { ThemeProvider, useTheme } from '../theme';
 
@@ -39,8 +40,10 @@ function RootContent() {
 
 export default function RootLayout() {
   return (
-    <ThemeProvider>
-      <RootContent />
-    </ThemeProvider>
+    <I18nProvider>
+      <ThemeProvider>
+        <RootContent />
+      </ThemeProvider>
+    </I18nProvider>
   );
 }

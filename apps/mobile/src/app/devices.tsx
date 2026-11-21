@@ -3,17 +3,18 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { ModalHeader } from '../components/ModalHeader';
+import { useI18n } from '../i18n';
 import { useHub } from '../store';
 import { MONO_FONT, useTheme } from '../theme';
 
-const PERM_LABELS: Record<string, string> = {
-  files: '文件',
-  exec: '命令',
-  desktop: '桌面',
-};
-
 export default function DevicesScreen() {
   const theme = useTheme();
+  const { t } = useI18n();
+  const permLabels: Record<string, string> = {
+    files: t('permFiles'),
+    exec: t('permExec'),
+    desktop: t('permDesktop'),
+  };
   const {
     activeServer,
     connState,
@@ -57,16 +58,16 @@ export default function DevicesScreen() {
   };
 
   const tailcatStateText = (() => {
-    if (!tailcat) return '未读取';
-    if (tailcat.state === 'ready') return '已就绪';
-    if (tailcat.state === 'connecting') return '正在连接中继';
-    if (tailcat.state === 'disabled') return '未开启';
-    return tailcat.error || '连接异常';
+    if (!tailcat) return t('tailcatUnknown');
+    if (tailcat.state === 'ready') return t('tailcatReady');
+    if (tailcat.state === 'connecting') return t('tailcatConnecting');
+    if (tailcat.state === 'disabled') return t('tailcatDisabled');
+    return tailcat.error || t('tailcatErr');
   })();
 
   return (
     <View style={[styles.root, { backgroundColor: theme.page }]}>
-      <ModalHeader title="设备与隧道" onClose={closeSheet} />
+      <ModalHeader title={t('devicesTunnel')} onClose={closeSheet} />
       <ScrollView
         contentContainerStyle={styles.scroll}
         refreshControl={
@@ -74,7 +75,7 @@ export default function DevicesScreen() {
         }
       >
         <View style={[styles.card, { backgroundColor: theme.card }]}>
-          <Text style={[styles.cardTitle, { color: theme.text }]}>当前手机连接</Text>
+          <Text style={[styles.cardTitle, { color: theme.text }]}>{t('currentMobileConn')}</Text>
           {activeServer ? (
             <View style={styles.kvGroup}>
               <Text style={[styles.serverName, { color: theme.text }]}>{activeServer.label}</Text>
@@ -84,39 +85,39 @@ export default function DevicesScreen() {
               <View style={styles.badgeRow}>
                 <View style={[styles.badge, { backgroundColor: isTailcat ? theme.lilac : theme.s1 }]}>
                   <Text style={[styles.badgeTxt, { color: isTailcat ? theme.lilacInk : theme.text2 }]}>
-                    {isTailcat ? 'Tailcat 端到端加密隧道' : 'HTTP 局域网/直连'}
+                    {isTailcat ? t('tailcatE2E') : t('httpLan')}
                   </Text>
                 </View>
                 <View style={[styles.badge, { backgroundColor: online ? theme.sage : theme.s1 }]}>
                   <Text style={[styles.badgeTxt, { color: online ? theme.sageInk : theme.busy }]}>
-                    {online ? '实时流已连接' : '重连中'}
+                    {online ? t('streamConnected') : t('reconnecting')}
                   </Text>
                 </View>
               </View>
             </View>
           ) : (
-            <Text style={[styles.emptyTxt, { color: theme.mute }]}>尚未连接主电脑</Text>
+            <Text style={[styles.emptyTxt, { color: theme.mute }]}>{t('notConnectedHost')}</Text>
           )}
           <Pressable
             onPress={() => router.push('/connect')}
             style={[styles.manageBtn, { backgroundColor: theme.s1 }]}
           >
-            <Text style={[styles.manageBtnTxt, { color: theme.text }]}>管理连接</Text>
+            <Text style={[styles.manageBtnTxt, { color: theme.text }]}>{t('manageConn')}</Text>
           </Pressable>
           {activeServer && (
             <Pressable
               onPress={() => router.push('/desktop?target=local')}
               style={[styles.manageBtn, { backgroundColor: theme.accentSoft }]}
             >
-              <Text style={[styles.manageBtnTxt, { color: theme.accent }]}>打开主电脑远程桌面</Text>
+              <Text style={[styles.manageBtnTxt, { color: theme.accent }]}>{t('openHostDesktop')}</Text>
             </Pressable>
           )}
         </View>
 
         <View style={[styles.card, { backgroundColor: theme.card }]}>
-          <Text style={[styles.cardTitle, { color: theme.text }]}>主电脑远程访问（Tailcat）</Text>
+          <Text style={[styles.cardTitle, { color: theme.text }]}>{t('hostRemoteAccess')}</Text>
           <View style={styles.rowBetween}>
-            <Text style={[styles.lbl, { color: theme.text2 }]}>隧道状态</Text>
+            <Text style={[styles.lbl, { color: theme.text2 }]}>{t('tunnelState')}</Text>
             <Text
               style={[
                 styles.val,
@@ -134,22 +135,22 @@ export default function DevicesScreen() {
             </Text>
           </View>
           <View style={styles.rowBetween}>
-            <Text style={[styles.lbl, { color: theme.text2 }]}>口令保护</Text>
+            <Text style={[styles.lbl, { color: theme.text2 }]}>{t('tokenProtect')}</Text>
             <Text style={[styles.val, { color: tailcat?.hasToken ? theme.sageInk : theme.mute }]}>
-              {tailcat?.hasToken ? '已启用访问口令保护' : '未配置 apiToken'}
+              {tailcat?.hasToken ? t('tokenEnabled') : t('tokenUnset')}
             </Text>
           </View>
         </View>
 
         <View style={[styles.card, { backgroundColor: theme.card }]}>
           <View style={styles.rowBetween}>
-            <Text style={[styles.cardTitle, { color: theme.text }]}>已接入的远端电脑节点</Text>
+            <Text style={[styles.cardTitle, { color: theme.text }]}>{t('connectedNodes')}</Text>
             <Text style={[styles.countTxt, { color: theme.mute }]}>{nodes.length}</Text>
           </View>
 
           {nodes.length === 0 ? (
             <Text style={[styles.emptyTxt, { color: theme.text2 }]}>
-              暂无远端电脑节点接入。在另一台电脑打开 Bot Hub 桌面端并开启「允许主电脑操控本机」即可出现。
+              {t('noRemoteNodes')}
             </Text>
           ) : (
             <View style={styles.nodeList}>
@@ -169,7 +170,7 @@ export default function DevicesScreen() {
                           { color: node.connected ? theme.sageInk : theme.mute },
                         ]}
                       >
-                        {node.connected ? '在线' : '离线'}
+                        {node.connected ? t('online') : t('offline')}
                       </Text>
                     </View>
                   </View>
@@ -183,7 +184,7 @@ export default function DevicesScreen() {
                       {node.permissions.map((p) => (
                         <View key={p} style={[styles.permPill, { backgroundColor: theme.card }]}>
                           <Text style={[styles.permTxt, { color: theme.text2 }]}>
-                            {PERM_LABELS[p] || p}
+                            {permLabels[p] || p}
                           </Text>
                         </View>
                       ))}
@@ -192,7 +193,7 @@ export default function DevicesScreen() {
                           onPress={() => router.push(`/desktop?target=${encodeURIComponent(node.id)}`)}
                           style={[styles.permPill, { backgroundColor: theme.accentSoft }]}
                         >
-                          <Text style={[styles.permTxt, { color: theme.accent }]}>打开桌面</Text>
+                          <Text style={[styles.permTxt, { color: theme.accent }]}>{t('openDesktop')}</Text>
                         </Pressable>
                       )}
                     </View>

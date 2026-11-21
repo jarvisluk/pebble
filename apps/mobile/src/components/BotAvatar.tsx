@@ -2,16 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { Animated, StyleSheet, View } from 'react-native';
 import Svg, { Ellipse, G, Path } from 'react-native-svg';
 
-import { useTheme } from '../theme';
-
-const COLORS: string[] = [
-  '#f08a2c',
-  '#8a7ad8',
-  '#86a33a',
-  '#b85a4a',
-  '#7a7465',
-  '#e0685a',
-];
+import { getBotColor, useTheme } from '../theme';
 
 function fnv1a(s: string): number {
   let h = 2166136261;
@@ -32,7 +23,7 @@ interface BotAvatarProps {
 export function BotAvatar({ id, size, index = -1, busy = false, ringColor }: BotAvatarProps) {
   const theme = useTheme();
   const h = fnv1a(id || '?');
-  const blob = COLORS[(index >= 0 ? index : h) % COLORS.length];
+  const blob = getBotColor(id, index);
   const tilt = ((h >>> 4) % 25) - 12;
   const gx = ((h >>> 9) % 7) - 3;
   const gy = ((h >>> 12) % 5) - 2;

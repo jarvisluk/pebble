@@ -16,9 +16,10 @@ import {
 import { BotAvatar } from '../components/BotAvatar';
 import { ModalHeader } from '../components/ModalHeader';
 import { confirmAction } from '../confirm';
+import { useI18n } from '../i18n';
 import { resolveDefaultModel, useHub } from '../store';
-import { MONO_FONT, useTheme, useThemePref } from '../theme';
-import type { ThemePreference } from '../storage';
+import { ACCENT_PRESETS, DEFAULT_ACCENT, MONO_FONT, useTheme, useThemePref } from '../theme';
+import type { LanguagePreference, ThemePreference } from '../storage';
 import type { MagpieMemoryList } from '../types';
 
 interface BotDraft {
@@ -44,7 +45,8 @@ function mapsEqual(a: Record<string, string>, b: Record<string, string>): boolea
 
 export default function SettingsScreen() {
   const theme = useTheme();
-  const { pref: themePref, setPref: setThemePref } = useThemePref();
+  const { pref: themePref, setPref: setThemePref, accent, setAccent } = useThemePref();
+  const { pref: langPref, setPref: setLangPref, t } = useI18n();
   const {
     activeServer,
     bots,
@@ -99,7 +101,7 @@ export default function SettingsScreen() {
       const res = await fetchMemories({ scope: 'global', query: q, limit: 30 });
       setMemData(res);
     } catch (err: any) {
-      setError(err?.message || '加载全局记忆失败');
+      setError(err?.message || t('opFailed'));
     } finally {
       setMemLoading(false);
     }
@@ -204,9 +206,9 @@ export default function SettingsScreen() {
       setDefaultModelsTouched(false);
       setSharedUserMdTouched(false);
       setBotDrafts({});
-      setSavedMsg('已保存');
+      setSavedMsg(t('settingsSaved'));
     } catch (err: any) {
-      setError(err?.message || '保存失败');
+      setError(err?.message || t('saveFailed'));
     } finally {
       setSaving(false);
     }
@@ -215,20 +217,20 @@ export default function SettingsScreen() {
   const onConnectMagpie = (harnessId: string) => {
     const targetModel = defaultModel.trim() || settings?.harnesses.find((h) => h.id === harnessId)?.defaultModel || '';
     if (!targetModel) {
-      setError(`请先在下方填写全局默认模型，再将 ${harnessId} 接入 Magpie`);
+      setError(t('pickMagpieModel'));
       return;
     }
     confirmAction(
-      '使用 Magpie 接管',
-      `确认运行 magpie ${harnessId} ${targetModel} 接管该 CLI？`,
+      t('mpConnect'),
+      `magpie ${harnessId} ${targetModel}`,
       async () => {
         setError('');
         setBusyAction(`magpie:${harnessId}`);
         try {
           await connectMagpie(harnessId, targetModel);
-          setSavedMsg(`${harnessId} 已接入 Magpie`);
+          setSavedMsg(t('connectedMagpie', { label: harnessId }));
         } catch (err: any) {
-          setError(err?.message || '接入失败');
+          setError(err?.message || t('connectFailed'));
         } finally {
           setBusyAction('');
         }
@@ -238,16 +240,16 @@ export default function SettingsScreen() {
 
   const onDisconnectMagpie = (harnessId: string) => {
     confirmAction(
-      '恢复原生 CLI 配置',
-      `确认运行 magpie ${harnessId} default，撤回 Magpie 对 ${harnessId} 的接管？`,
+      t('restoreNativeTitle'),
+      t('restoreNativeDesc', { label: harnessId }),
       async () => {
         setError('');
         setBusyAction(`magpie:${harnessId}`);
         try {
           await disconnectMagpie(harnessId);
-          setSavedMsg(`${harnessId} 已恢复原生配置`);
+          setSavedMsg(t('restoredNative', { label: harnessId }));
         } catch (err: any) {
-          setError(err?.message || '恢复失败');
+          setError(err?.message || t('restoreFailed'));
         } finally {
           setBusyAction('');
         }
@@ -263,15 +265,15 @@ export default function SettingsScreen() {
       setBusyAction(`prov:${action}:${id}`);
       try {
         const res = await magpieProviderAction({ action, id });
-        setSavedMsg(res.output || '操作成功');
+        setSavedMsg(res.output || t('opSuccess'));
       } catch (err: any) {
-        setError(err?.message || '操作失败');
+        setError(err?.message || t('opFailed'));
       } finally {
         setBusyAction('');
       }
     };
     if (action === 'rm') {
-      confirmAction('移除模型源', `确认移除 ${id}？`, run, true);
+      confirmAction(t('rmProviderTitle'), t('rmProviderDesc', { id }), run, true);
     } else {
       await run();
     }
@@ -293,9 +295,9 @@ export default function SettingsScreen() {
       setProvName('');
       setProvUrl('');
       setShowAddProv(false);
-      setSavedMsg('已添加模型源');
+      setSavedMsg(t('providerAdded'));
     } catch (err: any) {
-      setError(err?.message || '添加失败');
+      setError(err?.message || t('addFailed'));
     } finally {
       setBusyAction('');
     }
@@ -307,7 +309,7 @@ export default function SettingsScreen() {
     try {
       await loadModels(hId);
     } catch (err: any) {
-      setError(err?.message || '加载模型列表失败');
+      setError(err?.message || t('loadModelsFailed'));
     } finally {
       setLoadingModelsFor(null);
     }
@@ -326,9 +328,9 @@ export default function SettingsScreen() {
   return (
     <View style={[styles.root, { backgroundColor: theme.page }]}>
       <ModalHeader
-        title="设置"
+        title={t('settings')}
         onClose={closeSheet}
-        rightLabel="保存"
+        rightLabel={t('save')}
         onRightPress={onSave}
         rightDisabled={!dirty || saving}
         rightLoading={saving}
@@ -351,7 +353,7 @@ export default function SettingsScreen() {
 
           <View style={[styles.card, { backgroundColor: theme.card }]}>
             <View style={styles.rowBetween}>
-              <Text style={[styles.sectionTitle, { color: theme.text }]}>Magpie 原生接管</Text>
+              <Text style={[styles.sectionTitle, { color: theme.text }]}>{t('magpieTakeover')}</Text>
               <View
                 style={[
                   styles.smallBtn,
@@ -376,14 +378,14 @@ export default function SettingsScreen() {
                     },
                   ]}
                 >
-                  {!mp?.installed ? '未安装' : mp.healthy ? '网关运行中' : '未运行'}
+                  {!mp?.installed ? t('notInstalled') : mp.healthy ? t('gatewayOk') : t('gatewayDown')}
                 </Text>
               </View>
             </View>
 
             {!mp?.installed ? (
               <Text style={[styles.noteTxt, { color: theme.text2 }]}>
-                主电脑未安装 Magpie，各 CLI 当前使用自身独立配置。安装 Magpie 后可在此统一管理密钥与接入状态。
+                {t('hostNoMagpieGlobal')}
               </Text>
             ) : (
               <View style={styles.magpieList}>
@@ -393,8 +395,8 @@ export default function SettingsScreen() {
                       <Text style={[styles.magpieName, { color: theme.text }]}>{h.label || h.id}</Text>
                       <Text numberOfLines={1} style={[styles.magpieSub, { color: theme.mute, fontFamily: MONO_FONT }]}>
                         {h.magpie.connected
-                          ? `Magpie · ${h.magpie.model || '已接入'}`
-                          : `原生 CLI${h.magpie.nativeModel ? ` · ${h.magpie.nativeModel}` : ''}`}
+                          ? `Magpie · ${h.magpie.model || t('mpConnected')}`
+                          : `${t('mpNative')}${h.magpie.nativeModel ? ` · ${h.magpie.nativeModel}` : ''}`}
                       </Text>
                     </View>
                     <View style={styles.magpieActs}>
@@ -407,7 +409,7 @@ export default function SettingsScreen() {
                           <ActivityIndicator size="small" color={h.magpie.connected ? theme.text : theme.accentText} />
                         ) : (
                           <Text style={[styles.magpieBtnTxt, { color: h.magpie.connected ? theme.text : theme.accentText }]}>
-                            {h.magpie.connected ? '切换' : '接管'}
+                            {h.magpie.connected ? t('mpSwitch') : t('mpConnect')}
                           </Text>
                         )}
                       </Pressable>
@@ -417,7 +419,7 @@ export default function SettingsScreen() {
                           onPress={() => onDisconnectMagpie(h.id)}
                           style={[styles.magpieBtn, { backgroundColor: theme.card }]}
                         >
-                          <Text style={[styles.magpieBtnTxt, { color: theme.danger }]}>恢复原生</Text>
+                          <Text style={[styles.magpieBtnTxt, { color: theme.danger }]}>{t('mpRestore')}</Text>
                         </Pressable>
                       )}
                     </View>
@@ -430,14 +432,14 @@ export default function SettingsScreen() {
               <>
                 <View style={styles.rowBetween}>
                   <Text style={[styles.subLabel, { color: theme.text2 }]}>
-                    模型源（{providers.length}）
+                    {t('providersTitle', { n: providers.length })}
                   </Text>
                   <Pressable
                     onPress={() => setShowAddProv((v) => !v)}
                     style={[styles.smallBtn, { backgroundColor: theme.accentSoft }]}
                   >
                     <Text style={[styles.smallBtnTxt, { color: theme.accent }]}>
-                      {showAddProv ? '收起' : '+ 添加模型源'}
+                      {showAddProv ? t('collapse') : t('addProvider')}
                     </Text>
                   </Pressable>
                 </View>
@@ -446,8 +448,8 @@ export default function SettingsScreen() {
                   <View style={[styles.addProvBox, { backgroundColor: theme.s1 }]}>
                     <View style={styles.segmentRow}>
                       {[
-                        { key: 'preset' as const, label: '预设厂商' },
-                        { key: 'custom' as const, label: '自定义接口' },
+                        { key: 'preset' as const, label: t('presetTab') },
+                        { key: 'custom' as const, label: t('customTab') },
                       ].map((opt) => (
                         <Pressable
                           key={opt.key}
@@ -507,7 +509,7 @@ export default function SettingsScreen() {
                         <TextInput
                           value={provUrl}
                           onChangeText={setProvUrl}
-                          placeholder="Base URL，例如 https://api.example.com/v1"
+                          placeholder={t('baseUrlPh')}
                           placeholderTextColor={theme.mute}
                           autoCapitalize="none"
                           autoCorrect={false}
@@ -519,7 +521,7 @@ export default function SettingsScreen() {
                     <TextInput
                       value={provName}
                       onChangeText={setProvName}
-                      placeholder={provMode === 'custom' ? '名称（必填，如 my-relay）' : '别名（可选）'}
+                      placeholder={t('aliasOptionalPh')}
                       placeholderTextColor={theme.mute}
                       autoCapitalize="none"
                       autoCorrect={false}
@@ -528,7 +530,7 @@ export default function SettingsScreen() {
                     <TextInput
                       value={provKey}
                       onChangeText={setProvKey}
-                      placeholder="API Key（sk-...）"
+                      placeholder={t('apiKeyPh')}
                       placeholderTextColor={theme.mute}
                       secureTextEntry
                       autoCapitalize="none"
@@ -541,7 +543,7 @@ export default function SettingsScreen() {
                       style={[styles.addBtn, { backgroundColor: theme.accent }]}
                     >
                       <Text style={[styles.magpieBtnTxt, { color: theme.accentText }]}>
-                        {busyAction === 'prov:add' ? '添加中…' : '确认添加'}
+                        {busyAction === 'prov:add' ? t('adding') : t('confirmAdd')}
                       </Text>
                     </Pressable>
                   </View>
@@ -551,7 +553,7 @@ export default function SettingsScreen() {
                   <View key={p.id} style={[styles.magpieRow, { backgroundColor: theme.s1 }]}>
                     <View style={styles.magpieInfo}>
                       <Text style={[styles.magpieName, { color: theme.text }]}>
-                        {p.name} · {p.enabled ? '启用' : '停用'}
+                        {p.name} · {p.enabled ? t('enabled') : t('paused')}
                       </Text>
                       <Text numberOfLines={1} style={[styles.magpieSub, { color: theme.mute }]}>
                         {[p.endpoint, p.modelsInfo].filter(Boolean).join(' · ')}
@@ -562,21 +564,21 @@ export default function SettingsScreen() {
                         onPress={() => void onProviderAct('test', p.id)}
                         style={[styles.magpieBtn, { backgroundColor: theme.card }]}
                       >
-                        <Text style={[styles.magpieBtnTxt, { color: theme.text2 }]}>测速</Text>
+                        <Text style={[styles.magpieBtnTxt, { color: theme.text2 }]}>{t('testBtn')}</Text>
                       </Pressable>
                       <Pressable
                         onPress={() => void onProviderAct(p.enabled ? 'off' : 'on', p.id)}
                         style={[styles.magpieBtn, { backgroundColor: theme.card }]}
                       >
                         <Text style={[styles.magpieBtnTxt, { color: theme.text2 }]}>
-                          {p.enabled ? '停用' : '启用'}
+                          {p.enabled ? t('paused') : t('enabled')}
                         </Text>
                       </Pressable>
                       <Pressable
                         onPress={() => void onProviderAct('rm', p.id)}
                         style={[styles.magpieBtn, { backgroundColor: theme.card }]}
                       >
-                        <Text style={[styles.magpieBtnTxt, { color: theme.danger }]}>移除</Text>
+                        <Text style={[styles.magpieBtnTxt, { color: theme.danger }]}>{t('removeBtn')}</Text>
                       </Pressable>
                     </View>
                   </View>
@@ -586,13 +588,13 @@ export default function SettingsScreen() {
           </View>
 
           <View style={[styles.card, { backgroundColor: theme.card }]}>
-            <Text style={[styles.sectionTitle, { color: theme.text }]}>外观</Text>
+            <Text style={[styles.sectionTitle, { color: theme.text }]}>{t('appearance')}</Text>
             <View style={styles.segmentRow}>
               {(
                 [
-                  { key: 'system', label: '跟随系统' },
-                  { key: 'light', label: '浅色' },
-                  { key: 'dark', label: '深色' },
+                  { key: 'system', label: t('followSystem') },
+                  { key: 'light', label: t('themeLight') },
+                  { key: 'dark', label: t('themeDark') },
                 ] as { key: ThemePreference; label: string }[]
               ).map((opt) => (
                 <Pressable
@@ -614,18 +616,71 @@ export default function SettingsScreen() {
                 </Pressable>
               ))}
             </View>
+
+            <View style={styles.rowBetween}>
+              <Text style={[styles.subLabel, { color: theme.text2 }]}>{t('appAccent')}</Text>
+              <Pressable onPress={() => setAccent(DEFAULT_ACCENT)}>
+                <Text style={[styles.smallBtnTxt, { color: theme.accent }]}>{t('resetDefault')}</Text>
+              </Pressable>
+            </View>
+            <Text style={[styles.magpieSub, { color: theme.mute }]}>{t('appAccentDesc')}</Text>
+            <View style={styles.swatchRow}>
+              {ACCENT_PRESETS.map((hex) => {
+                const selected = accent === hex;
+                return (
+                  <Pressable
+                    key={hex}
+                    onPress={() => setAccent(hex)}
+                    style={[
+                      styles.swatch,
+                      { backgroundColor: hex },
+                      selected && { borderWidth: 3, borderColor: theme.text },
+                    ]}
+                  />
+                );
+              })}
+            </View>
+
+            <Text style={[styles.subLabel, { color: theme.text2 }]}>{t('language')}</Text>
+            <View style={styles.segmentRow}>
+              {(
+                [
+                  { key: 'system', label: t('followSystem') },
+                  { key: 'zh-CN', label: '简体中文' },
+                  { key: 'en', label: 'English' },
+                ] as { key: LanguagePreference; label: string }[]
+              ).map((opt) => (
+                <Pressable
+                  key={opt.key}
+                  onPress={() => setLangPref(opt.key)}
+                  style={[
+                    styles.segmentPill,
+                    { backgroundColor: langPref === opt.key ? theme.accentSoft : theme.s1 },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.segmentTxt,
+                      { color: langPref === opt.key ? theme.accent : theme.text2 },
+                    ]}
+                  >
+                    {opt.label}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
           </View>
 
           <View style={[styles.card, { backgroundColor: theme.card }]}>
             <View style={styles.rowBetween}>
-              <Text style={[styles.sectionTitle, { color: theme.text }]}>全局默认模型</Text>
+              <Text style={[styles.sectionTitle, { color: theme.text }]}>{t('globalDefaultModel')}</Text>
               <View style={styles.magpieActs}>
                 <Pressable
                   onPress={() => setPerHarnessExpanded((v) => !v)}
                   style={[styles.smallBtn, { backgroundColor: theme.s1 }]}
                 >
                   <Text style={[styles.smallBtnTxt, { color: theme.accent }]}>
-                    {perHarnessExpanded ? '收起' : '按后端设置'}
+                    {perHarnessExpanded ? t('collapse') : t('perHarness')}
                   </Text>
                 </Pressable>
                 <Pressable
@@ -634,7 +689,7 @@ export default function SettingsScreen() {
                   style={[styles.smallBtn, { backgroundColor: theme.s1 }]}
                 >
                   <Text style={[styles.smallBtnTxt, { color: theme.text2 }]}>
-                    {loadingModelsFor === primaryHarness ? '加载中…' : '可选列表'}
+                    {loadingModelsFor === primaryHarness ? t('loading') : t('optionalModels')}
                   </Text>
                 </Pressable>
               </View>
@@ -646,7 +701,7 @@ export default function SettingsScreen() {
                 setSavedMsg('');
                 setDefaultModel(val);
               }}
-              placeholder="例如 magpie/claude-sonnet-4"
+              placeholder="magpie/claude-sonnet-4"
               placeholderTextColor={theme.mute}
               autoCapitalize="none"
               autoCorrect={false}
@@ -655,7 +710,7 @@ export default function SettingsScreen() {
             {perHarnessExpanded && (
               <View style={[styles.addProvBox, { backgroundColor: theme.s1 }]}>
                 <Text style={[styles.subLabel, { color: theme.text2 }]}>
-                  按 Harness 覆盖全局默认模型
+                  {t('perHarnessTitle')}
                 </Text>
                 {harnessOptions.map((h) => (
                   <View key={h.id} style={styles.perHarnessItem}>
@@ -667,7 +722,7 @@ export default function SettingsScreen() {
                         setSavedMsg('');
                         setDefaultModelsDraft((prev) => ({ ...prev, [h.id]: val }));
                       }}
-                      placeholder="留空跟随全局默认"
+                      placeholder={t('followGlobalPh')}
                       placeholderTextColor={theme.mute}
                       autoCapitalize="none"
                       autoCorrect={false}
@@ -707,9 +762,9 @@ export default function SettingsScreen() {
           </View>
 
           <View style={[styles.card, { backgroundColor: theme.card }]}>
-            <Text style={[styles.sectionTitle, { color: theme.text }]}>各 Bot 后端与模型覆盖</Text>
+            <Text style={[styles.sectionTitle, { color: theme.text }]}>{t('botModelsSection')}</Text>
             {bots.length === 0 ? (
-              <Text style={[styles.emptyNote, { color: theme.mute }]}>当前没有 Bot</Text>
+              <Text style={[styles.emptyNote, { color: theme.mute }]}>{t('noBotsInSettings')}</Text>
             ) : (
               <View style={styles.botList}>
                 {bots.map((b, index) => {
@@ -720,7 +775,7 @@ export default function SettingsScreen() {
                   const ph =
                     defaultModelsDraft[draft.harness]?.trim() ||
                     resolveDefaultModel(defaultModel.trim(), draft.harness) ||
-                    '继承默认模型';
+                    t('inheritDefaultPh');
                   return (
                     <View key={b.id} style={[styles.botItem, { backgroundColor: theme.s1 }]}>
                       <View style={styles.botHead}>
@@ -783,7 +838,7 @@ export default function SettingsScreen() {
 
           <View style={[styles.card, { backgroundColor: theme.card }]}>
             <View style={styles.rowBetween}>
-              <Text style={[styles.sectionTitle, { color: theme.text }]}>全局共享记忆</Text>
+              <Text style={[styles.sectionTitle, { color: theme.text }]}>{t('globalSharedMem')}</Text>
               <Text style={[styles.magpieSub, { color: theme.mute, fontFamily: MONO_FONT }]}>_shared/USER.md</Text>
             </View>
             <TextInput
@@ -793,7 +848,7 @@ export default function SettingsScreen() {
                 setSavedMsg('');
                 setSharedUserMd(val);
               }}
-              placeholder="记录你的常用偏好、身份背景或全局约定（所有 Bot 共读）…"
+              placeholder={t('userMdPh')}
               placeholderTextColor={theme.mute}
               multiline
               textAlignVertical="top"
@@ -803,14 +858,14 @@ export default function SettingsScreen() {
 
           <View style={[styles.card, { backgroundColor: theme.card }]}>
             <View style={styles.rowBetween}>
-              <Text style={[styles.sectionTitle, { color: theme.text }]}>Magpie 全局记忆</Text>
+              <Text style={[styles.sectionTitle, { color: theme.text }]}>{t('magpieGlobalMem')}</Text>
               <View style={styles.magpieActs}>
                 <Pressable
                   onPress={() => void loadGlobalMemories(memQuery)}
                   style={[styles.smallBtn, { backgroundColor: theme.s1 }]}
                 >
                   <Text style={[styles.smallBtnTxt, { color: theme.text2 }]}>
-                    {memLoading ? '刷新中' : '刷新'}
+                    {memLoading ? t('refreshing') : t('refresh')}
                   </Text>
                 </Pressable>
                 <Pressable
@@ -818,7 +873,7 @@ export default function SettingsScreen() {
                   style={[styles.smallBtn, { backgroundColor: theme.accentSoft }]}
                 >
                   <Text style={[styles.smallBtnTxt, { color: theme.accent }]}>
-                    {memShowAdd ? '收起' : '+ 添加'}
+                    {memShowAdd ? t('collapse') : t('addShort')}
                   </Text>
                 </Pressable>
               </View>
@@ -845,7 +900,7 @@ export default function SettingsScreen() {
                 <TextInput
                   value={memTags}
                   onChangeText={setMemTags}
-                  placeholder="标签（可选，逗号分隔）"
+                  placeholder={t('tagsPh')}
                   placeholderTextColor={theme.mute}
                   autoCapitalize="none"
                   style={[styles.input, { backgroundColor: theme.card, color: theme.text }]}
@@ -853,7 +908,7 @@ export default function SettingsScreen() {
                 <TextInput
                   value={memText}
                   onChangeText={setMemText}
-                  placeholder="输入一条跨项目长期记忆…"
+                  placeholder={t('globalMemPh')}
                   placeholderTextColor={theme.mute}
                   multiline
                   textAlignVertical="top"
@@ -864,7 +919,7 @@ export default function SettingsScreen() {
                   onPress={async () => {
                     const txt = memText.trim();
                     if (!txt) {
-                      setError('请填写记忆内容');
+                      setError(t('memContentReq'));
                       return;
                     }
                     setError('');
@@ -878,10 +933,10 @@ export default function SettingsScreen() {
                       setMemText('');
                       setMemTags('');
                       setMemShowAdd(false);
-                      setSavedMsg('已保存全局记忆');
+                      setSavedMsg(t('globalMemSaved'));
                       await loadGlobalMemories(memQuery);
                     } catch (err: any) {
-                      setError(err?.message || '保存记忆失败');
+                      setError(err?.message || t('saveMemFailed'));
                     } finally {
                       setBusyAction('');
                     }
@@ -889,7 +944,7 @@ export default function SettingsScreen() {
                   style={[styles.addBtn, { backgroundColor: theme.accent }]}
                 >
                   <Text style={[styles.magpieBtnTxt, { color: theme.accentText }]}>
-                    {busyAction === 'mem:save' ? '保存中…' : '保存记忆'}
+                    {busyAction === 'mem:save' ? t('saving') : t('saveMemory')}
                   </Text>
                 </Pressable>
               </View>
@@ -900,7 +955,7 @@ export default function SettingsScreen() {
                 value={memQuery}
                 onChangeText={setMemQuery}
                 onSubmitEditing={() => void loadGlobalMemories(memQuery)}
-                placeholder="搜索 Magpie 全局记忆…"
+                placeholder={t('searchGlobalMemPh')}
                 placeholderTextColor={theme.mute}
                 returnKeyType="search"
                 style={[styles.input, { flex: 1, backgroundColor: theme.s1, color: theme.text }]}
@@ -909,18 +964,18 @@ export default function SettingsScreen() {
                 onPress={() => void loadGlobalMemories(memQuery)}
                 style={[styles.magpieBtn, { backgroundColor: theme.s1 }]}
               >
-                <Text style={[styles.magpieBtnTxt, { color: theme.text2 }]}>搜索</Text>
+                <Text style={[styles.magpieBtnTxt, { color: theme.text2 }]}>{t('search')}</Text>
               </Pressable>
             </View>
 
             {!memData?.installed ? (
-              <Text style={[styles.emptyNote, { color: theme.mute }]}>主电脑未安装 Magpie，暂不可透传 Magpie 记忆。</Text>
+              <Text style={[styles.emptyNote, { color: theme.mute }]}>{t('hostNoMagpieGlobal')}</Text>
             ) : !memData.available ? (
               <Text style={[styles.emptyNote, { color: theme.danger }]}>
-                Magpie 网关未响应{memData.error ? `：${memData.error}` : ''}
+                {t('magpieNoResp')}{memData.error ? `: ${memData.error}` : ''}
               </Text>
             ) : (memData.items || []).length === 0 ? (
-              <Text style={[styles.emptyNote, { color: theme.mute }]}>暂无全局记忆条目</Text>
+              <Text style={[styles.emptyNote, { color: theme.mute }]}>{t('noGlobalMem')}</Text>
             ) : (
               <View style={styles.magpieList}>
                 {memData.items.map((it) => (
@@ -933,24 +988,24 @@ export default function SettingsScreen() {
                           </View>
                         ) : null}
                         {(it.tags || [])
-                          .filter((t) => !t.startsWith('bot:'))
-                          .map((t) => (
-                            <View key={t} style={[styles.smallBtn, { backgroundColor: theme.card }]}>
-                              <Text style={[styles.smallBtnTxt, { color: theme.text2 }]}>#{t}</Text>
+                          .filter((tag) => !tag.startsWith('bot:'))
+                          .map((tag) => (
+                            <View key={tag} style={[styles.smallBtn, { backgroundColor: theme.card }]}>
+                              <Text style={[styles.smallBtnTxt, { color: theme.text2 }]}>#{tag}</Text>
                             </View>
                           ))}
                       </View>
                       <Pressable
                         onPress={() => {
                           confirmAction(
-                            '删除记忆',
-                            '确认从 Magpie Memory 遗忘这条记忆？',
+                            t('deleteMemTitle'),
+                            t('deleteMemConfirm'),
                             async () => {
                               try {
                                 await deleteMemory(it.id);
                                 await loadGlobalMemories(memQuery);
                               } catch (err: any) {
-                                setError(err?.message || '删除失败');
+                                setError(err?.message || t('delFailed'));
                               }
                             },
                             true
@@ -958,7 +1013,7 @@ export default function SettingsScreen() {
                         }}
                         style={[styles.magpieBtn, { backgroundColor: theme.card }]}
                       >
-                        <Text style={[styles.magpieBtnTxt, { color: theme.danger }]}>删除</Text>
+                        <Text style={[styles.magpieBtnTxt, { color: theme.danger }]}>{t('delete')}</Text>
                       </Pressable>
                     </View>
                     <Text selectable style={[styles.noteTxt, { color: theme.text }]}>
@@ -971,13 +1026,13 @@ export default function SettingsScreen() {
           </View>
 
           <View style={[styles.card, { backgroundColor: theme.card }]}>
-            <Text style={[styles.sectionTitle, { color: theme.text }]}>远程与设备</Text>
+            <Text style={[styles.sectionTitle, { color: theme.text }]}>{t('remoteDevicesTitle')}</Text>
             <View style={styles.rowBetween}>
-              <Text style={[styles.noteTxt, { color: theme.text }]}>允许 Bot 操控本机桌面</Text>
+              <Text style={[styles.noteTxt, { color: theme.text }]}>{t('allowDesktopCtrl')}</Text>
               <Switch
                 value={settings?.allowLocalDesktop !== false}
                 onValueChange={(v) => {
-                  void setAllowLocalDesktop(v).catch((err: any) => setError(err?.message || '更新失败'));
+                  void setAllowLocalDesktop(v).catch((err: any) => setError(err?.message || t('updateFailed')));
                 }}
                 trackColor={{ false: theme.s2, true: theme.accent }}
               />
@@ -985,7 +1040,7 @@ export default function SettingsScreen() {
             <View style={styles.rowBetween}>
               <View style={styles.connCol}>
                 <Text style={[styles.connLbl, { color: theme.text }]}>
-                  {activeServer?.label || '未选择主电脑'}
+                  {activeServer?.label || t('noHostSelected')}
                 </Text>
                 <Text numberOfLines={1} style={[styles.connAddr, { color: theme.mute, fontFamily: MONO_FONT }]}>
                   {activeServer?.address || '-'}
@@ -996,13 +1051,13 @@ export default function SettingsScreen() {
                   onPress={() => router.push('/devices')}
                   style={[styles.switchBtn, { backgroundColor: theme.s1 }]}
                 >
-                  <Text style={[styles.switchBtnTxt, { color: theme.text }]}>配对与节点</Text>
+                  <Text style={[styles.switchBtnTxt, { color: theme.text }]}>{t('pairingNodes')}</Text>
                 </Pressable>
                 <Pressable
                   onPress={() => router.push('/connect')}
                   style={[styles.switchBtn, { backgroundColor: theme.s1 }]}
                 >
-                  <Text style={[styles.switchBtnTxt, { color: theme.text }]}>切换主机</Text>
+                  <Text style={[styles.switchBtnTxt, { color: theme.text }]}>{t('switchHost')}</Text>
                 </Pressable>
               </View>
             </View>
@@ -1022,6 +1077,8 @@ const styles = StyleSheet.create({
   card: { borderRadius: 22, padding: 16, gap: 12 },
   sectionTitle: { fontSize: 16, fontWeight: '700' },
   subLabel: { fontSize: 13.5, fontWeight: '600' },
+  swatchRow: { flexDirection: 'row', gap: 10, flexWrap: 'wrap' },
+  swatch: { width: 28, height: 28, borderRadius: 14 },
   noteTxt: { fontSize: 13.5, lineHeight: 19, flex: 1 },
   rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
   segmentRow: { flexDirection: 'row', gap: 8 },

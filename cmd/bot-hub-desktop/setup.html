@@ -34,26 +34,44 @@
 <body>
 <div id="dragBar" style="position:fixed;top:8px;left:76px;right:8px;height:36px;--wails-draggable:drag"></div>
 <main>
-  <div><h1>Bot Hub</h1><p class="sub">选择这台电脑的用法，之后可从菜单栏图标「切换模式」</p></div>
+  <div><h1>Bot Hub</h1><p class="sub" data-i18n="sub">选择这台电脑的用法，之后可从菜单栏图标「切换模式」</p></div>
 
   <section class="card">
-    <h2>在这台电脑上运行</h2>
-    <p>Bot 在本机运行，数据保存在 <code id="dir"></code></p>
-    <p id="ocWarn" class="warn" hidden>没有找到 opencode：请先安装 OpenCode 再选这一项。</p>
-    <button id="local">本机运行</button>
+    <h2 data-i18n="localTitle">在这台电脑上运行</h2>
+    <p><span data-i18n="localDesc">Bot 在本机运行，数据保存在 </span><code id="dir"></code></p>
+    <p id="ocWarn" class="warn" hidden data-i18n="ocWarn">没有找到 opencode：请先安装 OpenCode 再选这一项。</p>
+    <button id="local" data-i18n="localBtn">本机运行</button>
   </section>
 
   <section class="card">
-    <h2>连接远端 Bot Hub</h2>
-    <p>粘贴远端「远程访问」里的 tailcat:// 链接。不需要安装 Tailscale。</p>
+    <h2 data-i18n="remoteTitle">连接远端 Bot Hub</h2>
+    <p data-i18n="remoteDesc">粘贴远端「远程访问」里的 tailcat:// 链接。不需要安装 Tailscale。</p>
     <textarea id="link" placeholder="tailcat://connect/tc…?port=3789" spellcheck="false"></textarea>
-    <button id="remote">连接</button>
+    <button id="remote" data-i18n="remoteBtn">连接</button>
   </section>
 
   <p id="status"></p>
 </main>
 <script>
 const $ = id => document.getElementById(id);
+const langPref = (() => { try { return localStorage.getItem('bothub.lang'); } catch { return ''; } })();
+const isEn = langPref === 'en' || (langPref !== 'zh-CN' && !/^zh\b/i.test(navigator.language || ''));
+const dict = isEn ? {
+  sub: 'Choose how to use this computer (switch anytime from the menu bar icon)',
+  localTitle: 'Run on this computer',
+  localDesc: 'Bots run locally and store data in ',
+  ocWarn: 'opencode not found: install OpenCode before choosing local mode.',
+  localBtn: 'Run Locally',
+  remoteTitle: 'Connect to remote Bot Hub',
+  remoteDesc: 'Paste the tailcat:// link from Remote Access. No Tailscale install needed.',
+  remoteBtn: 'Connect',
+  starting: 'Starting…',
+  startFailed: 'Start failed',
+} : null;
+if (isEn) {
+  document.documentElement.lang = 'en';
+  document.querySelectorAll('[data-i18n]').forEach(el => { if (dict[el.dataset.i18n]) el.textContent = dict[el.dataset.i18n]; });
+}
 let polling = false;
 async function refresh() {
   const s = await (await fetch('/api/desktop')).json();
@@ -61,14 +79,14 @@ async function refresh() {
   $('ocWarn').hidden = s.opencode;
   if (!$('link').value) $('link').value = s.link || '';
   $('status').textContent = s.status;
-  $('status').className = s.status.startsWith('启动失败') ? 'warn' : '';
-  const busy = s.status === '正在启动…';
+  $('status').className = s.status.startsWith('启动失败') || s.status.startsWith('Start failed') ? 'warn' : '';
+  const busy = s.status === '正在启动…' || s.status === 'Starting…';
   $('local').disabled = $('remote').disabled = busy;
   return busy;
 }
 async function start(body) {
   await fetch('/api/desktop/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-  $('status').textContent = '正在启动…';
+  $('status').textContent = isEn ? dict.starting : '正在启动…';
   if (polling) return;
   polling = true;
   // The app navigates away on success; until then, show progress or the error.

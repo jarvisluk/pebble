@@ -67,6 +67,7 @@ func NewDefaultRegistry(cfg *config.HubConfig) *Registry {
 	r.Register(NewPiHarness())
 	r.Register(NewDshHarness())
 	r.Register(NewClaudeHarness())
+	r.Register(NewAgyHarness())
 	return r
 }
 
@@ -90,7 +91,7 @@ func (r *Registry) Get(kind string) (Harness, error) {
 }
 
 // harnessOrder is the display order; unknown kinds sort after, by name.
-var harnessOrder = map[string]int{"opencode": 1, "pi": 2, "dsh": 3, "claude": 4}
+var harnessOrder = map[string]int{"opencode": 1, "pi": 2, "dsh": 3, "claude": 4, "agy": 5}
 
 // All returns the registered harnesses in display order.
 func (r *Registry) All() []Harness {

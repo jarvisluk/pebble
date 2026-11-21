@@ -598,6 +598,10 @@ func shellEnv() {
 		}
 	}
 	if home, err := os.UserHomeDir(); err == nil {
-		os.Setenv("PATH", os.Getenv("PATH")+string(os.PathListSeparator)+filepath.Join(home, ".opencode", "bin"))
+		os.Setenv("PATH", strings.Join([]string{
+			os.Getenv("PATH"),
+			filepath.Join(home, ".opencode", "bin"),
+			filepath.Join(home, ".local", "bin"),
+		}, string(os.PathListSeparator)))
 	}
 }

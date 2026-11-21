@@ -22,24 +22,19 @@ import { ChevronLeftIcon, DocIcon, MonitorIcon, SendIcon, StopIcon } from '../..
 import { MarkdownText } from '../../components/MarkdownText';
 import { ModalHeader } from '../../components/ModalHeader';
 import { confirmAction } from '../../confirm';
+import { useI18n } from '../../i18n';
 import { formatStamp, useHub } from '../../store';
-import { MONO_FONT, useTheme } from '../../theme';
+import { getBotPalette, MONO_FONT, useTheme } from '../../theme';
 import type { BotDetail, ChatMessage, MagpieMemoryList } from '../../types';
 
 const FIVE_MIN_MS = 5 * 60 * 1000;
-
-const SLASH_COMMANDS = [
-  { cmd: '/status', label: '会话状态', autoSend: true },
-  { cmd: '/bots', label: '所有 Bot', autoSend: true },
-  { cmd: '/ask ', label: '跨 Bot 协作', autoSend: false },
-  { cmd: '/reset', label: '重置会话', autoSend: true },
-];
 
 export default function BotChatScreen() {
   const { id } = useLocalSearchParams<{ id: string | string[] }>();
   const botId = useMemo(() => decodeURIComponent(Array.isArray(id) ? id[0] || '' : id || ''), [id]);
 
   const theme = useTheme();
+  const { t, lang } = useI18n();
   const insets = useSafeAreaInsets();
   const {
     bots,
@@ -62,13 +57,25 @@ export default function BotChatScreen() {
 
   const botIndex = useMemo(() => bots.findIndex((b) => b.id === botId), [bots, botId]);
   const bot = botIndex >= 0 ? bots[botIndex] : undefined;
+  const botPal = useMemo(() => getBotPalette(botId, botIndex, theme.dark), [botId, botIndex, theme.dark]);
   const chatList = msgs[botId] || [];
+
+  const slashCommands = useMemo(
+    () => [
+      { cmd: '/status', label: t('statusLabel'), autoSend: true },
+      { cmd: '/bots', label: t('allBotsLabel'), autoSend: true },
+      { cmd: '/ask ', label: t('collabLabel'), autoSend: false },
+      { cmd: '/reset', label: t('resetSessionLabel'), autoSend: true },
+    ],
+    [t]
+  );
 
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detail, setDetail] = useState<BotDetail | null>(null);
+  const [techExpanded, setTechExpanded] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [editName, setEditName] = useState('');
   const [editDesc, setEditDesc] = useState('');
@@ -125,6 +132,7 @@ export default function BotChatScreen() {
 
   const handleOpenDetail = useCallback(async () => {
     setEditMode(false);
+    setTechExpanded(false);
     setBotMemShowAdd(false);
     setEditErr('');
     setDetailOpen(true);
@@ -153,7 +161,7 @@ export default function BotChatScreen() {
   const onSaveEdit = async () => {
     const trimmed = editName.trim();
     if (!trimmed) {
-      setEditErr('名称不能为空');
+      setEditErr(t('nameRequired'));
       return;
     }
     setEditErr('');
@@ -169,7 +177,7 @@ export default function BotChatScreen() {
       setDetail(fresh);
       setEditMode(false);
     } catch (err: any) {
-      setEditErr(err?.message || '保存失败');
+      setEditErr(err?.message || t('saveFailed'));
     } finally {
       setEditSaving(false);
     }
@@ -178,15 +186,15 @@ export default function BotChatScreen() {
   const handleDeleteConfirm = () => {
     if (bots.length <= 1) return;
     confirmAction(
-      `删除 ${bot?.name || botId}？`,
-      '将从配置中移除此 Bot 并停止其队列，磁盘上的 workspace 与历史文件会保留。',
+      t('deleteBotTitle', { name: bot?.name || botId }),
+      t('deleteBotDesc'),
       async () => {
         try {
           await deleteBot(botId);
           setDetailOpen(false);
           router.replace('/');
         } catch (err: any) {
-          setEditErr(err?.message || '删除失败');
+          setEditErr(err?.message || t('delFailed'));
         }
       },
       true
@@ -206,12 +214,12 @@ export default function BotChatScreen() {
         await sendMessage(botId, trimmed);
       } catch (err: any) {
         if (restoreOnError) setInput(raw);
-        setSendErr(err?.message || '发送失败');
+        setSendErr(err?.message || t('sendFailed'));
       } finally {
         setSending(false);
       }
     },
-    [botId, sendMessage]
+    [botId, sendMessage, t]
   );
 
   const onSubmitComposer = () => {
@@ -229,7 +237,7 @@ export default function BotChatScreen() {
     try {
       await interruptBot(botId);
     } catch (err: any) {
-      setSendErr(err?.message || '停止失败');
+      setSendErr(err?.message || t('stopFailed'));
     }
   };
 
@@ -245,15 +253,15 @@ export default function BotChatScreen() {
 
   const handleResetConfirm = () => {
     confirmAction(
-      '重置会话',
-      `将清空「${bot?.name || botId}」的当前上下文并开启新会话，此操作不可撤销。`,
+      t('resetSessionTitle'),
+      t('resetSessionDesc', { name: bot?.name || botId }),
       async () => {
         try {
           await resetBot(botId);
           setDetailOpen(false);
           await loadMessages(botId);
         } catch (err: any) {
-          setSendErr(err?.message || '重置失败');
+          setSendErr(err?.message || t('resetFailed'));
         }
       },
       true
@@ -262,21 +270,21 @@ export default function BotChatScreen() {
 
   const suggestions = [
     {
-      title: '你能做什么？',
-      sub: '了解能力与工作目录',
+      title: t('sugAskTitle'),
+      sub: t('sugAskSub'),
       bg: theme.pink,
       ink: theme.pinkInk,
-      onPress: () => void handleSendText('你能做什么？', false),
+      onPress: () => void handleSendText(t('sugAskTitle'), false),
     },
     {
-      title: '会话状态',
-      sub: '/status',
+      title: t('statusLabel'),
+      sub: t('sugStatusSub'),
       bg: theme.lilac,
       ink: theme.lilacInk,
       onPress: () => void handleSendText('/status', false),
     },
     {
-      title: '让别的 Bot 帮忙',
+      title: t('sugCollabTitle'),
       sub: '/ask ',
       bg: theme.sage,
       ink: theme.sageInk,
@@ -286,10 +294,10 @@ export default function BotChatScreen() {
       },
     },
     {
-      title: '列出所有 Bot',
+      title: t('sugListTitle'),
       sub: '/bots',
-      bg: theme.accentSoft,
-      ink: theme.accent,
+      bg: botPal.soft,
+      ink: botPal.accent,
       onPress: () => void handleSendText('/bots', false),
     },
   ];
@@ -306,7 +314,7 @@ export default function BotChatScreen() {
     if (item.role === 'user') {
       bubble = (
         <View style={styles.userRow}>
-          <View style={[styles.userBubble, { backgroundColor: theme.accentSoft }]}>
+          <View style={[styles.userBubble, { backgroundColor: botPal.soft }]}>
             <Text selectable style={[styles.userText, { color: theme.text }]}>
               {item.text}
             </Text>
@@ -332,7 +340,10 @@ export default function BotChatScreen() {
         </View>
       );
     } else if (item.role === 'bot_out' || item.role === 'bot_in') {
-      const label = item.role === 'bot_out' ? `委托给 @${item.to || ''}` : `来自 @${item.from || ''}`;
+      const label =
+        item.role === 'bot_out'
+          ? t('delegateTo', { peer: item.to || '' })
+          : t('fromPeer', { peer: item.from || '' });
       bubble = (
         <View style={styles.assistantRow}>
           <View style={[styles.botRelBubble, { backgroundColor: theme.lilac }]}>
@@ -365,7 +376,7 @@ export default function BotChatScreen() {
     return (
       <View>
         {showStamp && (
-          <Text style={[styles.stamp, { color: theme.mute }]}>{formatStamp(item.createdAt)}</Text>
+          <Text style={[styles.stamp, { color: theme.mute }]}>{formatStamp(item.createdAt, lang)}</Text>
         )}
         {bubble}
       </View>
@@ -379,7 +390,7 @@ export default function BotChatScreen() {
     <SafeAreaView style={[styles.safe, { backgroundColor: theme.page }]} edges={['top', 'left', 'right']}>
       <View style={[styles.header, { borderBottomColor: theme.s2 }]}>
         <Pressable
-          accessibilityLabel="返回"
+          accessibilityLabel={t('back')}
           onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))}
           style={styles.backBtn}
           hitSlop={10}
@@ -396,7 +407,7 @@ export default function BotChatScreen() {
         </View>
 
         <Pressable
-          accessibilityLabel="远程桌面"
+          accessibilityLabel={t('remoteDesktop')}
           onPress={() => router.push(`/desktop?target=${encodeURIComponent(takeovers[0]?.target || 'local')}`)}
           style={[styles.docBtn, { backgroundColor: theme.s1, marginRight: 6 }]}
           hitSlop={8}
@@ -404,7 +415,7 @@ export default function BotChatScreen() {
           <MonitorIcon size={18} color={takeovers.length > 0 ? theme.danger : theme.text2} />
         </Pressable>
         <Pressable
-          accessibilityLabel="Bot 详情"
+          accessibilityLabel={t('botDetails')}
           onPress={handleOpenDetail}
           style={[styles.docBtn, { backgroundColor: theme.s1 }]}
           hitSlop={8}
@@ -416,19 +427,19 @@ export default function BotChatScreen() {
       {takeovers.length > 0 && (
         <View style={[styles.errBanner, { backgroundColor: theme.pink, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 }]}>
           <Text numberOfLines={2} style={[styles.errTxt, { color: theme.pinkInk, flex: 1 }]}>
-            人工接管：{takeovers[0].reason}
+            {t('takeoverInline', { reason: takeovers[0].reason })}
           </Text>
           <Pressable
             onPress={() => router.push(`/desktop?target=${encodeURIComponent(takeovers[0].target || 'local')}`)}
             style={{ borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5, backgroundColor: theme.card }}
           >
-            <Text style={{ fontSize: 12, fontWeight: '700', color: theme.text }}>处理</Text>
+            <Text style={{ fontSize: 12, fontWeight: '700', color: theme.text }}>{t('handleAction')}</Text>
           </Pressable>
           <Pressable
             onPress={() => void resolveTakeover(takeovers[0].id)}
-            style={{ borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5, backgroundColor: theme.accent }}
+            style={{ borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5, backgroundColor: botPal.accent }}
           >
-            <Text style={{ fontSize: 12, fontWeight: '700', color: theme.accentText }}>恢复</Text>
+            <Text style={{ fontSize: 12, fontWeight: '700', color: botPal.text }}>{t('resumeShort')}</Text>
           </Pressable>
         </View>
       )}
@@ -460,7 +471,7 @@ export default function BotChatScreen() {
               <BotAvatar id={botId} size={92} index={botIndex} />
               <Text style={[styles.emptyTitle, { color: theme.text }]}>{bot?.name || botId}</Text>
               <Text style={[styles.emptyDesc, { color: theme.text2 }]}>
-                {bot?.description || '直接发消息，或试试下面的指令'}
+                {bot?.description || t('emptyChatHint')}
               </Text>
               <View style={styles.suggestGrid}>
                 {suggestions.map((s) => (
@@ -484,7 +495,7 @@ export default function BotChatScreen() {
               <View style={[styles.busyFoot, { backgroundColor: theme.s1 }]}>
                 <ActivityIndicator size="small" color={theme.busy} />
                 <Text style={[styles.busyFootTxt, { color: theme.busy }]}>
-                  {tools[botId] ? `正在调用 ${tools[botId]}…` : '正在思考…'}
+                  {tools[botId] ? t('callingTool', { tool: tools[botId] }) : t('thinking')}
                 </Text>
               </View>
             ) : undefined
@@ -505,13 +516,13 @@ export default function BotChatScreen() {
               keyboardShouldPersistTaps="always"
               contentContainerStyle={styles.slashRow}
             >
-              {SLASH_COMMANDS.map((c) => (
+              {slashCommands.map((c) => (
                 <Pressable
                   key={c.cmd}
                   onPress={() => onPickSlash(c.cmd, c.autoSend)}
                   style={[styles.slashPill, { backgroundColor: theme.s1 }]}
                 >
-                  <Text style={[styles.slashCmd, { color: theme.accent, fontFamily: MONO_FONT }]}>
+                  <Text style={[styles.slashCmd, { color: botPal.accent, fontFamily: MONO_FONT }]}>
                     {c.cmd.trim()}
                   </Text>
                   <Text style={[styles.slashLbl, { color: theme.text2 }]}>{c.label}</Text>
@@ -525,14 +536,14 @@ export default function BotChatScreen() {
               ref={inputRef}
               value={input}
               onChangeText={setInput}
-              placeholder={`发消息给 ${bot?.name || botId}…`}
+              placeholder={t('msgBotPh', { name: bot?.name || botId })}
               placeholderTextColor={theme.mute}
               multiline
               style={[styles.composerInput, { color: theme.text }]}
               maxLength={8000}
             />
             <Pressable
-              accessibilityLabel={showStop ? '停止输出' : '发送消息'}
+              accessibilityLabel={showStop ? t('stopOutput') : t('sendMsg')}
               disabled={!showStop && (!input.trim() || sending)}
               onPress={showStop ? onInterrupt : onSubmitComposer}
               style={[
@@ -541,7 +552,7 @@ export default function BotChatScreen() {
                   backgroundColor: showStop
                     ? theme.text
                     : input.trim()
-                      ? theme.accent
+                      ? botPal.accent
                       : theme.s2,
                 },
               ]}
@@ -549,7 +560,7 @@ export default function BotChatScreen() {
               {showStop ? (
                 <StopIcon size={16} color={theme.page} />
               ) : (
-                <SendIcon size={17} color={input.trim() ? theme.accentText : theme.mute} />
+                <SendIcon size={17} color={input.trim() ? botPal.text : theme.mute} />
               )}
             </Pressable>
           </View>
@@ -568,22 +579,22 @@ export default function BotChatScreen() {
         <View style={[styles.modalRoot, { backgroundColor: theme.page }]}>
           {editMode ? (
             <ModalHeader
-              title="编辑 Bot"
-              closeLabel="取消"
+              title={t('editBot')}
+              closeLabel={t('cancel')}
               onClose={() => {
                 setEditMode(false);
                 setEditErr('');
               }}
-              rightLabel="保存"
+              rightLabel={t('save')}
               onRightPress={() => void onSaveEdit()}
               rightDisabled={!editName.trim() || editSaving}
               rightLoading={editSaving}
             />
           ) : (
             <ModalHeader
-              title="Bot 详情"
+              title={t('botDetails')}
               onClose={() => setDetailOpen(false)}
-              rightLabel="编辑"
+              rightLabel={t('edit')}
               onRightPress={enterEditMode}
               rightDisabled={detailLoading}
             />
@@ -597,28 +608,28 @@ export default function BotChatScreen() {
             {editMode ? (
               <>
                 <View style={[styles.detailCard, { backgroundColor: theme.card }]}>
-                  <Text style={[styles.sectionLabel, { color: theme.mute }]}>名称</Text>
+                  <Text style={[styles.sectionLabel, { color: theme.mute }]}>{t('botName')}</Text>
                   <TextInput
                     value={editName}
                     onChangeText={setEditName}
-                    placeholder="Bot 名称"
+                    placeholder={t('botNamePh')}
                     placeholderTextColor={theme.mute}
                     style={[styles.editInput, { backgroundColor: theme.s1, color: theme.text }]}
                   />
-                  <Text style={[styles.sectionLabel, { color: theme.mute }]}>简介（可选）</Text>
+                  <Text style={[styles.sectionLabel, { color: theme.mute }]}>{t('descOptional')}</Text>
                   <TextInput
                     value={editDesc}
                     onChangeText={setEditDesc}
-                    placeholder="一句话说明它负责什么"
+                    placeholder={t('descPh')}
                     placeholderTextColor={theme.mute}
                     style={[styles.editInput, { backgroundColor: theme.s1, color: theme.text }]}
                   />
                   <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 4 }}>
-                    <Text style={[styles.instructionsTxt, { color: theme.text, flex: 1 }]}>会话隐私隔离（其他 Bot 不可召回历史会话）</Text>
+                    <Text style={[styles.instructionsTxt, { color: theme.text, flex: 1 }]}>{t('privateSessions')}</Text>
                     <Switch
                       value={editPrivate}
                       onValueChange={setEditPrivate}
-                      trackColor={{ false: theme.s2, true: theme.accent }}
+                      trackColor={{ false: theme.s2, true: botPal.accent }}
                     />
                   </View>
                 </View>
@@ -628,7 +639,7 @@ export default function BotChatScreen() {
                   <TextInput
                     value={editInst}
                     onChangeText={setEditInst}
-                    placeholder="# Bot 指令…"
+                    placeholder={t('agentsPh')}
                     placeholderTextColor={theme.mute}
                     multiline
                     textAlignVertical="top"
@@ -662,65 +673,29 @@ export default function BotChatScreen() {
 
                   <View style={styles.statGrid}>
                     <View style={[styles.statPill, { backgroundColor: theme.s1 }]}>
-                      <Text style={[styles.statLbl, { color: theme.mute }]}>轮次</Text>
+                      <Text style={[styles.statLbl, { color: theme.mute }]}>{t('statTurns')}</Text>
                       <Text style={[styles.statVal, { color: theme.text }]}>
                         {activeDetail?.session?.turnCount || 0}
                       </Text>
                     </View>
                     <View style={[styles.statPill, { backgroundColor: theme.s1 }]}>
-                      <Text style={[styles.statLbl, { color: theme.mute }]}>开销</Text>
+                      <Text style={[styles.statLbl, { color: theme.mute }]}>{t('statCost')}</Text>
                       <Text style={[styles.statVal, { color: theme.text }]}>
                         ${(activeDetail?.session?.totalCostUsd || 0).toFixed(4)}
-                      </Text>
-                    </View>
-                    <View style={[styles.statPill, { backgroundColor: theme.s1 }]}>
-                      <Text style={[styles.statLbl, { color: theme.mute }]}>后端</Text>
-                      <Text style={[styles.statVal, { color: theme.text }]}>
-                        {activeDetail?.harness || '-'}
-                      </Text>
-                    </View>
-                    <View style={[styles.statPill, { backgroundColor: theme.s1 }]}>
-                      <Text style={[styles.statLbl, { color: theme.mute }]}>模型</Text>
-                      <Text numberOfLines={1} style={[styles.statVal, { color: theme.text }]}>
-                        {activeDetail?.model || '默认'}
-                      </Text>
-                    </View>
-                    <View style={[styles.statPill, { backgroundColor: theme.s1 }]}>
-                      <Text style={[styles.statLbl, { color: theme.mute }]}>历史会话</Text>
-                      <Text numberOfLines={1} style={[styles.statVal, { color: theme.text }]}>
-                        {`${activeDetail?.archivedSessions || 0} 条${activeDetail?.privateSessions ? ' · 隐私' : ''}`}
                       </Text>
                     </View>
                   </View>
                 </View>
 
                 <View style={[styles.detailCard, { backgroundColor: theme.card }]}>
-                  <Text style={[styles.sectionLabel, { color: theme.mute }]}>工作目录</Text>
-                  <Text selectable style={[styles.monoBlock, { color: theme.text2, fontFamily: MONO_FONT }]}>
-                    {activeDetail?.workspace || '-'}
-                  </Text>
-                </View>
-
-                <View style={[styles.detailCard, { backgroundColor: theme.card }]}>
-                  <Text style={[styles.sectionLabel, { color: theme.mute }]}>AGENTS.md</Text>
-                  {detailLoading ? (
-                    <ActivityIndicator size="small" color={theme.accent} />
-                  ) : (
-                    <Text selectable style={[styles.instructionsTxt, { color: theme.text2 }]}>
-                      {detail?.instructions?.trim() ? detail.instructions : '未配置指令'}
-                    </Text>
-                  )}
-                </View>
-
-                <View style={[styles.detailCard, { backgroundColor: theme.card }]}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <Text style={[styles.sectionLabel, { color: theme.mute }]}>Magpie 专属记忆</Text>
+                    <Text style={[styles.sectionLabel, { color: theme.mute }]}>{t('botMemory')}</Text>
                     <Pressable
                       onPress={() => setBotMemShowAdd((v) => !v)}
-                      style={{ borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4, backgroundColor: theme.accentSoft }}
+                      style={{ borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4, backgroundColor: botPal.soft }}
                     >
-                      <Text style={{ fontSize: 12, fontWeight: '700', color: theme.accent }}>
-                        {botMemShowAdd ? '收起' : '+ 添加'}
+                      <Text style={{ fontSize: 12, fontWeight: '700', color: botPal.accent }}>
+                        {botMemShowAdd ? t('collapse') : t('addShort')}
                       </Text>
                     </Pressable>
                   </View>
@@ -729,7 +704,7 @@ export default function BotChatScreen() {
                       <TextInput
                         value={botMemText}
                         onChangeText={setBotMemText}
-                        placeholder="记录此 Bot 的长期事实或约定…"
+                        placeholder={t('botMemPh')}
                         placeholderTextColor={theme.mute}
                         multiline
                         textAlignVertical="top"
@@ -747,27 +722,27 @@ export default function BotChatScreen() {
                             setBotMemShowAdd(false);
                             await loadBotMemories();
                           } catch (err: any) {
-                            setEditErr(err?.message || '保存专属记忆失败');
+                            setEditErr(err?.message || t('saveBotMemFailed'));
                           } finally {
                             setBotMemSaving(false);
                           }
                         }}
-                        style={{ borderRadius: 999, paddingVertical: 9, alignItems: 'center', backgroundColor: theme.accent }}
+                        style={{ borderRadius: 999, paddingVertical: 9, alignItems: 'center', backgroundColor: botPal.accent }}
                       >
-                        <Text style={{ fontSize: 13, fontWeight: '700', color: theme.accentText }}>
-                          {botMemSaving ? '保存中…' : '保存记忆'}
+                        <Text style={{ fontSize: 13, fontWeight: '700', color: botPal.text }}>
+                          {botMemSaving ? t('saving') : t('saveMemory')}
                         </Text>
                       </Pressable>
                     </View>
                   )}
                   {botMemLoading ? (
-                    <ActivityIndicator size="small" color={theme.accent} />
+                    <ActivityIndicator size="small" color={botPal.accent} />
                   ) : !botMem?.installed ? (
-                    <Text style={[styles.instructionsTxt, { color: theme.mute }]}>主电脑未安装 Magpie</Text>
+                    <Text style={[styles.instructionsTxt, { color: theme.mute }]}>{t('hostNoMagpie')}</Text>
                   ) : !botMem.available ? (
-                    <Text style={[styles.instructionsTxt, { color: theme.danger }]}>Magpie 网关未响应</Text>
+                    <Text style={[styles.instructionsTxt, { color: theme.danger }]}>{t('magpieNoResp')}</Text>
                   ) : (botMem.items || []).length === 0 ? (
-                    <Text style={[styles.instructionsTxt, { color: theme.mute }]}>暂无专属记忆</Text>
+                    <Text style={[styles.instructionsTxt, { color: theme.mute }]}>{t('noBotMemories')}</Text>
                   ) : (
                     <View style={{ gap: 8 }}>
                       {botMem.items.map((it) => (
@@ -779,8 +754,8 @@ export default function BotChatScreen() {
                             <Pressable
                               onPress={() => {
                                 confirmAction(
-                                  '删除记忆',
-                                  '确认遗忘该条专属记忆？',
+                                  t('deleteMemTitle'),
+                                  t('deleteMemConfirm'),
                                   async () => {
                                     await deleteMemory(it.id);
                                     await loadBotMemories();
@@ -790,7 +765,7 @@ export default function BotChatScreen() {
                               }}
                               style={{ borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3, backgroundColor: theme.card }}
                             >
-                              <Text style={{ fontSize: 11.5, fontWeight: '700', color: theme.danger }}>删除</Text>
+                              <Text style={{ fontSize: 11.5, fontWeight: '700', color: theme.danger }}>{t('delete')}</Text>
                             </Pressable>
                           </View>
                           <Text selectable style={[styles.instructionsTxt, { color: theme.text }]}>
@@ -802,11 +777,64 @@ export default function BotChatScreen() {
                   )}
                 </View>
 
+                <View style={[styles.detailCard, { backgroundColor: theme.card }]}>
+                  <Pressable
+                    onPress={() => setTechExpanded((v) => !v)}
+                    style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}
+                  >
+                    <Text style={[styles.sectionLabel, { color: theme.text2 }]}>{t('techDetails')}</Text>
+                    <Text style={{ fontSize: 12, fontWeight: '700', color: theme.mute }}>
+                      {techExpanded ? t('collapse') : '▾'}
+                    </Text>
+                  </Pressable>
+                  {techExpanded && (
+                    <View style={{ gap: 12, paddingTop: 4 }}>
+                      <View style={styles.statGrid}>
+                        <View style={[styles.statPill, { backgroundColor: theme.s1 }]}>
+                          <Text style={[styles.statLbl, { color: theme.mute }]}>{t('statHarness')}</Text>
+                          <Text style={[styles.statVal, { color: theme.text }]}>
+                            {activeDetail?.harness || '-'}
+                          </Text>
+                        </View>
+                        <View style={[styles.statPill, { backgroundColor: theme.s1 }]}>
+                          <Text style={[styles.statLbl, { color: theme.mute }]}>{t('statModel')}</Text>
+                          <Text numberOfLines={1} style={[styles.statVal, { color: theme.text }]}>
+                            {activeDetail?.model || t('defaultTag')}
+                          </Text>
+                        </View>
+                        <View style={[styles.statPill, { backgroundColor: theme.s1 }]}>
+                          <Text style={[styles.statLbl, { color: theme.mute }]}>{t('statArchived')}</Text>
+                          <Text numberOfLines={1} style={[styles.statVal, { color: theme.text }]}>
+                            {t('archivedCount', { n: activeDetail?.archivedSessions || 0 }) +
+                              (activeDetail?.privateSessions ? t('privateTag') : '')}
+                          </Text>
+                        </View>
+                      </View>
+                      <View style={{ gap: 4 }}>
+                        <Text style={[styles.sectionLabel, { color: theme.mute }]}>{t('workspaceDir')}</Text>
+                        <Text selectable style={[styles.monoBlock, { color: theme.text2, fontFamily: MONO_FONT }]}>
+                          {activeDetail?.workspace || '-'}
+                        </Text>
+                      </View>
+                      <View style={{ gap: 4 }}>
+                        <Text style={[styles.sectionLabel, { color: theme.mute }]}>AGENTS.md</Text>
+                        {detailLoading ? (
+                          <ActivityIndicator size="small" color={botPal.accent} />
+                        ) : (
+                          <Text selectable style={[styles.instructionsTxt, { color: theme.text2 }]}>
+                            {detail?.instructions?.trim() ? detail.instructions : t('noInstructions')}
+                          </Text>
+                        )}
+                      </View>
+                    </View>
+                  )}
+                </View>
+
                 <Pressable
                   onPress={handleResetConfirm}
                   style={[styles.dangerBtn, { backgroundColor: theme.s1 }]}
                 >
-                  <Text style={[styles.dangerBtnTxt, { color: theme.text }]}>重置会话</Text>
+                  <Text style={[styles.dangerBtnTxt, { color: theme.text }]}>{t('resetSessionBtn')}</Text>
                 </Pressable>
 
                 {bots.length > 1 && (
@@ -814,7 +842,7 @@ export default function BotChatScreen() {
                     onPress={handleDeleteConfirm}
                     style={[styles.dangerBtn, { backgroundColor: theme.pink }]}
                   >
-                    <Text style={[styles.dangerBtnTxt, { color: theme.danger }]}>删除 Bot</Text>
+                    <Text style={[styles.dangerBtnTxt, { color: theme.danger }]}>{t('deleteBotBtn')}</Text>
                   </Pressable>
                 )}
               </>

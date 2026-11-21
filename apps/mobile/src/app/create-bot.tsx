@@ -14,6 +14,7 @@ import {
 
 import { BotAvatar } from '../components/BotAvatar';
 import { ModalHeader } from '../components/ModalHeader';
+import { useI18n } from '../i18n';
 import { resolveDefaultModel, useHub } from '../store';
 import { MONO_FONT, useTheme } from '../theme';
 
@@ -26,6 +27,7 @@ function toSlug(name: string): string {
 
 export default function CreateBotScreen() {
   const theme = useTheme();
+  const { t } = useI18n();
   const { settings, loadSettings, createBot } = useHub();
 
   const [name, setName] = useState('');
@@ -55,8 +57,8 @@ export default function CreateBotScreen() {
 
   const defaultModelPlaceholder = useMemo(() => {
     const resolved = resolveDefaultModel(settings?.defaultModel || '', harness);
-    return resolved || '留空继承默认模型';
-  }, [harness, settings?.defaultModel]);
+    return resolved || t('inheritDefaultPh');
+  }, [harness, settings?.defaultModel, t]);
 
   const closeSheet = () => {
     if (router.canGoBack()) {
@@ -83,11 +85,11 @@ export default function CreateBotScreen() {
     const cleanName = name.trim();
     const cleanId = botId.trim();
     if (!cleanName) {
-      setError('请填写 Bot 名称');
+      setError(t('fillBotName'));
       return;
     }
     if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/.test(cleanId)) {
-      setError('ID 仅支持字母、数字、连字符和下划线，且需以字母或数字开头');
+      setError(t('idInvalid'));
       return;
     }
 
@@ -103,14 +105,14 @@ export default function CreateBotScreen() {
       });
       router.replace(`/bot/${encodeURIComponent(created.id)}`);
     } catch (err: any) {
-      setError(err?.message || '创建失败');
+      setError(err?.message || t('createFailed'));
       setSubmitting(false);
     }
   };
 
   return (
     <View style={[styles.root, { backgroundColor: theme.page }]}>
-      <ModalHeader title="新建 Bot" onClose={closeSheet} />
+      <ModalHeader title={t('newBot')} onClose={closeSheet} />
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -122,11 +124,11 @@ export default function CreateBotScreen() {
 
           <View style={[styles.card, { backgroundColor: theme.card }]}>
             <View style={styles.field}>
-              <Text style={[styles.lbl, { color: theme.text2 }]}>名称</Text>
+              <Text style={[styles.lbl, { color: theme.text2 }]}>{t('botName')}</Text>
               <TextInput
                 value={name}
                 onChangeText={onChangeName}
-                placeholder="代码助手"
+                placeholder={t('botNameExamplePh')}
                 placeholderTextColor={theme.mute}
                 style={[styles.input, { backgroundColor: theme.s1, color: theme.text }]}
               />
@@ -137,7 +139,7 @@ export default function CreateBotScreen() {
               <TextInput
                 value={botId}
                 onChangeText={onChangeId}
-                placeholder="coder-1（英文、数字、-、_）"
+                placeholder={t('botIdPh')}
                 placeholderTextColor={theme.mute}
                 autoCapitalize="none"
                 autoCorrect={false}
@@ -146,18 +148,18 @@ export default function CreateBotScreen() {
             </View>
 
             <View style={styles.field}>
-              <Text style={[styles.lbl, { color: theme.text2 }]}>简介（选填）</Text>
+              <Text style={[styles.lbl, { color: theme.text2 }]}>{t('descOptional')}</Text>
               <TextInput
                 value={description}
                 onChangeText={setDescription}
-                placeholder="负责某个仓库或日常事务"
+                placeholder={t('botDescCreatePh')}
                 placeholderTextColor={theme.mute}
                 style={[styles.input, { backgroundColor: theme.s1, color: theme.text }]}
               />
             </View>
 
             <View style={styles.field}>
-              <Text style={[styles.lbl, { color: theme.text2 }]}>执行后端</Text>
+              <Text style={[styles.lbl, { color: theme.text2 }]}>{t('harnessBackend')}</Text>
               <View style={styles.wrapRow}>
                 {harnessOptions.map((h) => {
                   const active = harness === h.id;
@@ -180,7 +182,7 @@ export default function CreateBotScreen() {
             </View>
 
             <View style={styles.field}>
-              <Text style={[styles.lbl, { color: theme.text2 }]}>模型（选填）</Text>
+              <Text style={[styles.lbl, { color: theme.text2 }]}>{t('modelOptional')}</Text>
               <TextInput
                 value={model}
                 onChangeText={setModel}
@@ -193,11 +195,11 @@ export default function CreateBotScreen() {
             </View>
 
             <View style={styles.field}>
-              <Text style={[styles.lbl, { color: theme.text2 }]}>指令 AGENTS.md（选填）</Text>
+              <Text style={[styles.lbl, { color: theme.text2 }]}>{t('agentsCreateLbl')}</Text>
               <TextInput
                 value={instructions}
                 onChangeText={setInstructions}
-                placeholder="给这个 Bot 的长期角色设定与工作约束…"
+                placeholder={t('agentsCreatePh')}
                 placeholderTextColor={theme.mute}
                 multiline
                 textAlignVertical="top"
@@ -215,7 +217,7 @@ export default function CreateBotScreen() {
               {submitting ? (
                 <ActivityIndicator size="small" color={theme.accentText} />
               ) : (
-                <Text style={[styles.createTxt, { color: theme.accentText }]}>创建</Text>
+                <Text style={[styles.createTxt, { color: theme.accentText }]}>{t('create')}</Text>
               )}
             </Pressable>
           </View>
