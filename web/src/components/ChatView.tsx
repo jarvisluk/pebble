@@ -303,7 +303,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
                     } else if (m.role === 'assistant') {
                       const rt =
                         m.from && m.from.startsWith('routine:') ? (
-                          <div className="label">定时回执 · {m.from.slice(8)}</div>
+                          <div className="label">{t('routineReceiptFrom', { name: m.from.slice(8) })}</div>
                         ) : null;
                       body = (
                         <div className={`msg bot${fresh}`}>

@@ -90,7 +90,6 @@ export default function BotChatScreen() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [detail, setDetail] = useState<BotDetail | null>(null);
   const [techExpanded, setTechExpanded] = useState(false);
-  const [editMode, setEditMode] = useState(false);
   const [editName, setEditName] = useState('');
   const [editDesc, setEditDesc] = useState('');
   const [editInst, setEditInst] = useState('');
@@ -193,22 +192,22 @@ export default function BotChatScreen() {
     const name = rtName.trim();
     const prompt = rtPrompt.trim();
     if (!name) {
-      setRtErr('请填写任务名称');
+      setRtErr(t('rtNameRequired'));
       return;
     }
     if (!prompt) {
-      setRtErr('请填写任务指令');
+      setRtErr(t('rtPromptRequired'));
       return;
     }
     const isDaily = rtMode === 'daily';
     const everyMinutes = isDaily ? 0 : parseInt(rtEvery, 10);
     const dailyAt = isDaily ? rtDaily.trim() : '';
     if (!isDaily && !(everyMinutes > 0)) {
-      setRtErr('间隔分钟需大于 0');
+      setRtErr(t('rtEveryPositive'));
       return;
     }
     if (isDaily && !/^\d{2}:\d{2}$/.test(dailyAt)) {
-      setRtErr('时间格式需为 HH:MM');
+      setRtErr(t('rtTimeFormatErr'));
       return;
     }
     setRtErr('');
@@ -231,19 +230,23 @@ export default function BotChatScreen() {
       }
       setRtShowForm(false);
     } catch (err: any) {
-      setRtErr(err?.message || '保存定时任务失败');
+      setRtErr(err?.message || t('rtSaveFailed'));
     } finally {
       setRtSaving(false);
     }
   };
 
   const handleOpenDetail = useCallback(async () => {
-    setEditMode(false);
     setTechExpanded(false);
     setBotMemShowAdd(false);
     setRtShowForm(false);
     setRtErr('');
     setEditErr('');
+    const initSrc = detail || bot;
+    setEditName(initSrc?.name || botId);
+    setEditDesc(initSrc?.description || '');
+    setEditInst(detail?.instructions || '');
+    setEditPrivate(!!initSrc?.privateSessions);
     setDetailOpen(true);
     setDetailLoading(true);
     void loadBotMemories();
@@ -251,22 +254,16 @@ export default function BotChatScreen() {
     try {
       const d = await getBotDetail(botId);
       setDetail(d);
+      setEditName(d.name || botId);
+      setEditDesc(d.description || '');
+      setEditInst(d.instructions || '');
+      setEditPrivate(!!d.privateSessions);
     } catch {
       // keep fallback bot info if detail fails
     } finally {
       setDetailLoading(false);
     }
-  }, [botId, getBotDetail, loadBotMemories, loadBotRoutines]);
-
-  const enterEditMode = () => {
-    const src = detail || bot;
-    setEditName(src?.name || botId);
-    setEditDesc(src?.description || '');
-    setEditInst(detail?.instructions || '');
-    setEditPrivate(!!src?.privateSessions);
-    setEditErr('');
-    setEditMode(true);
-  };
+  }, [bot, botId, detail, getBotDetail, loadBotMemories, loadBotRoutines]);
 
   const onSaveEdit = async () => {
     const trimmed = editName.trim();
@@ -285,7 +282,10 @@ export default function BotChatScreen() {
       });
       const fresh = await getBotDetail(botId);
       setDetail(fresh);
-      setEditMode(false);
+      setEditName(fresh.name || botId);
+      setEditDesc(fresh.description || '');
+      setEditInst(fresh.instructions || '');
+      setEditPrivate(!!fresh.privateSessions);
     } catch (err: any) {
       setEditErr(err?.message || t('saveFailed'));
     } finally {
@@ -439,7 +439,9 @@ export default function BotChatScreen() {
       if (item.costUsd && item.costUsd > 0) {
         metaParts.push(`$${item.costUsd.toFixed(4)}`);
       }
-      const routineLabel = item.from?.startsWith('routine:') ? `定时回执 · ${item.from.slice(8)}` : '';
+      const routineLabel = item.from?.startsWith('routine:')
+        ? t('routineReceiptFrom', { name: item.from.slice(8) })
+        : '';
       bubble = (
         <View style={styles.assistantRow}>
           <View style={[styles.assistantBubble, { backgroundColor: theme.card }]}>
@@ -501,6 +503,13 @@ export default function BotChatScreen() {
 
   const showStop = !!bot?.busy && !input.trim();
   const activeDetail = detail || bot;
+  const isDirty = Boolean(
+    activeDetail &&
+      (editName !== (activeDetail.name || botId) ||
+        editDesc !== (activeDetail.description || '') ||
+        editPrivate !== Boolean(activeDetail.privateSessions) ||
+        editInst !== (detail?.instructions || ''))
+  );
 
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: theme.page }]} edges={['top', 'left', 'right']}>
@@ -688,120 +697,66 @@ export default function BotChatScreen() {
         animationType="slide"
         presentationStyle={Platform.OS === 'ios' ? 'pageSheet' : 'fullScreen'}
         onRequestClose={() => {
-          setEditMode(false);
           setDetailOpen(false);
         }}
       >
         <View style={[styles.modalRoot, { backgroundColor: theme.page }]}>
-          {editMode ? (
-            <ModalHeader
-              title={t('editBot')}
-              closeLabel={t('cancel')}
-              onClose={() => {
-                setEditMode(false);
-                setEditErr('');
-              }}
-              rightLabel={t('save')}
-              onRightPress={() => void onSaveEdit()}
-              rightDisabled={!editName.trim() || editSaving}
-              rightLoading={editSaving}
-            />
-          ) : (
-            <ModalHeader
-              title={t('botDetails')}
-              onClose={() => setDetailOpen(false)}
-              rightLabel={t('edit')}
-              onRightPress={enterEditMode}
-              rightDisabled={detailLoading}
-            />
-          )}
+          <ModalHeader title={t('botDetails')} onClose={() => setDetailOpen(false)} />
           <ScrollView contentContainerStyle={styles.detailScroll} keyboardShouldPersistTaps="handled">
             {editErr ? (
               <View style={[styles.errBanner, { backgroundColor: theme.pink, marginHorizontal: 0 }]}>
                 <Text style={[styles.errTxt, { color: theme.danger }]}>{editErr}</Text>
               </View>
             ) : null}
-            {editMode ? (
-              <>
-                <View style={[styles.detailCard, { backgroundColor: theme.card }]}>
-                  <Text style={[styles.sectionLabel, { color: theme.mute }]}>{t('botName')}</Text>
-                  <TextInput
-                    value={editName}
-                    onChangeText={setEditName}
-                    placeholder={t('botNamePh')}
-                    placeholderTextColor={theme.mute}
-                    style={[styles.editInput, { backgroundColor: theme.s1, color: theme.text }]}
-                  />
-                  <Text style={[styles.sectionLabel, { color: theme.mute }]}>{t('descOptional')}</Text>
-                  <TextInput
-                    value={editDesc}
-                    onChangeText={setEditDesc}
-                    placeholder={t('descPh')}
-                    placeholderTextColor={theme.mute}
-                    style={[styles.editInput, { backgroundColor: theme.s1, color: theme.text }]}
-                  />
-                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 4 }}>
-                    <Text style={[styles.instructionsTxt, { color: theme.text, flex: 1 }]}>{t('privateSessions')}</Text>
-                    <Switch
-                      value={editPrivate}
-                      onValueChange={setEditPrivate}
-                      trackColor={{ false: theme.s2, true: botPal.accent }}
+            <>
+              <View style={[styles.detailCard, { backgroundColor: theme.card }]}>
+                <View style={styles.detailTop}>
+                  <BotAvatar id={botId} size={76} index={botIndex} />
+                  <View style={[styles.detailTitleCol, { gap: 4 }]}>
+                    <TextInput
+                      value={editName}
+                      onChangeText={setEditName}
+                      placeholder={t('botNamePh')}
+                      placeholderTextColor={theme.mute}
+                      style={[
+                        styles.detailName,
+                        {
+                          color: theme.text,
+                          backgroundColor: theme.s1,
+                          borderRadius: 10,
+                          paddingHorizontal: 10,
+                          paddingVertical: 6,
+                        },
+                      ]}
                     />
-                  </View>
-                </View>
-
-                <View style={[styles.detailCard, { backgroundColor: theme.card }]}>
-                  <Text style={[styles.sectionLabel, { color: theme.mute }]}>AGENTS.md</Text>
-                  <TextInput
-                    value={editInst}
-                    onChangeText={setEditInst}
-                    placeholder={t('agentsPh')}
-                    placeholderTextColor={theme.mute}
-                    multiline
-                    textAlignVertical="top"
-                    style={[
-                      styles.editInput,
-                      styles.editTextarea,
-                      { backgroundColor: theme.s1, color: theme.text, fontFamily: MONO_FONT },
-                    ]}
-                  />
-                </View>
-              </>
-            ) : (
-              <>
-                <View style={[styles.detailCard, { backgroundColor: theme.card }]}>
-                  <View style={styles.detailTop}>
-                    <BotAvatar id={botId} size={76} index={botIndex} />
-                    <View style={styles.detailTitleCol}>
-                      <Text style={[styles.detailName, { color: theme.text }]}>
-                        {activeDetail?.name || botId}
-                      </Text>
-                      <Text style={[styles.detailId, { color: theme.mute, fontFamily: MONO_FONT }]}>
-                        @{botId}
-                      </Text>
-                    </View>
-                  </View>
-                  {activeDetail?.description ? (
-                    <Text style={[styles.detailDesc, { color: theme.text2 }]}>
-                      {activeDetail.description}
+                    <Text style={[styles.detailId, { color: theme.mute, fontFamily: MONO_FONT }]}>
+                      @{botId}
                     </Text>
-                  ) : null}
-
-                  <View style={styles.statGrid}>
-                    <View style={[styles.statPill, { backgroundColor: theme.s1 }]}>
-                      <Text style={[styles.statLbl, { color: theme.mute }]}>{t('statTurns')}</Text>
-                      <Text style={[styles.statVal, { color: theme.text }]}>
-                        {activeDetail?.session?.turnCount || 0}
-                      </Text>
-                    </View>
-                    <View style={[styles.statPill, { backgroundColor: theme.s1 }]}>
-                      <Text style={[styles.statLbl, { color: theme.mute }]}>{t('statCost')}</Text>
-                      <Text style={[styles.statVal, { color: theme.text }]}>
-                        ${(activeDetail?.session?.totalCostUsd || 0).toFixed(4)}
-                      </Text>
-                    </View>
                   </View>
                 </View>
+                <TextInput
+                  value={editDesc}
+                  onChangeText={setEditDesc}
+                  placeholder={t('descPh')}
+                  placeholderTextColor={theme.mute}
+                  style={[styles.editInput, { backgroundColor: theme.s1, color: theme.text }]}
+                />
+
+                <View style={styles.statGrid}>
+                  <View style={[styles.statPill, { backgroundColor: theme.s1 }]}>
+                    <Text style={[styles.statLbl, { color: theme.mute }]}>{t('statTurns')}</Text>
+                    <Text style={[styles.statVal, { color: theme.text }]}>
+                      {activeDetail?.session?.turnCount || 0}
+                    </Text>
+                  </View>
+                  <View style={[styles.statPill, { backgroundColor: theme.s1 }]}>
+                    <Text style={[styles.statLbl, { color: theme.mute }]}>{t('statCost')}</Text>
+                    <Text style={[styles.statVal, { color: theme.text }]}>
+                      ${(activeDetail?.session?.totalCostUsd || 0).toFixed(4)}
+                    </Text>
+                  </View>
+                </View>
+              </View>
 
                 <View style={[styles.detailCard, { backgroundColor: theme.card }]}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -932,14 +887,32 @@ export default function BotChatScreen() {
                           {activeDetail?.workspace || '-'}
                         </Text>
                       </View>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 4 }}>
+                        <Text style={[styles.instructionsTxt, { color: theme.text, flex: 1 }]}>{t('privateSessions')}</Text>
+                        <Switch
+                          value={editPrivate}
+                          onValueChange={setEditPrivate}
+                          trackColor={{ false: theme.s2, true: botPal.accent }}
+                        />
+                      </View>
                       <View style={{ gap: 4 }}>
                         <Text style={[styles.sectionLabel, { color: theme.mute }]}>AGENTS.md</Text>
                         {detailLoading ? (
                           <ActivityIndicator size="small" color={botPal.accent} />
                         ) : (
-                          <Text selectable style={[styles.instructionsTxt, { color: theme.text2 }]}>
-                            {detail?.instructions?.trim() ? detail.instructions : t('noInstructions')}
-                          </Text>
+                          <TextInput
+                            value={editInst}
+                            onChangeText={setEditInst}
+                            placeholder={t('agentsPh')}
+                            placeholderTextColor={theme.mute}
+                            multiline
+                            textAlignVertical="top"
+                            style={[
+                              styles.editInput,
+                              styles.editTextarea,
+                              { backgroundColor: theme.s1, color: theme.text, fontFamily: MONO_FONT },
+                            ]}
+                          />
                         )}
                       </View>
                     </View>
@@ -948,7 +921,7 @@ export default function BotChatScreen() {
 
                 <View style={[styles.detailCard, { backgroundColor: theme.card }]}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <Text style={[styles.sectionLabel, { color: theme.mute }]}>定时任务</Text>
+                    <Text style={[styles.sectionLabel, { color: theme.mute }]}>{t('routines')}</Text>
                     <Pressable
                       onPress={() => {
                         if (rtShowForm && !rtEditId) setRtShowForm(false);
@@ -957,7 +930,7 @@ export default function BotChatScreen() {
                       style={{ borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4, backgroundColor: theme.accentSoft }}
                     >
                       <Text style={{ fontSize: 12, fontWeight: '700', color: theme.accent }}>
-                        {rtShowForm && !rtEditId ? '收起' : '+ 添加'}
+                        {rtShowForm && !rtEditId ? t('collapse') : t('addShort')}
                       </Text>
                     </Pressable>
                   </View>
@@ -967,7 +940,7 @@ export default function BotChatScreen() {
                       <TextInput
                         value={rtName}
                         onChangeText={setRtName}
-                        placeholder="任务名称（如：晨间简报）"
+                        placeholder={t('rtNamePh')}
                         placeholderTextColor={theme.mute}
                         style={[styles.editInput, { backgroundColor: theme.card, color: theme.text }]}
                       />
@@ -985,7 +958,7 @@ export default function BotChatScreen() {
                             }}
                           >
                             <Text style={{ fontSize: 12.5, fontWeight: '700', color: rtMode === m ? theme.accentText : theme.text2 }}>
-                              {m === 'interval' ? '按间隔（分钟）' : '每天定时'}
+                              {m === 'interval' ? t('rtModeInterval') : t('rtModeDaily')}
                             </Text>
                           </Pressable>
                         ))}
@@ -995,7 +968,7 @@ export default function BotChatScreen() {
                           value={rtEvery}
                           onChangeText={setRtEvery}
                           keyboardType="number-pad"
-                          placeholder="间隔分钟，例如 60"
+                          placeholder={t('rtEveryPh')}
                           placeholderTextColor={theme.mute}
                           style={[styles.editInput, { backgroundColor: theme.card, color: theme.text, fontFamily: MONO_FONT }]}
                         />
@@ -1003,7 +976,7 @@ export default function BotChatScreen() {
                         <TextInput
                           value={rtDaily}
                           onChangeText={setRtDaily}
-                          placeholder="每天触发时间 HH:MM（如 09:00）"
+                          placeholder={t('rtDailyPh')}
                           placeholderTextColor={theme.mute}
                           style={[styles.editInput, { backgroundColor: theme.card, color: theme.text, fontFamily: MONO_FONT }]}
                         />
@@ -1011,9 +984,9 @@ export default function BotChatScreen() {
                       <View style={{ flexDirection: 'row', gap: 6 }}>
                         {(
                           [
-                            ['receipt', '回执'],
-                            ['notify', '通知主会话'],
-                            ['none', '仅记录'],
+                            ['receipt', t('rtDeliveryReceipt')],
+                            ['notify', t('rtDeliveryNotify')],
+                            ['none', t('rtDeliveryNone')],
                           ] as const
                         ).map(([val, lbl]) => (
                           <Pressable
@@ -1036,7 +1009,7 @@ export default function BotChatScreen() {
                       <TextInput
                         value={rtModel}
                         onChangeText={setRtModel}
-                        placeholder="模型覆盖（可选，留空沿用 Bot 默认）"
+                        placeholder={t('rtModelPh')}
                         placeholderTextColor={theme.mute}
                         autoCapitalize="none"
                         style={[styles.editInput, { backgroundColor: theme.card, color: theme.text, fontFamily: MONO_FONT }]}
@@ -1044,7 +1017,7 @@ export default function BotChatScreen() {
                       <TextInput
                         value={rtTgChat}
                         onChangeText={setRtTgChat}
-                        placeholder="Telegram Chat ID（可选）"
+                        placeholder={t('rtTgChatPh')}
                         placeholderTextColor={theme.mute}
                         autoCapitalize="none"
                         style={[styles.editInput, { backgroundColor: theme.card, color: theme.text, fontFamily: MONO_FONT }]}
@@ -1052,14 +1025,14 @@ export default function BotChatScreen() {
                       <TextInput
                         value={rtPrompt}
                         onChangeText={setRtPrompt}
-                        placeholder="任务指令（无异常回复 NO_REPLY）"
+                        placeholder={t('rtPromptPh')}
                         placeholderTextColor={theme.mute}
                         multiline
                         textAlignVertical="top"
                         style={[styles.editInput, { minHeight: 72, backgroundColor: theme.card, color: theme.text }]}
                       />
                       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                        <Text style={{ fontSize: 13, color: theme.text }}>启用定时</Text>
+                        <Text style={{ fontSize: 13, color: theme.text }}>{t('rtEnabled')}</Text>
                         <Switch
                           value={rtEnabled}
                           onValueChange={setRtEnabled}
@@ -1074,7 +1047,7 @@ export default function BotChatScreen() {
                           }}
                           style={{ flex: 1, borderRadius: 999, paddingVertical: 9, alignItems: 'center', backgroundColor: theme.card }}
                         >
-                          <Text style={{ fontSize: 13, fontWeight: '700', color: theme.text2 }}>取消</Text>
+                          <Text style={{ fontSize: 13, fontWeight: '700', color: theme.text2 }}>{t('cancel')}</Text>
                         </Pressable>
                         <Pressable
                           disabled={rtSaving}
@@ -1082,7 +1055,7 @@ export default function BotChatScreen() {
                           style={{ flex: 1, borderRadius: 999, paddingVertical: 9, alignItems: 'center', backgroundColor: theme.accent }}
                         >
                           <Text style={{ fontSize: 13, fontWeight: '700', color: theme.accentText }}>
-                            {rtSaving ? '保存中…' : '保存任务'}
+                            {rtSaving ? t('saving') : t('rtSaveBtn')}
                           </Text>
                         </Pressable>
                       </View>
@@ -1096,25 +1069,30 @@ export default function BotChatScreen() {
                   {rtLoading && botRoutines.length === 0 ? (
                     <ActivityIndicator size="small" color={theme.accent} />
                   ) : botRoutines.length === 0 ? (
-                    <Text style={[styles.instructionsTxt, { color: theme.mute }]}>暂无定时任务</Text>
+                    <Text style={[styles.instructionsTxt, { color: theme.mute }]}>{t('rtEmpty')}</Text>
                   ) : (
                     <View style={{ gap: 8 }}>
                       {botRoutines.map((rt) => {
                         const trig = [
-                          rt.everyMinutes && rt.everyMinutes > 0 ? `每 ${rt.everyMinutes}m` : '',
-                          rt.dailyAt ? `每日 ${rt.dailyAt}` : '',
+                          rt.everyMinutes && rt.everyMinutes > 0 ? t('rtEveryShort', { n: rt.everyMinutes }) : '',
+                          rt.dailyAt ? t('rtDailyShort', { time: rt.dailyAt }) : '',
                         ]
                           .filter(Boolean)
                           .join(' · ');
-                        const delivLbl = rt.mainDelivery === 'notify' ? '通知主会话' : rt.mainDelivery === 'none' ? '仅记录' : '回执';
+                        const delivLbl =
+                          rt.mainDelivery === 'notify'
+                            ? t('rtDeliveryNotify')
+                            : rt.mainDelivery === 'none'
+                              ? t('rtDeliveryNone')
+                              : t('rtDeliveryReceipt');
                         const statusTxt = rt.running
-                          ? '执行中'
+                          ? t('rtStatusRunning')
                           : rt.lastRun?.status === 'ok'
-                            ? '已产出'
+                            ? t('rtStatusOk')
                             : rt.lastRun?.status === 'silent'
-                              ? '无变化'
+                              ? t('rtStatusSilent')
                               : rt.lastRun?.status === 'error'
-                                ? '失败'
+                                ? t('rtStatusError')
                                 : '';
                         const runsOpen = rtRunsOpenId === rt.id;
                         const runList = rtRunsMap[rt.id] || [];
@@ -1141,7 +1119,7 @@ export default function BotChatScreen() {
                                 value={rt.enabled}
                                 onValueChange={(v) => {
                                   void updateRoutine(botId, rt.id, { enabled: v }).catch((err: any) =>
-                                    setRtErr(err?.message || '更新状态失败')
+                                    setRtErr(err?.message || t('rtStatusUpdateFailed'))
                                   );
                                 }}
                                 trackColor={{ false: theme.s2, true: theme.accent }}
@@ -1158,12 +1136,12 @@ export default function BotChatScreen() {
                                 disabled={rt.running}
                                 onPress={() => {
                                   setRtErr('');
-                                  void runRoutine(botId, rt.id).catch((err: any) => setRtErr(err?.message || '触发失败'));
+                                  void runRoutine(botId, rt.id).catch((err: any) => setRtErr(err?.message || t('rtRunFailed')));
                                 }}
                                 style={{ borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4, backgroundColor: theme.card }}
                               >
                                 <Text style={{ fontSize: 12, fontWeight: '700', color: theme.text }}>
-                                  {rt.running ? '运行中…' : '立即运行'}
+                                  {rt.running ? t('rtRunningBtn') : t('rtRunNow')}
                                 </Text>
                               </Pressable>
                               <Pressable
@@ -1183,20 +1161,20 @@ export default function BotChatScreen() {
                                 style={{ borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4, backgroundColor: theme.card }}
                               >
                                 <Text style={{ fontSize: 12, fontWeight: '700', color: theme.text2 }}>
-                                  {runsOpen ? '收起记录' : '记录'}
+                                  {runsOpen ? t('rtRunsHide') : t('rtRunsBtn')}
                                 </Text>
                               </Pressable>
                               <Pressable
                                 onPress={() => openRoutineEditor(rt)}
                                 style={{ borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4, backgroundColor: theme.card }}
                               >
-                                <Text style={{ fontSize: 12, fontWeight: '700', color: theme.text2 }}>编辑</Text>
+                                <Text style={{ fontSize: 12, fontWeight: '700', color: theme.text2 }}>{t('edit')}</Text>
                               </Pressable>
                               <Pressable
                                 onPress={() => {
                                   confirmAction(
-                                    `删除「${rt.name}」？`,
-                                    '将移除此定时任务并立即停止计时器。',
+                                    t('rtDeleteTitle', { name: rt.name }),
+                                    t('rtDeleteDesc'),
                                     async () => {
                                       await deleteRoutine(botId, rt.id);
                                     },
@@ -1205,18 +1183,18 @@ export default function BotChatScreen() {
                                 }}
                                 style={{ borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4, backgroundColor: theme.card }}
                               >
-                                <Text style={{ fontSize: 12, fontWeight: '700', color: theme.danger }}>删除</Text>
+                                <Text style={{ fontSize: 12, fontWeight: '700', color: theme.danger }}>{t('delete')}</Text>
                               </Pressable>
                             </View>
                             {runsOpen && (
                               <View style={{ gap: 4, paddingTop: 4 }}>
                                 {runList.length === 0 ? (
-                                  <Text style={{ fontSize: 12, color: theme.mute }}>暂无执行记录</Text>
+                                  <Text style={{ fontSize: 12, color: theme.mute }}>{t('rtRunsEmpty')}</Text>
                                 ) : (
                                   runList.map((r) => (
                                     <View key={r.id} style={{ backgroundColor: theme.card, borderRadius: 8, padding: 6, gap: 2 }}>
                                       <Text style={{ fontSize: 11.5, color: theme.mute }}>
-                                        {`${r.status === 'ok' ? '已产出' : r.status === 'silent' ? '无变化' : '失败'} · ${r.trigger} · ${((r.durationMs || 0) / 1000).toFixed(1)}s`}
+                                        {`${r.status === 'ok' ? t('rtStatusOk') : r.status === 'silent' ? t('rtStatusSilent') : t('rtStatusError')} · ${r.trigger} · ${((r.durationMs || 0) / 1000).toFixed(1)}s`}
                                       </Text>
                                       {r.error ? (
                                         <Text style={{ fontSize: 12, color: theme.danger }}>{r.error}</Text>
@@ -1244,16 +1222,27 @@ export default function BotChatScreen() {
                   <Text style={[styles.dangerBtnTxt, { color: theme.text }]}>{t('resetSessionBtn')}</Text>
                 </Pressable>
 
-                {bots.length > 1 && (
+                {isDirty ? (
                   <Pressable
-                    onPress={handleDeleteConfirm}
-                    style={[styles.dangerBtn, { backgroundColor: theme.pink }]}
+                    disabled={editSaving || !editName.trim()}
+                    onPress={() => void onSaveEdit()}
+                    style={[styles.dangerBtn, { backgroundColor: botPal.accent, opacity: editSaving || !editName.trim() ? 0.5 : 1 }]}
                   >
-                    <Text style={[styles.dangerBtnTxt, { color: theme.danger }]}>{t('deleteBotBtn')}</Text>
+                    <Text style={[styles.dangerBtnTxt, { color: botPal.text }]}>
+                      {editSaving ? t('saving') : t('save')}
+                    </Text>
                   </Pressable>
+                ) : (
+                  bots.length > 1 && (
+                    <Pressable
+                      onPress={handleDeleteConfirm}
+                      style={[styles.dangerBtn, { backgroundColor: theme.pink }]}
+                    >
+                      <Text style={[styles.dangerBtnTxt, { color: theme.danger }]}>{t('deleteBotBtn')}</Text>
+                    </Pressable>
+                  )
                 )}
               </>
-            )}
           </ScrollView>
         </View>
       </Modal>

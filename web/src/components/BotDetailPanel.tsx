@@ -51,10 +51,9 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
 }) => {
   const t = (k: string, vars?: Record<string, string | number>) => translate(lang, k, vars);
 
-  const [mode, setMode] = useState<'view' | 'edit'>('view');
   const [techOpen, setTechOpen] = useState(false);
 
-  // Edit form
+  // Inline edit form fields
   const [editName, setEditName] = useState('');
   const [editDesc, setEditDesc] = useState('');
   const [editPrivate, setEditPrivate] = useState(false);
@@ -118,7 +117,6 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
 
   useEffect(() => {
     if (!open || !detail) return;
-    setMode('view');
     setTechOpen(false);
     setMemAddOpen(false);
     setMemErr('');
@@ -129,6 +127,15 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
     void loadRoutines(detail.id);
     if (detail.harness) void onLoadModels(detail.harness);
   }, [open, detail?.id]);
+
+  useEffect(() => {
+    if (!open || !detail) return;
+    setEditName(detail.name || '');
+    setEditDesc(detail.description || '');
+    setEditPrivate(Boolean(detail.privateSessions));
+    setEditInst(detail.instructions || '');
+    setEditErr('');
+  }, [open, detail?.id, detail?.name, detail?.description, detail?.privateSessions, detail?.instructions]);
 
   useEffect(() => {
     if (open && detail && routineRefreshSeq > 0) {
@@ -146,19 +153,13 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
   const harnessLabel = (id?: string) =>
     settings?.harnesses.find((h) => h.id === id)?.label || id || 'opencode';
 
-  const startEdit = () => {
-    if (!detail) return;
-    if (mode === 'edit') {
-      setMode('view');
-      return;
-    }
-    setEditName(detail.name || '');
-    setEditDesc(detail.description || '');
-    setEditPrivate(Boolean(detail.privateSessions));
-    setEditInst(detail.instructions || '');
-    setEditErr('');
-    setMode('edit');
-  };
+  const isDirty = Boolean(
+    detail &&
+      (editName !== (detail.name || '') ||
+        editDesc !== (detail.description || '') ||
+        editPrivate !== Boolean(detail.privateSessions) ||
+        editInst !== (detail.instructions || ''))
+  );
 
   const saveEdit = async (e?: React.FormEvent) => {
     e?.preventDefault();
@@ -182,7 +183,6 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
       });
       onBotUpdated(st);
       await onRefreshDetail(detail.id);
-      setMode('view');
       onToast(t('saved'));
     } catch (err) {
       if (err instanceof Error && err.message !== 'unauthorized') setEditErr(err.message);
@@ -212,22 +212,22 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
     const name = rtName.trim();
     const prompt = rtPrompt.trim();
     if (!name) {
-      setRtErr('请填写任务名称');
+      setRtErr(t('rtNameRequired'));
       return;
     }
     if (!prompt) {
-      setRtErr('请填写任务指令');
+      setRtErr(t('rtPromptRequired'));
       return;
     }
     const daily = rtMode === 'daily';
     const everyMinutes = daily ? 0 : parseInt(rtEvery, 10);
     const dailyAt = daily ? rtDaily.trim() : '';
     if (!daily && !(everyMinutes > 0)) {
-      setRtErr('间隔分钟需大于 0');
+      setRtErr(t('rtEveryPositive'));
       return;
     }
     if (daily && !/^\d{2}:\d{2}$/.test(dailyAt)) {
-      setRtErr('时间格式需为 HH:MM');
+      setRtErr(t('rtTimeFormatErr'));
       return;
     }
 
@@ -249,13 +249,13 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
           method: 'PATCH',
           body,
         });
-        onToast('已更新定时任务');
+        onToast(t('rtUpdated'));
       } else {
         await api(`/api/bots/${encodeURIComponent(detail.id)}/routines`, {
           method: 'POST',
           body,
         });
-        onToast('已创建定时任务');
+        onToast(t('rtCreated'));
       }
       setRtFormOpen(false);
       await loadRoutines(detail.id);
@@ -308,28 +308,8 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
   return (
     <aside id="panel" className={`panel${open ? ' open' : ''}`} aria-label={t('botDetails')} style={botAccentStyle}>
       <div className="panel-hd">
-        <h3 id="pTitle">{mode === 'edit' ? t('editBot') : t('details')}</h3>
+        <h3 id="pTitle">{t('details')}</h3>
         <div className="side-acts">
-          <button
-            type="button"
-            id="pEditBtn"
-            className={`ghost${mode === 'edit' ? ' active' : ''}`}
-            aria-label={t('editBot')}
-            title={t('editBot')}
-            onClick={startEdit}
-          >
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.9"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M12 20h9" />
-              <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" />
-            </svg>
-          </button>
           <button
             type="button"
             className="ghost"
@@ -345,14 +325,27 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
       </div>
 
       <div className="panel-b">
-        {detail && mode === 'view' && (
+        {detail && (
           <div id="pView">
             <div className="p-hero">
               <div id="pAv">
                 <BotAvatar id={detail.id} bots={bots} />
               </div>
-              <h2 id="pName">{detail.name}</h2>
-              <p id="pDesc">{detail.description || ''}</p>
+              <input
+                id="pName"
+                className="p-hero-name"
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                aria-label={t('name')}
+              />
+              <input
+                id="pDesc"
+                className="p-hero-desc"
+                value={editDesc}
+                placeholder={t('descPh')}
+                onChange={(e) => setEditDesc(e.target.value)}
+                aria-label={t('descOptional')}
+              />
             </div>
             <div className="stats">
               <div className="stat">
@@ -471,7 +464,7 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
             </div>
 
             <div className="sec" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-              <span>定时任务</span>
+              <span>{t('routines')}</span>
               <button
                 type="button"
                 id="pRtAddToggle"
@@ -481,30 +474,30 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
                   else setRtFormOpen(false);
                 }}
               >
-                + 添加
+                {t('addShort')}
               </button>
             </div>
             {rtFormOpen && (
               <div id="pRtFormBox" className="add-prov mem-add" style={{ marginBottom: 8 }}>
                 <div className="fld">
-                  <label>名称</label>
-                  <input id="pRtName" placeholder="晨间简报" value={rtName} onChange={(e) => setRtName(e.target.value)} />
+                  <label>{t('name')}</label>
+                  <input id="pRtName" placeholder={t('rtNamePh')} value={rtName} onChange={(e) => setRtName(e.target.value)} />
                 </div>
                 <div className="two">
                   <div className="fld">
-                    <label>触发方式</label>
+                    <label>{t('rtTriggerMode')}</label>
                     <select
                       id="pRtMode"
                       value={rtMode}
                       onChange={(e) => setRtMode(e.target.value as 'interval' | 'daily')}
                     >
-                      <option value="interval">按间隔（分钟）</option>
-                      <option value="daily">每天定时</option>
+                      <option value="interval">{t('rtModeInterval')}</option>
+                      <option value="daily">{t('rtModeDaily')}</option>
                     </select>
                   </div>
                   {rtMode === 'interval' ? (
                     <div className="fld" id="pRtEveryWrap">
-                      <label>间隔分钟</label>
+                      <label>{t('rtEveryMinutes')}</label>
                       <input
                         id="pRtEvery"
                         className="mono"
@@ -517,7 +510,7 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
                   ) : (
                     <div className="fld" id="pRtDailyWrap">
                       <label>
-                        时间 <em>HH:MM</em>
+                        {t('rtTime')} <em>HH:MM</em>
                       </label>
                       <input
                         id="pRtDaily"
@@ -530,23 +523,23 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
                   )}
                 </div>
                 <div className="fld">
-                  <label>主会话投递</label>
+                  <label>{t('rtMainDelivery')}</label>
                   <select id="pRtDelivery" value={rtDelivery} onChange={(e) => setRtDelivery(e.target.value)}>
-                    <option value="receipt">回执（下次对话自动带入）</option>
-                    <option value="notify">通知主会话（立即唤醒）</option>
-                    <option value="none">仅记录（不写入主时间线）</option>
+                    <option value="receipt">{t('rtDeliveryReceiptFull')}</option>
+                    <option value="notify">{t('rtDeliveryNotifyFull')}</option>
+                    <option value="none">{t('rtDeliveryNoneFull')}</option>
                   </select>
                 </div>
                 <div className="two">
                   <div className="fld">
                     <label>
-                      模型覆盖 <em>可选</em>
+                      {t('rtModelOverride')} <em>{t('rtOptional')}</em>
                     </label>
                     <input
                       id="pRtModel"
                       className="mono"
                       list="pRtModelList"
-                      placeholder="留空沿用 Bot 默认"
+                      placeholder={t('rtModelPh')}
                       spellCheck={false}
                       value={rtModel}
                       onChange={(e) => setRtModel(e.target.value)}
@@ -559,7 +552,7 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
                   </div>
                   <div className="fld">
                     <label>
-                      Telegram Chat ID <em>可选</em>
+                      Telegram Chat ID <em>{t('rtOptional')}</em>
                     </label>
                     <input
                       id="pRtTgChat"
@@ -572,12 +565,12 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
                   </div>
                 </div>
                 <div className="fld">
-                  <label>任务指令</label>
+                  <label>{t('rtPrompt')}</label>
                   <textarea
                     id="pRtPrompt"
                     rows={3}
                     style={{ minHeight: 66, fontFamily: 'var(--font)' }}
-                    placeholder="检查 memory/ 与近期状态；若无重要事项仅回复 NO_REPLY。"
+                    placeholder={t('rtPromptPh')}
                     value={rtPrompt}
                     onChange={(e) => setRtPrompt(e.target.value)}
                   />
@@ -590,7 +583,7 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
                       checked={rtEnabled}
                       onChange={(e) => setRtEnabled(e.target.checked)}
                     />
-                    启用定时
+                    {t('rtEnabled')}
                   </label>
                   <div style={{ display: 'flex', gap: 6 }}>
                     <button
@@ -602,7 +595,7 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
                         setRtErr('');
                       }}
                     >
-                      取消
+                      {t('cancel')}
                     </button>
                     <button
                       type="button"
@@ -611,7 +604,7 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
                       disabled={rtSaving}
                       onClick={() => void saveRoutine()}
                     >
-                      保存
+                      {t('save')}
                     </button>
                   </div>
                 </div>
@@ -620,25 +613,34 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
 
             <div id="pRtList" className="stack6">
               {rtLoading && routines.length === 0 ? (
-                <div className="set-card-desc">加载中…</div>
+                <div className="set-card-desc">{t('loadingEllipsis')}</div>
               ) : routines.length === 0 ? (
-                <div className="set-card-desc">暂无定时任务</div>
+                <div className="set-card-desc">{t('rtEmpty')}</div>
               ) : (
                 routines.map((rt) => {
                   const trig = [
-                    (rt.everyMinutes || 0) > 0 ? `每 ${rt.everyMinutes}m` : '',
-                    rt.dailyAt ? `每日 ${rt.dailyAt}` : '',
+                    (rt.everyMinutes || 0) > 0 ? t('rtEveryShort', { n: rt.everyMinutes || 0 }) : '',
+                    rt.dailyAt ? t('rtDailyShort', { time: rt.dailyAt }) : '',
                   ]
                     .filter(Boolean)
                     .join(' · ');
                   const delivLbl =
-                    rt.mainDelivery === 'notify' ? '通知主会话' : rt.mainDelivery === 'none' ? '仅记录' : '回执';
+                    rt.mainDelivery === 'notify'
+                      ? t('rtDeliveryNotify')
+                      : rt.mainDelivery === 'none'
+                        ? t('rtDeliveryNone')
+                        : t('rtDeliveryReceipt');
                   const nextTxt =
                     rt.enabled && rt.nextRunAt
-                      ? `下次 ${new Date(rt.nextRunAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}`
+                      ? t('rtNextAt', {
+                          time: new Date(rt.nextRunAt).toLocaleTimeString(lang === 'en' ? 'en-US' : 'zh-CN', {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          }),
+                        })
                       : rt.enabled
                         ? ''
-                        : '已停用';
+                        : t('rtDisabled');
                   const lastTxt = rt.lastRun
                     ? `${formatStamp(rt.lastRun.finishedAt, lang)} · ${(rt.lastRun.durationMs / 1000).toFixed(1)}s`
                     : '';
@@ -652,13 +654,13 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
                         <div className="mem-meta">
                           <span className="rt-title">{rt.name}</span>
                           {rt.running ? (
-                            <span className="mp ok">执行中</span>
+                            <span className="mp ok">{t('rtStatusRunning')}</span>
                           ) : rt.lastRun?.status === 'ok' ? (
-                            <span className="mp ok">已产出</span>
+                            <span className="mp ok">{t('rtStatusOk')}</span>
                           ) : rt.lastRun?.status === 'silent' ? (
-                            <span className="mp">无变化</span>
+                            <span className="mp">{t('rtStatusSilent')}</span>
                           ) : rt.lastRun?.status === 'error' ? (
-                            <span className="mp bad">失败</span>
+                            <span className="mp bad">{t('rtStatusError')}</span>
                           ) : null}
                         </div>
                         <div className="prov-acts">
@@ -678,7 +680,7 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
                               }
                             }}
                           >
-                            {rt.enabled ? '停用' : '启用'}
+                            {rt.enabled ? t('rtDisableBtn') : t('rtEnableBtn')}
                           </button>
                           <button
                             type="button"
@@ -691,14 +693,14 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
                                   `/api/bots/${encodeURIComponent(detail.id)}/routines/${encodeURIComponent(rt.id)}/run?async=1`,
                                   { method: 'POST' }
                                 );
-                                onToast(`已触发 ${rt.name}`);
+                                onToast(t('rtTriggered', { name: rt.name }));
                                 await loadRoutines(detail.id);
                               } catch (e) {
                                 if (e instanceof Error && e.message !== 'unauthorized') setRtErr(e.message);
                               }
                             }}
                           >
-                            {rt.running ? '运行中' : '运行'}
+                            {rt.running ? t('rtRunningBtn') : t('rtRunBtn')}
                           </button>
                           <button
                             type="button"
@@ -717,32 +719,32 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
                               } catch {}
                             }}
                           >
-                            记录
+                            {t('rtRunsBtn')}
                           </button>
                           <button type="button" className="mp" onClick={() => openRoutineForm(rt)}>
-                            编辑
+                            {t('rtEditBtn')}
                           </button>
                           <button
                             type="button"
                             className="mp bad"
                             onClick={() => {
                               onConfirm({
-                                title: `删除定时任务「${rt.name}」？`,
-                                text: '将从配置中移除此任务并立即停止计时器。',
-                                okText: '删除',
+                                title: t('rtDeleteTitle', { name: rt.name }),
+                                text: t('rtDeleteDesc'),
+                                okText: t('delBtn'),
                                 okClass: 'bad',
                                 onOk: async () => {
                                   await api(
                                     `/api/bots/${encodeURIComponent(detail.id)}/routines/${encodeURIComponent(rt.id)}`,
                                     { method: 'DELETE' }
                                   );
-                                  onToast('已删除定时任务');
+                                  onToast(t('rtDeleted'));
                                   await loadRoutines(detail.id);
                                 },
                               });
                             }}
                           >
-                            删除
+                            {t('delBtn')}
                           </button>
                         </div>
                       </div>
@@ -751,10 +753,15 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
                       {runsOpen && (
                         <div className="rt-runs">
                           {runs.length === 0 ? (
-                            <div className="set-card-desc">暂无执行记录</div>
+                            <div className="set-card-desc">{t('rtRunsEmpty')}</div>
                           ) : (
                             runs.map((r, idx) => {
-                              const stText = r.status === 'ok' ? '已产出' : r.status === 'silent' ? '无变化' : '失败';
+                              const stText =
+                                r.status === 'ok'
+                                  ? t('rtStatusOk')
+                                  : r.status === 'silent'
+                                    ? t('rtStatusSilent')
+                                    : t('rtStatusError');
                               const costTxt = r.costUsd ? ` · $${Number(r.costUsd).toFixed(4)}` : '';
                               return (
                                 <div key={r.id || idx} className="rt-run">
@@ -836,81 +843,71 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
                     <dd id="pWs">{detail.workspace}</dd>
                   </div>
                 </dl>
+                <label className="perm" style={{ alignSelf: 'flex-start', marginTop: 10 }}>
+                  <input
+                    type="checkbox"
+                    id="pePrivate"
+                    checked={editPrivate}
+                    onChange={(e) => setEditPrivate(e.target.checked)}
+                  />
+                  <span>{t('privateSessionsLabel')}</span>
+                </label>
                 <div className="sec">AGENTS.md</div>
-                <div id="pInst" className="agents">
-                  {detail.instructions || t('emptyText')}
-                </div>
+                <textarea
+                  id="pInst"
+                  className="agents p-agents-in"
+                  rows={10}
+                  spellCheck={false}
+                  placeholder={t('agentsPh')}
+                  value={editInst}
+                  onChange={(e) => setEditInst(e.target.value)}
+                />
               </div>
             </details>
           </div>
         )}
-
-        {detail && mode === 'edit' && (
-          <form id="pEditForm" className="panel-edit" autoComplete="off" onSubmit={saveEdit}>
-            <div className="fld">
-              <label>{t('name')}</label>
-              <input id="peName" required value={editName} onChange={(e) => setEditName(e.target.value)} />
-            </div>
-            <div className="fld">
-              <label dangerouslySetInnerHTML={{ __html: t('descOptional') }} />
-              <input
-                id="peDesc"
-                placeholder={t('descPh')}
-                value={editDesc}
-                onChange={(e) => setEditDesc(e.target.value)}
-              />
-            </div>
-            <label className="perm" style={{ alignSelf: 'flex-start' }}>
-              <input
-                type="checkbox"
-                id="pePrivate"
-                checked={editPrivate}
-                onChange={(e) => setEditPrivate(e.target.checked)}
-              />
-              <span>{t('privateSessionsLabel')}</span>
-            </label>
-            <div className="fld">
-              <label>AGENTS.md</label>
-              <textarea
-                id="peInst"
-                rows={12}
-                spellCheck={false}
-                placeholder={t('agentsPh')}
-                value={editInst}
-                onChange={(e) => setEditInst(e.target.value)}
-              />
-            </div>
-            <div id="peErr" className="msg-err">
-              {editErr}
-            </div>
-          </form>
-        )}
       </div>
 
+      {editErr && (
+        <div id="peErr" className="msg-err" style={{ marginTop: 6 }}>
+          {editErr}
+        </div>
+      )}
+
       <div className="panel-f">
-        {mode === 'view' ? (
-          <div id="pViewFoot" className="panel-foot-row">
+        <div id="pViewFoot" className="panel-foot-row">
+          <button
+            type="button"
+            id="pReset"
+            className="btn"
+            onClick={() => {
+              if (!detail) return;
+              onClose();
+              onConfirm({
+                title: t('resetSessionTitle'),
+                text: t('resetSessionDesc', { name: detail.name }),
+                okText: t('resetBtn'),
+                onOk: async () => {
+                  await api(`/api/bots/${encodeURIComponent(detail.id)}/reset`, { method: 'POST' });
+                  onToast(t('newSessionStarted'));
+                  await onReloadBots();
+                },
+              });
+            }}
+          >
+            {t('resetSession')}
+          </button>
+          {isDirty ? (
             <button
               type="button"
-              id="pReset"
-              className="btn"
-              onClick={() => {
-                if (!detail) return;
-                onClose();
-                onConfirm({
-                  title: t('resetSessionTitle'),
-                  text: t('resetSessionDesc', { name: detail.name }),
-                  okText: t('resetBtn'),
-                  onOk: async () => {
-                    await api(`/api/bots/${encodeURIComponent(detail.id)}/reset`, { method: 'POST' });
-                    onToast(t('newSessionStarted'));
-                    await onReloadBots();
-                  },
-                });
-              }}
+              id="peSave"
+              className="btn go"
+              disabled={editSaving}
+              onClick={() => void saveEdit()}
             >
-              {t('resetSession')}
+              {t('save')}
             </button>
+          ) : (
             <button
               type="button"
               id="pDelete"
@@ -935,23 +932,8 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
             >
               {t('deleteBot')}
             </button>
-          </div>
-        ) : (
-          <div id="pEditFoot" className="panel-foot-row">
-            <button type="button" id="peCancel" className="btn" onClick={() => setMode('view')}>
-              {t('cancel')}
-            </button>
-            <button
-              type="button"
-              id="peSave"
-              className="btn go"
-              disabled={editSaving}
-              onClick={() => void saveEdit()}
-            >
-              {t('save')}
-            </button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </aside>
   );

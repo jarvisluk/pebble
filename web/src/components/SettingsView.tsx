@@ -1232,7 +1232,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               <div className="two">
                 <div className="fld">
                   <label>
-                    桌面子进程 Harness <em>可选</em>
+                    {t('deskWorkerHarness')} <em>{t('rtOptional')}</em>
                   </label>
                   <select
                     id="sDeskHarness"
@@ -1242,7 +1242,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       if (e.target.value) void onLoadModels(e.target.value);
                     }}
                   >
-                    <option value="">跟随当前 Bot</option>
+                    <option value="">{t('deskWorkerFollowBot')}</option>
                     {(settings?.harnesses || []).map((h) => (
                       <option key={h.id} value={h.id}>
                         {h.label}
@@ -1252,14 +1252,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 </div>
                 <div className="fld">
                   <label>
-                    桌面子进程模型 <em>建议轻量视觉模型</em>
+                    {t('deskWorkerModel')} <em>{t('deskWorkerModelHint')}</em>
                   </label>
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                     <input
                       id="sDeskModel"
                       className="mono"
                       list={deskHarness ? `models-${deskHarness}` : 'models-global'}
-                      placeholder="留空沿用 Bot 默认"
+                      placeholder={t('rtModelPh')}
                       spellCheck={false}
                       style={{ flex: 1, minWidth: 0 }}
                       value={deskModel}
@@ -1279,7 +1279,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                             body: { desktopHarness: deskHarness, desktopModel: deskModel.trim() },
                           });
                           onSettingsUpdated(next);
-                          onToast('已保存桌面子进程配置');
+                          onToast(t('deskWorkerSaved'));
                         } catch (e) {
                           if (e instanceof Error && e.message !== 'unauthorized') setRemoteErr(e.message);
                         } finally {
@@ -1287,13 +1287,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                         }
                       }}
                     >
-                      保存
+                      {t('save')}
                     </button>
                   </div>
                 </div>
               </div>
               <p className="set-card-desc">
-                配置后，多步桌面或可见浏览器操作将由独立临时子进程使用该模型执行，避免截图撑爆主会话上下文；用户可随时在「远程桌面」观摩与强制接管。
+                {t('deskWorkerDesc')}
               </p>
             </section>
 

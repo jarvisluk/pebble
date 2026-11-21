@@ -64,7 +64,7 @@ export default function DesktopScreen() {
         if (st?.screen) setScreen(st.screen);
         if (st?.status?.screenRecording === 'denied') {
           setStreaming(false);
-          setError('缺少 macOS 屏幕录制权限，请在「系统设置 → 隐私与安全性 → 录屏与系统录音」中允许 Bot Hub 后重试');
+          setError(t('deskScreenRecordingDenied'));
         }
       } catch {}
     };

@@ -1035,9 +1035,9 @@ export default function SettingsScreen() {
           <View style={[styles.card, { backgroundColor: theme.card }]}>
             <Text style={[styles.sectionTitle, { color: theme.text }]}>{t('remoteDevicesTitle')}</Text>
             <View style={{ gap: 6, backgroundColor: theme.s1, borderRadius: 14, padding: 10 }}>
-              <Text style={[styles.subLabel, { color: theme.text2 }]}>桌面子进程 Harness（留空跟随当前 Bot）</Text>
+              <Text style={[styles.subLabel, { color: theme.text2 }]}>{t('deskWorkerHarnessLabel')}</Text>
               <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap' }}>
-                {[{ id: '', label: '跟随 Bot' }, ...(settings?.harnesses || [])].map((h) => (
+                {[{ id: '', label: t('deskWorkerFollowBot') }, ...(settings?.harnesses || [])].map((h) => (
                   <Pressable
                     key={h.id || 'auto'}
                     onPress={() => {
@@ -1060,7 +1060,7 @@ export default function SettingsScreen() {
                   </Pressable>
                 ))}
               </View>
-              <Text style={[styles.subLabel, { color: theme.text2, marginTop: 4 }]}>桌面子进程模型（建议轻量视觉模型）</Text>
+              <Text style={[styles.subLabel, { color: theme.text2, marginTop: 4 }]}>{t('deskWorkerModelLabel')}</Text>
               <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
                 <TextInput
                   value={deskModel}
@@ -1068,7 +1068,7 @@ export default function SettingsScreen() {
                     setDeskModel(v);
                     setDeskTouched(true);
                   }}
-                  placeholder="留空沿用 Bot 默认"
+                  placeholder={t('deskWorkerModelPh')}
                   placeholderTextColor={theme.mute}
                   autoCapitalize="none"
                   style={[
@@ -1084,9 +1084,9 @@ export default function SettingsScreen() {
                     try {
                       await setDesktopWorker(deskHarness, deskModel);
                       setDeskTouched(false);
-                      setSavedMsg('已保存桌面子进程配置');
+                      setSavedMsg(t('deskWorkerSaved'));
                     } catch (err: any) {
-                      setError(err?.message || '保存失败');
+                      setError(err?.message || t('saveFailed'));
                     } finally {
                       setBusyAction('');
                     }
@@ -1094,7 +1094,7 @@ export default function SettingsScreen() {
                   style={[styles.switchBtn, { backgroundColor: theme.accent }]}
                 >
                   <Text style={[styles.switchBtnTxt, { color: theme.accentText }]}>
-                    {busyAction === 'desk' ? '保存中' : '保存'}
+                    {busyAction === 'desk' ? t('saving') : t('save')}
                   </Text>
                 </Pressable>
               </View>
