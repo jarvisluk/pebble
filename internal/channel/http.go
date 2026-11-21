@@ -119,6 +119,7 @@ func NewHTTPServer(h *hub.Hub, cfg config.HTTPConfig) *HTTPServer {
 	mux.HandleFunc("POST /api/desktop/takeover/request", s.handleDesktopTakeoverRequest)
 	mux.HandleFunc("POST /api/desktop/takeover/resolve", s.handleDesktopTakeoverResolve)
 	mux.HandleFunc("POST /api/desktop/mcp", s.handleDesktopMCP)
+	mux.HandleFunc("POST /api/desktop/task", s.handleDesktopTask)
 
 	mux.HandleFunc("POST /api/login", s.handleLogin)
 	mux.HandleFunc("GET /api/tailcat", s.handleTailcat)
@@ -443,6 +444,8 @@ type settingsBody struct {
 	DefaultModel      *string           `json:"defaultModel,omitempty"`
 	DefaultModels     map[string]string `json:"defaultModels,omitempty"`
 	AllowLocalDesktop *bool             `json:"allowLocalDesktop,omitempty"`
+	DesktopHarness    *string           `json:"desktopHarness,omitempty"`
+	DesktopModel      *string           `json:"desktopModel,omitempty"`
 	SharedUserMD      *string           `json:"sharedUserMd,omitempty"`
 }
 
@@ -454,6 +457,7 @@ func (s *HTTPServer) handleSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	cfg := s.hub.Config()
 	defaultModel, defaultModels := s.hub.DefaultModelsSnapshot()
+	deskHarness, deskModel := s.hub.DesktopWorkerSnapshot()
 	installed := harness.MagpieInstalled()
 	var (
 		healthy   bool
@@ -486,6 +490,8 @@ func (s *HTTPServer) handleSettings(w http.ResponseWriter, r *http.Request) {
 			"presets":   presets,
 		},
 		"allowLocalDesktop": cfg.LocalDesktopAllowed(),
+		"desktopHarness":    deskHarness,
+		"desktopModel":      deskModel,
 		"defaultModel":      defaultModel,
 		"defaultModels":     defaultModels,
 		"sharedUserMd":      s.hub.SharedUserMD(),
@@ -501,6 +507,19 @@ func (s *HTTPServer) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.AllowLocalDesktop != nil {
 		if err := s.hub.SetAllowLocalDesktop(*body.AllowLocalDesktop); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
+	}
+	if body.DesktopHarness != nil || body.DesktopModel != nil {
+		curHarness, curModel := s.hub.DesktopWorkerSnapshot()
+		if body.DesktopHarness != nil {
+			curHarness = *body.DesktopHarness
+		}
+		if body.DesktopModel != nil {
+			curModel = *body.DesktopModel
+		}
+		if err := s.hub.SetDesktopWorker(curHarness, curModel); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
 			return
 		}

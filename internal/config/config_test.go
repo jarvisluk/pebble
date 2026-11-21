@@ -210,3 +210,34 @@ func TestScheduleConfigNormalizationAndValidation(t *testing.T) {
 	}
 }
 
+func TestDesktopWorkerConfigAndHasDesktopModel(t *testing.T) {
+	root := t.TempDir()
+	cfgDir := filepath.Join(root, "config")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TEST_DESK_MODEL", "magpie/mac-mini/auto/flash")
+	cfgPath := filepath.Join(cfgDir, "bots.json")
+	if err := os.WriteFile(cfgPath, []byte(`{"desktopHarness":"opencode","desktopModel":"${TEST_DESK_MODEL}","bots":[{"id":"a"}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _, err := Load(root, cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.DesktopHarness != "opencode" || cfg.DesktopModel != "magpie/mac-mini/auto/flash" {
+		t.Fatalf("unexpected desktop worker config: harness=%q model=%q", cfg.DesktopHarness, cfg.DesktopModel)
+	}
+	if !HasDesktopModel(cfgPath) {
+		t.Fatal("expected HasDesktopModel=true")
+	}
+
+	emptyPath := filepath.Join(cfgDir, "empty.json")
+	if err := os.WriteFile(emptyPath, []byte(`{"bots":[{"id":"a"}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if HasDesktopModel(emptyPath) {
+		t.Fatal("expected HasDesktopModel=false when unset")
+	}
+}
+

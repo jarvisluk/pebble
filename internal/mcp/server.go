@@ -23,6 +23,7 @@ type Server struct {
 	hubURL     string
 	selfBotID  string
 	configPath string
+	role       string
 	httpClient *http.Client
 
 	mu          sync.Mutex
@@ -45,6 +46,7 @@ func NewServerWithConfig(hubURL, selfBotID, configPath string) *Server {
 		hubURL:      hubURL,
 		selfBotID:   selfBotID,
 		configPath:  strings.TrimSpace(configPath),
+		role:        strings.TrimSpace(os.Getenv("BOT_HUB_MCP_ROLE")),
 		httpClient:  &http.Client{Timeout: 10 * time.Minute},
 		cachedToken: strings.TrimSpace(os.Getenv("BOT_HUB_API_TOKEN")),
 	}
@@ -129,7 +131,7 @@ func (s *Server) handle(ctx context.Context, req rpcRequest) rpcResponse {
 		return rpcResponse{
 			JSONRPC: "2.0",
 			ID:      req.ID,
-			Result:  map[string]any{"tools": toolDefinitions()},
+			Result:  map[string]any{"tools": s.visibleTools()},
 		}
 
 	case "tools/call":
@@ -361,6 +363,32 @@ func toolDefinitions() []map[string]any {
 					},
 				},
 				"required": []string{"op"},
+			},
+		},
+		{
+			"name":        "desktop_task",
+			"description": "Delegate a multi-step desktop GUI or visible-browser task to an isolated computer-use worker running on the visible desktop (observable and take-over-ready via Remote Desktop). Use this instead of running headless browsers or multi-step screenshot/click loops in the main session.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"goal": map[string]any{
+						"type":        "string",
+						"description": "Clear description of the GUI goal to accomplish on the visible desktop.",
+					},
+					"nodeId": map[string]any{
+						"type":        "string",
+						"description": "Target desktop ('local' or remote node ID). Omit to auto-select.",
+					},
+					"app": map[string]any{
+						"type":        "string",
+						"description": "Optional application name involved.",
+					},
+					"timeoutSec": map[string]any{
+						"type":        "integer",
+						"description": "Optional timeout in seconds.",
+					},
+				},
+				"required": []string{"goal"},
 			},
 		},
 		{
@@ -735,6 +763,40 @@ func (s *Server) callTool(ctx context.Context, name string, rawArgs json.RawMess
 		}
 		return formatNodeResult(args.Op, &res)
 
+	case "desktop_task":
+		if s.role == "computer_use" {
+			return "desktop_task cannot be called from inside a computer-use worker", true
+		}
+		if s.selfBotID == "" {
+			return "caller bot ID is unknown", true
+		}
+		var args struct {
+			Goal       string `json:"goal"`
+			NodeID     string `json:"nodeId"`
+			App        string `json:"app"`
+			TimeoutSec int    `json:"timeoutSec"`
+		}
+		if err := json.Unmarshal(rawArgs, &args); err != nil || strings.TrimSpace(args.Goal) == "" {
+			return "goal is required", true
+		}
+		body, err := s.doJSON(ctx, http.MethodPost, "/api/desktop/task", map[string]any{
+			"botId":      s.selfBotID,
+			"nodeId":     args.NodeID,
+			"goal":       args.Goal,
+			"app":        args.App,
+			"timeoutSec": args.TimeoutSec,
+		})
+		if err != nil {
+			return err.Error(), true
+		}
+		var resp struct {
+			Text string `json:"text"`
+		}
+		if json.Unmarshal(body, &resp) == nil && resp.Text != "" {
+			return resp.Text, false
+		}
+		return prettyJSON(body), false
+
 	case "request_takeover":
 		var args struct {
 			Reason string `json:"reason"`
@@ -961,6 +1023,31 @@ func (s *Server) resolveBotID(explicit string) string {
 		return id
 	}
 	return strings.TrimSpace(s.selfBotID)
+}
+
+func (s *Server) visibleTools() []map[string]any {
+	all := toolDefinitions()
+	if s.role == "computer_use" {
+		out := make([]map[string]any, 0, 3)
+		for _, t := range all {
+			switch t["name"] {
+			case "list_nodes", "node_desktop", "request_takeover":
+				out = append(out, t)
+			}
+		}
+		return out
+	}
+	if s.configPath != "" && config.HasDesktopModel(s.configPath) {
+		out := make([]map[string]any, 0, len(all)-1)
+		for _, t := range all {
+			if t["name"] == "node_desktop" {
+				continue
+			}
+			out = append(out, t)
+		}
+		return out
+	}
+	return all
 }
 
 func (s *Server) callNode(ctx context.Context, nodeID, action string, args any, timeoutSec int) (string, bool) {

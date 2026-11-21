@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"bot-hub/internal/desktop"
+	"bot-hub/internal/hub"
 	"bot-hub/internal/node"
 )
 
@@ -346,6 +347,9 @@ func (s *HTTPServer) handleDesktopForceTakeover(w http.ResponseWriter, r *http.R
 	_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body)
 	target := s.resolveDesktopTarget(r, body.Target)
 	paused := s.desktopCoord().ForceTakeover(target)
+	if paused == "" && s.hub != nil {
+		paused = s.hub.ActiveDesktopTaskBot(target)
+	}
 	if paused == "" {
 		paused = strings.TrimSpace(body.BotID)
 	}
@@ -576,4 +580,53 @@ func (s *HTTPServer) handleDesktopMCP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, res)
+}
+
+func (s *HTTPServer) handleDesktopTask(w http.ResponseWriter, r *http.Request) {
+	if s.hub == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "hub unavailable"})
+		return
+	}
+	var body struct {
+		BotID      string `json:"botId"`
+		NodeID     string `json:"nodeId"`
+		Goal       string `json:"goal"`
+		App        string `json:"app"`
+		TimeoutSec int    `json:"timeoutSec"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json body"})
+		return
+	}
+	res, err := s.hub.RunDesktopTask(r.Context(), hub.DesktopTaskRequest{
+		BotID:      body.BotID,
+		Target:     body.NodeID,
+		Goal:       body.Goal,
+		App:        body.App,
+		TimeoutSec: body.TimeoutSec,
+	})
+	if err != nil {
+		status := http.StatusBadGateway
+		switch {
+		case errors.Is(err, hub.ErrBotNotFound):
+			status = http.StatusNotFound
+		case errors.Is(err, hub.ErrDesktopTaskBusy):
+			status = http.StatusConflict
+		case errors.Is(err, hub.ErrLocalDesktopDisabled):
+			status = http.StatusForbidden
+		case strings.Contains(err.Error(), "goal is required"):
+			status = http.StatusBadRequest
+		}
+		writeJSON(w, status, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":         true,
+		"botId":      res.BotID,
+		"sessionId":  res.SessionID,
+		"text":       res.Text,
+		"tools":      res.Tools,
+		"durationMs": res.DurationMs,
+		"usage":      res.Usage,
+	})
 }

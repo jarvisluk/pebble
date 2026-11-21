@@ -402,3 +402,91 @@ func TestRoutineHTTPRoutes(t *testing.T) {
 		t.Fatalf("DELETE routine failed: %d %s", delRec.Code, delRec.Body.String())
 	}
 }
+
+type blockingDesktopHarness struct {
+	started chan struct{}
+}
+
+func (b *blockingDesktopHarness) Kind() string                             { return "opencode" }
+func (b *blockingDesktopHarness) Label() string                            { return "OpenCode" }
+func (b *blockingDesktopHarness) Models(context.Context) ([]string, error) { return nil, nil }
+func (b *blockingDesktopHarness) Close()                                   {}
+func (b *blockingDesktopHarness) RunTurn(ctx context.Context, opts harness.RunOptions) (*harness.TurnResult, error) {
+	if b.started != nil {
+		select {
+		case <-b.started:
+		default:
+			close(b.started)
+		}
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	return &harness.TurnResult{BotID: opts.Bot.ID, SessionID: "dt_1", Text: "desktop done"}, nil
+}
+
+func TestDesktopTaskAndSettingsRoutes(t *testing.T) {
+	tmp := t.TempDir()
+	store, err := state.NewStore(filepath.Join(tmp, "sessions.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	bh := &blockingDesktopHarness{}
+	reg := harness.NewRegistry()
+	reg.Register(bh)
+
+	cfg := &config.HubConfig{
+		ProjectRoot: tmp,
+		SharedDir:   filepath.Join(tmp, "workspaces", "_shared"),
+		StateFile:   filepath.Join(tmp, "sessions.json"),
+		Bots: []config.BotConfig{
+			{ID: "ops", Name: "Ops", Workspace: filepath.Join(tmp, "workspaces", "ops"), Harness: "opencode"},
+		},
+	}
+	h := hub.New(cfg, store, nil, reg)
+	defer h.Close()
+
+	s := NewHTTPServer(h, config.HTTPConfig{Host: "127.0.0.1"})
+	defer s.Shutdown(t.Context())
+	mux := s.srv.Handler
+
+	// PUT /api/settings persists desktopHarness & desktopModel
+	putReq := httptest.NewRequest(http.MethodPut, "/api/settings", bytes.NewBufferString(`{"desktopHarness":"opencode","desktopModel":"magpie/mac-mini/auto/flash"}`))
+	putReq.Host = "127.0.0.1:3789"
+	putRec := httptest.NewRecorder()
+	mux.ServeHTTP(putRec, putReq)
+	if putRec.Code != http.StatusOK || !strings.Contains(putRec.Body.String(), `"desktopModel":"magpie/mac-mini/auto/flash"`) {
+		t.Fatalf("PUT /api/settings desktop failed: %d %s", putRec.Code, putRec.Body.String())
+	}
+
+	// POST /api/desktop/task succeeds
+	taskReq := httptest.NewRequest(http.MethodPost, "/api/desktop/task", bytes.NewBufferString(`{"botId":"ops","nodeId":"local","goal":"open Settings"}`))
+	taskReq.Host = "127.0.0.1:3789"
+	taskRec := httptest.NewRecorder()
+	mux.ServeHTTP(taskRec, taskReq)
+	if taskRec.Code != http.StatusOK || !strings.Contains(taskRec.Body.String(), `"desktop done"`) {
+		t.Fatalf("POST /api/desktop/task failed: %d %s", taskRec.Code, taskRec.Body.String())
+	}
+
+	// ForceTakeover interrupts an in-flight desktop task
+	bh.started = make(chan struct{})
+	done := make(chan int, 1)
+	go func() {
+		req := httptest.NewRequest(http.MethodPost, "/api/desktop/task", bytes.NewBufferString(`{"botId":"ops","nodeId":"local","goal":"wait"}`))
+		req.Host = "127.0.0.1:3789"
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		done <- rec.Code
+	}()
+	<-bh.started
+
+	ftReq := httptest.NewRequest(http.MethodPost, "/api/desktop/force-takeover", bytes.NewBufferString(`{"target":"local"}`))
+	ftReq.Host = "127.0.0.1:3789"
+	ftRec := httptest.NewRecorder()
+	mux.ServeHTTP(ftRec, ftReq)
+	if ftRec.Code != http.StatusOK || !strings.Contains(ftRec.Body.String(), `"interrupted":true`) {
+		t.Fatalf("force-takeover expected interrupted=true, got %d %s", ftRec.Code, ftRec.Body.String())
+	}
+	if code := <-done; code != http.StatusBadGateway {
+		t.Fatalf("expected interrupted desktop task to return 502, got %d", code)
+	}
+}

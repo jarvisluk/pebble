@@ -133,6 +133,7 @@ interface HubContextValue {
     key?: string;
   }) => Promise<{ ok: boolean; output?: string }>;
   setAllowLocalDesktop: (allow: boolean) => Promise<SettingsData>;
+  setDesktopWorker: (harness: string, model: string) => Promise<SettingsData>;
   refreshNodes: () => Promise<void>;
   refreshTailcat: () => Promise<TailcatStatus>;
   refreshDesktopTargets: () => Promise<DesktopTarget[]>;
@@ -845,6 +846,15 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
     return s;
   }, []);
 
+  const setDesktopWorker = useCallback(async (harness: string, model: string) => {
+    const s = await apiRequest<SettingsData>(baseURLRef.current, authTokenRef.current, '/api/settings', {
+      method: 'PUT',
+      body: { desktopHarness: harness.trim(), desktopModel: model.trim() },
+    });
+    setSettings(s);
+    return s;
+  }, []);
+
   const refreshNodes = useCallback(async () => {
     if (!baseURLRef.current) return;
     const d = await apiRequest<{ nodes: NodeInfo[] }>(baseURLRef.current, authTokenRef.current, '/api/nodes');
@@ -968,6 +978,7 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
         disconnectMagpie,
         magpieProviderAction,
         setAllowLocalDesktop,
+        setDesktopWorker,
         refreshNodes,
         refreshTailcat,
         refreshDesktopTargets,

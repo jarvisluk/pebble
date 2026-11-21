@@ -57,8 +57,8 @@ func TestMCPStdioToolsFlow(t *testing.T) {
 	if err := json.Unmarshal([]byte(lines[1]), &listResp); err != nil {
 		t.Fatalf("parse tools/list: %v", err)
 	}
-	if len(listResp.Result.Tools) != 16 {
-		t.Fatalf("expected 16 tools, got %d", len(listResp.Result.Tools))
+	if len(listResp.Result.Tools) != 17 {
+		t.Fatalf("expected 17 tools, got %d", len(listResp.Result.Tools))
 	}
 	if !strings.Contains(lines[3], "Reply from bot:researcher") {
 		t.Fatalf("expected message_bot reply, got %s", lines[3])
@@ -243,5 +243,65 @@ func TestMCPRoutineTools(t *testing.T) {
 	if !strings.Contains(lines[0], "Morning Brief") || !strings.Contains(lines[1], "receipt") ||
 		!strings.Contains(lines[2], "all clear") || !strings.Contains(lines[3], `"isError":false`) {
 		t.Fatalf("unexpected routine MCP outputs:\n%s", out.String())
+	}
+}
+
+func TestMCPDesktopTaskAndRoleFiltering(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config", "bots.json")
+	if err := os.MkdirAll(filepath.Dir(cfgPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cfgPath, []byte(`{"desktopModel":"magpie/flash","bots":[{"id":"assistant"}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodPost && r.URL.Path == "/api/desktop/task" {
+			_, _ = w.Write([]byte(`{"ok":true,"text":"opened Safari and logged in"}`))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer api.Close()
+
+	// 1. Main role with desktopModel configured hides raw node_desktop and exposes desktop_task.
+	mainInput := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"desktop_task","arguments":{"goal":"open Safari"}}}`,
+		"",
+	}, "\n")
+	var mainOut bytes.Buffer
+	mainSrv := NewServerWithConfig(api.URL, "assistant", cfgPath)
+	if err := mainSrv.ServeStdio(context.Background(), strings.NewReader(mainInput), &mainOut); err != nil {
+		t.Fatal(err)
+	}
+	mainLines := strings.Split(strings.TrimSpace(mainOut.String()), "\n")
+	if strings.Contains(mainLines[0], `"node_desktop"`) || !strings.Contains(mainLines[0], `"desktop_task"`) {
+		t.Fatalf("expected desktop_task visible and node_desktop hidden when desktopModel is set:\n%s", mainLines[0])
+	}
+	if !strings.Contains(mainLines[1], "opened Safari and logged in") {
+		t.Fatalf("expected desktop_task output, got %s", mainLines[1])
+	}
+
+	// 2. computer_use role exposes only 3 tools and blocks nested desktop_task.
+	t.Setenv("BOT_HUB_MCP_ROLE", "computer_use")
+	cuInput := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"desktop_task","arguments":{"goal":"nested"}}}`,
+		"",
+	}, "\n")
+	var cuOut bytes.Buffer
+	cuSrv := NewServerWithConfig(api.URL, "assistant", cfgPath)
+	if err := cuSrv.ServeStdio(context.Background(), strings.NewReader(cuInput), &cuOut); err != nil {
+		t.Fatal(err)
+	}
+	cuLines := strings.Split(strings.TrimSpace(cuOut.String()), "\n")
+	if strings.Contains(cuLines[0], `"desktop_task"`) || !strings.Contains(cuLines[0], `"node_desktop"`) {
+		t.Fatalf("expected computer_use role to expose node_desktop and hide desktop_task:\n%s", cuLines[0])
+	}
+	if !strings.Contains(cuLines[1], `"isError":true`) {
+		t.Fatalf("expected nested desktop_task rejected, got %s", cuLines[1])
 	}
 }

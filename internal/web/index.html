@@ -980,6 +980,20 @@ try {
                 <span id="localDeskEngine" class="mp">检测中</span>
               </div>
               <label class="perm" style="align-self:flex-start"><input type="checkbox" id="sAllowLocalDesk" />允许 Bot 通过 MCP 操控本机桌面（点击/输入/截图）</label>
+              <div class="two">
+                <div class="fld">
+                  <label>桌面子进程 Harness <em>可选</em></label>
+                  <select id="sDeskHarness"></select>
+                </div>
+                <div class="fld">
+                  <label>桌面子进程模型 <em>建议轻量视觉模型</em></label>
+                  <div style="display:flex;gap:8px;align-items:center">
+                    <input id="sDeskModel" class="mono" list="models-global" placeholder="留空沿用 Bot 默认" spellcheck="false" style="flex:1;min-width:0" />
+                    <button type="button" id="sDeskWorkerSave" class="mp go">保存</button>
+                  </div>
+                </div>
+              </div>
+              <p class="set-card-desc">配置后，多步桌面或可见浏览器操作将由独立临时子进程使用该模型执行，避免截图撑爆主会话上下文；用户可随时在「远程桌面」观摩与强制接管。</p>
             </section>
 
             <section class="set-card" id="remoteNodesBox">
@@ -2264,6 +2278,11 @@ function closeSettings() {
 function renderSettingsView(s, draft = null) {
   if (!s) return;
   $('sAllowLocalDesk').checked = s.allowLocalDesktop !== false;
+  const dhSel = $('sDeskHarness');
+  dhSel.innerHTML = '<option value="">跟随当前 Bot</option>' + (s.harnesses || []).map(h => `<option value="${esc(h.id)}">${esc(h.label)}</option>`).join('');
+  dhSel.value = s.desktopHarness || '';
+  $('sDeskModel').value = s.desktopModel || '';
+  $('sDeskModel').setAttribute('list', dhSel.value ? 'models-' + dhSel.value : 'models-global');
   $('sTheme').value = getThemePref();
   $('sDefaultModel').value = draft ? draft.defaultModel : (s.defaultModel || '');
   const perValues = draft ? (draft.defaultModels || {}) : (s.defaultModels || {});
@@ -2519,6 +2538,26 @@ $('sAllowLocalDesk').onchange = async () => {
   } catch (e) {
     $('sAllowLocalDesk').checked = !next;
     if (e.message !== 'unauthorized') $('remoteErr').textContent = e.message;
+  }
+};
+$('sDeskHarness').onchange = () => {
+  const h = $('sDeskHarness').value;
+  $('sDeskModel').setAttribute('list', h ? 'models-' + h : 'models-global');
+  if (h) loadModels(h);
+};
+$('sDeskWorkerSave').onclick = async () => {
+  $('sDeskWorkerSave').disabled = true;
+  $('remoteErr').textContent = '';
+  try {
+    state.settings = await api('/api/settings', {
+      method: 'PUT',
+      body: { desktopHarness: $('sDeskHarness').value, desktopModel: $('sDeskModel').value.trim() },
+    });
+    toast('已保存桌面子进程配置');
+  } catch (e) {
+    if (e.message !== 'unauthorized') $('remoteErr').textContent = e.message;
+  } finally {
+    $('sDeskWorkerSave').disabled = false;
   }
 };
 $('localNodeToggle').onclick = () => {

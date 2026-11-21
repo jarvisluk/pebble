@@ -58,6 +58,7 @@ export default function SettingsScreen() {
     disconnectMagpie,
     magpieProviderAction,
     setAllowLocalDesktop,
+    setDesktopWorker,
     fetchMemories,
     saveMemory,
     deleteMemory,
@@ -93,6 +94,10 @@ export default function SettingsScreen() {
   const [memText, setMemText] = useState('');
   const [memTags, setMemTags] = useState('');
 
+  const [deskHarness, setDeskHarness] = useState('');
+  const [deskModel, setDeskModel] = useState('');
+  const [deskTouched, setDeskTouched] = useState(false);
+
   const loadGlobalMemories = async (q = memQuery) => {
     setMemLoading(true);
     try {
@@ -114,6 +119,10 @@ export default function SettingsScreen() {
   useEffect(() => {
     if (settings && !defaultModelTouched) {
       setDefaultModel(settings.defaultModel || '');
+    }
+    if (settings && !deskTouched) {
+      setDeskHarness(settings.desktopHarness || '');
+      setDeskModel(settings.desktopModel || '');
     }
     if (settings && !defaultModelsTouched) {
       const dm = cleanModelsMap(settings.defaultModels);
@@ -981,6 +990,71 @@ export default function SettingsScreen() {
                 }}
                 trackColor={{ false: theme.s2, true: theme.accent }}
               />
+            </View>
+            <View style={{ gap: 6, backgroundColor: theme.s1, borderRadius: 14, padding: 10 }}>
+              <Text style={[styles.subLabel, { color: theme.text2 }]}>桌面子进程 Harness（留空跟随当前 Bot）</Text>
+              <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap' }}>
+                {[{ id: '', label: '跟随 Bot' }, ...(settings?.harnesses || [])].map((h) => (
+                  <Pressable
+                    key={h.id || 'auto'}
+                    onPress={() => {
+                      setDeskHarness(h.id);
+                      setDeskTouched(true);
+                    }}
+                    style={[
+                      styles.switchBtn,
+                      { backgroundColor: deskHarness === h.id ? theme.accent : theme.card },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.switchBtnTxt,
+                        { color: deskHarness === h.id ? theme.accentText : theme.text2 },
+                      ]}
+                    >
+                      {h.label}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+              <Text style={[styles.subLabel, { color: theme.text2, marginTop: 4 }]}>桌面子进程模型（建议轻量视觉模型）</Text>
+              <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+                <TextInput
+                  value={deskModel}
+                  onChangeText={(v) => {
+                    setDeskModel(v);
+                    setDeskTouched(true);
+                  }}
+                  placeholder="留空沿用 Bot 默认"
+                  placeholderTextColor={theme.mute}
+                  autoCapitalize="none"
+                  style={[
+                    styles.input,
+                    { flex: 1, backgroundColor: theme.card, color: theme.text, fontFamily: MONO_FONT },
+                  ]}
+                />
+                <Pressable
+                  disabled={busyAction === 'desk'}
+                  onPress={async () => {
+                    setBusyAction('desk');
+                    setError('');
+                    try {
+                      await setDesktopWorker(deskHarness, deskModel);
+                      setDeskTouched(false);
+                      setSavedMsg('已保存桌面子进程配置');
+                    } catch (err: any) {
+                      setError(err?.message || '保存失败');
+                    } finally {
+                      setBusyAction('');
+                    }
+                  }}
+                  style={[styles.switchBtn, { backgroundColor: theme.accent }]}
+                >
+                  <Text style={[styles.switchBtnTxt, { color: theme.accentText }]}>
+                    {busyAction === 'desk' ? '保存中' : '保存'}
+                  </Text>
+                </Pressable>
+              </View>
             </View>
             <View style={styles.rowBetween}>
               <View style={styles.connCol}>

@@ -92,6 +92,8 @@ export interface SettingsData {
     };
   };
   allowLocalDesktop?: boolean;
+  desktopHarness?: string;
+  desktopModel?: string;
   defaultModel: string;
   defaultModels?: Record<string, string>;
   sharedUserMd?: string;

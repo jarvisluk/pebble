@@ -197,6 +197,8 @@ type HubConfig struct {
 	DefaultModel      string            `json:"defaultModel,omitempty"`
 	DefaultModels     map[string]string `json:"defaultModels,omitempty"`
 	AllowLocalDesktop *bool             `json:"allowLocalDesktop,omitempty"` // default: true
+	DesktopHarness    string            `json:"desktopHarness,omitempty"`
+	DesktopModel      string            `json:"desktopModel,omitempty"`
 	OpenCodeServerURL string            `json:"opencodeServerUrl,omitempty"`
 	SharedDir         string            `json:"sharedDir,omitempty"`
 	StateFile         string            `json:"stateFile,omitempty"`
@@ -298,6 +300,8 @@ func Load(projectRoot, explicitPath string) (*HubConfig, string, error) {
 	cfg.ProjectRoot = projectRoot
 	cfg.ConfigPath = cfgPath
 	cfg.DefaultModel = expandEnv(cfg.DefaultModel)
+	cfg.DesktopHarness = strings.TrimSpace(cfg.DesktopHarness)
+	cfg.DesktopModel = strings.TrimSpace(expandEnv(cfg.DesktopModel))
 	cfg.OpenCodeServerURL = expandEnv(cfg.OpenCodeServerURL)
 	cfg.HTTP.WebhookSecret = expandEnv(cfg.HTTP.WebhookSecret)
 	cfg.HTTP.APIToken = expandEnv(cfg.HTTP.APIToken)
@@ -473,7 +477,7 @@ func PlatformInstructionsText() string {
 		"  - If `list_sessions` returns a `magpieSession` (e.g. `opencode:...` or `claude:...`) and you need raw tool transcripts, pass it to `magpie-sessions__read_session`.",
 		"  - When context gets noisy or off-track, call `rotate_session(handoffNote)` to cleanly archive this session after the turn.",
 		"- **Scheduled Routines (`bot-hub` MCP)**: `list_routines`, `upsert_routine`, `delete_routine`, `run_routine`. Routines run in isolated turns with `AGENTS.md` + `memory/` and deliver findings via `receipt` (queued for the next main turn), `notify` (immediate main turn), or `none`.",
-		"- **Devices & Human Takeover**: `list_nodes`, `node_exec`, `node_file`, `node_desktop`, `request_takeover`.",
+		"- **Devices & Human Takeover**: `desktop_task`, `list_nodes`, `node_exec`, `node_file`, `node_desktop`, `request_takeover`. Delegate multi-step desktop or web GUI tasks to `desktop_task` so they run on the visible desktop (observable and take-over-ready) in an isolated lightweight worker instead of headless browsers or main-session screenshot loops.",
 		"",
 	}, "\n")
 }
@@ -597,6 +601,27 @@ func ReadAPIToken(configPath string) string {
 	}
 	loadDotEnv(filepath.Dir(filepath.Dir(configPath)))
 	return strings.TrimSpace(expandEnv(tok))
+}
+
+// HasDesktopModel reports whether configPath configures a non-empty desktopModel.
+func HasDesktopModel(configPath string) bool {
+	if configPath == "" {
+		return false
+	}
+	raw, err := os.ReadFile(configPath)
+	if err != nil {
+		return false
+	}
+	var doc struct {
+		DesktopModel string `json:"desktopModel"`
+	}
+	if json.Unmarshal(raw, &doc) != nil {
+		return false
+	}
+	if ContainsEnvRef(doc.DesktopModel) {
+		loadDotEnv(filepath.Dir(filepath.Dir(configPath)))
+	}
+	return strings.TrimSpace(expandEnv(doc.DesktopModel)) != ""
 }
 
 func ensureOpenCodeMCPConfig(bot *BotConfig, cfg *HubConfig) error {

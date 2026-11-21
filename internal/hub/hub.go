@@ -28,6 +28,12 @@ var ErrBotNotFound = errors.New("bot not found")
 // ErrRoutineNotFound indicates that the requested routine ID does not exist on the bot.
 var ErrRoutineNotFound = errors.New("routine not found")
 
+// ErrDesktopTaskBusy indicates a computer-use worker is already running on the target desktop.
+var ErrDesktopTaskBusy = errors.New("desktop task already running for target")
+
+// ErrLocalDesktopDisabled indicates local host desktop automation is turned off in settings.
+var ErrLocalDesktopDisabled = errors.New("本机桌面操控已在「设置 › 远程与设备」中关闭")
+
 // ErrForbidden indicates the caller is not permitted to access another bot's private sessions.
 var ErrForbidden = errors.New("forbidden")
 
@@ -40,9 +46,20 @@ type SendOptions struct {
 }
 
 type IsolatedOptions struct {
-	Source    string
-	Model     string
-	OnToolUse func(toolName string)
+	Source     string
+	Harness    string
+	Model      string
+	MCPRole    string
+	TimeoutSec int
+	OnToolUse  func(toolName string)
+}
+
+type DesktopTaskRequest struct {
+	BotID      string `json:"botId"`
+	Target     string `json:"nodeId,omitempty"`
+	Goal       string `json:"goal"`
+	App        string `json:"app,omitempty"`
+	TimeoutSec int    `json:"timeoutSec,omitempty"`
 }
 
 type RoutinePatch struct {
@@ -175,6 +192,13 @@ type Hub struct {
 	activeEphemeralMu sync.Mutex
 	activeEphemeral   map[string]int
 
+	isolatedCancelsMu sync.Mutex
+	isolatedCancels   map[string]map[uint64]context.CancelFunc
+	isolatedSeq       atomic.Uint64
+
+	desktopTaskMu      sync.Mutex
+	activeDesktopTasks map[string]string // target -> botID
+
 	schedMu            sync.RWMutex
 	onSchedulesChanged func()
 
@@ -204,12 +228,14 @@ func New(cfg *config.HubConfig, store *state.Store, messages *state.MessageStore
 		messages:      messages,
 		registry:      reg,
 		localDesk:     desktop.NewEngine(),
-		lanes:           make(map[string]*botLane, len(cfg.Bots)),
-		order:           make([]string, 0, len(cfg.Bots)),
-		pendingReload:   make(map[string]bool),
-		activeEphemeral: make(map[string]int),
-		subs:            make(map[uint64]chan Event),
-		hops:            make(map[string]int),
+		lanes:              make(map[string]*botLane, len(cfg.Bots)),
+		order:              make([]string, 0, len(cfg.Bots)),
+		pendingReload:      make(map[string]bool),
+		activeEphemeral:    make(map[string]int),
+		isolatedCancels:    make(map[string]map[uint64]context.CancelFunc),
+		activeDesktopTasks: make(map[string]string),
+		subs:               make(map[uint64]chan Event),
+		hops:               make(map[string]int),
 	}
 	h.nodes = node.NewRegistry(func() {
 		h.broadcast(Event{
@@ -566,6 +592,9 @@ func (h *Hub) ResetSession(botID string) (state.SessionRecord, bool, error) {
 	lane.cancelMu.Unlock()
 	if cancel != nil {
 		cancel()
+		h.desktop.CancelTakeoversByBot(botID)
+	}
+	if h.cancelIsolatedByBot(botID) > 0 {
 		h.desktop.CancelTakeoversByBot(botID)
 	}
 
@@ -1274,7 +1303,7 @@ func (h *Hub) executeTurn(ctx context.Context, lane *botLane, bot config.BotConf
 	return nil, fmt.Errorf("bot %q exhausted retries", bot.ID)
 }
 
-// Interrupt cancels the bot's running turn, if any.
+// Interrupt cancels the bot's running turn and any active isolated tasks, if any.
 func (h *Hub) Interrupt(botID string) (bool, error) {
 	h.lanesMu.RLock()
 	lane, ok := h.lanes[botID]
@@ -1285,12 +1314,18 @@ func (h *Hub) Interrupt(botID string) (bool, error) {
 	lane.cancelMu.Lock()
 	cancel := lane.cancel
 	lane.cancelMu.Unlock()
-	if cancel == nil {
-		return false, nil
+	interrupted := false
+	if cancel != nil {
+		cancel()
+		interrupted = true
 	}
-	cancel()
-	h.desktop.CancelTakeoversByBot(botID)
-	return true, nil
+	if h.cancelIsolatedByBot(botID) > 0 {
+		interrupted = true
+	}
+	if interrupted {
+		h.desktop.CancelTakeoversByBot(botID)
+	}
+	return interrupted, nil
 }
 
 func (h *Hub) reloadHarness(kind string) {
@@ -1601,6 +1636,7 @@ func (h *Hub) DeleteBot(botID string) error {
 	if cancel != nil {
 		cancel()
 	}
+	h.cancelIsolatedByBot(botID)
 	if h.desktop != nil {
 		h.desktop.CancelTakeoversByBot(botID)
 	}
@@ -1858,9 +1894,20 @@ func (h *Hub) RunIsolated(ctx context.Context, botID, prompt string, opts Isolat
 		return nil, fmt.Errorf("bot %q not found: %w", botID, ErrBotNotFound)
 	}
 
+	if hk := strings.TrimSpace(opts.Harness); hk != "" && hk != bot.Harness {
+		bot.Harness = hk
+		if strings.TrimSpace(opts.Model) == "" && bot.ModelInherited {
+			h.lanesMu.RLock()
+			bot.Model = h.cfg.DefaultModelFor(bot.Harness)
+			h.lanesMu.RUnlock()
+		}
+	}
 	if m := strings.TrimSpace(opts.Model); m != "" {
 		bot.Model = m
 		bot.ModelInherited = false
+	}
+	if opts.TimeoutSec > 0 {
+		bot.TimeoutSec = opts.TimeoutSec
 	}
 
 	runner, err := h.registry.Get(bot.Harness)
@@ -1897,12 +1944,26 @@ func (h *Hub) RunIsolated(ctx context.Context, botID, prompt string, opts Isolat
 		extraEnv["BOT_HUB_API_TOKEN"] = apiToken
 		mcpEnv = map[string]string{"BOT_HUB_API_TOKEN": apiToken}
 	}
+	if role := strings.TrimSpace(opts.MCPRole); role != "" {
+		extraEnv["BOT_HUB_MCP_ROLE"] = role
+		if mcpEnv == nil {
+			mcpEnv = make(map[string]string, 1)
+		}
+		mcpEnv["BOT_HUB_MCP_ROLE"] = role
+	}
+
+	runCtx, cancel := context.WithCancel(ctx)
+	cancelID := h.registerIsolatedCancel(bot.ID, cancel)
+	defer func() {
+		cancel()
+		h.unregisterIsolatedCancel(bot.ID, cancelID)
+	}()
 
 	var toolMu sync.Mutex
 	var toolOrder []string
 	toolCounts := make(map[string]int)
 
-	res, err := runner.RunTurn(ctx, harness.RunOptions{
+	res, err := runner.RunTurn(runCtx, harness.RunOptions{
 		Bot:                      bot,
 		Prompt:                   effectivePrompt,
 		SessionID:                "",
@@ -2301,5 +2362,193 @@ func (h *Hub) BroadcastRoutineRun(run state.RoutineRun) {
 		Type:    "routine_run",
 		BotID:   run.BotID,
 		Payload: run,
+	})
+}
+
+func (h *Hub) registerIsolatedCancel(botID string, cancel context.CancelFunc) uint64 {
+	id := h.isolatedSeq.Add(1)
+	h.isolatedCancelsMu.Lock()
+	m := h.isolatedCancels[botID]
+	if m == nil {
+		m = make(map[uint64]context.CancelFunc)
+		h.isolatedCancels[botID] = m
+	}
+	m[id] = cancel
+	h.isolatedCancelsMu.Unlock()
+	return id
+}
+
+func (h *Hub) unregisterIsolatedCancel(botID string, id uint64) {
+	h.isolatedCancelsMu.Lock()
+	if m := h.isolatedCancels[botID]; m != nil {
+		delete(m, id)
+		if len(m) == 0 {
+			delete(h.isolatedCancels, botID)
+		}
+	}
+	h.isolatedCancelsMu.Unlock()
+}
+
+func (h *Hub) cancelIsolatedByBot(botID string) int {
+	h.isolatedCancelsMu.Lock()
+	m := h.isolatedCancels[botID]
+	cancels := make([]context.CancelFunc, 0, len(m))
+	for _, fn := range m {
+		cancels = append(cancels, fn)
+	}
+	h.isolatedCancelsMu.Unlock()
+	for _, fn := range cancels {
+		fn()
+	}
+	return len(cancels)
+}
+
+// DesktopWorkerSnapshot returns the configured global desktop worker harness and model.
+func (h *Hub) DesktopWorkerSnapshot() (string, string) {
+	h.lanesMu.RLock()
+	defer h.lanesMu.RUnlock()
+	return h.cfg.DesktopHarness, h.cfg.DesktopModel
+}
+
+// SetDesktopWorker persists and updates the global computer-use worker harness and model.
+func (h *Hub) SetDesktopWorker(harnessKind, model string) error {
+	harnessKind = strings.TrimSpace(harnessKind)
+	model = strings.TrimSpace(model)
+	if harnessKind != "" {
+		if _, err := h.registry.Get(harnessKind); err != nil {
+			return err
+		}
+	}
+
+	h.lanesMu.Lock()
+	defer h.lanesMu.Unlock()
+	prevExpandedModel := h.cfg.DesktopModel
+	if h.cfg.ConfigPath != "" {
+		if err := config.UpdateRaw(h.cfg, func(raw *config.HubConfig) error {
+			raw.DesktopHarness = harnessKind
+			if model == prevExpandedModel && config.ContainsEnvRef(raw.DesktopModel) {
+				return nil
+			}
+			raw.DesktopModel = model
+			return nil
+		}); err != nil {
+			return fmt.Errorf("save config: %w", err)
+		}
+	}
+	h.cfg.DesktopHarness = harnessKind
+	h.cfg.DesktopModel = model
+	return nil
+}
+
+// ActiveDesktopTaskBot returns the bot ID currently running a computer-use worker on target, if any.
+func (h *Hub) ActiveDesktopTaskBot(target string) string {
+	t := strings.TrimSpace(target)
+	if strings.EqualFold(t, "local") {
+		t = "local"
+	}
+	h.desktopTaskMu.Lock()
+	defer h.desktopTaskMu.Unlock()
+	if id := h.activeDesktopTasks[t]; id != "" {
+		return id
+	}
+	if t != "local" && t != "" {
+		return h.activeDesktopTasks["_default"]
+	}
+	return ""
+}
+
+// RunDesktopTask executes a multi-step GUI / visible-browser goal in an isolated
+// ephemeral worker using the configured lightweight desktop model/harness.
+func (h *Hub) RunDesktopTask(ctx context.Context, req DesktopTaskRequest) (*harness.TurnResult, error) {
+	botID := strings.TrimSpace(req.BotID)
+	if botID == "" {
+		return nil, fmt.Errorf("botId is required: %w", ErrBotNotFound)
+	}
+	if _, ok := h.GetBot(botID); !ok {
+		return nil, fmt.Errorf("bot %q not found: %w", botID, ErrBotNotFound)
+	}
+	goal := strings.TrimSpace(req.Goal)
+	if goal == "" {
+		return nil, errors.New("goal is required")
+	}
+
+	target := strings.TrimSpace(req.Target)
+	if target == "" {
+		connected := 0
+		if h.nodes != nil {
+			for _, n := range h.nodes.List() {
+				if n.Connected {
+					connected++
+				}
+			}
+		}
+		if connected == 0 {
+			target = "local"
+		} else {
+			target = "_default"
+		}
+	}
+	if strings.EqualFold(target, "local") {
+		target = "local"
+		if !h.Config().LocalDesktopAllowed() {
+			return nil, ErrLocalDesktopDisabled
+		}
+	}
+
+	h.desktopTaskMu.Lock()
+	if holder := h.activeDesktopTasks[target]; holder != "" {
+		h.desktopTaskMu.Unlock()
+		return nil, fmt.Errorf("%w (%s, held by bot %q)", ErrDesktopTaskBusy, target, holder)
+	}
+	h.activeDesktopTasks[target] = botID
+	h.desktopTaskMu.Unlock()
+	defer func() {
+		h.desktopTaskMu.Lock()
+		if h.activeDesktopTasks[target] == botID {
+			delete(h.activeDesktopTasks, target)
+		}
+		h.desktopTaskMu.Unlock()
+	}()
+
+	deskHarness, deskModel := h.DesktopWorkerSnapshot()
+	var lines []string
+	lines = append(lines,
+		"[Computer Use Worker]",
+		fmt.Sprintf("Target desktop: %s", target),
+	)
+	if app := strings.TrimSpace(req.App); app != "" {
+		lines = append(lines, fmt.Sprintf("Target app: %s", app))
+	}
+	lines = append(lines,
+		"Rules:",
+		"- Operate ONLY on the visible desktop via `node_desktop` (never launch headless browsers or hidden background UI sessions) so the user can observe and take over at any moment.",
+		"- Capture a screenshot with `node_desktop(op=\"screenshot\")` and inspect it before clicking/typing; verify the final state visually after acting.",
+		"- If login/QR/2FA/CAPTCHA/payment confirmation is required, call `request_takeover(reason=...)` and wait for the human to finish.",
+		"- Never call `desktop_task` recursively.",
+		"- Return a concise factual summary of what was done and observed.",
+		"",
+		"Goal:",
+		goal,
+	)
+
+	return h.RunIsolated(ctx, botID, strings.Join(lines, "\n"), IsolatedOptions{
+		Source:     "desktop_task",
+		Harness:    deskHarness,
+		Model:      deskModel,
+		MCPRole:    "computer_use",
+		TimeoutSec: req.TimeoutSec,
+		OnToolUse: func(toolName string) {
+			if toolName == "" {
+				return
+			}
+			h.broadcast(Event{
+				Type:  "tool_use",
+				BotID: botID,
+				Payload: map[string]any{
+					"botId": botID,
+					"tool":  "desktop:" + toolName,
+				},
+			})
+		},
 	})
 }
