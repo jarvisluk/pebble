@@ -95,7 +95,7 @@ func (d *desktop) run() {
 		MinHeight:        520,
 		BackgroundColour: application.NewRGB(239, 236, 232),
 		URL:              "/",
-		JS:               "if(/Mac/.test(navigator.platform))document.documentElement.classList.add('mac-app');",
+		JS:               "if(/Mac/.test(navigator.platform)){window.__bothubMacShell=true;document.documentElement.classList.add('mac-app');}",
 		Mac: application.MacWindow{
 			TitleBar: application.MacTitleBarHiddenInset,
 		},
@@ -105,6 +105,9 @@ func (d *desktop) run() {
 	})
 	d.win.RegisterHook(events.Mac.WebViewDidFinishNavigation, func(*application.WindowEvent) {
 		configureMacWindow(d.win.NativeWindow())
+		if runtime.GOOS == "darwin" {
+			d.win.ExecJS("if(/Mac/.test(navigator.platform)){window.__bothubMacShell=true;document.documentElement.classList.add('mac-app');}")
+		}
 	})
 	d.win.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) { d.win.Hide(); e.Cancel() })
 	d.app.Event.OnApplicationEvent(events.Mac.ApplicationShouldHandleReopen, func(*application.ApplicationEvent) { d.win.Show() })
@@ -175,13 +178,6 @@ func (d *desktop) start(p prefs) {
 	d.save()
 	d.syncTray()
 	d.setStatus("")
-	if runtime.GOOS == "darwin" {
-		if strings.Contains(url, "?") {
-			url += "&shell=mac"
-		} else {
-			url += "?shell=mac"
-		}
-	}
 	d.win.SetURL(url)
 }
 
