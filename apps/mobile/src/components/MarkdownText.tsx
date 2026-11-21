@@ -3,9 +3,11 @@ import * as Haptics from 'expo-haptics';
 import React, { useState } from 'react';
 import { Linking, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
+import { useI18n } from '../i18n';
 import { MONO_FONT, type Theme } from '../theme';
 
 function CodeCard({ lang, code, theme }: { lang: string; code: string; theme: Theme }) {
+  const { t } = useI18n();
   const [copied, setCopied] = useState(false);
 
   const onCopy = async () => {
@@ -22,7 +24,7 @@ function CodeCard({ lang, code, theme }: { lang: string; code: string; theme: Th
       <View style={[styles.codeHead, { borderBottomColor: theme.s2 }]}>
         <Text style={[styles.codeLang, { color: theme.mute }]}>{lang || 'code'}</Text>
         <Pressable onPress={onCopy} style={[styles.copyBtn, { backgroundColor: theme.card }]} hitSlop={8}>
-          <Text style={[styles.copyTxt, { color: theme.text2 }]}>{copied ? '已复制' : '复制'}</Text>
+          <Text style={[styles.copyTxt, { color: theme.text2 }]}>{copied ? t('copied') : t('copy')}</Text>
         </Pressable>
       </View>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.codeBody}>

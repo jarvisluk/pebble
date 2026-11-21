@@ -6,8 +6,11 @@ import type { ServerProfile } from './types';
 const SERVERS_KEY = 'bothub.servers.v1';
 const ACTIVE_KEY = 'bothub.activeServerId.v1';
 const THEME_KEY = 'bothub.theme.v1';
+const LANG_KEY = 'bothub.lang.v1';
+const ACCENT_KEY = 'bothub.accent.v1';
 
 export type ThemePreference = 'system' | 'light' | 'dark';
+export type LanguagePreference = 'system' | 'zh-CN' | 'en';
 
 async function readKey(key: string): Promise<string | null> {
   if (Platform.OS === 'web') {
@@ -66,4 +69,22 @@ export async function loadThemePref(): Promise<ThemePreference> {
 
 export async function saveThemePref(pref: ThemePreference): Promise<void> {
   await writeKey(THEME_KEY, pref === 'system' ? null : pref);
+}
+
+export async function loadLangPref(): Promise<LanguagePreference> {
+  const val = await readKey(LANG_KEY);
+  return val === 'zh-CN' || val === 'en' ? val : 'system';
+}
+
+export async function saveLangPref(pref: LanguagePreference): Promise<void> {
+  await writeKey(LANG_KEY, pref === 'system' ? null : pref);
+}
+
+export async function loadAccentPref(): Promise<string | null> {
+  const val = await readKey(ACCENT_KEY);
+  return val && /^#[0-9a-fA-F]{6}$/.test(val) ? val.toLowerCase() : null;
+}
+
+export async function saveAccentPref(hex: string | null): Promise<void> {
+  await writeKey(ACCENT_KEY, hex && /^#[0-9a-fA-F]{6}$/.test(hex) ? hex.toLowerCase() : null);
 }

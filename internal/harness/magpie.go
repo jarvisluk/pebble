@@ -26,6 +26,7 @@ var magpieAgents = map[string]struct{ agent, prefix string }{
 	"pi":       {"pi", "magpie/"},
 	"dsh":      {"dsh", "magpie/"},
 	"claude":   {"claude", ""},
+	"agy":      {"agy", "magpie/"},
 }
 
 // MagpieInstall tells the UI how to get magpie.

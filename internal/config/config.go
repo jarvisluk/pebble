@@ -379,6 +379,7 @@ func PlatformInstructionsText() string {
 		"  - On a new session after `/reset` or an error, use `list_sessions` and `recall_session` (omit `sessionId` or pass `\"previous\"` for your prior session; keep slices small and fetch single oversized messages by `messageId` to avoid re-polluting context).",
 		"  - If `list_sessions` returns a `magpieSession` (e.g. `opencode:...` or `claude:...`) and you need raw tool transcripts, pass it to `magpie-sessions__read_session`.",
 		"  - When context gets noisy or off-track, call `rotate_session(handoffNote)` to cleanly archive this session after the turn.",
+		"  - On harnesses without native `billion-context` incremental compression (e.g., `agy`, `dsh`), keep sessions bounded by saving durable facts to `memory/` or Magpie Memory and calling `rotate_session` regularly (using `recall_session` or `bili` tools if present).",
 		"- **Devices & Automation**:",
 		"  - Remote nodes (`bot-hub` MCP): `list_nodes`, `node_exec`, `node_file`.",
 		"  - Desktop GUI (`agent-desktop` CLI): operate apps via accessibility-tree `snapshot` + `@ref` instead of blind coordinates (run locally via shell, or remotely via `node_exec`).",

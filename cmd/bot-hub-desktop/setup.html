@@ -212,40 +212,65 @@
 <main>
   <header class="head">
     <h1>Bot Hub</h1>
-    <p class="sub">选择这台电脑的使用方式，之后可从菜单栏图标「切换模式」更改</p>
+    <p class="sub" data-i18n="sub">选择这台电脑的使用方式，之后可从菜单栏图标「切换模式」更改</p>
   </header>
 
   <section class="card">
     <div class="card-hd">
-      <h2>在这台电脑上运行</h2>
+      <h2 data-i18n="localTitle">在这台电脑上运行</h2>
     </div>
-    <p class="desc">在本机启动服务并打开开箱引导，数据保存在 <code id="dir"></code></p>
+    <p class="desc"><span data-i18n="localDesc">在本机启动服务并打开开箱引导，数据保存在 </span><code id="dir"></code></p>
     <div class="meta-row">
-      <span id="harnessSummary" class="lbl">正在检测本机 Agent 引擎…</span>
-      <button type="button" id="recheck" class="mp">重新检测</button>
+      <span id="harnessSummary" class="lbl" data-i18n="detecting">正在检测本机 Agent 引擎…</span>
+      <button type="button" id="recheck" class="mp" data-i18n="recheck">重新检测</button>
     </div>
-    <button type="button" id="local" class="btn">本机运行</button>
+    <button type="button" id="local" class="btn" data-i18n="localBtn">本机运行</button>
   </section>
 
   <section class="card">
     <div class="card-hd">
-      <h2>连接远端 Bot Hub</h2>
+      <h2 data-i18n="remoteTitle">连接远端 Bot Hub</h2>
     </div>
-    <p class="desc">粘贴主电脑「远程访问」中的 tailcat:// 配对链接，无需安装 Tailscale。</p>
+    <p class="desc" data-i18n="remoteDesc">粘贴主电脑「远程访问」中的 tailcat:// 配对链接，无需安装 Tailscale。</p>
     <textarea id="link" placeholder="tailcat://connect/tc…?port=3789" spellcheck="false"></textarea>
-    <p id="linkHint" class="hint">支持携带 #token= 的完整配对链接</p>
-    <button type="button" id="remote" class="btn">连接</button>
+    <p id="linkHint" class="hint" data-i18n="linkHint">支持携带 #token= 的完整配对链接</p>
+    <button type="button" id="remote" class="btn" data-i18n="remoteBtn">连接</button>
   </section>
 
   <p id="status"></p>
 </main>
 <script>
 const $ = id => document.getElementById(id);
+const langPref = (() => { try { return localStorage.getItem('bothub.lang'); } catch { return ''; } })();
+const isEn = langPref === 'en' || (langPref !== 'zh-CN' && !/^zh\b/i.test(navigator.language || ''));
+const dict = isEn ? {
+  sub: 'Choose how to use this computer (switch anytime from the menu bar icon)',
+  localTitle: 'Run on this computer',
+  localDesc: 'Start the local service and unbox wizard; data is stored in ',
+  detecting: 'Detecting local agent harnesses…',
+  recheck: 'Re-check',
+  detectedPrefix: 'Detected: ',
+  noneDetected: 'No installed agent harness detected; setup wizard will guide installation',
+  localBtn: 'Run Locally',
+  remoteTitle: 'Connect to remote Bot Hub',
+  remoteDesc: 'Paste the tailcat:// pairing link from Remote Access. No Tailscale install needed.',
+  linkHint: 'Supports full pairing links containing #token=',
+  tokenDetected: 'Access token detected from link',
+  remoteBtn: 'Connect',
+  starting: 'Starting…',
+  startFailed: 'Start failed',
+} : null;
+if (isEn) {
+  document.documentElement.lang = 'en';
+  document.querySelectorAll('[data-i18n]').forEach(el => { if (dict[el.dataset.i18n]) el.textContent = dict[el.dataset.i18n]; });
+}
 let polling = false;
 function syncLinkHint() {
   const v = $('link').value.trim();
   const hasTok = v.includes('#token=') || v.includes('token=');
-  $('linkHint').textContent = hasTok ? '已从链接识别访问口令' : '支持携带 #token= 的完整配对链接';
+  $('linkHint').textContent = hasTok
+    ? (isEn ? dict.tokenDetected : '已从链接识别访问口令')
+    : (isEn ? dict.linkHint : '支持携带 #token= 的完整配对链接');
   $('linkHint').className = hasTok ? 'hint ok' : 'hint';
 }
 async function refresh() {
@@ -253,24 +278,26 @@ async function refresh() {
   $('dir').textContent = s.dataDir || '';
   const installed = Array.isArray(s.harnesses) ? s.harnesses.filter(h => h.installed) : [];
   if (installed.length > 0) {
-    $('harnessSummary').textContent = '已检测到：' + installed.map(h => h.label).join('、');
+    const sep = isEn ? ', ' : '、';
+    $('harnessSummary').textContent = (isEn ? dict.detectedPrefix : '已检测到：') + installed.map(h => h.label).join(sep);
     $('harnessSummary').className = 'lbl ok';
   } else {
-    $('harnessSummary').textContent = '未检测到已安装的 Agent 引擎，进入后将引导安装';
+    $('harnessSummary').textContent = isEn ? dict.noneDetected : '未检测到已安装的 Agent 引擎，进入后将引导安装';
     $('harnessSummary').className = 'lbl';
   }
   if (!$('link').value && s.link) {
     $('link').value = s.link;
   }
   syncLinkHint();
-  $('status').textContent = s.status || '';
-  $('status').className = (s.status || '').startsWith('启动失败') ? 'warn' : '';
-  const busy = s.status === '正在启动…';
+  const st = s.status || '';
+  $('status').textContent = st;
+  $('status').className = st.startsWith('启动失败') || st.startsWith('Start failed') ? 'warn' : '';
+  const busy = st === '正在启动…' || st === 'Starting…';
   $('local').disabled = $('remote').disabled = busy;
   return busy;
 }
 async function start(body) {
-  $('status').textContent = '正在启动…';
+  $('status').textContent = isEn ? dict.starting : '正在启动…';
   $('status').className = '';
   $('local').disabled = $('remote').disabled = true;
   await fetch('/api/desktop/start', {

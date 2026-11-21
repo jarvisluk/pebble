@@ -9,6 +9,7 @@ desktop:
 
 APP = bin/Bot Hub.app
 RES_BIN = $(APP)/Contents/Resources/bin
+CODESIGN_IDENTITY ?=
 app: desktop
 	rm -rf "$(APP)" && mkdir -p "$(APP)/Contents/MacOS" "$(RES_BIN)"
 	cp build/darwin/Info.plist "$(APP)/Contents/"
@@ -44,10 +45,21 @@ app: desktop
 	else \
 		echo "note: bot-host not found; $(APP) will use OS fallback for remote desktop"; \
 	fi
-	@for f in "$(RES_BIN)"/*; do \
-		[ -e "$$f" ] && codesign --force --sign - "$$f"; \
-	done
-	codesign --force --sign - "$(APP)"
+	@IDENTITY="$(CODESIGN_IDENTITY)"; \
+	if [ -z "$$IDENTITY" ]; then \
+		IDENTITY=$$(security find-identity -v -p codesigning 2>/dev/null | awk '/Apple Development:/ {print $$2; exit}'); \
+	fi; \
+	if [ -z "$$IDENTITY" ]; then \
+		IDENTITY=$$(security find-identity -v -p codesigning 2>/dev/null | awk '/Developer ID Application:/ {print $$2; exit}'); \
+	fi; \
+	if [ -z "$$IDENTITY" ]; then \
+		IDENTITY="-"; \
+	fi; \
+	echo "Signing $(APP) with identity: $$IDENTITY"; \
+	for f in "$(RES_BIN)"/*; do \
+		[ -e "$$f" ] && codesign --force --sign "$$IDENTITY" "$$f"; \
+	done; \
+	codesign --force --sign "$$IDENTITY" "$(APP)"
 
 serve:
 	go run ./cmd/bot-hub serve

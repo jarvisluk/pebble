@@ -19,6 +19,13 @@ if (isNativeMacShell && !isMobileUA && /Mac/.test(navigator.platform)) {
 try {
   const t = localStorage.getItem('bothub.theme');
   if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
+  const l = localStorage.getItem('bothub.lang');
+  const resolvedLang = (l === 'zh-CN' || l === 'en') ? l : (/^zh\b/i.test(navigator.language || '') ? 'zh-CN' : 'en');
+  document.documentElement.lang = resolvedLang;
+  const ac = localStorage.getItem('bothub.accent');
+  if (ac && /^#[0-9a-fA-F]{6}$/.test(ac)) {
+    document.documentElement.style.setProperty('--accent', ac);
+  }
 } catch {}
 </script>
 <style>
@@ -34,8 +41,11 @@ try {
     --mute: #9b958f;
     --accent: #d9774b;
     --accent-text: #ffffff;
-    --accent-soft: #f8e1d6;
-    --sel: #faebe4;
+    --accent-soft: color-mix(in srgb, var(--accent) 16%, var(--card));
+    --sel: color-mix(in srgb, var(--accent) 10%, var(--card));
+    --bot-accent: var(--accent);
+    --bot-accent-text: var(--accent-text);
+    --bot-accent-soft: color-mix(in srgb, var(--bot-accent) 16%, var(--card));
     --pink: #f7d9d3;
     --pink-ink: #b2443a;
     --lilac: #e0dbfb;
@@ -83,6 +93,7 @@ try {
       --text-2: #ccc7c1;
       --mute: #948e88;
       --accent-soft: #2a2a2a;
+      --bot-accent-soft: #2a2a2a;
       --sel: #262626;
       --pink: #171717;
       --pink-ink: #f0a59b;
@@ -109,6 +120,7 @@ try {
     --text-2: #ccc7c1;
     --mute: #948e88;
     --accent-soft: #2a2a2a;
+    --bot-accent-soft: #2a2a2a;
     --sel: #262626;
     --pink: #171717;
     --pink-ink: #f0a59b;
@@ -158,7 +170,9 @@ try {
   .ghost svg { width: 18px; height: 18px; }
   .ghost.active { background: var(--accent-soft); color: var(--accent); }
   .chat-hd .ghost:hover:not(:disabled), .set-hd .ghost:hover:not(:disabled) { background: var(--card); }
-  .chat-hd .ghost.active:hover:not(:disabled), .set-hd .ghost.active:hover:not(:disabled) { background: var(--accent-soft); }
+  .chat-hd .ghost.active { background: var(--bot-accent-soft); color: var(--bot-accent); }
+  .chat-hd .ghost.active:hover:not(:disabled) { background: var(--bot-accent-soft); }
+  .set-hd .ghost.active:hover:not(:disabled) { background: var(--accent-soft); }
   .desk-dot { position: absolute; top: 5px; right: 5px; width: 7px; height: 7px; border-radius: 50%; background: var(--danger); box-shadow: 0 0 0 2px var(--page); }
   .circle { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; flex: none; background: var(--s1); color: var(--text-2); transition: background .15s, color .15s, transform .15s; }
   .circle:hover:not(:disabled) { background: var(--s2); color: var(--text); }
@@ -414,7 +428,7 @@ try {
   .msg.me { align-items: flex-end; margin-top: 6px; }
   .msg.bot { align-items: flex-start; }
   .bubble { padding: 10px 16px; border-radius: var(--r-bubble); background: var(--card); max-width: 80%; min-width: 0; }
-  .msg.me .bubble { background: var(--accent-soft); max-width: 72%; }
+  .msg.me .bubble { background: var(--bot-accent-soft); max-width: 72%; }
   .msg .label { display: flex; align-items: center; gap: 6px; font-size: var(--fs-xs); color: var(--mute); margin: 8px 16px 4px; }
   .msg .label .av { width: 16px; height: 16px; }
   .msg.peer .bubble { background: var(--lilac); }
@@ -471,7 +485,7 @@ try {
   .composer textarea { flex: 1; resize: none; outline: none; padding: 8px 6px; min-height: 40px; max-height: 220px; line-height: 24px; }
   .composer textarea::placeholder { color: var(--mute); }
   .composer .circle { font: 600 var(--fs-lg) var(--mono); }
-  .send { width: 40px; height: 40px; border-radius: 50%; background: var(--accent); color: var(--accent-text); display: grid; place-items: center; flex: none; transition: transform .15s, opacity .15s; }
+  .send { width: 40px; height: 40px; border-radius: 50%; background: var(--bot-accent); color: var(--bot-accent-text); display: grid; place-items: center; flex: none; transition: transform .15s, opacity .15s; }
   .send:active:not(:disabled) { transform: scale(.92); }
   .send svg { width: 18px; height: 18px; }
   .send.stop { background: var(--text); color: var(--card); }
@@ -484,10 +498,33 @@ try {
   /* panel: same top/bottom edges as the sidebar */
   .shade { position: fixed; inset: 0; background: var(--shade); opacity: 0; pointer-events: none; transition: opacity .2s; z-index: 30; }
   .shade.open { opacity: 1; pointer-events: auto; }
-  .panel { position: fixed; top: var(--edge-t); right: var(--edge-r); bottom: var(--edge-b); width: min(380px, calc(100vw - var(--edge-l) - var(--edge-r))); background: var(--card); border-radius: var(--r-card); padding: 0 var(--pad) var(--pad); z-index: 31; display: flex; flex-direction: column; box-shadow: 0 24px 60px rgba(0, 0, 0, .18); transform: translateX(calc(100% + var(--edge-r))); visibility: hidden; transition: transform .25s ease, visibility .25s; }
+  .panel { position: fixed; top: var(--edge-t); right: var(--edge-r); bottom: var(--edge-b); width: min(380px, calc(100vw - var(--edge-l) - var(--edge-r))); background: var(--card); border-radius: var(--r-card); padding: 4px var(--pad) var(--pad); z-index: 31; display: flex; flex-direction: column; box-shadow: 0 24px 60px rgba(0, 0, 0, .18); transform: translateX(calc(100% + var(--edge-r))); visibility: hidden; transition: transform .25s ease, visibility .25s; }
   .panel.open { transform: none; visibility: visible; }
-  .panel-hd { height: var(--bar); flex: none; display: flex; align-items: center; justify-content: space-between; margin-right: -4px; }
+  .panel-hd { height: var(--bar); flex: none; display: flex; align-items: center; justify-content: space-between; padding-left: 8px; margin-right: -4px; }
   .panel-hd h3 { font-size: var(--fs-md); font-weight: 700; }
+  .panel .ghost.active { background: var(--bot-accent-soft); color: var(--bot-accent); }
+  .panel .mp.go { background: var(--bot-accent); color: var(--bot-accent-text); }
+  .panel .mp.go:hover { background: var(--bot-accent); color: var(--bot-accent-text); filter: brightness(1.06); }
+  .panel .btn.go { background: var(--bot-accent); color: var(--bot-accent-text); }
+  .panel .btn.go:hover:not(:disabled) { background: var(--bot-accent); filter: brightness(1.06); }
+  .panel .perm input { accent-color: var(--bot-accent); }
+  .panel .fld input:focus, .panel .fld textarea:focus, .panel .fld select:focus { border-color: var(--bot-accent); }
+  #chatView .to-banner .btn.go, #deskPane .d-btn.on { background: var(--bot-accent); color: var(--bot-accent-text); }
+  #deskPane .desk-media:focus { outline-color: var(--bot-accent); }
+  .p-tech { margin-top: 16px; }
+  .p-tech summary { list-style: none; cursor: pointer; display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border-radius: var(--r-row); background: var(--s1); font-size: var(--fs-sm); font-weight: 600; color: var(--text-2); transition: background .15s, color .15s; user-select: none; }
+  .p-tech summary::-webkit-details-marker { display: none; }
+  .p-tech summary:hover { background: var(--s2); color: var(--text); }
+  .p-tech summary svg { width: 16px; height: 16px; color: var(--mute); transition: transform .15s; }
+  .p-tech[open] summary svg { transform: rotate(90deg); }
+  .p-tech-body { padding-top: 8px; }
+  .accent-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .swatch { width: 28px; height: 28px; border-radius: 50%; border: 2px solid transparent; transition: transform .15s, box-shadow .15s; flex: none; position: relative; }
+  .swatch:hover { transform: scale(1.08); }
+  .swatch.on { box-shadow: 0 0 0 2px var(--card), 0 0 0 4px var(--accent); }
+  .accent-pick { width: 32px; height: 28px; padding: 0; border-radius: 999px; overflow: hidden; border: 1px solid var(--s2); background: var(--s1); cursor: pointer; }
+  .accent-pick::-webkit-color-swatch-wrapper { padding: 2px; }
+  .accent-pick::-webkit-color-swatch { border: 0; border-radius: 999px; }
   .panel-b { flex: 1; overflow-y: auto; margin: 0 calc(-1 * var(--pad)); padding: 8px var(--pad) var(--pad); }
   .p-hero { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 2px; margin-bottom: 16px; }
   .p-hero .av { width: 64px; height: 64px; margin-bottom: 10px; }
@@ -740,63 +777,63 @@ try {
       <div class="side-hd">
         <h2>Bots<span id="botCount"></span></h2>
         <div class="side-acts">
-          <button id="openCreate" class="ghost" aria-label="新建 Bot" title="新建 Bot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
-          <button id="collapseSideBtn" class="ghost" aria-label="折叠侧边栏" title="折叠侧边栏 (⌘B)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="4"/><path d="M9 4v16"/></svg></button>
+          <button id="openCreate" class="ghost" data-i18n-aria="newBot" data-i18n-title="newBot" aria-label="新建 Bot" title="新建 Bot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
+          <button id="collapseSideBtn" class="ghost" data-i18n-aria="collapseSide" data-i18n-title="collapseSideTitle" aria-label="折叠侧边栏" title="折叠侧边栏 (⌘B)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="4"/><path d="M9 4v16"/></svg></button>
         </div>
       </div>
-      <label class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="filter" placeholder="搜索 Bot" autocomplete="off" /></label>
+      <label class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="filter" data-i18n-ph="searchBot" placeholder="搜索 Bot" autocomplete="off" /></label>
       <nav id="bots" class="list"></nav>
     </div>
 
     <div id="sideSettings" class="side-pane" hidden>
       <div class="side-hd">
-        <h2>设置</h2>
+        <h2 data-i18n="settings">设置</h2>
       </div>
       <button type="button" id="settingsBack" class="snav-item snav-back">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
-        <span>返回会话</span>
+        <span data-i18n="backToChat">返回会话</span>
       </button>
-      <nav id="settingsTabs" class="list" role="tablist" aria-label="设置分组">
+      <nav id="settingsTabs" class="list" role="tablist" data-i18n-aria="settingsTabs" aria-label="设置分组">
         <button type="button" class="snav-item on" role="tab" aria-selected="true" data-stab="models">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 2 7l10 5 10-5-10-5z"/><path d="m2 12 10 5 10-5"/><path d="m2 17 10 5 10-5"/></svg>
-          <span>模型与 Bot</span>
+          <span data-i18n="tabModels">模型与 Bot</span>
         </button>
         <button type="button" class="snav-item" role="tab" aria-selected="false" data-stab="remote">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3.6 9h16.8M3.6 15h16.8"/><path d="M12 3a14.5 14.5 0 0 0 0 18 14.5 14.5 0 0 0 0-18z"/></svg>
-          <span>远程与设备</span>
+          <span data-i18n="tabRemote">远程与设备</span>
         </button>
         <button type="button" class="snav-item" role="tab" aria-selected="false" data-stab="general">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M4 17h16M9 5v4M15 15v4"/></svg>
-          <span>通用</span>
+          <span data-i18n="tabGeneral">通用</span>
         </button>
       </nav>
     </div>
 
     <div class="side-ft">
-      <button type="button" id="settingsBtn" class="ghost" aria-label="设置" title="设置 (⌘,)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
+      <button type="button" id="settingsBtn" class="ghost" data-i18n-aria="settings" data-i18n-title="settingsTitle" aria-label="设置" title="设置 (⌘,)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
     </div>
   </aside>
 
   <main class="main">
     <div id="chatView" class="main-pane">
       <div class="chat-hd">
-        <button id="menuBtn" class="ghost menu" aria-label="展开侧边栏" title="侧边栏 (⌘B)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h10"/></svg></button>
+        <button id="menuBtn" class="ghost menu" data-i18n-aria="expandSide" data-i18n-title="expandSideTitle" aria-label="展开侧边栏" title="侧边栏 (⌘B)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h10"/></svg></button>
         <div id="hdAv"></div>
         <div class="who"><h1 id="hdName"></h1></div>
         <div class="hd-acts">
-          <button id="deskBtn" class="ghost" aria-label="远程桌面" title="远程桌面">
+          <button id="deskBtn" class="ghost" data-i18n-aria="remoteDesktop" data-i18n-title="remoteDesktop" aria-label="远程桌面" title="远程桌面">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="14" rx="2.5"/><path d="M8 21h8M12 18v3"/></svg>
             <span id="deskDot" class="desk-dot" hidden></span>
           </button>
-          <button id="detailBtn" class="ghost" aria-label="详情" title="详情" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg></button>
+          <button id="detailBtn" class="ghost" data-i18n-aria="details" data-i18n-title="details" aria-label="详情" title="详情" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg></button>
         </div>
       </div>
 
     <div id="takeoverBanner" class="to-banner" hidden>
       <span id="takeoverBannerText" class="to-banner-txt"></span>
       <div class="to-banner-acts">
-        <button type="button" id="toBannerOpen" class="btn">打开桌面</button>
-        <button type="button" id="toBannerResolve" class="btn go">完成并恢复 AI</button>
+        <button type="button" id="toBannerOpen" class="btn" data-i18n="openDesktop">打开桌面</button>
+        <button type="button" id="toBannerResolve" class="btn go" data-i18n="resumeAI">完成并恢复 AI</button>
       </div>
     </div>
 
@@ -805,46 +842,46 @@ try {
         <div id="scroll" class="scroll"><div id="thread" class="thread"></div></div>
         <div class="composer-wrap">
           <div class="composer">
-            <button id="plusBtn" class="circle" aria-label="快捷命令" title="快捷命令">/</button>
+            <button id="plusBtn" class="circle" data-i18n-aria="slashCmds" data-i18n-title="slashCmds" aria-label="快捷命令" title="快捷命令">/</button>
             <textarea id="input" rows="1" placeholder="发消息"></textarea>
             <button id="sendBtn" class="send" disabled aria-label="发送"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
             <div id="pop" class="pop">
-              <button data-cmd="/status">/status <span>会话与费用</span></button>
-              <button data-cmd="/bots">/bots <span>所有 Bot</span></button>
-              <button data-cmd="/ask ">/ask &lt;bot&gt; … <span>转给另一个 Bot</span></button>
-              <button data-cmd="/reset">/reset <span>开新会话</span></button>
+              <button data-cmd="/status">/status <span data-i18n="cmdStatusDesc">会话与费用</span></button>
+              <button data-cmd="/bots">/bots <span data-i18n="cmdBotsDesc">所有 Bot</span></button>
+              <button data-cmd="/ask ">/ask &lt;bot&gt; … <span data-i18n="cmdAskDesc">转给另一个 Bot</span></button>
+              <button data-cmd="/reset">/reset <span data-i18n="cmdResetDesc">开新会话</span></button>
             </div>
           </div>
         </div>
       </div>
 
-      <section id="deskPane" class="desk-pane" aria-label="远程桌面" hidden>
+      <section id="deskPane" class="desk-pane" data-i18n-aria="remoteDesktop" aria-label="远程桌面" hidden>
         <div id="deskStage" class="desk-stage">
           <div id="deskViewport" class="desk-viewport">
             <video id="deskVideo" class="desk-media" autoplay muted playsinline tabindex="0" data-desk-stage hidden></video>
-            <img id="deskImg" class="desk-media" alt="远程桌面" draggable="false" tabindex="0" data-desk-stage hidden />
+            <img id="deskImg" class="desk-media" data-i18n-alt="remoteDesktop" alt="远程桌面" draggable="false" tabindex="0" data-desk-stage hidden />
           </div>
 
           <div id="deskCenterMsg" class="d-center-msg" hidden>
-            <div id="deskCenterText">正在连接桌面…</div>
-            <button type="button" id="deskRetryBtn" class="btn">重试连接</button>
+            <div id="deskCenterText" data-i18n="deskConnecting">正在连接桌面…</div>
+            <button type="button" id="deskRetryBtn" class="btn" data-i18n="retryConnect">重试连接</button>
           </div>
 
           <div class="d-top-stack">
             <div class="d-pill tl">
               <div class="d-tl-row">
-                <button type="button" id="deskStatusBtn" class="d-status-btn" title="展开链路详情">
+                <button type="button" id="deskStatusBtn" class="d-status-btn" data-i18n-title="deskToggleDetails" title="展开链路详情">
                   <span id="deskStatusDot" class="d-dot"></span>
-                  <span id="deskStatusLabel">准备中</span>
+                  <span id="deskStatusLabel" data-i18n="deskPreparing">准备中</span>
                 </button>
-                <select id="deskTarget" class="d-sel" aria-label="目标设备"></select>
-                <select id="deskWindow" class="d-sel" aria-label="窗口范围"><option value="">整个屏幕</option></select>
+                <select id="deskTarget" class="d-sel" data-i18n-aria="deskTarget" aria-label="目标设备"></select>
+                <select id="deskWindow" class="d-sel" data-i18n-aria="deskWindow" aria-label="窗口范围"><option value="" data-i18n="entireScreen">整个屏幕</option></select>
               </div>
               <dl id="deskDetails" class="d-details" hidden>
-                <dt>模式</dt><dd id="ddMode">—</dd>
-                <dt>延迟</dt><dd id="ddRtt">—</dd>
-                <dt>分辨率</dt><dd id="ddRes">—</dd>
-                <dt>状态</dt><dd id="ddLock">空闲</dd>
+                <dt data-i18n="deskMode">模式</dt><dd id="ddMode">—</dd>
+                <dt data-i18n="deskLatency">延迟</dt><dd id="ddRtt">—</dd>
+                <dt data-i18n="deskResolution">分辨率</dt><dd id="ddRes">—</dd>
+                <dt data-i18n="deskLockState">状态</dt><dd id="ddLock" data-i18n="idle">空闲</dd>
               </dl>
             </div>
 
@@ -856,15 +893,15 @@ try {
 
           <div class="d-pill br">
             <div id="deskTypePop" class="d-type-pop" hidden>
-              <input id="deskTypeIn" placeholder="输入中文或文本，回车发送" autocomplete="off" />
-              <button type="button" id="deskTypeSend" class="d-btn on">发送</button>
+              <input id="deskTypeIn" data-i18n-ph="deskTypePh" placeholder="输入中文或文本，回车发送" autocomplete="off" />
+              <button type="button" id="deskTypeSend" class="d-btn on" data-i18n="send">发送</button>
             </div>
             <div class="d-tools">
-              <button type="button" id="deskTypeBtn" class="d-btn" title="文本输入">Aa</button>
-              <button type="button" id="deskZoomBtn" class="d-btn" title="切换 1:1 / 适应">适应</button>
-              <button type="button" id="deskRefreshBtn" class="d-btn" title="刷新窗口并重连流"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg></button>
-              <button type="button" id="deskFsBtn" class="d-btn" title="全屏"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg></button>
-              <button type="button" id="deskCloseBtn" class="d-btn" title="关闭桌面"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+              <button type="button" id="deskTypeBtn" class="d-btn" data-i18n-title="textInput" title="文本输入">Aa</button>
+              <button type="button" id="deskZoomBtn" class="d-btn" data-i18n-title="toggleZoom" title="切换 1:1 / 适应" data-i18n="fitZoom">适应</button>
+              <button type="button" id="deskRefreshBtn" class="d-btn" data-i18n-title="refreshStream" title="刷新窗口并重连流"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg></button>
+              <button type="button" id="deskFsBtn" class="d-btn" data-i18n-title="fullscreen" title="全屏"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg></button>
+              <button type="button" id="deskCloseBtn" class="d-btn" data-i18n-title="closeDesktop" title="关闭桌面"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
             </div>
           </div>
         </div>
@@ -872,12 +909,12 @@ try {
     </div>
     </div>
 
-    <section id="settingsView" class="main-pane" aria-label="设置" hidden>
+    <section id="settingsView" class="main-pane" data-i18n-aria="settings" aria-label="设置" hidden>
       <div class="set-hd">
-        <button type="button" id="settingsMenuBtn" class="ghost menu" aria-label="打开设置分组" title="设置分组"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h10"/></svg></button>
+        <button type="button" id="settingsMenuBtn" class="ghost menu" data-i18n-aria="openSettingsTabs" data-i18n-title="settingsTabs" aria-label="打开设置分组" title="设置分组"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h10"/></svg></button>
         <h1 id="setTitle">模型与 Bot</h1>
         <div class="hd-acts">
-          <button type="submit" form="settingsForm" id="settingsSubmit" class="btn go set-save" disabled>保存配置</button>
+          <button type="submit" form="settingsForm" id="settingsSubmit" class="btn go set-save" data-i18n="saveConfig" disabled>保存配置</button>
         </div>
       </div>
       <div class="scroll">
@@ -885,54 +922,54 @@ try {
           <div id="sTabModels" class="tab-pane">
             <section class="set-card">
               <div class="set-card-hd">
-                <h2>Magpie 统一管理</h2>
-                <span id="sMagpieStatusPill" class="mp">检测中</span>
+                <h2 data-i18n="magpieUnified">Magpie 统一管理</h2>
+                <span id="sMagpieStatusPill" class="mp" data-i18n="checking">检测中</span>
               </div>
               <div id="sMagpieInstall" class="note" hidden></div>
               <div id="sMagpieBox" class="set-stack" hidden>
-                <p class="set-card-desc">未接管时各 CLI 直接读取自身配置；通过下方「接管」可调用原生 Magpie 将多个后端统一到同一套网关与路由。</p>
+                <p class="set-card-desc" data-i18n="magpieIntro">未接管时各 CLI 直接读取自身配置；通过下方「接管」可调用原生 Magpie 将多个后端统一到同一套网关与路由。</p>
                 <div id="sMagpieHarnesses" class="stack6"></div>
                 <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:4px">
-                  <span style="font-size:var(--fs-sm);color:var(--text-2)">模型源（Providers · <em id="sProvCount" style="font-style:normal">0</em>）</span>
+                  <span style="font-size:var(--fs-sm);color:var(--text-2)"><span data-i18n="providersLabel">模型源（Providers · </span><em id="sProvCount" style="font-style:normal">0</em><span data-i18n="providersLabelEnd">）</span></span>
                   <div style="display:flex;gap:6px">
-                    <button type="button" id="sToggleProvs" class="mp">展开列表</button>
-                    <button type="button" id="sShowAddProv" class="mp go">+ 添加模型源</button>
+                    <button type="button" id="sToggleProvs" class="mp" data-i18n="expandList">展开列表</button>
+                    <button type="button" id="sShowAddProv" class="mp go" data-i18n="addProviderBtn">+ 添加模型源</button>
                   </div>
                 </div>
                 <div id="sAddProvBox" class="add-prov" hidden>
                   <div class="two">
                     <div class="fld">
-                      <label>添加方式</label>
+                      <label data-i18n="addMethod">添加方式</label>
                       <select id="apKind">
-                        <option value="preset">预设厂商</option>
-                        <option value="custom">自定义兼容接口</option>
+                        <option value="preset" data-i18n="presetVendor">预设厂商</option>
+                        <option value="custom" data-i18n="customEndpoint">自定义兼容接口</option>
                       </select>
                     </div>
                     <div class="fld" id="apPresetFld">
-                      <label>预设厂商</label>
+                      <label data-i18n="presetVendor">预设厂商</label>
                       <select id="apPreset"></select>
                     </div>
                     <div class="fld" id="apProtoFld" hidden>
-                      <label>接口协议</label>
+                      <label data-i18n="apiProtocol">接口协议</label>
                       <select id="apProtocol">
-                        <option value="openai">OpenAI 兼容 (/v1)</option>
-                        <option value="anthropic">Anthropic 兼容</option>
+                        <option value="openai" data-i18n="protoOpenAI">OpenAI 兼容 (/v1)</option>
+                        <option value="anthropic" data-i18n="protoAnthropic">Anthropic 兼容</option>
                         <option value="responses">OpenAI Responses</option>
                         <option value="gemini">Google Gemini</option>
                       </select>
                     </div>
                   </div>
                   <div class="two">
-                    <div class="fld"><label id="apNameLbl">别名 <em>可选</em></label><input id="apName" placeholder="例如 my-relay" /></div>
-                    <div class="fld"><label>API Key <em>直传给 magpie</em></label><input id="apKey" type="password" class="mono" placeholder="sk-..." autocomplete="new-password" /></div>
+                    <div class="fld"><label id="apNameLbl" data-i18n-html="aliasOptional">别名 <em>可选</em></label><input id="apName" data-i18n-ph="aliasPh" placeholder="例如 my-relay" /></div>
+                    <div class="fld"><label data-i18n-html="apiKeyLabel">API Key <em>直传给 magpie</em></label><input id="apKey" type="password" class="mono" placeholder="sk-..." autocomplete="new-password" /></div>
                   </div>
                   <div id="apCustomUrlRow" class="two" hidden>
                     <div class="fld"><label>Base URL</label><input id="apUrl" class="mono" placeholder="https://api.example.com/v1" /></div>
-                    <div class="fld"><label>模型列表 <em>可选，逗号分隔</em></label><input id="apModels" class="mono" placeholder="model-a,model-b" /></div>
+                    <div class="fld"><label data-i18n-html="modelsListOptional">模型列表 <em>可选，逗号分隔</em></label><input id="apModels" class="mono" placeholder="model-a,model-b" /></div>
                   </div>
                   <div style="display:flex;justify-content:flex-end;gap:6px">
-                    <button type="button" id="apCancel" class="mp">取消</button>
-                    <button type="button" id="apSubmit" class="mp go">确认添加</button>
+                    <button type="button" id="apCancel" class="mp" data-i18n="cancel">取消</button>
+                    <button type="button" id="apSubmit" class="mp go" data-i18n="confirmAdd">确认添加</button>
                   </div>
                 </div>
                 <div id="sMagpieProviders" class="stack6" hidden></div>
@@ -941,23 +978,23 @@ try {
 
             <section class="set-card">
               <div class="set-card-hd">
-                <h2>默认模型</h2>
-                <button type="button" id="sTogglePerHarness" class="link-btn">按后端设置</button>
+                <h2 data-i18n="defaultModel">默认模型</h2>
+                <button type="button" id="sTogglePerHarness" class="link-btn" data-i18n="perHarness">按后端设置</button>
               </div>
               <div class="fld">
-                <label>全局默认模型 <em>留空则用 CLI 当前配置模型</em></label>
-                <input id="sDefaultModel" class="mono" spellcheck="false" list="models-global" placeholder="留空则用 CLI 当前配置模型" />
+                <label data-i18n-html="globalDefaultModel">全局默认模型 <em>留空则用 CLI 当前配置模型</em></label>
+                <input id="sDefaultModel" class="mono" spellcheck="false" list="models-global" data-i18n-ph="globalDefaultPh" placeholder="留空则用 CLI 当前配置模型" />
               </div>
               <div id="sPerHarnessBox" class="note" hidden>
-                <div class="set-card-desc">按 Harness 覆盖全局默认模型（留空则继承上方全局默认）</div>
+                <div class="set-card-desc" data-i18n="perHarnessDesc">按 Harness 覆盖全局默认模型（留空则继承上方全局默认）</div>
                 <div id="sPerHarnessFields" class="two"></div>
               </div>
             </section>
 
             <section class="set-card">
               <div class="set-card-hd">
-                <h2>Bot 模型分配</h2>
-                <span class="set-card-desc">模型留空则继承全局默认</span>
+                <h2 data-i18n="botModels">Bot 模型分配</h2>
+                <span class="set-card-desc" data-i18n="botModelsDesc">模型留空则继承全局默认</span>
               </div>
               <div id="sBots" class="rows"></div>
             </section>
@@ -966,53 +1003,53 @@ try {
           <div id="sTabRemote" class="tab-pane" hidden>
             <section class="set-card" id="localNodeBox" hidden>
               <div class="set-card-hd">
-                <h2>本机节点 <em id="localNodeId"></em></h2>
+                <h2><span data-i18n="localNode">本机节点</span> <em id="localNodeId"></em></h2>
                 <div style="display:flex;align-items:center;gap:6px">
-                  <span class="mp" id="localNodeState">未开启</span>
-                  <button type="button" class="mp" id="localNodeToggle">开启操控…</button>
+                  <span class="mp" id="localNodeState" data-i18n="disabled">未开启</span>
+                  <button type="button" class="mp" id="localNodeToggle" data-i18n="enableControlBtn">开启操控…</button>
                 </div>
               </div>
               <div style="display:flex;align-items:center;gap:8px">
-                <input id="localNodeNameIn" class="note-in" placeholder="本机节点名称" autocomplete="off" />
-                <button type="button" class="mp" id="localNodeNameSave">保存名称</button>
+                <input id="localNodeNameIn" class="note-in" data-i18n-ph="localNodeNamePh" placeholder="本机节点名称" autocomplete="off" />
+                <button type="button" class="mp" id="localNodeNameSave" data-i18n="saveName">保存名称</button>
               </div>
-              <p class="set-card-desc">开启后，主电脑上的 Bot 可通过本机 Bot Hub 执行勾选的操作（系统权限归属本应用）。</p>
+              <p class="set-card-desc" data-i18n="localNodeDesc">开启后，主电脑上的 Bot 可通过本机 Bot Hub 执行勾选的操作（系统权限归属本应用）。</p>
               <div class="perms" id="localNodePerms">
-                <label class="perm"><input type="checkbox" data-perm="files" />文件读写</label>
-                <label class="perm"><input type="checkbox" data-perm="exec" />执行命令</label>
-                <label class="perm"><input type="checkbox" data-perm="desktop" />桌面与自动化</label>
+                <label class="perm"><input type="checkbox" data-perm="files" /><span data-i18n="permFiles">文件读写</span></label>
+                <label class="perm"><input type="checkbox" data-perm="exec" /><span data-i18n="permExec">执行命令</span></label>
+                <label class="perm"><input type="checkbox" data-perm="desktop" /><span data-i18n="permDesktop">桌面与自动化</span></label>
               </div>
             </section>
 
             <section class="set-card">
               <div class="set-card-hd">
-                <h2>Tailcat 远程加密隧道 <em>· <span id="remoteState">未读取</span></em></h2>
-                <button type="button" id="remoteToggle" class="mp go">开启远程访问</button>
+                <h2><span data-i18n="tailcatTunnel">Tailcat 远程加密隧道</span> <em>· <span id="remoteState" data-i18n="unreadState">未读取</span></em></h2>
+                <button type="button" id="remoteToggle" class="mp go" data-i18n="enableRemote">开启远程访问</button>
               </div>
               <img id="remoteQR" alt="" style="display:none;width:190px;align-self:center;border-radius:12px;background:#fff;padding:8px" />
               <div class="fld" id="remoteLinkFld" style="display:none"><textarea id="remoteLink" class="mono" readonly style="min-height:66px"></textarea></div>
-              <div class="fld" id="remoteTokenFld" style="display:none"><label>访问口令 <em>留空自动生成</em></label><input id="remoteTokenIn" class="mono" placeholder="自定义 apiToken 或留空" autocomplete="off" /></div>
+              <div class="fld" id="remoteTokenFld" style="display:none"><label data-i18n-html="accessTokenOptional">访问口令 <em>留空自动生成</em></label><input id="remoteTokenIn" class="mono" data-i18n-ph="accessTokenPh" placeholder="自定义 apiToken 或留空" autocomplete="off" /></div>
               <div class="row-end" id="remoteCopyWrap" hidden>
-                <button type="button" id="remoteCopy" class="mp go">复制配对链接</button>
+                <button type="button" id="remoteCopy" class="mp go" data-i18n="copyPairLink">复制配对链接</button>
               </div>
               <p id="remoteHelp" class="set-card-desc"></p>
               <div class="note" id="remoteTokBox" hidden>
-                <div style="display:flex;align-items:center;justify-content:space-between;gap:8px"><span id="remoteTokTitle">访问口令（可复用）</span><div id="remoteTokActs" style="display:flex;gap:6px"><button type="button" class="mp" id="remoteTokEye">显示</button><button type="button" class="mp" id="remoteTokReset">更换口令</button></div></div>
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:8px"><span id="remoteTokTitle" data-i18n="accessTokenReusable">访问口令（可复用）</span><div id="remoteTokActs" style="display:flex;gap:6px"><button type="button" class="mp" id="remoteTokEye" data-i18n="show">显示</button><button type="button" class="mp" id="remoteTokReset" data-i18n="resetToken">更换口令</button></div></div>
                 <div id="remoteTokEnv" class="set-card-desc" hidden></div>
-                <div class="cmd" id="remoteTokCmd"><code id="remoteTokVal"></code><button type="button" id="remoteTokCopy">复制</button></div>
+                <div class="cmd" id="remoteTokCmd"><code id="remoteTokVal"></code><button type="button" id="remoteTokCopy" data-i18n="copy">复制</button></div>
               </div>
             </section>
 
             <section class="set-card" id="localDeskBox">
               <div class="set-card-hd">
-                <h2>本机远程桌面</h2>
-                <span id="localDeskEngine" class="mp">检测中</span>
+                <h2 data-i18n="localDesktopTitle">本机远程桌面</h2>
+                <span id="localDeskEngine" class="mp" data-i18n="checking">检测中</span>
               </div>
             </section>
 
             <section class="set-card" id="remoteNodesBox">
               <div class="set-card-hd">
-                <h2>已连接远端设备节点</h2>
+                <h2 data-i18n="connectedNodes">已连接远端设备节点</h2>
                 <span class="mp" id="remoteNodeCount">0</span>
               </div>
               <div id="remoteNodesList" class="stack6"></div>
@@ -1023,69 +1060,95 @@ try {
           <div id="sTabGeneral" class="tab-pane" hidden>
             <section class="set-card">
               <div class="set-card-hd">
-                <h2>外观</h2>
-                <span class="set-card-desc">选择浅色、深色或跟随系统</span>
+                <h2 data-i18n="appearance">外观</h2>
+                <span class="set-card-desc" data-i18n="appearanceDesc">选择浅色、深色或跟随系统</span>
               </div>
               <div class="fld">
                 <select id="sTheme">
-                  <option value="system">跟随系统</option>
-                  <option value="light">浅色</option>
-                  <option value="dark">深色</option>
+                  <option value="system" data-i18n="followSystem">跟随系统</option>
+                  <option value="light" data-i18n="themeLight">浅色</option>
+                  <option value="dark" data-i18n="themeDark">深色</option>
                 </select>
               </div>
             </section>
 
             <section class="set-card">
               <div class="set-card-hd">
-                <h2>全局共享记忆</h2>
-                <span class="set-card-desc">_shared/USER.md · 所有 Bot 共读</span>
+                <h2 data-i18n="appAccent">应用重点色</h2>
+                <button type="button" id="sAccentReset" class="link-btn" data-i18n="resetDefault">恢复默认</button>
+              </div>
+              <p class="set-card-desc" data-i18n="appAccentDesc">用于侧栏、设置页、弹窗等全局高亮；各 Bot 对话与详情页将自动使用 Bot 自身配色。</p>
+              <div class="accent-row">
+                <div id="sAccentSwatches" class="accent-row"></div>
+                <input id="sAccentCustom" type="color" class="accent-pick" data-i18n-title="customColor" title="自定义颜色" />
+              </div>
+            </section>
+
+            <section class="set-card">
+              <div class="set-card-hd">
+                <h2 data-i18n="language">语言</h2>
+                <span class="set-card-desc" data-i18n="languageDesc">界面显示语言（默认跟随系统）</span>
               </div>
               <div class="fld">
-                <textarea id="sUserMd" rows="8" style="min-height:160px" spellcheck="false" placeholder="记录你的常用偏好、身份背景或全局约定…"></textarea>
+                <select id="sLang">
+                  <option value="system" data-i18n="followSystem">跟随系统</option>
+                  <option value="zh-CN">简体中文</option>
+                  <option value="en">English</option>
+                </select>
+              </div>
+            </section>
+
+            <section class="set-card">
+              <div class="set-card-hd">
+                <h2 data-i18n="globalSharedMem">全局共享记忆</h2>
+                <span class="set-card-desc" data-i18n="globalSharedMemDesc">_shared/USER.md · 所有 Bot 共读</span>
+              </div>
+              <div class="fld">
+                <textarea id="sUserMd" rows="8" style="min-height:160px" spellcheck="false" data-i18n-ph="userMdPh" placeholder="记录你的常用偏好、身份背景或全局约定…"></textarea>
               </div>
             </section>
 
             <section class="set-card" id="sMemCard">
               <div class="set-card-hd">
-                <h2>Magpie 全局记忆</h2>
+                <h2 data-i18n="magpieGlobalMem">Magpie 全局记忆</h2>
                 <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-                  <span id="sMemStatus" class="mp">未加载</span>
-                  <button type="button" id="sMemRefresh" class="mp">刷新</button>
-                  <button type="button" id="sMemAddToggle" class="mp go">+ 添加记忆</button>
+                  <span id="sMemStatus" class="mp" data-i18n="notLoaded">未加载</span>
+                  <button type="button" id="sMemRefresh" class="mp" data-i18n="refresh">刷新</button>
+                  <button type="button" id="sMemAddToggle" class="mp go" data-i18n="addMemoryBtn">+ 添加记忆</button>
                 </div>
               </div>
-              <p class="set-card-desc">由宿主机 Magpie Memory 托管，所有 Bot 与本机 CLI 共读跨项目长期记忆。</p>
+              <p class="set-card-desc" data-i18n="magpieGlobalMemDesc">由宿主机 Magpie Memory 托管，所有 Bot 与本机 CLI 共读跨项目长期记忆。</p>
               <div id="sMemAddBox" class="add-prov mem-add" hidden>
                 <div class="two">
                   <div class="fld">
-                    <label>类型</label>
+                    <label data-i18n="memType">类型</label>
                     <select id="sMemKind">
-                      <option value="fact">事实 (fact)</option>
-                      <option value="preference">偏好 (preference)</option>
-                      <option value="rule">规则 (rule)</option>
-                      <option value="reference">参考 (reference)</option>
-                      <option value="profile">画像 (profile)</option>
-                      <option value="procedure">流程 (procedure)</option>
-                      <option value="episode">纪要 (episode)</option>
+                      <option value="fact" data-i18n="kindFact">事实 (fact)</option>
+                      <option value="preference" data-i18n="kindPreference">偏好 (preference)</option>
+                      <option value="rule" data-i18n="kindRule">规则 (rule)</option>
+                      <option value="reference" data-i18n="kindReference">参考 (reference)</option>
+                      <option value="profile" data-i18n="kindProfile">画像 (profile)</option>
+                      <option value="procedure" data-i18n="kindProcedure">流程 (procedure)</option>
+                      <option value="episode" data-i18n="kindEpisode">纪要 (episode)</option>
                     </select>
                   </div>
                   <div class="fld">
-                    <label>标签 <em>可选，逗号分隔</em></label>
-                    <input id="sMemTags" placeholder="例如 proxy, deploy" />
+                    <label data-i18n-html="tagsOptional">标签 <em>可选，逗号分隔</em></label>
+                    <input id="sMemTags" data-i18n-ph="tagsPh" placeholder="例如 proxy, deploy" />
                   </div>
                 </div>
                 <div class="fld">
-                  <label>记忆内容</label>
-                  <textarea id="sMemText" rows="3" style="min-height:72px;font-family:var(--font)" placeholder="输入一条可跨项目复用的事实、偏好或规则…"></textarea>
+                  <label data-i18n="memContent">记忆内容</label>
+                  <textarea id="sMemText" rows="3" style="min-height:72px;font-family:var(--font)" data-i18n-ph="globalMemPh" placeholder="输入一条可跨项目复用的事实、偏好或规则…"></textarea>
                 </div>
                 <div style="display:flex;justify-content:flex-end;gap:6px">
-                  <button type="button" id="sMemAddCancel" class="mp">取消</button>
-                  <button type="button" id="sMemAddSubmit" class="mp go">保存记忆</button>
+                  <button type="button" id="sMemAddCancel" class="mp" data-i18n="cancel">取消</button>
+                  <button type="button" id="sMemAddSubmit" class="mp go" data-i18n="saveMemory">保存记忆</button>
                 </div>
               </div>
               <div class="mem-bar">
-                <input id="sMemQuery" class="note-in" placeholder="搜索 Magpie 全局记忆…" />
-                <button type="button" id="sMemSearchBtn" class="mp">搜索</button>
+                <input id="sMemQuery" class="note-in" data-i18n-ph="searchGlobalMemPh" placeholder="搜索 Magpie 全局记忆…" />
+                <button type="button" id="sMemSearchBtn" class="mp" data-i18n="search">搜索</button>
               </div>
               <div id="sMemList" class="stack6"></div>
               <div id="sMemErr" class="msg-err"></div>
@@ -1109,99 +1172,104 @@ try {
 
 <div id="shade" class="shade"></div>
 
-<aside id="panel" class="panel" aria-label="Bot 详情">
+<aside id="panel" class="panel" data-i18n-aria="botDetails" aria-label="Bot 详情">
   <div class="panel-hd">
     <h3 id="pTitle">详情</h3>
     <div class="side-acts">
-      <button type="button" id="pEditBtn" class="ghost" aria-label="编辑 Bot" title="编辑 Bot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg></button>
-      <button type="button" class="ghost" data-close aria-label="关闭" title="关闭"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+      <button type="button" id="pEditBtn" class="ghost" data-i18n-aria="editBot" data-i18n-title="editBot" aria-label="编辑 Bot" title="编辑 Bot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg></button>
+      <button type="button" class="ghost" data-close data-i18n-aria="close" data-i18n-title="close" aria-label="关闭" title="关闭"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
     </div>
   </div>
   <div class="panel-b">
     <div id="pView">
       <div class="p-hero"><div id="pAv"></div><h2 id="pName"></h2><p id="pDesc"></p></div>
       <div class="stats">
-        <div class="stat"><b id="pTurns">0</b><span>轮对话</span></div>
-        <div class="stat"><b id="pCost">$0</b><span>累计费用</span></div>
-        <div class="stat"><b id="pState">空闲</b><span>状态</span></div>
+        <div class="stat"><b id="pTurns">0</b><span data-i18n="statTurns">轮对话</span></div>
+        <div class="stat"><b id="pCost">$0</b><span data-i18n="statCost">累计费用</span></div>
+        <div class="stat"><b id="pState">空闲</b><span data-i18n="statState">状态</span></div>
       </div>
-      <dl class="kv">
-        <div><dt>ID</dt><dd id="pId"></dd></div>
-        <div><dt>Harness</dt><dd id="pHarness"></dd></div>
-        <div><dt>模型</dt><dd id="pModel"></dd></div>
-        <div><dt>Session</dt><dd id="pSession"></dd></div>
-        <div><dt>历史会话</dt><dd id="pArchived"></dd></div>
-        <div><dt>Workspace</dt><dd id="pWs"></dd></div>
-      </dl>
-      <div class="sec">AGENTS.md</div>
-      <div id="pInst" class="agents"></div>
       <div class="sec" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-        <span>Magpie 专属记忆</span>
-        <button type="button" id="pMemAddToggle" class="mp go">+ 添加</button>
+        <span data-i18n="botMemory">Magpie 专属记忆</span>
+        <button type="button" id="pMemAddToggle" class="mp go" data-i18n="addShort">+ 添加</button>
       </div>
       <div id="pMemAddBox" class="add-prov mem-add" style="margin-bottom:8px" hidden>
         <div class="fld">
-          <label>类型</label>
+          <label data-i18n="memType">类型</label>
           <select id="pMemKind">
-            <option value="fact">事实 (fact)</option>
-            <option value="rule">规则 (rule)</option>
-            <option value="reference">参考 (reference)</option>
-            <option value="procedure">流程 (procedure)</option>
-            <option value="episode">纪要 (episode)</option>
+            <option value="fact" data-i18n="kindFact">事实 (fact)</option>
+            <option value="rule" data-i18n="kindRule">规则 (rule)</option>
+            <option value="reference" data-i18n="kindReference">参考 (reference)</option>
+            <option value="procedure" data-i18n="kindProcedure">流程 (procedure)</option>
+            <option value="episode" data-i18n="kindEpisode">纪要 (episode)</option>
           </select>
         </div>
         <div class="fld">
-          <label>记忆内容</label>
-          <textarea id="pMemText" rows="3" style="min-height:66px;font-family:var(--font)" placeholder="记录此 Bot 的长期事实、约定或环境信息…"></textarea>
+          <label data-i18n="memContent">记忆内容</label>
+          <textarea id="pMemText" rows="3" style="min-height:66px;font-family:var(--font)" data-i18n-ph="botMemPh" placeholder="记录此 Bot 的长期事实、约定或环境信息…"></textarea>
         </div>
         <div style="display:flex;justify-content:flex-end;gap:6px">
-          <button type="button" id="pMemAddCancel" class="mp">取消</button>
-          <button type="button" id="pMemAddSubmit" class="mp go">保存</button>
+          <button type="button" id="pMemAddCancel" class="mp" data-i18n="cancel">取消</button>
+          <button type="button" id="pMemAddSubmit" class="mp go" data-i18n="save">保存</button>
         </div>
       </div>
       <div id="pMemList" class="stack6"></div>
       <div id="pMemErr" class="msg-err"></div>
+      <details id="pTechDetails" class="p-tech">
+        <summary><span data-i18n="techDetails">技术详情</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg></summary>
+        <div class="p-tech-body">
+          <dl class="kv">
+            <div><dt>ID</dt><dd id="pId"></dd></div>
+            <div><dt>Harness</dt><dd id="pHarness"></dd></div>
+            <div><dt data-i18n="model">模型</dt><dd id="pModel"></dd></div>
+            <div><dt>Session</dt><dd id="pSession"></dd></div>
+            <div><dt data-i18n="archivedSessions">历史会话</dt><dd id="pArchived"></dd></div>
+            <div><dt>Workspace</dt><dd id="pWs"></dd></div>
+          </dl>
+          <div class="sec">AGENTS.md</div>
+          <div id="pInst" class="agents"></div>
+        </div>
+      </details>
     </div>
     <form id="pEditForm" class="panel-edit" autocomplete="off" hidden>
-      <div class="fld"><label>名称</label><input id="peName" required /></div>
-      <div class="fld"><label>简介 <em>可选</em></label><input id="peDesc" placeholder="一句话说明它负责什么" /></div>
-      <label class="perm" style="align-self:flex-start"><input type="checkbox" id="pePrivate" />会话隐私隔离（其他 Bot 不可召回历史会话）</label>
-      <div class="fld"><label>AGENTS.md</label><textarea id="peInst" rows="12" spellcheck="false" placeholder="# Bot 指令…"></textarea></div>
+      <div class="fld"><label data-i18n="name">名称</label><input id="peName" required /></div>
+      <div class="fld"><label data-i18n-html="descOptional">简介 <em>可选</em></label><input id="peDesc" data-i18n-ph="descPh" placeholder="一句话说明它负责什么" /></div>
+      <label class="perm" style="align-self:flex-start"><input type="checkbox" id="pePrivate" /><span data-i18n="privateSessionsLabel">会话隐私隔离（其他 Bot 不可召回历史会话）</span></label>
+      <div class="fld"><label>AGENTS.md</label><textarea id="peInst" rows="12" spellcheck="false" data-i18n-ph="agentsPh" placeholder="# Bot 指令…"></textarea></div>
       <div id="peErr" class="msg-err"></div>
     </form>
   </div>
   <div class="panel-f">
     <div id="pViewFoot" class="panel-foot-row">
-      <button type="button" id="pReset" class="btn">重置会话</button>
-      <button type="button" id="pDelete" class="btn ghost-bad">删除 Bot</button>
+      <button type="button" id="pReset" class="btn" data-i18n="resetSession">重置会话</button>
+      <button type="button" id="pDelete" class="btn ghost-bad" data-i18n="deleteBot">删除 Bot</button>
     </div>
     <div id="pEditFoot" class="panel-foot-row" hidden>
-      <button type="button" id="peCancel" class="btn">取消</button>
-      <button type="button" id="peSave" class="btn go">保存</button>
+      <button type="button" id="peCancel" class="btn" data-i18n="cancel">取消</button>
+      <button type="button" id="peSave" class="btn go" data-i18n="save">保存</button>
     </div>
   </div>
 </aside>
 
 <div id="createDlg" class="dlg-wrap">
   <form id="createForm" class="dlg" autocomplete="off">
-    <div class="dlg-h"><div id="cAv"></div><div><h3>新建 Bot</h3><p>独立的 workspace、会话和记忆</p></div></div>
+    <div class="dlg-h"><div id="cAv"></div><div><h3 data-i18n="newBot">新建 Bot</h3><p data-i18n="newBotSub">独立的 workspace、会话和记忆</p></div></div>
     <div class="dlg-b">
       <div class="two">
-        <div class="fld"><label>名称</label><input id="fName" placeholder="Nix · Infra" required /></div>
+        <div class="fld"><label data-i18n="name">名称</label><input id="fName" placeholder="Nix · Infra" required /></div>
         <div class="fld"><label>ID <em>a-z 0-9 - _</em></label><input id="fId" class="mono" placeholder="nix" pattern="[A-Za-z0-9_-]+" required spellcheck="false" /></div>
       </div>
-      <div class="fld"><label>简介 <em>可选</em></label><input id="fDesc" placeholder="一句话说明它负责什么" /></div>
+      <div class="fld"><label data-i18n-html="descOptional">简介 <em>可选</em></label><input id="fDesc" data-i18n-ph="descPh" placeholder="一句话说明它负责什么" /></div>
       <div class="two">
         <div class="fld"><label>Harness</label><select id="fHarness"></select></div>
-        <div class="fld"><label>模型 <em>留空用默认</em></label><input id="fModel" class="mono" placeholder="provider/model" spellcheck="false" /></div>
+        <div class="fld"><label data-i18n-html="modelDefaultOptional">模型 <em>留空用默认</em></label><input id="fModel" class="mono" placeholder="provider/model" spellcheck="false" /></div>
       </div>
-      <div class="fld"><label>AGENTS.md <em>留空自动生成</em></label><textarea id="fInst" placeholder="# Nix&#10;你负责服务器巡检、日志排查与部署脚本…" spellcheck="false"></textarea></div>
-      <label class="perm" style="align-self:flex-start"><input type="checkbox" id="fPrivate" />会话隐私隔离（其他 Bot 不可召回历史会话）</label>
+      <div class="fld"><label data-i18n-html="agentsAutoOptional">AGENTS.md <em>留空自动生成</em></label><textarea id="fInst" data-i18n-ph="agentsCreatePh" placeholder="# Nix&#10;你负责服务器巡检、日志排查与部署脚本…" spellcheck="false"></textarea></div>
+      <label class="perm" style="align-self:flex-start"><input type="checkbox" id="fPrivate" /><span data-i18n="privateSessionsLabel">会话隐私隔离（其他 Bot 不可召回历史会话）</span></label>
       <div id="createErr" class="msg-err"></div>
     </div>
     <div class="dlg-f">
-      <button type="button" class="btn" data-close>取消</button>
-      <button type="submit" id="createSubmit" class="btn go">创建</button>
+      <button type="button" class="btn" data-close data-i18n="cancel">取消</button>
+      <button type="submit" id="createSubmit" class="btn go" data-i18n="create">创建</button>
     </div>
   </form>
 </div>
@@ -1210,23 +1278,23 @@ try {
 
 <div id="confirmDlg" class="dlg-wrap">
   <div class="dlg sm">
-    <div class="dlg-h"><div><h3 id="confirmTitle">确认操作</h3></div></div>
+    <div class="dlg-h"><div><h3 id="confirmTitle" data-i18n="confirmAction">确认操作</h3></div></div>
     <div class="dlg-b"><p id="confirmText"></p></div>
     <div class="dlg-f">
-      <button type="button" id="confirmCancel" class="btn">取消</button>
-      <button type="button" id="confirmOk" class="btn bad">确定</button>
+      <button type="button" id="confirmCancel" class="btn" data-i18n="cancel">取消</button>
+      <button type="button" id="confirmOk" class="btn bad" data-i18n="ok">确定</button>
     </div>
   </div>
 </div>
 
 <div id="loginDlg" class="dlg-wrap">
   <form id="loginForm" class="dlg sm">
-    <div class="dlg-h"><div><h3>需要访问令牌</h3><p>配置里的 http.apiToken</p></div></div>
+    <div class="dlg-h"><div><h3 data-i18n="tokenRequired">需要访问令牌</h3><p data-i18n="tokenHint">配置里的 http.apiToken</p></div></div>
     <div class="dlg-b">
       <div class="fld"><input id="loginToken" class="mono" type="password" placeholder="token" autocomplete="current-password" required /></div>
       <div id="loginErr" class="msg-err"></div>
     </div>
-    <div class="dlg-f"><button type="submit" class="btn go">进入</button></div>
+    <div class="dlg-f"><button type="submit" class="btn go" data-i18n="enter">进入</button></div>
   </form>
 </div>
 
@@ -1360,17 +1428,770 @@ try {
   }
 } catch {}
 
+/* ---------- i18n ---------- */
+const I18N = {
+  'zh-CN': {
+    newBot: '新建 Bot',
+    collapseSide: '折叠侧边栏',
+    collapseSideTitle: '折叠侧边栏 (⌘B)',
+    searchBot: '搜索 Bot',
+    settings: '设置',
+    settingsTitle: '设置 (⌘,)',
+    backToChat: '返回会话',
+    settingsTabs: '设置分组',
+    tabModels: '模型与 Bot',
+    tabRemote: '远程与设备',
+    tabGeneral: '通用',
+    expandSide: '展开侧边栏',
+    expandSideTitle: '侧边栏 (⌘B)',
+    remoteDesktop: '远程桌面',
+    details: '详情',
+    openDesktop: '打开桌面',
+    resumeAI: '完成并恢复 AI',
+    slashCmds: '快捷命令',
+    cmdStatusDesc: '会话与费用',
+    cmdBotsDesc: '所有 Bot',
+    cmdAskDesc: '转给另一个 Bot',
+    cmdResetDesc: '开新会话',
+    deskConnecting: '正在连接桌面…',
+    retryConnect: '重试连接',
+    deskToggleDetails: '展开链路详情',
+    deskPreparing: '准备中',
+    deskTarget: '目标设备',
+    deskWindow: '窗口范围',
+    entireScreen: '整个屏幕',
+    deskMode: '模式',
+    deskLatency: '延迟',
+    deskResolution: '分辨率',
+    deskLockState: '锁状态',
+    idle: '空闲',
+    deskTypePh: '输入中文或文本，回车发送',
+    send: '发送',
+    stop: '停止',
+    textInput: '文本输入',
+    toggleZoom: '切换 1:1 / 适应',
+    fitZoom: '适应',
+    refreshStream: '刷新窗口并重连流',
+    fullscreen: '全屏',
+    closeDesktop: '关闭桌面',
+    openSettingsTabs: '打开设置分组',
+    saveConfig: '保存配置',
+    magpieUnified: 'Magpie 统一管理',
+    checking: '检测中',
+    magpieIntro: '未接管时各 CLI 直接读取自身配置；通过下方「接管」可调用原生 Magpie 将多个后端统一到同一套网关与路由。',
+    providersLabel: '模型源（Providers · ',
+    providersLabelEnd: '）',
+    expandList: '展开列表',
+    collapseList: '收起列表',
+    addProviderBtn: '+ 添加模型源',
+    addMethod: '添加方式',
+    presetVendor: '预设厂商',
+    customEndpoint: '自定义兼容接口',
+    apiProtocol: '接口协议',
+    protoOpenAI: 'OpenAI 兼容 (/v1)',
+    protoAnthropic: 'Anthropic 兼容',
+    aliasOptional: '别名 <em>可选</em>',
+    aliasPh: '例如 my-relay',
+    apiKeyLabel: 'API Key <em>直传给 magpie</em>',
+    modelsListOptional: '模型列表 <em>可选，逗号分隔</em>',
+    cancel: '取消',
+    confirmAdd: '确认添加',
+    defaultModel: '默认模型',
+    perHarness: '按后端设置',
+    collapse: '收起',
+    globalDefaultModel: '全局默认模型 <em>留空则用 CLI 当前配置模型</em>',
+    globalDefaultPh: '留空则用 CLI 当前配置模型',
+    perHarnessDesc: '按 Harness 覆盖全局默认模型（留空则继承上方全局默认）',
+    botModels: 'Bot 模型分配',
+    botModelsDesc: '模型留空则继承全局默认',
+    localNode: '本机节点',
+    disabled: '未开启',
+    enableControlBtn: '开启操控…',
+    close: '关闭',
+    localNodeNamePh: '本机节点名称',
+    saveName: '保存名称',
+    localNodeDesc: '开启后，主电脑上的 Bot 可通过本机 Bot Hub 执行勾选的操作（系统权限归属本应用）。',
+    permFiles: '文件读写',
+    permExec: '执行命令',
+    permDesktop: '桌面与自动化',
+    tailcatTunnel: 'Tailcat 远程加密隧道',
+    unreadState: '未读取',
+    enableRemote: '开启远程访问',
+    accessTokenOptional: '访问口令 <em>留空自动生成</em>',
+    accessTokenPh: '自定义 apiToken 或留空',
+    copyPairLink: '复制配对链接',
+    accessTokenReusable: '访问口令（可复用）',
+    accessTokenEnv: '访问口令（环境变量）',
+    accessTokenEnvHint: '已由环境变量 {ref} 提供',
+    show: '显示',
+    hide: '隐藏',
+    resetToken: '更换口令',
+    copy: '复制',
+    copied: '已复制',
+    localDesktopTitle: '本机远程桌面与自动化',
+    allowLocalDeskLabel: '允许 Bot 通过 MCP 操控本机桌面（点击/输入/截图）',
+    connectedNodes: '已连接远端设备节点',
+    appearance: '外观',
+    appearanceDesc: '选择浅色、深色或跟随系统',
+    followSystem: '跟随系统',
+    themeLight: '浅色',
+    themeDark: '深色',
+    appAccent: '应用重点色',
+    appAccentDesc: '用于侧栏、设置页、弹窗等全局高亮；各 Bot 对话与详情页将自动使用 Bot 自身配色。',
+    resetDefault: '恢复默认',
+    customColor: '自定义颜色',
+    language: '语言',
+    languageDesc: '界面显示语言（默认跟随系统）',
+    globalSharedMem: '全局共享记忆',
+    globalSharedMemDesc: '_shared/USER.md · 所有 Bot 共读',
+    userMdPh: '记录你的常用偏好、身份背景或全局约定…',
+    magpieGlobalMem: 'Magpie 全局记忆',
+    notLoaded: '未加载',
+    refresh: '刷新',
+    addMemoryBtn: '+ 添加记忆',
+    magpieGlobalMemDesc: '由宿主机 Magpie Memory 托管，所有 Bot 与本机 CLI 共读跨项目长期记忆。',
+    memType: '类型',
+    kindFact: '事实 (fact)',
+    kindPreference: '偏好 (preference)',
+    kindRule: '规则 (rule)',
+    kindReference: '参考 (reference)',
+    kindProfile: '画像 (profile)',
+    kindProcedure: '流程 (procedure)',
+    kindEpisode: '纪要 (episode)',
+    tagsOptional: '标签 <em>可选，逗号分隔</em>',
+    tagsPh: '例如 proxy, deploy',
+    memContent: '记忆内容',
+    globalMemPh: '输入一条可跨项目复用的事实、偏好或规则…',
+    saveMemory: '保存记忆',
+    searchGlobalMemPh: '搜索 Magpie 全局记忆…',
+    search: '搜索',
+    botDetails: 'Bot 详情',
+    editBot: '编辑 Bot',
+    statTurns: '轮对话',
+    statCost: '累计费用',
+    statState: '状态',
+    botMemory: 'Magpie 专属记忆',
+    addShort: '+ 添加',
+    botMemPh: '记录此 Bot 的长期事实、约定或环境信息…',
+    save: '保存',
+    techDetails: '技术详情',
+    model: '模型',
+    archivedSessions: '历史会话',
+    name: '名称',
+    descOptional: '简介 <em>可选</em>',
+    descPh: '一句话说明它负责什么',
+    privateSessionsLabel: '会话隐私隔离（其他 Bot 不可召回历史会话）',
+    agentsPh: '# Bot 指令…',
+    resetSession: '重置会话',
+    deleteBot: '删除 Bot',
+    newBotSub: '独立的 workspace、会话和记忆',
+    modelDefaultOptional: '模型 <em>留空用默认</em>',
+    agentsAutoOptional: 'AGENTS.md <em>留空自动生成</em>',
+    agentsCreatePh: '# Nix\n你负责服务器巡检、日志排查与部署脚本…',
+    create: '创建',
+    confirmAction: '确认操作',
+    ok: '确定',
+    tokenRequired: '需要访问令牌',
+    tokenHint: '配置里的 http.apiToken',
+    enter: '进入',
+    today: '今天',
+    yesterday: '昨天',
+    dateFmt: '{m}月{d}日 {t}',
+    codeTag: '[代码]',
+    callingTool: '正在调用 {tool}',
+    callingToolEllipsis: '正在调用 {tool}…',
+    thinking: '正在思考…',
+    noMessages: '还没有消息',
+    youPrefix: '你：',
+    noMatchedBots: '没有匹配的 Bot',
+    noBotsYetSide: '还没有 Bot，点上面的 + 创建',
+    msgBotPh: '发消息给 {name}',
+    msgPh: '发消息',
+    fromLabel: '来自 {from}',
+    sentToPeer: '发给 {peer}',
+    peerReply: '{peer} 回复',
+    emptyBotsTitle: '还没有 Bot',
+    emptyBotsDesc: '点左侧 + 创建一个，每个人设拥有独立工作区和长期会话',
+    createBotBtn: '创建 Bot',
+    createBotBtnSub: '自定义人设、命令与记忆',
+    sugAskRole: '了解职责',
+    sugAskRolePrompt: '你能做什么？',
+    sugAskRoleSub: '问问它当前有哪些工具和目录',
+    sugStatus: '查看状态',
+    sugStatusSub: '模型、Session 与累计费用',
+    sugCollab: 'Bot 间协作',
+    sugCollabSub: '转交给其他 Bot 处理',
+    busy: '工作中',
+    defaultTag: '（默认）',
+    archivedCount: '{n} 条',
+    privateTag: ' · 隐私隔离',
+    emptyText: '(空)',
+    keepOneBot: '至少需要保留一个 Bot',
+    nameRequired: '名称不能为空',
+    saved: '已保存',
+    deleteBotTitle: '删除 {name}？',
+    deleteBotDesc: '将从配置中移除此 Bot 并停止其队列，磁盘上的 workspace 与历史文件会保留。',
+    confirmDelete: '确认删除',
+    deletedBot: '已删除 Bot',
+    resetSessionTitle: '重置会话？',
+    resetSessionDesc: '{name} 会开始一个新会话，之前的上下文不再带入。Workspace 和 memory/ 保留不动。',
+    resetBtn: '重置',
+    newSessionStarted: '已开始新会话',
+    notRunning: '当前没有在运行',
+    defaultModelPh: '默认 {model}',
+    followGlobalPh: '留空跟随全局默认',
+    inheritGlobalPh: '留空用全局默认',
+    noBotsSimple: '还没有 Bot',
+    mpNotInstalled: '未安装（各 CLI 独立运行）',
+    mpHealthy: '网关运行中',
+    mpUnhealthy: '已安装（网关未响应）',
+    mpInstallHint: '需要统一多模型、API Key、订阅与路由时，请在终端安装 <a href="{docs}" target="_blank" rel="noopener">Magpie CLI</a> 后重开设置：',
+    mpConnected: 'Magpie 已接管',
+    mpNative: '原生 CLI',
+    mpModelPh: '例如 deepseek/deepseek-chat',
+    mpSwitch: '切换',
+    mpConnect: '接管',
+    mpRestoreNative: '恢复原生',
+    mpPickModelErr: '请为 {label} 选择或输入要接管的 Magpie 模型',
+    mpConnectedToast: '{label} 已接入 Magpie',
+    mpRestoreTitle: '恢复 {label} 原生配置？',
+    mpRestoreDesc: '将运行 magpie {id} default，撤回 Magpie 对该 CLI 全局配置的接管。',
+    mpConfirmRestore: '确认恢复',
+    mpRestoredToast: '{label} 已恢复原生配置',
+    usedBy: '用于 {who}',
+    enabled: '启用',
+    paused: '停用',
+    testBtn: '测速',
+    removeBtn: '移除',
+    noProvidersDesc: '暂无模型源，点「+ 添加模型源」配置 API Key 或中转。',
+    testPassed: '{id} 测试通过',
+    providerUpdated: '已更新模型源',
+    rmProviderTitle: '移除模型源 {id}？',
+    rmProviderDesc: '将调用 magpie provider rm 从本机 Magpie 配置移除此提供方。',
+    confirmRemove: '确认移除',
+    providerAdded: '已添加模型源',
+    aliasRequired: '名称',
+    onlineCount: '{n} 在线',
+    noPerm: '无权限',
+    permFileShort: '文件',
+    permExecShort: '命令',
+    permDeskShort: '桌面',
+    online: '在线',
+    offline: '离线',
+    noRemoteNodes: '暂无远端设备接入（在另一台电脑用 Bot Hub 连接远端后，可开启「允许主电脑操控本机」）',
+    nodeConnecting: '连接中…',
+    nodeConnected: '已连接',
+    nodeWaitingAuth: '等待登录',
+    nodeError: '连接失败',
+    nodeNameEmpty: '节点名称不能为空',
+    nodeNameSaved: '已更新节点名称',
+    remoteConnecting: '正在连接中继…',
+    remoteReady: '已就绪',
+    remoteError: '出错',
+    remoteRetry: '重试开启',
+    remoteStop: '停用',
+    remoteHelpReady: '手机 App 可直接扫码一键配对；在另一台电脑的 Bot Hub 桌面版选「连接远端」粘贴链接，或运行 bot-hub connect <链接>。',
+    remoteHelpOff: '开启后自动生成 Tailcat 加密隧道与二维码，无需改配置文件或重启。',
+    remoteHelpConnecting: '正在连接 Tailcat 中继，请稍候…',
+    remoteHelpFallback: '稍后再打开查看。',
+    jpegStream: 'JPEG 实时流',
+    unavailable: '不可用',
+    localDeskEnabled: '已允许 Bot 操控本机桌面',
+    localDeskDisabled: '已关闭 Bot 操控本机桌面',
+    localNodeEnabled: '已开启本机节点',
+    localNodeDisabled: '已关闭本机节点',
+    localNodeConfirmTitle: '允许主电脑操控本机？',
+    localNodeConfirmDesc: '开启后，主电脑上的 Bot 将可按已勾选范围访问本机文件、执行命令或操作桌面。可随时在此处或菜单栏关闭。',
+    confirmEnable: '确认开启',
+    remoteEnabledToast: '已开启远程访问',
+    remoteDisabledToast: '已停用远程访问',
+    remoteDisableTitle: '停用远程访问？',
+    remoteDisableDesc: '停用后当前 Tailcat 隧道连接会立即断开。',
+    confirmDisable: '确认停用',
+    tokenCopied: '已复制口令',
+    copyFailed: '复制失败',
+    resetTokenTitle: '更换访问口令？',
+    resetTokenDesc: '将生成新的随机口令并替换旧口令，已连接的远端设备需要重新输入新口令。',
+    confirmResetToken: '确认更换',
+    tokenResetToast: '已更换口令',
+    pairLinkCopied: '已复制配对链接',
+    botOnlineToast: '{name} 已上线',
+    memNotInstalled: '主电脑未安装 Magpie，暂不可透传 Magpie 记忆。',
+    memUnavailable: 'Magpie 网关未响应',
+    memEmpty: '暂无记忆条目',
+    delBtn: '删除',
+    loading: '加载中',
+    loadingEllipsis: '加载中…',
+    notConnected: '未连接',
+    itemsCount: '{n} 条',
+    failed: '失败',
+    memDeleted: '已删除记忆',
+    memContentReq: '请填写记忆内容',
+    globalMemSaved: '已保存全局记忆',
+    botMemSaved: '已保存专属记忆',
+    takeoverBanner: '人工接管（{bot} · {target}）：{reason}',
+    localHost: '本机',
+    takeoverDoneNote: '已在远程桌面完成操作，请继续。',
+    resumedAI: '已恢复 Bot 执行',
+    deskJpegLabel: '截图流 · {fps} fps · {rtt} ms',
+    deskSleeping: '已休眠',
+    deskBlocked: '连接受阻',
+    deskConnectingShort: '连接中…',
+    deskJpegMode: 'HTTP JPEG 实时流',
+    deskAiOperating: 'AI 操作中 ({tool})',
+    deskHumanCtrl: '人工控制',
+    deskAlertTakeover: '人工接管：{reason}',
+    deskAlertAi: 'AI 正在操作屏幕（{tool}）',
+    forceTakeover: '强制接管',
+    forcedTakeoverToast: '已中断 AI 并恢复操控',
+    deskConnectFailed: '桌面连接失败',
+    deskUnreachable: '目标桌面暂不可达',
+    accentResetToast: '已恢复默认重点色',
+  },
+  en: {
+    newBot: 'New Bot',
+    collapseSide: 'Collapse sidebar',
+    collapseSideTitle: 'Collapse sidebar (⌘B)',
+    searchBot: 'Search bots',
+    settings: 'Settings',
+    settingsTitle: 'Settings (⌘,)',
+    backToChat: 'Back to chat',
+    settingsTabs: 'Settings sections',
+    tabModels: 'Models & Bots',
+    tabRemote: 'Remote & Devices',
+    tabGeneral: 'General',
+    expandSide: 'Expand sidebar',
+    expandSideTitle: 'Sidebar (⌘B)',
+    remoteDesktop: 'Remote Desktop',
+    details: 'Details',
+    openDesktop: 'Open Desktop',
+    resumeAI: 'Done & Resume AI',
+    slashCmds: 'Commands',
+    cmdStatusDesc: 'Session & cost',
+    cmdBotsDesc: 'All bots',
+    cmdAskDesc: 'Delegate to bot',
+    cmdResetDesc: 'New session',
+    deskConnecting: 'Connecting to desktop…',
+    retryConnect: 'Retry',
+    deskToggleDetails: 'Toggle link details',
+    deskPreparing: 'Preparing',
+    deskTarget: 'Target device',
+    deskWindow: 'Window scope',
+    entireScreen: 'Entire screen',
+    deskMode: 'Mode',
+    deskLatency: 'Latency',
+    deskResolution: 'Resolution',
+    deskLockState: 'Lock',
+    idle: 'Idle',
+    deskTypePh: 'Type text and press Enter',
+    send: 'Send',
+    stop: 'Stop',
+    textInput: 'Text input',
+    toggleZoom: 'Toggle 1:1 / Fit',
+    fitZoom: 'Fit',
+    refreshStream: 'Refresh & reconnect',
+    fullscreen: 'Fullscreen',
+    closeDesktop: 'Close desktop',
+    openSettingsTabs: 'Open settings sections',
+    saveConfig: 'Save',
+    magpieUnified: 'Magpie Gateway',
+    checking: 'Checking',
+    magpieIntro: 'Without takeover each CLI reads its own config; click Connect to route multiple harnesses through Magpie.',
+    providersLabel: 'Providers (',
+    providersLabelEnd: ')',
+    expandList: 'Show list',
+    collapseList: 'Hide list',
+    addProviderBtn: '+ Add Provider',
+    addMethod: 'Method',
+    presetVendor: 'Preset',
+    customEndpoint: 'Custom Endpoint',
+    apiProtocol: 'Protocol',
+    protoOpenAI: 'OpenAI Compatible (/v1)',
+    protoAnthropic: 'Anthropic Compatible',
+    aliasOptional: 'Alias <em>optional</em>',
+    aliasPh: 'e.g. my-relay',
+    apiKeyLabel: 'API Key <em>passed to magpie</em>',
+    modelsListOptional: 'Models <em>optional, comma-separated</em>',
+    cancel: 'Cancel',
+    confirmAdd: 'Add',
+    defaultModel: 'Default Model',
+    perHarness: 'Per-harness',
+    collapse: 'Collapse',
+    globalDefaultModel: 'Global default model <em>leave blank to use CLI default</em>',
+    globalDefaultPh: 'Leave blank to use CLI default',
+    perHarnessDesc: 'Override global default per harness (leave blank to inherit)',
+    botModels: 'Bot Models',
+    botModelsDesc: 'Leave blank to inherit global default',
+    localNode: 'This Device Node',
+    disabled: 'Disabled',
+    enableControlBtn: 'Enable…',
+    close: 'Close',
+    localNodeNamePh: 'Device node name',
+    saveName: 'Save Name',
+    localNodeDesc: 'When enabled, bots on your host can perform checked actions on this machine.',
+    permFiles: 'Read/Write Files',
+    permExec: 'Run Commands',
+    permDesktop: 'Desktop & Automation',
+    tailcatTunnel: 'Tailcat Encrypted Tunnel',
+    unreadState: 'Unknown',
+    enableRemote: 'Enable Remote',
+    accessTokenOptional: 'Access token <em>leave blank to generate</em>',
+    accessTokenPh: 'Custom apiToken or blank',
+    copyPairLink: 'Copy Pairing Link',
+    accessTokenReusable: 'Access token (reusable)',
+    accessTokenEnv: 'Access token (env var)',
+    accessTokenEnvHint: 'Provided by environment variable {ref}',
+    show: 'Show',
+    hide: 'Hide',
+    resetToken: 'Rotate',
+    copy: 'Copy',
+    copied: 'Copied',
+    localDesktopTitle: 'Local Desktop & Automation',
+    allowLocalDeskLabel: 'Allow bots to control local desktop via MCP (click/type/screenshot)',
+    connectedNodes: 'Connected Remote Nodes',
+    appearance: 'Appearance',
+    appearanceDesc: 'Choose light, dark, or follow system',
+    followSystem: 'System',
+    themeLight: 'Light',
+    themeDark: 'Dark',
+    appAccent: 'App Accent Color',
+    appAccentDesc: 'Used for global highlights (sidebar, settings, dialogs); bot chat and detail views use each bot’s own color.',
+    resetDefault: 'Reset',
+    customColor: 'Custom color',
+    language: 'Language',
+    languageDesc: 'Interface language (follows system by default)',
+    globalSharedMem: 'Global Shared Context',
+    globalSharedMemDesc: '_shared/USER.md · shared by all bots',
+    userMdPh: 'Your global preferences, background, and shared rules…',
+    magpieGlobalMem: 'Magpie Global Memory',
+    notLoaded: 'Not loaded',
+    refresh: 'Refresh',
+    addMemoryBtn: '+ Add Memory',
+    magpieGlobalMemDesc: 'Managed by host Magpie Memory; shared across all bots and local CLIs.',
+    memType: 'Kind',
+    kindFact: 'Fact',
+    kindPreference: 'Preference',
+    kindRule: 'Rule',
+    kindReference: 'Reference',
+    kindProfile: 'Profile',
+    kindProcedure: 'Procedure',
+    kindEpisode: 'Episode',
+    tagsOptional: 'Tags <em>optional, comma-separated</em>',
+    tagsPh: 'e.g. proxy, deploy',
+    memContent: 'Content',
+    globalMemPh: 'Enter a cross-project fact, preference, or rule…',
+    saveMemory: 'Save Memory',
+    searchGlobalMemPh: 'Search Magpie global memory…',
+    search: 'Search',
+    botDetails: 'Bot Details',
+    editBot: 'Edit Bot',
+    statTurns: 'Turns',
+    statCost: 'Cost',
+    statState: 'State',
+    botMemory: 'Magpie Bot Memory',
+    addShort: '+ Add',
+    botMemPh: 'Long-term facts, conventions, or notes for this bot…',
+    save: 'Save',
+    techDetails: 'Technical Details',
+    model: 'Model',
+    archivedSessions: 'Archived',
+    name: 'Name',
+    descOptional: 'Description <em>optional</em>',
+    descPh: 'One-line summary of its role',
+    privateSessionsLabel: 'Private sessions (hide history from other bots)',
+    agentsPh: '# Bot instructions…',
+    resetSession: 'Reset Session',
+    deleteBot: 'Delete Bot',
+    newBotSub: 'Dedicated workspace, session, and memory',
+    modelDefaultOptional: 'Model <em>blank for default</em>',
+    agentsAutoOptional: 'AGENTS.md <em>blank to auto-generate</em>',
+    agentsCreatePh: '# Nix\nYou handle server checks, log debugging, and deploys…',
+    create: 'Create',
+    confirmAction: 'Confirm',
+    ok: 'Confirm',
+    tokenRequired: 'Access Token Required',
+    tokenHint: 'http.apiToken from config',
+    enter: 'Sign In',
+    today: 'Today',
+    yesterday: 'Yesterday',
+    dateFmt: '{m}/{d} {t}',
+    codeTag: '[code]',
+    callingTool: 'Running {tool}',
+    callingToolEllipsis: 'Running {tool}…',
+    thinking: 'Thinking…',
+    noMessages: 'No messages yet',
+    youPrefix: 'You: ',
+    noMatchedBots: 'No matching bots',
+    noBotsYetSide: 'No bots yet — click + above',
+    msgBotPh: 'Message {name}',
+    msgPh: 'Send a message',
+    fromLabel: 'From {from}',
+    sentToPeer: 'To {peer}',
+    peerReply: '{peer} replied',
+    emptyBotsTitle: 'No Bots Yet',
+    emptyBotsDesc: 'Click + on the left to create one with its own workspace and persistent session',
+    createBotBtn: 'Create Bot',
+    createBotBtnSub: 'Custom instructions, commands & memory',
+    sugAskRole: 'Explore Role',
+    sugAskRolePrompt: 'What can you do?',
+    sugAskRoleSub: 'Ask about available tools and workspace',
+    sugStatus: 'Check Status',
+    sugStatusSub: 'Model, session & cumulative cost',
+    sugCollab: 'Collaborate',
+    sugCollabSub: 'Delegate tasks to another bot',
+    busy: 'Busy',
+    defaultTag: ' (default)',
+    archivedCount: '{n}',
+    privateTag: ' · Private',
+    emptyText: '(empty)',
+    keepOneBot: 'At least one bot must remain',
+    nameRequired: 'Name is required',
+    saved: 'Saved',
+    deleteBotTitle: 'Delete {name}?',
+    deleteBotDesc: 'Removes this bot from config and stops its lane. Workspace and history files remain on disk.',
+    confirmDelete: 'Delete',
+    deletedBot: 'Bot deleted',
+    resetSessionTitle: 'Reset session?',
+    resetSessionDesc: '{name} will start a fresh session without prior conversation context. Workspace and memory/ stay intact.',
+    resetBtn: 'Reset',
+    newSessionStarted: 'Started a new session',
+    notRunning: 'Nothing is running',
+    defaultModelPh: 'Default {model}',
+    followGlobalPh: 'Leave blank for global default',
+    inheritGlobalPh: 'Blank for global default',
+    noBotsSimple: 'No bots yet',
+    mpNotInstalled: 'Not installed (CLIs standalone)',
+    mpHealthy: 'Gateway running',
+    mpUnhealthy: 'Installed (gateway offline)',
+    mpInstallHint: 'Install <a href="{docs}" target="_blank" rel="noopener">Magpie CLI</a> to unify models, keys, subscriptions, and routing:',
+    mpConnected: 'Connected via Magpie',
+    mpNative: 'Native CLI',
+    mpModelPh: 'e.g. deepseek/deepseek-chat',
+    mpSwitch: 'Switch',
+    mpConnect: 'Connect',
+    mpRestoreNative: 'Restore',
+    mpPickModelErr: 'Choose or enter a Magpie model for {label}',
+    mpConnectedToast: '{label} connected to Magpie',
+    mpRestoreTitle: 'Restore {label} native config?',
+    mpRestoreDesc: 'Runs `magpie {id} default` to disconnect Magpie from this CLI.',
+    mpConfirmRestore: 'Restore',
+    mpRestoredToast: '{label} restored to native config',
+    usedBy: 'Used by {who}',
+    enabled: 'Enabled',
+    paused: 'Paused',
+    testBtn: 'Test',
+    removeBtn: 'Remove',
+    noProvidersDesc: 'No providers yet. Click "+ Add Provider" to add an API key or endpoint.',
+    testPassed: '{id} passed',
+    providerUpdated: 'Providers updated',
+    rmProviderTitle: 'Remove provider {id}?',
+    rmProviderDesc: 'Runs `magpie provider rm` to remove this provider from local Magpie config.',
+    confirmRemove: 'Remove',
+    providerAdded: 'Provider added',
+    aliasRequired: 'Name',
+    onlineCount: '{n} online',
+    noPerm: 'No permissions',
+    permFileShort: 'Files',
+    permExecShort: 'Exec',
+    permDeskShort: 'Desktop',
+    online: 'Online',
+    offline: 'Offline',
+    noRemoteNodes: 'No remote devices connected',
+    nodeConnecting: 'Connecting…',
+    nodeConnected: 'Connected',
+    nodeWaitingAuth: 'Waiting auth',
+    nodeError: 'Error',
+    nodeNameEmpty: 'Node name cannot be empty',
+    nodeNameSaved: 'Node name updated',
+    remoteConnecting: 'Connecting relay…',
+    remoteReady: 'Ready',
+    remoteError: 'Error',
+    remoteRetry: 'Retry',
+    remoteStop: 'Disable',
+    remoteHelpReady: 'Scan the QR code in the mobile app, or paste this link into another desktop client (`bot-hub connect`).',
+    remoteHelpOff: 'Generates an encrypted Tailcat tunnel and QR code with zero config edits.',
+    remoteHelpConnecting: 'Connecting to Tailcat relay…',
+    remoteHelpFallback: 'Try opening again shortly.',
+    jpegStream: 'JPEG Stream',
+    unavailable: 'Unavailable',
+    localDeskEnabled: 'Local desktop control enabled',
+    localDeskDisabled: 'Local desktop control disabled',
+    localNodeEnabled: 'Device node enabled',
+    localNodeDisabled: 'Device node disabled',
+    localNodeConfirmTitle: 'Allow host to control this computer?',
+    localNodeConfirmDesc: 'Bots on your host will be able to access selected capabilities on this machine.',
+    confirmEnable: 'Enable',
+    remoteEnabledToast: 'Remote access enabled',
+    remoteDisabledToast: 'Remote access disabled',
+    remoteDisableTitle: 'Disable remote access?',
+    remoteDisableDesc: 'Active Tailcat tunnel connections will disconnect immediately.',
+    confirmDisable: 'Disable',
+    tokenCopied: 'Token copied',
+    copyFailed: 'Copy failed',
+    resetTokenTitle: 'Rotate access token?',
+    resetTokenDesc: 'Generates a new token and invalidates the old one. Connected clients must re-authenticate.',
+    confirmResetToken: 'Rotate',
+    tokenResetToast: 'Token rotated',
+    pairLinkCopied: 'Pairing link copied',
+    botOnlineToast: '{name} is online',
+    memNotInstalled: 'Magpie is not installed on the host.',
+    memUnavailable: 'Magpie gateway is not responding',
+    memEmpty: 'No memories yet',
+    delBtn: 'Delete',
+    loading: 'Loading',
+    loadingEllipsis: 'Loading…',
+    notConnected: 'Offline',
+    itemsCount: '{n}',
+    failed: 'Failed',
+    memDeleted: 'Memory deleted',
+    memContentReq: 'Memory content is required',
+    globalMemSaved: 'Global memory saved',
+    botMemSaved: 'Bot memory saved',
+    takeoverBanner: 'Human takeover ({bot} · {target}): {reason}',
+    localHost: 'Host',
+    takeoverDoneNote: 'Completed manual step on remote desktop, please continue.',
+    resumedAI: 'Bot execution resumed',
+    deskJpegLabel: 'JPEG · {fps} fps · {rtt} ms',
+    deskSleeping: 'Sleeping',
+    deskBlocked: 'Blocked',
+    deskConnectingShort: 'Connecting…',
+    deskJpegMode: 'HTTP JPEG Stream',
+    deskAiOperating: 'AI active ({tool})',
+    deskHumanCtrl: 'Human control',
+    deskAlertTakeover: 'Takeover: {reason}',
+    deskAlertAi: 'AI is controlling screen ({tool})',
+    forceTakeover: 'Take Over',
+    forcedTakeoverToast: 'AI interrupted; manual control active',
+    deskConnectFailed: 'Desktop connection failed',
+    deskUnreachable: 'Target desktop unreachable',
+    accentResetToast: 'Accent color reset to default',
+  }
+};
+
+function getLangPref() {
+  try {
+    const l = localStorage.getItem('bothub.lang');
+    return (l === 'zh-CN' || l === 'en') ? l : 'system';
+  } catch { return 'system'; }
+}
+function resolvedLang() {
+  const pref = getLangPref();
+  if (pref === 'zh-CN' || pref === 'en') return pref;
+  return /^zh\b/i.test(navigator.language || '') ? 'zh-CN' : 'en';
+}
+function t(key, vars = null) {
+  const lang = resolvedLang();
+  let s = I18N[lang]?.[key] ?? I18N['zh-CN'][key] ?? key;
+  if (vars) {
+    for (const [k, v] of Object.entries(vars)) s = s.replaceAll(`{${k}}`, String(v ?? ''));
+  }
+  return s;
+}
+function applyLangPref(val) {
+  if (val === 'zh-CN' || val === 'en') {
+    try { localStorage.setItem('bothub.lang', val); } catch {}
+  } else {
+    try { localStorage.removeItem('bothub.lang'); } catch {}
+  }
+  applyI18n();
+}
+function applyI18n() {
+  document.documentElement.lang = resolvedLang();
+  document.querySelectorAll('[data-i18n]').forEach(el => { el.textContent = t(el.dataset.i18n); });
+  document.querySelectorAll('[data-i18n-html]').forEach(el => { el.innerHTML = t(el.dataset.i18nHtml); });
+  document.querySelectorAll('[data-i18n-ph]').forEach(el => { el.placeholder = t(el.dataset.i18nPh); });
+  document.querySelectorAll('[data-i18n-title]').forEach(el => { el.title = t(el.dataset.i18nTitle); });
+  document.querySelectorAll('[data-i18n-aria]').forEach(el => { el.setAttribute('aria-label', t(el.dataset.i18nAria)); });
+  document.querySelectorAll('[data-i18n-alt]').forEach(el => { el.alt = t(el.dataset.i18nAlt); });
+  $('pTitle').textContent = panelMode === 'edit' ? t('editBot') : t('details');
+  $('deskZoomBtn').textContent = deskState.zoom1 ? '1:1' : t('fitZoom');
+  renderBots();
+  renderHead();
+  renderThread();
+  renderTakeovers();
+  deskSyncStatus();
+  if (state.view === 'settings') {
+    $('setTitle').textContent = t(SETTINGS_TITLE_KEYS[settingsTab] || 'tabModels');
+    if (state.settings) renderSettingsView(state.settings, captureSettingsDraft());
+    if (settingsTab === 'remote') refreshRemoteTab();
+    else if (settingsTab === 'general') loadGlobalMemories();
+  }
+}
+
 /* ---------- utils ---------- */
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const activeBot = () => state.bots.find(b => b.id === state.active);
 function hash(s) { let h = 2166136261; for (const c of String(s)) h = Math.imul(h ^ c.codePointAt(0), 16777619); return h >>> 0; }
 
-/* ---------- avatar template: blob with two eyes (DESIGN.md §6) ---------- */
+/* ---------- app accent & bot-scoped color ---------- */
+const DEFAULT_ACCENT = '#d9774b';
+const ACCENT_PRESETS = ['#d9774b', '#3b82f6', '#10b981', '#8b5cf6', '#e11d48', '#f59e0b'];
 const COLORS = ['#f08a2c', '#8a7ad8', '#86a33a', '#b85a4a', '#7a7465', '#e0685a'];
-function avatar(id, cls = '', extra = '') {
+
+function contrastText(hex) {
+  const m = /^#?([0-9a-fA-F]{6})$/.exec(String(hex || '').trim());
+  if (!m) return '#ffffff';
+  const n = parseInt(m[1], 16);
+  const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  const lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+  return lum > 0.62 ? '#1d1b19' : '#ffffff';
+}
+function getAccentPref() {
+  try {
+    const a = localStorage.getItem('bothub.accent');
+    return (a && /^#[0-9a-fA-F]{6}$/.test(a)) ? a.toLowerCase() : DEFAULT_ACCENT;
+  } catch { return DEFAULT_ACCENT; }
+}
+function applyAccentPref(hex) {
+  const clean = /^#[0-9a-fA-F]{6}$/.test(String(hex || '').trim()) ? hex.toLowerCase() : DEFAULT_ACCENT;
+  if (clean === DEFAULT_ACCENT) {
+    document.documentElement.style.removeProperty('--accent');
+    document.documentElement.style.removeProperty('--accent-text');
+    try { localStorage.removeItem('bothub.accent'); } catch {}
+  } else {
+    document.documentElement.style.setProperty('--accent', clean);
+    document.documentElement.style.setProperty('--accent-text', contrastText(clean));
+    try { localStorage.setItem('bothub.accent', clean); } catch {}
+  }
+  renderAccentControls();
+}
+function renderAccentControls() {
+  const cur = getAccentPref();
+  const box = $('sAccentSwatches');
+  if (box) {
+    box.innerHTML = ACCENT_PRESETS.map(c =>
+      `<button type="button" class="swatch ${cur === c ? 'on' : ''}" data-accent="${c}" style="background:${c}" aria-label="${c}"></button>`
+    ).join('');
+    box.querySelectorAll('[data-accent]').forEach(btn => btn.onclick = () => applyAccentPref(btn.dataset.accent));
+  }
+  if ($('sAccentCustom')) $('sAccentCustom').value = cur;
+}
+function botColor(id) {
   const h = hash(id || '?');
   const i = state.bots.findIndex(b => b.id === id);
-  const color = COLORS[(i >= 0 ? i : h) % COLORS.length];
+  return COLORS[(i >= 0 ? i : h) % COLORS.length];
+}
+function applyBotScopeColor(id) {
+  const targets = [$('chatView'), $('panel')];
+  if (!id) {
+    for (const el of targets) {
+      el?.style.removeProperty('--bot-accent');
+      el?.style.removeProperty('--bot-accent-text');
+    }
+    return;
+  }
+  const c = botColor(id);
+  const txt = contrastText(c);
+  for (const el of targets) {
+    el?.style.setProperty('--bot-accent', c);
+    el?.style.setProperty('--bot-accent-text', txt);
+  }
+}
+
+/* ---------- avatar template: blob with two eyes (DESIGN.md §6) ---------- */
+function avatar(id, cls = '', extra = '') {
+  const h = hash(id || '?');
+  const color = botColor(id);
   const tilt = (h >>> 4) % 25 - 12;
   const gx = (h >>> 9) % 7 - 3;
   const gy = (h >>> 12) % 5 - 2;
@@ -1384,13 +2205,14 @@ function avatar(id, cls = '', extra = '') {
 function stamp(iso) {
   const d = new Date(iso);
   if (isNaN(d)) return '';
-  const t = d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+  const loc = resolvedLang() === 'en' ? 'en-US' : 'zh-CN';
+  const timeStr = d.toLocaleTimeString(loc, { hour: '2-digit', minute: '2-digit' });
   const today = new Date(); const y = new Date(today); y.setDate(today.getDate() - 1);
-  if (d.toDateString() === today.toDateString()) return `今天 ${t}`;
-  if (d.toDateString() === y.toDateString()) return `昨天 ${t}`;
-  return `${d.getMonth() + 1}月${d.getDate()}日 ${t}`;
+  if (d.toDateString() === today.toDateString()) return `${t('today')} ${timeStr}`;
+  if (d.toDateString() === y.toDateString()) return `${t('yesterday')} ${timeStr}`;
+  return t('dateFmt', { m: d.getMonth() + 1, d: d.getDate(), t: timeStr });
 }
-const plain = s => String(s || '').replace(/```[\s\S]*?```/g, '[代码]').replace(/[#>*`_\[\]]/g, '').replace(/\s+/g, ' ').trim();
+const plain = s => String(s || '').replace(/```[\s\S]*?```/g, t('codeTag')).replace(/[#>*`_\[\]]/g, '').replace(/\s+/g, ' ').trim();
 let toastTimer;
 function toast(text) {
   document.querySelector('.toast')?.remove();
@@ -1415,7 +2237,7 @@ function md(text) {
       const nl = part.indexOf('\n');
       const lang = nl > -1 ? part.slice(0, nl).trim() : '';
       const code = (nl > -1 ? part.slice(nl + 1) : part).replace(/\n$/, '');
-      out.push(`<div class="code"><div class="code-h"><span>${lang || 'code'}</span><button type="button" data-copy>复制</button></div><pre><code>${code}</code></pre></div>`);
+      out.push(`<div class="code"><div class="code-h"><span>${lang || 'code'}</span><button type="button" data-copy>${t('copy')}</button></div><pre><code>${code}</code></pre></div>`);
       return;
     }
     let list = null, para = [];
@@ -1474,16 +2296,17 @@ function short(iso) {
   const d = new Date(iso);
   if (isNaN(d)) return '';
   const today = new Date(); const y = new Date(today); y.setDate(today.getDate() - 1);
-  if (d.toDateString() === today.toDateString()) return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
-  if (d.toDateString() === y.toDateString()) return '昨天';
+  const loc = resolvedLang() === 'en' ? 'en-US' : 'zh-CN';
+  if (d.toDateString() === today.toDateString()) return d.toLocaleTimeString(loc, { hour: '2-digit', minute: '2-digit' });
+  if (d.toDateString() === y.toDateString()) return t('yesterday');
   return `${d.getMonth() + 1}/${d.getDate()}`;
 }
 function preview(b) {
   const unread = state.unread[b.id] ? `<i class="badge">${state.unread[b.id]}</i>` : '';
-  if (b.busy) return `<div class="pv run"><span>${state.tool[b.id] ? `正在调用 ${esc(state.tool[b.id])}` : '正在思考…'}</span>${unread}</div>`;
+  if (b.busy) return `<div class="pv run"><span>${state.tool[b.id] ? esc(t('callingTool', { tool: state.tool[b.id] })) : t('thinking')}</span>${unread}</div>`;
   const m = state.last[b.id];
-  if (!m) return `<div class="pv"><span>${esc(b.description || '还没有消息')}</span>${unread}</div>`;
-  const who = m.role === 'user' ? '你：' : m.role === 'bot_out' ? `→ ${esc((m.to || '').replace(/^bot:/, ''))}：` : '';
+  if (!m) return `<div class="pv"><span>${esc(b.description || t('noMessages'))}</span>${unread}</div>`;
+  const who = m.role === 'user' ? t('youPrefix') : m.role === 'bot_out' ? `→ ${esc((m.to || '').replace(/^bot:/, ''))}: ` : '';
   return `<div class="pv"><span>${who}${esc(plain(m.text))}</span>${unread}</div>`;
 }
 function renderBots() {
@@ -1491,16 +2314,17 @@ function renderBots() {
   const list = state.bots.filter(b => !q || `${b.name} ${b.id} ${b.description || ''}`.toLowerCase().includes(q));
   $('botCount').textContent = state.bots.length || '';
   $('bots').innerHTML = list.map(b => `<button class="item ${b.id === state.active ? 'on' : ''}" data-bot="${esc(b.id)}" title="${esc(b.description || b.name)}">${avatar(b.id, '', b.busy ? '<span class="busy"></span>' : '')}<div class="txt"><div class="nm"><span>${esc(b.name)}</span><time>${esc(short(state.last[b.id]?.createdAt))}</time></div>${preview(b)}</div></button>`).join('')
-    || `<div class="none">${q ? '没有匹配的 Bot' : '还没有 Bot，点上面的 + 创建'}</div>`;
+    || `<div class="none">${q ? t('noMatchedBots') : t('noBotsYetSide')}</div>`;
 }
 
 /* ---------- render: thread ---------- */
 function renderHead() {
   const b = activeBot();
+  applyBotScopeColor(b?.id);
   $('detailBtn').disabled = !b;
   $('hdAv').innerHTML = b ? avatar(b.id) : '';
   $('hdName').textContent = b ? b.name : 'bot-hub';
-  $('input').placeholder = b ? `发消息给 ${b.name}` : '发消息';
+  $('input').placeholder = b ? t('msgBotPh', { name: b.name }) : t('msgPh');
   syncSend();
 }
 
@@ -1510,7 +2334,7 @@ function msgHTML(m) {
   const footHTML = foot ? `<div class="foot">${foot}</div>` : '';
   switch (m.role) {
     case 'user': {
-      const via = m.from && !['web', 'user', 'cli'].includes(m.from) ? `<div class="label">来自 ${esc(m.from)}</div>` : '';
+      const via = m.from && !['web', 'user', 'cli'].includes(m.from) ? `<div class="label">${esc(t('fromLabel', { from: m.from }))}</div>` : '';
       return `<div class="msg me${fresh}">${via}<div class="bubble">${md(m.text)}</div></div>`;
     }
     case 'assistant':
@@ -1519,7 +2343,7 @@ function msgHTML(m) {
     case 'bot_in': {
       const out = m.role === 'bot_out';
       const peer = (out ? m.to : m.from || '').replace(/^bot:/, '');
-      const label = out ? `发给 ${esc(peer)}` : `${esc(peer)} 回复`;
+      const label = out ? esc(t('sentToPeer', { peer })) : esc(t('peerReply', { peer }));
       return `<div class="msg bot peer${fresh}"><div class="label">${avatar(peer)}${label}</div><div class="bubble">${md(m.text)}</div>${footHTML}</div>`;
     }
     default: {
@@ -1533,31 +2357,31 @@ function renderThread({ stick = false } = {}) {
   const sc = $('scroll'), th = $('thread'), b = activeBot();
   const nearBottom = stick || sc.scrollHeight - sc.scrollTop - sc.clientHeight < 120;
   if (!b) {
-    th.innerHTML = `<div class="hello"><h2>还没有 Bot</h2><p>点左侧 + 创建一个，每个人设拥有独立工作区和长期会话</p><div class="sugs"><button class="sug p" data-open-create><b>创建 Bot</b><span>自定义人设、命令与记忆</span></button></div></div>`;
+    th.innerHTML = `<div class="hello"><h2>${esc(t('emptyBotsTitle'))}</h2><p>${esc(t('emptyBotsDesc'))}</p><div class="sugs"><button class="sug p" data-open-create><b>${esc(t('createBotBtn'))}</b><span>${esc(t('createBotBtnSub'))}</span></button></div></div>`;
     return;
   }
   const list = state.msgs[b.id] || [];
   if (!list.length && !b.busy) {
     th.innerHTML = `<div class="hello">${avatar(b.id)}<h2>${esc(b.name)}</h2><p>${esc(b.description || b.workspace)}</p><div class="sugs">
-      <button class="sug p" data-fill="你能做什么？"><b>了解职责</b><span>问问它当前有哪些工具和目录</span></button>
-      <button class="sug l" data-cmd="/status"><b>查看状态</b><span>模型、Session 与累计费用</span></button>
-      <button class="sug g" data-fill="/ask "><b>Bot 间协作</b><span>转交给其他 Bot 处理</span></button>
+      <button class="sug p" data-fill="${esc(t('sugAskRolePrompt'))}"><b>${esc(t('sugAskRole'))}</b><span>${esc(t('sugAskRoleSub'))}</span></button>
+      <button class="sug l" data-cmd="/status"><b>${esc(t('sugStatus'))}</b><span>${esc(t('sugStatusSub'))}</span></button>
+      <button class="sug g" data-fill="/ask "><b>${esc(t('sugCollab'))}</b><span>${esc(t('sugCollabSub'))}</span></button>
     </div></div>`;
     return;
   }
   let lastTs = 0, html = '';
   for (const m of list) {
-    const t = Date.parse(m.createdAt) || 0;
-    if (!lastTs || t - lastTs > 300000) {
+    const t0 = Date.parse(m.createdAt) || 0;
+    if (!lastTs || t0 - lastTs > 300000) {
       const lbl = stamp(m.createdAt);
       if (lbl) html += `<div class="stamp">${lbl}</div>`;
     }
-    lastTs = t;
+    lastTs = t0;
     html += msgHTML(m);
     state.seen.add(m.id);
   }
   if (b.busy) {
-    html += `<div class="live">${avatar(b.id)}<span class="shimmer">${state.tool[b.id] ? `正在调用 ${esc(state.tool[b.id])}…` : '正在思考…'}</span></div>`;
+    html += `<div class="live">${avatar(b.id)}<span class="shimmer">${state.tool[b.id] ? esc(t('callingToolEllipsis', { tool: state.tool[b.id] })) : t('thinking')}</span></div>`;
   }
   th.innerHTML = html;
   if (nearBottom) sc.scrollTop = sc.scrollHeight;
@@ -1682,7 +2506,7 @@ let panelMode = 'view';
 function setPanelMode(mode) {
   panelMode = mode;
   const edit = mode === 'edit';
-  $('pTitle').textContent = edit ? '编辑 Bot' : '详情';
+  $('pTitle').textContent = edit ? t('editBot') : t('details');
   $('pEditBtn').classList.toggle('active', edit);
   $('pView').hidden = edit;
   $('pViewFoot').hidden = edit;
@@ -1728,24 +2552,26 @@ async function openPanel() {
   try {
     const d = await api(`/api/bots/${encodeURIComponent(b.id)}`);
     panelDetail = d;
+    applyBotScopeColor(d.id);
     setPanelMode('view');
+    $('pTechDetails').open = false;
     $('pAv').innerHTML = avatar(d.id);
     $('pName').textContent = d.name;
     $('pDesc').textContent = d.description || '';
     $('pTurns').textContent = d.session?.turnCount || 0;
     $('pCost').textContent = '$' + (d.session?.totalCostUsd || 0).toFixed(2);
-    $('pState').textContent = d.busy ? '工作中' : '空闲';
+    $('pState').textContent = d.busy ? t('busy') : t('idle');
     $('pId').textContent = d.id;
     $('pHarness').textContent = harnessLabel(d.harness);
-    $('pModel').textContent = (d.model || '—') + (d.modelInherited ? '（默认）' : '');
+    $('pModel').textContent = (d.model || '—') + (d.modelInherited ? t('defaultTag') : '');
     $('pSession').textContent = d.session?.sessionId || '—';
-    $('pArchived').textContent = `${d.archivedSessions || 0} 条${d.privateSessions ? ' · 隐私隔离' : ''}`;
+    $('pArchived').textContent = t('archivedCount', { n: d.archivedSessions || 0 }) + (d.privateSessions ? t('privateTag') : '');
     $('pWs').textContent = d.workspace;
-    $('pInst').textContent = d.instructions || '(空)';
+    $('pInst').textContent = d.instructions || t('emptyText');
     $('pMemAddBox').hidden = true;
     $('pMemErr').textContent = '';
     $('pDelete').disabled = state.bots.length <= 1;
-    $('pDelete').title = state.bots.length <= 1 ? '至少需要保留一个 Bot' : '';
+    $('pDelete').title = state.bots.length <= 1 ? t('keepOneBot') : '';
     open('panel'); open('shade');
     loadBotMemories(d.id);
   } catch (e) { if (e.message !== 'unauthorized') toast(e.message); }
@@ -1770,7 +2596,7 @@ $('peCancel').onclick = () => setPanelMode('view');
 async function saveBotEdit() {
   if (!panelDetail) return;
   const name = $('peName').value.trim();
-  if (!name) { $('peErr').textContent = '名称不能为空'; $('peName').focus(); return; }
+  if (!name) { $('peErr').textContent = t('nameRequired'); $('peName').focus(); return; }
   $('peSave').disabled = true;
   $('peErr').textContent = '';
   try {
@@ -1783,7 +2609,7 @@ async function saveBotEdit() {
     renderBots(); renderHead();
     if (!(state.msgs[st.id] || []).length) renderThread();
     await openPanel();
-    toast('已保存');
+    toast(t('saved'));
   } catch (e) {
     if (e.message !== 'unauthorized') $('peErr').textContent = e.message;
   } finally {
@@ -1796,23 +2622,23 @@ $('pEditForm').onsubmit = e => { e.preventDefault(); saveBotEdit(); };
 $('pDelete').onclick = () => {
   const b = activeBot(); if (!b || state.bots.length <= 1) return;
   confirmAction({
-    title: `删除 ${b.name}？`,
-    text: '将从配置中移除此 Bot 并停止其队列，磁盘上的 workspace 与历史文件会保留。',
-    okText: '确认删除',
+    title: t('deleteBotTitle', { name: b.name }),
+    text: t('deleteBotDesc'),
+    okText: t('confirmDelete'),
     okClass: 'bad',
     onOk: async () => {
       try {
         await api(`/api/bots/${encodeURIComponent(b.id)}`, { method: 'DELETE' });
         closeAll();
         removeBotLocally(b.id);
-        toast('已删除 Bot');
+        toast(t('deletedBot'));
       } catch (e) { if (e.message !== 'unauthorized') toast(e.message); }
     }
   });
 };
 
 let confirmHandler = null;
-function confirmAction({ title, text, okText = '确定', okClass = 'bad', onOk }) {
+function confirmAction({ title, text, okText = t('ok'), okClass = 'bad', onOk }) {
   $('confirmTitle').textContent = title;
   $('confirmText').textContent = text;
   const ok = $('confirmOk');
@@ -1825,12 +2651,12 @@ function confirmAction({ title, text, okText = '确定', okClass = 'bad', onOk }
 function askReset() {
   const b = activeBot(); if (!b) return;
   confirmAction({
-    title: '重置会话？',
-    text: `${b.name} 会开始一个新会话，之前的上下文不再带入。Workspace 和 memory/ 保留不动。`,
-    okText: '重置',
+    title: t('resetSessionTitle'),
+    text: t('resetSessionDesc', { name: b.name }),
+    okText: t('resetBtn'),
     onOk: async () => {
       closeAll();
-      try { await api(`/api/bots/${encodeURIComponent(b.id)}/reset`, { method: 'POST' }); toast('已开始新会话'); await loadBots(); }
+      try { await api(`/api/bots/${encodeURIComponent(b.id)}/reset`, { method: 'POST' }); toast(t('newSessionStarted')); await loadBots(); }
       catch (e) { if (e.message !== 'unauthorized') toast(e.message); }
     }
   });
@@ -1846,7 +2672,7 @@ function syncSend() {
   const b = activeBot(), btn = $('sendBtn');
   const stop = !!b?.busy && !$('input').value.trim();
   btn.classList.toggle('stop', stop);
-  btn.setAttribute('aria-label', stop ? '停止' : '发送');
+  btn.setAttribute('aria-label', stop ? t('stop') : t('send'));
   btn.innerHTML = stop
     ? '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="7" y="7" width="10" height="10" rx="2"/></svg>'
     : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>';
@@ -1854,26 +2680,26 @@ function syncSend() {
 }
 async function interrupt() {
   const id = state.active; if (!id) return;
-  try { const r = await api(`/api/bots/${encodeURIComponent(id)}/interrupt`, { method: 'POST' }); if (!r.interrupted) toast('当前没有在运行'); }
+  try { const r = await api(`/api/bots/${encodeURIComponent(id)}/interrupt`, { method: 'POST' }); if (!r.interrupted) toast(t('notRunning')); }
   catch (e) { if (e.message !== 'unauthorized') toast(e.message); }
 }
 
 /* ---------- global wiring ---------- */
 document.addEventListener('click', e => {
   if (!e.target.closest('#pop, #plusBtn')) $('pop').classList.remove('open');
-  const t = e.target.closest('[data-bot],[data-close],[data-fill],[data-cmd],[data-copy],[data-open-create],[data-open-desk]');
-  if (!t) return;
-  if (t.dataset.bot) selectBot(t.dataset.bot);
-  else if (t.hasAttribute('data-close')) closeAll();
-  else if (t.hasAttribute('data-open-create')) $('openCreate').click();
-  else if (t.dataset.openDesk) { closeAll(); if (state.view === 'settings') closeSettings(); openDesktop(t.dataset.openDesk); }
-  else if (t.dataset.fill || t.dataset.cmd) {
+  const el = e.target.closest('[data-bot],[data-close],[data-fill],[data-cmd],[data-copy],[data-open-create],[data-open-desk]');
+  if (!el) return;
+  if (el.dataset.bot) selectBot(el.dataset.bot);
+  else if (el.hasAttribute('data-close')) closeAll();
+  else if (el.hasAttribute('data-open-create')) $('openCreate').click();
+  else if (el.dataset.openDesk) { closeAll(); if (state.view === 'settings') closeSettings(); openDesktop(el.dataset.openDesk); }
+  else if (el.dataset.fill || el.dataset.cmd) {
     $('pop').classList.remove('open');
-    const el = $('input'); el.value = t.dataset.fill || t.dataset.cmd; resize(); el.focus();
-    el.setSelectionRange(el.value.length, el.value.length);
-  } else if (t.hasAttribute('data-copy')) {
-    const code = t.closest('.code')?.querySelector('code')?.textContent || t.dataset.copy || '';
-    navigator.clipboard?.writeText(code).then(() => { t.textContent = '已复制'; setTimeout(() => t.textContent = '复制', 1200); });
+    const inp = $('input'); inp.value = el.dataset.fill || el.dataset.cmd; resize(); inp.focus();
+    inp.setSelectionRange(inp.value.length, inp.value.length);
+  } else if (el.hasAttribute('data-copy')) {
+    const code = el.closest('.code')?.querySelector('code')?.textContent || el.dataset.copy || '';
+    navigator.clipboard?.writeText(code).then(() => { el.textContent = t('copied'); setTimeout(() => el.textContent = t('copy'), 1200); });
   }
 });
 document.querySelectorAll('.dlg-wrap').forEach(w => w.addEventListener('mousedown', e => {
@@ -1981,7 +2807,7 @@ $('openCreate').onclick = () => {
 const syncCreateModel = () => {
   const h = $('fHarness').value;
   $('fModel').setAttribute('list', 'models-' + h);
-  $('fModel').placeholder = defaultFor(h) ? `默认 ${defaultFor(h)}` : 'provider/model';
+  $('fModel').placeholder = defaultFor(h) ? t('defaultModelPh', { model: defaultFor(h) }) : 'provider/model';
   loadModels(h);
 };
 $('fHarness').onchange = () => { $('fModel').value = ''; syncCreateModel(); };
@@ -1993,12 +2819,11 @@ let perHarnessExpanded = false;
 let settingsBase = null;
 let settingsLoadSeq = 0;
 let remoteTimer = null, localNodeTimer = null, remoteToken = '', remoteTokenShow = false, remoteHasToken = false, remoteEnvRef = '', localNodeState = null;
-const PERM_LABELS = { files: '文件', exec: '命令', desktop: '桌面' };
 
 function getThemePref() {
   try {
-    const t = localStorage.getItem('bothub.theme');
-    return (t === 'light' || t === 'dark') ? t : 'system';
+    const tv = localStorage.getItem('bothub.theme');
+    return (tv === 'light' || tv === 'dark') ? tv : 'system';
   } catch { return 'system'; }
 }
 function applyThemePref(val) {
@@ -2011,10 +2836,13 @@ function applyThemePref(val) {
   }
 }
 $('sTheme').onchange = () => applyThemePref($('sTheme').value);
+$('sLang').onchange = () => applyLangPref($('sLang').value);
+$('sAccentCustom').oninput = () => applyAccentPref($('sAccentCustom').value);
+$('sAccentReset').onclick = () => { applyAccentPref(DEFAULT_ACCENT); toast(t('accentResetToast')); };
 
 function syncPerHarnessToggle() {
   $('sPerHarnessBox').hidden = !perHarnessExpanded;
-  $('sTogglePerHarness').textContent = perHarnessExpanded ? '收起' : '按后端设置';
+  $('sTogglePerHarness').textContent = perHarnessExpanded ? t('collapse') : t('perHarness');
 }
 $('sTogglePerHarness').onclick = () => {
   perHarnessExpanded = !perHarnessExpanded;
@@ -2037,7 +2865,7 @@ function equalMaps(a, b) {
 }
 function renderPerHarnessFields(harnesses, values) {
   $('sPerHarnessFields').innerHTML = (harnesses || []).map(h =>
-    `<div class="fld"><label>${esc(h.label)}</label><input class="mono" data-dm="${esc(h.id)}" list="models-${esc(h.id)}" value="${esc(values?.[h.id] || '')}" placeholder="留空跟随全局默认" spellcheck="false" /></div>`
+    `<div class="fld"><label>${esc(h.label)}</label><input class="mono" data-dm="${esc(h.id)}" list="models-${esc(h.id)}" value="${esc(values?.[h.id] || '')}" placeholder="${esc(t('followGlobalPh'))}" spellcheck="false" /></div>`
   ).join('');
   $('sPerHarnessFields').querySelectorAll('[data-dm]').forEach(inp => {
     inp.oninput = () => {
@@ -2047,15 +2875,15 @@ function renderPerHarnessFields(harnesses, values) {
   });
 }
 
-const SETTINGS_TITLES = { models: '模型与 Bot', remote: '远程与设备', general: '通用' };
+const SETTINGS_TITLE_KEYS = { models: 'tabModels', remote: 'tabRemote', general: 'tabGeneral' };
 function switchSettingsTab(tab) {
-  settingsTab = SETTINGS_TITLES[tab] ? tab : 'models';
+  settingsTab = SETTINGS_TITLE_KEYS[tab] ? tab : 'models';
   $('sideSettings').querySelectorAll('[data-stab]').forEach(btn => {
     const on = btn.dataset.stab === settingsTab;
     btn.classList.toggle('on', on);
     btn.setAttribute('aria-selected', on ? 'true' : 'false');
   });
-  $('setTitle').textContent = SETTINGS_TITLES[settingsTab];
+  $('setTitle').textContent = t(SETTINGS_TITLE_KEYS[settingsTab]);
   $('sTabModels').hidden = settingsTab !== 'models';
   $('sTabRemote').hidden = settingsTab !== 'remote';
   $('sTabGeneral').hidden = settingsTab !== 'general';
@@ -2063,6 +2891,7 @@ function switchSettingsTab(tab) {
   if (settingsTab === 'remote') {
     refreshRemoteTab();
   } else if (settingsTab === 'general') {
+    renderAccentControls();
     loadGlobalMemories();
   }
   if (matchMedia('(max-width: 820px)').matches) closeAll();
@@ -2116,7 +2945,7 @@ function syncRow(row) {
   const g = $('sDefaultModel').value.trim();
   const def = dm || resolveDefaultModel(g, h);
   m.setAttribute('list', 'models-' + h);
-  m.placeholder = def ? `默认 ${def}` : '留空用全局默认';
+  m.placeholder = def ? t('defaultModelPh', { model: def }) : t('inheritGlobalPh');
   loadModels(h);
 }
 function captureSettingsDraft() {
@@ -2162,21 +2991,21 @@ function renderMagpieSection(s) {
   const mp = s.magpie || {};
   const pill = $('sMagpieStatusPill');
   if (!mp.installed) {
-    pill.textContent = '未安装（各 CLI 独立运行）';
+    pill.textContent = t('mpNotInstalled');
     pill.className = 'mp';
   } else if (mp.healthy) {
-    pill.textContent = '网关运行中';
+    pill.textContent = t('mpHealthy');
     pill.className = 'mp ok';
   } else {
-    pill.textContent = '已安装（网关未响应）';
+    pill.textContent = t('mpUnhealthy');
     pill.className = 'mp bad';
   }
 
   const inst = mp.install || {};
-  const cmd = c => `<div class="cmd"><code>${esc(c)}</code><button type="button" data-copy="${esc(c)}">复制</button></div>`;
+  const cmd = c => `<div class="cmd"><code>${esc(c)}</code><button type="button" data-copy="${esc(c)}">${t('copy')}</button></div>`;
   $('sMagpieInstall').hidden = !!mp.installed;
   if (!mp.installed) {
-    $('sMagpieInstall').innerHTML = `<div>需要统一多模型、API Key、订阅与路由时，请在终端安装 <a href="${esc(inst.docs || '')}" target="_blank" rel="noopener">Magpie CLI</a> 后重开设置：</div>${cmd(inst.script || '')}${cmd(inst.brew || '')}`;
+    $('sMagpieInstall').innerHTML = `<div>${t('mpInstallHint', { docs: esc(inst.docs || '') })}</div>${cmd(inst.script || '')}${cmd(inst.brew || '')}`;
   }
   $('sMagpieBox').hidden = !mp.installed;
   if (!mp.installed) return;
@@ -2186,14 +3015,14 @@ function renderMagpieSection(s) {
     const conn = !!h.magpie?.connected;
     const curVal = conn ? (h.magpie?.model || '') : ($('sDefaultModel').value.trim() || h.defaultModel || '');
     const stTag = conn
-      ? `<small style="color:var(--sage-ink)">Magpie 已接管</small>`
-      : `<small>原生 CLI${h.magpie?.nativeModel ? ' · ' + esc(h.magpie.nativeModel) : ''}</small>`;
+      ? `<small style="color:var(--sage-ink)">${esc(t('mpConnected'))}</small>`
+      : `<small>${esc(t('mpNative'))}${h.magpie?.nativeModel ? ' · ' + esc(h.magpie.nativeModel) : ''}</small>`;
     return `<div class="mp-hrow" data-mh="${esc(h.id)}">
       <div class="mp-hname"><span>${esc(h.label)}</span>${stTag}</div>
-      <input class="mono" data-mhm list="models-${esc(h.id)}" value="${esc(curVal)}" placeholder="例如 deepseek/deepseek-chat" spellcheck="false" />
+      <input class="mono" data-mhm list="models-${esc(h.id)}" value="${esc(curVal)}" placeholder="${esc(t('mpModelPh'))}" spellcheck="false" />
       <div class="mp-hacts">
-        <button type="button" class="mp ${conn ? '' : 'go'}" data-mh-go="${esc(h.id)}">${conn ? '切换' : '接管'}</button>
-        ${conn ? `<button type="button" class="mp" data-mh-off="${esc(h.id)}">恢复原生</button>` : ''}
+        <button type="button" class="mp ${conn ? '' : 'go'}" data-mh-go="${esc(h.id)}">${conn ? t('mpSwitch') : t('mpConnect')}</button>
+        ${conn ? `<button type="button" class="mp" data-mh-off="${esc(h.id)}">${t('mpRestoreNative')}</button>` : ''}
       </div>
     </div>`;
   }).join('');
@@ -2203,13 +3032,13 @@ function renderMagpieSection(s) {
     const row = btn.closest('[data-mh]');
     const model = row.querySelector('[data-mhm]').value.trim() || $('sDefaultModel').value.trim();
     const label = harnessLabel(id);
-    if (!model) { $('settingsErr').textContent = `请为 ${label} 选择或输入要接管的 Magpie 模型`; return; }
+    if (!model) { $('settingsErr').textContent = t('mpPickModelErr', { label }); return; }
     const curDraft = captureSettingsDraft();
     btn.disabled = true; $('settingsErr').textContent = '';
     try {
       state.settings = await api(`/api/harnesses/${encodeURIComponent(id)}/magpie`, { method: 'POST', body: { action: 'connect', model } });
       delete state.models[id];
-      toast(`${label} 已接入 Magpie`);
+      toast(t('mpConnectedToast', { label }));
       renderSettingsView(state.settings, curDraft);
     } catch (e) {
       btn.disabled = false;
@@ -2219,9 +3048,9 @@ function renderMagpieSection(s) {
   $('sMagpieHarnesses').querySelectorAll('[data-mh-off]').forEach(btn => btn.onclick = () => {
     const id = btn.dataset.mhOff, label = harnessLabel(id);
     confirmAction({
-      title: `恢复 ${label} 原生配置？`,
-      text: `将运行 magpie ${id} default，撤回 Magpie 对该 CLI 全局配置的接管。`,
-      okText: '确认恢复',
+      title: t('mpRestoreTitle', { label }),
+      text: t('mpRestoreDesc', { id }),
+      okText: t('mpConfirmRestore'),
       okClass: 'bad',
       onOk: async () => {
         const curDraft = captureSettingsDraft();
@@ -2229,7 +3058,7 @@ function renderMagpieSection(s) {
         try {
           state.settings = await api(`/api/harnesses/${encodeURIComponent(id)}/magpie`, { method: 'POST', body: { action: 'disconnect' } });
           delete state.models[id];
-          toast(`${label} 已恢复原生配置`);
+          toast(t('mpRestoredToast', { label }));
           renderSettingsView(state.settings, curDraft);
         } catch (e) {
           btn.disabled = false;
@@ -2243,22 +3072,22 @@ function renderMagpieSection(s) {
   const provs = mp.providers || [];
   $('sProvCount').textContent = provs.length;
   $('sMagpieProviders').hidden = !providersExpanded;
-  $('sToggleProvs').textContent = providersExpanded ? '收起列表' : '展开列表';
+  $('sToggleProvs').textContent = providersExpanded ? t('collapseList') : t('expandList');
   $('sMagpieProviders').innerHTML = provs.length ? provs.map(p => {
-    const meta = [p.id, p.endpoint, p.status, p.modelsInfo, p.usedBy ? `用于 ${p.usedBy}` : ''].filter(Boolean).join(' · ');
+    const meta = [p.id, p.endpoint, p.status, p.modelsInfo, p.usedBy ? t('usedBy', { who: p.usedBy }) : ''].filter(Boolean).join(' · ');
     return `<div class="prov-row">
       <div class="prov-meta">
-        <div class="nm">${esc(p.name)} <span class="mp ${p.enabled ? 'ok' : ''}">${p.enabled ? '启用' : '停用'}</span></div>
+        <div class="nm">${esc(p.name)} <span class="mp ${p.enabled ? 'ok' : ''}">${p.enabled ? t('enabled') : t('paused')}</span></div>
         <div class="subt">${esc(meta)}</div>
       </div>
       <div class="prov-acts">
-        <button type="button" class="mp" data-pa="test" data-pid="${esc(p.id)}">测速</button>
-        <button type="button" class="mp" data-pa="refresh" data-pid="${esc(p.id)}">刷新</button>
-        <button type="button" class="mp" data-pa="${p.enabled ? 'off' : 'on'}" data-pid="${esc(p.id)}">${p.enabled ? '停用' : '启用'}</button>
-        <button type="button" class="mp bad" data-pa="rm" data-pid="${esc(p.id)}">移除</button>
+        <button type="button" class="mp" data-pa="test" data-pid="${esc(p.id)}">${t('testBtn')}</button>
+        <button type="button" class="mp" data-pa="refresh" data-pid="${esc(p.id)}">${t('refresh')}</button>
+        <button type="button" class="mp" data-pa="${p.enabled ? 'off' : 'on'}" data-pid="${esc(p.id)}">${p.enabled ? t('paused') : t('enabled')}</button>
+        <button type="button" class="mp bad" data-pa="rm" data-pid="${esc(p.id)}">${t('removeBtn')}</button>
       </div>
     </div>`;
-  }).join('') : '<div class="set-card-desc">暂无模型源，点「+ 添加模型源」配置 API Key 或中转。</div>';
+  }).join('') : `<div class="set-card-desc">${esc(t('noProvidersDesc'))}</div>`;
 
   $('sMagpieProviders').querySelectorAll('[data-pa]').forEach(btn => btn.onclick = async () => {
     const action = btn.dataset.pa, pid = btn.dataset.pid;
@@ -2268,9 +3097,9 @@ function renderMagpieSection(s) {
         const res = await api('/api/magpie/providers', { method: 'POST', body: { action, id: pid } });
         if (state.settings?.magpie) state.settings.magpie.providers = res.providers || [];
         state.models = {};
-        if (action === 'test') toast(res.output || `${pid} 测试通过`);
+        if (action === 'test') toast(res.output || t('testPassed', { id: pid }));
         else {
-          toast('已更新模型源');
+          toast(t('providerUpdated'));
           await openSettings(captureSettingsDraft(), 'models');
         }
       } catch (e) {
@@ -2278,7 +3107,7 @@ function renderMagpieSection(s) {
       } finally { btn.disabled = false; }
     };
     if (action === 'rm') {
-      confirmAction({ title: `移除模型源 ${pid}？`, text: '将调用 magpie provider rm 从本机 Magpie 配置移除此提供方。', okText: '确认移除', onOk: run });
+      confirmAction({ title: t('rmProviderTitle', { id: pid }), text: t('rmProviderDesc'), okText: t('confirmRemove'), onOk: run });
     } else {
       await run();
     }
@@ -2291,12 +3120,12 @@ function renderMagpieSection(s) {
 $('sToggleProvs').onclick = () => {
   providersExpanded = !providersExpanded;
   $('sMagpieProviders').hidden = !providersExpanded;
-  $('sToggleProvs').textContent = providersExpanded ? '收起列表' : '展开列表';
+  $('sToggleProvs').textContent = providersExpanded ? t('collapseList') : t('expandList');
 };
 $('sShowAddProv').onclick = () => {
   const box = $('sAddProvBox');
   box.hidden = !box.hidden;
-  if (!box.hidden) { providersExpanded = true; $('sMagpieProviders').hidden = false; $('sToggleProvs').textContent = '收起列表'; }
+  if (!box.hidden) { providersExpanded = true; $('sMagpieProviders').hidden = false; $('sToggleProvs').textContent = t('collapseList'); }
 };
 $('apCancel').onclick = () => { $('sAddProvBox').hidden = true; };
 $('apKind').onchange = () => {
@@ -2304,7 +3133,7 @@ $('apKind').onchange = () => {
   $('apPresetFld').hidden = custom;
   $('apProtoFld').hidden = !custom;
   $('apCustomUrlRow').hidden = !custom;
-  $('apNameLbl').innerHTML = custom ? '名称' : '别名 <em>可选</em>';
+  $('apNameLbl').innerHTML = custom ? esc(t('aliasRequired')) : t('aliasOptional');
 };
 $('apSubmit').onclick = async () => {
   const custom = $('apKind').value === 'custom';
@@ -2323,7 +3152,7 @@ $('apSubmit').onclick = async () => {
     $('apKey').value = ''; $('apName').value = ''; $('apUrl').value = ''; $('apModels').value = '';
     $('sAddProvBox').hidden = true;
     state.models = {};
-    toast('已添加模型源');
+    toast(t('providerAdded'));
     await openSettings(captureSettingsDraft(), 'models');
   } catch (e) {
     if (e.message !== 'unauthorized') $('settingsErr').textContent = e.message;
@@ -2346,6 +3175,8 @@ function closeSettings() {
 function renderSettingsView(s, draft = null) {
   if (!s) return;
   $('sTheme').value = getThemePref();
+  $('sLang').value = getLangPref();
+  renderAccentControls();
   $('sDefaultModel').value = draft ? draft.defaultModel : (s.defaultModel || '');
   const perValues = draft ? (draft.defaultModels || {}) : (s.defaultModels || {});
   perHarnessExpanded = Object.values(perValues).some(Boolean);
@@ -2354,7 +3185,7 @@ function renderSettingsView(s, draft = null) {
   $('sUserMd').value = draft ? (draft.sharedUserMd || '') : (s.sharedUserMd || '');
   renderMagpieSection(s);
 
-  $('sBots').innerHTML = state.bots.map(botRow).join('') || '<div class="sub">还没有 Bot</div>';
+  $('sBots').innerHTML = state.bots.map(botRow).join('') || `<div class="sub">${esc(t('noBotsSimple'))}</div>`;
   settingsBase = {
     defaultModel: s.defaultModel || '',
     defaultModels: Object.fromEntries(Object.entries(s.defaultModels || {}).filter(([, v]) => Boolean(v))),
@@ -2442,7 +3273,7 @@ $('settingsForm').onsubmit = async e => {
       const st = await api(`/api/bots/${encodeURIComponent(b.id)}`, { method: 'PATCH', body: { harness: h, model: m } });
       Object.assign(b, st);
     }
-    toast('已保存');
+    toast(t('saved'));
     await loadBots();
     if (state.view === 'settings') renderSettingsView(state.settings, null);
   } catch (err) {
@@ -2452,17 +3283,18 @@ $('settingsForm').onsubmit = async e => {
 };
 
 /* ---------- settings remote & device tab ---------- */
+const permLabel = p => t({ files: 'permFileShort', exec: 'permExecShort', desktop: 'permDeskShort' }[p] || p);
 function renderNodes(nodes) {
   const list = Array.isArray(nodes) ? nodes : [];
   const onlineCount = list.filter(n => n.connected).length;
-  $('remoteNodeCount').textContent = `${onlineCount} 在线`;
+  $('remoteNodeCount').textContent = t('onlineCount', { n: onlineCount });
   $('remoteNodesList').innerHTML = list.length ? list.map(n => {
-    const perms = (n.permissions || []).map(p => PERM_LABELS[p] || p).join(' · ') || '无权限';
+    const perms = (n.permissions || []).map(permLabel).join(' · ') || t('noPerm');
     const meta = [n.os && n.arch ? `${n.os}/${n.arch}` : (n.os || ''), perms].filter(Boolean).join(' · ');
     const canDesk = n.connected && (n.permissions || []).includes('desktop');
     return `<div class="node-row"><div><div class="nm">${esc(n.name || n.id)}</div><div class="meta">${esc(meta)}</div></div>
-      <div style="display:flex;align-items:center;gap:6px">${canDesk ? `<button type="button" class="mp" data-open-desk="${esc(n.id)}">打开桌面</button>` : ''}<span class="mp${n.connected ? ' ok' : ''}">${n.connected ? '在线' : '离线'}</span></div></div>`;
-  }).join('') : '<div class="set-card-desc">暂无远端设备接入（在另一台电脑用 Bot Hub 连接远端后，可开启「允许主电脑操控本机」）</div>';
+      <div style="display:flex;align-items:center;gap:6px">${canDesk ? `<button type="button" class="mp" data-open-desk="${esc(n.id)}">${esc(t('openDesktop'))}</button>` : ''}<span class="mp${n.connected ? ' ok' : ''}">${n.connected ? t('online') : t('offline')}</span></div></div>`;
+  }).join('') : `<div class="set-card-desc">${esc(t('noRemoteNodes'))}</div>`;
 }
 function renderLocalNode(st) {
   localNodeState = st && st.available ? st : null;
@@ -2472,12 +3304,12 @@ function renderLocalNode(st) {
   if (document.activeElement !== $('localNodeNameIn')) {
     $('localNodeNameIn').value = localNodeState.name || '';
   }
-  const map = { disabled: '未开启', connecting: '连接中…', connected: '已连接', waiting_auth: '等待登录', error: '连接失败' };
+  const map = { disabled: t('disabled'), connecting: t('nodeConnecting'), connected: t('nodeConnected'), waiting_auth: t('nodeWaitingAuth'), error: t('nodeError') };
   const pill = $('localNodeState');
   pill.textContent = map[localNodeState.status] || localNodeState.status;
   pill.className = 'mp' + (localNodeState.connected ? ' ok' : '');
   const tog = $('localNodeToggle');
-  tog.textContent = localNodeState.enabled ? '关闭' : '开启操控…';
+  tog.textContent = localNodeState.enabled ? t('close') : t('enableControlBtn');
   tog.disabled = false;
   const perms = new Set(localNodeState.permissions || []);
   $('localNodePerms').querySelectorAll('input[data-perm]').forEach(cb => { cb.checked = perms.has(cb.dataset.perm); });
@@ -2488,12 +3320,12 @@ function renderLocalNode(st) {
 }
 async function saveLocalNodeName() {
   const name = $('localNodeNameIn').value.trim();
-  if (!name) { $('remoteErr').textContent = '节点名称不能为空'; return; }
+  if (!name) { $('remoteErr').textContent = t('nodeNameEmpty'); return; }
   $('localNodeNameSave').disabled = true;
   $('remoteErr').textContent = '';
   try {
     await postLocalNode({ name });
-    toast('已更新节点名称');
+    toast(t('nodeNameSaved'));
     setTimeout(() => api('/api/nodes').then(r => renderNodes(r.nodes || [])).catch(() => {}), 350);
   } catch (e) {
     $('remoteErr').textContent = e.message;
@@ -2520,19 +3352,19 @@ function syncRemoteToken() {
   $('remoteTokBox').hidden = !remoteHasToken;
   if (!remoteHasToken) return;
   if (remoteEnvRef) {
-    $('remoteTokTitle').textContent = '访问口令（环境变量）';
+    $('remoteTokTitle').textContent = t('accessTokenEnv');
     $('remoteTokActs').style.display = 'none';
     $('remoteTokCmd').style.display = 'none';
     $('remoteTokEnv').hidden = false;
-    $('remoteTokEnv').textContent = `已由环境变量 ${remoteEnvRef} 提供`;
+    $('remoteTokEnv').textContent = t('accessTokenEnvHint', { ref: remoteEnvRef });
     return;
   }
-  $('remoteTokTitle').textContent = '访问口令（可复用）';
+  $('remoteTokTitle').textContent = t('accessTokenReusable');
   $('remoteTokActs').style.display = 'flex';
   $('remoteTokCmd').style.display = 'flex';
   $('remoteTokEnv').hidden = true;
   $('remoteTokVal').textContent = (remoteTokenShow && remoteToken) ? remoteToken : '•'.repeat(24);
-  $('remoteTokEye').textContent = remoteTokenShow ? '隐藏' : '显示';
+  $('remoteTokEye').textContent = remoteTokenShow ? t('hide') : t('show');
 }
 async function ensureRemoteToken() {
   if (remoteToken) return remoteToken;
@@ -2540,43 +3372,43 @@ async function ensureRemoteToken() {
   remoteToken = d.apiToken || '';
   return remoteToken;
 }
-function renderRemote(t) {
-  const ready = t.state === 'ready', off = t.state === 'disabled', err = t.state === 'error';
-  $('remoteState').textContent = { disabled: '未开启', connecting: '正在连接中继…', ready: '已就绪', error: '出错' }[t.state] || t.state;
+function renderRemote(tr) {
+  const ready = tr.state === 'ready', off = tr.state === 'disabled', err = tr.state === 'error';
+  $('remoteState').textContent = { disabled: t('disabled'), connecting: t('remoteConnecting'), ready: t('remoteReady'), error: t('remoteError') }[tr.state] || tr.state;
   $('remoteQR').style.display = $('remoteLinkFld').style.display = ready ? '' : 'none';
   $('remoteCopyWrap').hidden = !ready;
-  $('remoteTokenFld').style.display = (off || err) && !t.hasToken ? '' : 'none';
+  $('remoteTokenFld').style.display = (off || err) && !tr.hasToken ? '' : 'none';
   if (ready) {
-    if (!$('remoteQR').dataset.link || $('remoteQR').dataset.link !== t.link) {
+    if (!$('remoteQR').dataset.link || $('remoteQR').dataset.link !== tr.link) {
       $('remoteQR').src = '/api/tailcat/qr.png?t=' + Date.now();
-      $('remoteQR').dataset.link = t.link;
+      $('remoteQR').dataset.link = tr.link;
     }
-    $('remoteLink').value = t.link;
+    $('remoteLink').value = tr.link;
   } else {
     delete $('remoteQR').dataset.link;
   }
-  remoteHasToken = !!t.hasToken;
-  remoteEnvRef = t.tokenEnvRef || '';
-  if (t.apiToken) remoteToken = t.apiToken;
+  remoteHasToken = !!tr.hasToken;
+  remoteEnvRef = tr.tokenEnvRef || '';
+  if (tr.apiToken) remoteToken = tr.apiToken;
   else if (!remoteHasToken || remoteEnvRef) remoteToken = '';
   syncRemoteToken();
   const tog = $('remoteToggle');
   tog.disabled = false;
   if (off || err) {
     tog.className = 'mp go';
-    tog.textContent = err ? '重试开启' : '开启远程访问';
+    tog.textContent = err ? t('remoteRetry') : t('enableRemote');
   } else {
     tog.className = 'mp bad';
-    tog.textContent = '停用';
+    tog.textContent = t('remoteStop');
   }
   tog.dataset.next = (off || err) ? '1' : '0';
   $('remoteHelp').textContent = ready
-    ? '手机 App 可直接扫码一键配对；在另一台电脑的 Bot Hub 桌面版选「连接远端」粘贴链接，或运行 bot-hub connect <链接>。'
-    : off ? '开启后自动生成 Tailcat 加密隧道与二维码，无需改配置文件或重启。'
-    : t.state === 'connecting' ? '正在连接 Tailcat 中继，请稍候…'
-    : (t.error || '稍后再打开查看。');
+    ? t('remoteHelpReady')
+    : off ? t('remoteHelpOff')
+    : tr.state === 'connecting' ? t('remoteHelpConnecting')
+    : (tr.error || t('remoteHelpFallback'));
   clearTimeout(remoteTimer);
-  if (t.state === 'connecting' && state.view === 'settings') {
+  if (tr.state === 'connecting' && state.view === 'settings') {
     remoteTimer = setTimeout(async () => { try { renderRemote(await api('/api/tailcat')); } catch {} }, 800);
   }
 }
@@ -2587,10 +3419,10 @@ function refreshRemoteTab() {
   api('/api/nodes').then(d => renderNodes(d.nodes || [])).catch(() => renderNodes([]));
   api('/api/tailcat').then(renderRemote).catch(err => renderRemote({ state: 'error', error: err.message }));
   api('/api/desktop/state?target=local').then(st => {
-    const be = st?.status?.webrtcAvailable ? 'bot-host (WebRTC H.264)' : 'JPEG 实时流';
+    const be = st?.status?.webrtcAvailable ? 'bot-host (WebRTC H.264)' : t('jpegStream');
     $('localDeskEngine').textContent = be;
     $('localDeskEngine').className = 'mp' + (st?.status?.supported ? ' ok' : '');
-  }).catch(() => { $('localDeskEngine').textContent = '不可用'; });
+  }).catch(() => { $('localDeskEngine').textContent = t('unavailable'); });
 }
 $('localNodeToggle').onclick = () => {
   if (!localNodeState) return;
@@ -2599,15 +3431,15 @@ $('localNodeToggle').onclick = () => {
     $('localNodeToggle').disabled = true;
     try {
       const d = await postLocalNode({ enabled: next });
-      toast(d.enabled ? '已开启本机节点' : '已关闭本机节点');
+      toast(d.enabled ? t('localNodeEnabled') : t('localNodeDisabled'));
       setTimeout(() => api('/api/nodes').then(r => renderNodes(r.nodes || [])).catch(() => {}), 350);
     } catch (e) { $('localNodeToggle').disabled = false; $('remoteErr').textContent = e.message; }
   };
   if (!next) { apply(); return; }
   confirmAction({
-    title: '允许主电脑操控本机？',
-    text: '开启后，主电脑上的 Bot 将可按已勾选范围访问本机文件、执行命令或操作桌面。可随时在此处或菜单栏关闭。',
-    okText: '确认开启',
+    title: t('localNodeConfirmTitle'),
+    text: t('localNodeConfirmDesc'),
+    okText: t('confirmEnable'),
     okClass: 'go',
     onOk: apply,
   });
@@ -2628,14 +3460,14 @@ $('remoteToggle').onclick = async () => {
       const body = { enabled: enable };
       if (enable) body.apiToken = $('remoteTokenIn').value.trim();
       renderRemote(await api('/api/tailcat', { method: 'POST', body }));
-      toast(enable ? '已开启远程访问' : '已停用远程访问');
+      toast(enable ? t('remoteEnabledToast') : t('remoteDisabledToast'));
     } catch (e) {
       $('remoteToggle').disabled = false;
       if (e.message !== 'unauthorized') $('remoteErr').textContent = e.message;
     }
   };
   if (enable) { await run(); return; }
-  confirmAction({ title: '停用远程访问？', text: '停用后当前 Tailcat 隧道连接会立即断开。', okText: '确认停用', onOk: run });
+  confirmAction({ title: t('remoteDisableTitle'), text: t('remoteDisableDesc'), okText: t('confirmDisable'), onOk: run });
 };
 $('remoteTokEye').onclick = async () => {
   if (!remoteTokenShow) {
@@ -2645,26 +3477,26 @@ $('remoteTokEye').onclick = async () => {
   syncRemoteToken();
 };
 $('remoteTokCopy').onclick = async () => {
-  try { await navigator.clipboard.writeText(await ensureRemoteToken()); toast('已复制口令'); } catch { toast('复制失败'); }
+  try { await navigator.clipboard.writeText(await ensureRemoteToken()); toast(t('tokenCopied')); } catch { toast(t('copyFailed')); }
 };
 $('remoteTokReset').onclick = () => {
   confirmAction({
-    title: '更换访问口令？',
-    text: '将生成新的随机口令并替换旧口令，已连接的远端设备需要重新输入新口令。',
-    okText: '确认更换',
+    title: t('resetTokenTitle'),
+    text: t('resetTokenDesc'),
+    okText: t('confirmResetToken'),
     onOk: async () => {
       $('remoteErr').textContent = '';
       try {
-        const t = await api('/api/tailcat', { method: 'POST', body: { resetToken: true } });
+        const r = await api('/api/tailcat', { method: 'POST', body: { resetToken: true } });
         remoteTokenShow = true;
-        renderRemote(t);
-        toast('已更换口令');
+        renderRemote(r);
+        toast(t('tokenResetToast'));
       } catch (e) { if (e.message !== 'unauthorized') $('remoteErr').textContent = e.message; }
     }
   });
 };
 $('remoteCopy').onclick = async () => {
-  try { await navigator.clipboard.writeText($('remoteLink').value); toast('已复制配对链接'); } catch { toast('复制失败'); }
+  try { await navigator.clipboard.writeText($('remoteLink').value); toast(t('pairLinkCopied')); } catch { toast(t('copyFailed')); }
 };
 
 /* ---------- create bot & login ---------- */
@@ -2682,7 +3514,7 @@ $('createForm').onsubmit = async e => {
     const st = await api('/api/bots', { method: 'POST', body });
     closeAll();
     if (!state.bots.some(b => b.id === st.id)) state.bots.push(st);
-    toast(`${st.name} 已上线`);
+    toast(t('botOnlineToast', { name: st.name }));
     await selectBot(st.id);
   } catch (err) { $('createErr').textContent = err.message; }
   finally { $('createSubmit').disabled = false; }
@@ -3110,25 +3942,25 @@ $('sReopenUnbox').onclick = () => {
 /* ---------- Magpie Memory pass-through ---------- */
 function renderMemoryRows(container, data, onDelete) {
   if (!data || !data.installed) {
-    container.innerHTML = '<div class="set-card-desc">主电脑未安装 Magpie，暂不可透传 Magpie 记忆。</div>';
+    container.innerHTML = `<div class="set-card-desc">${esc(t('memNotInstalled'))}</div>`;
     return;
   }
   if (!data.available) {
-    container.innerHTML = `<div class="set-card-desc">Magpie 网关未响应${data.error ? '：' + esc(data.error) : ''}</div>`;
+    container.innerHTML = `<div class="set-card-desc">${esc(t('memUnavailable'))}${data.error ? ': ' + esc(data.error) : ''}</div>`;
     return;
   }
   const items = data.items || [];
   if (!items.length) {
-    container.innerHTML = '<div class="set-card-desc">暂无记忆条目</div>';
+    container.innerHTML = `<div class="set-card-desc">${esc(t('memEmpty'))}</div>`;
     return;
   }
   container.innerHTML = items.map(it => {
-    const tags = (it.tags || []).filter(t => !t.startsWith('bot:')).map(t => `<span class="mp">#${esc(t)}</span>`).join('');
+    const tags = (it.tags || []).filter(tag => !tag.startsWith('bot:')).map(tag => `<span class="mp">#${esc(tag)}</span>`).join('');
     const tm = it.updatedAt ? `<span class="mem-time">${esc(it.updatedAt.replace('T', ' ').slice(0, 16))}</span>` : '';
     return `<div class="mem-row">
       <div class="mem-top">
         <div class="mem-meta">${it.kind ? `<span class="mp ok">${esc(it.kind)}</span>` : ''}${tags}${tm}</div>
-        <button type="button" class="mp bad" data-mem-del="${esc(it.id)}">删除</button>
+        <button type="button" class="mp bad" data-mem-del="${esc(it.id)}">${esc(t('delBtn'))}</button>
       </div>
       <div class="mem-txt">${esc(it.text)}</div>
     </div>`;
@@ -3142,21 +3974,21 @@ async function loadGlobalMemories() {
   const pill = $('sMemStatus');
   const errEl = $('sMemErr');
   errEl.textContent = '';
-  pill.textContent = '加载中';
+  pill.textContent = t('loading');
   pill.className = 'mp';
   try {
     const q = $('sMemQuery').value.trim();
     const d = await api(`/api/memory?scope=global&limit=30${q ? '&query=' + encodeURIComponent(q) : ''}`);
-    if (!d.installed) { pill.textContent = '未安装'; pill.className = 'mp'; }
-    else if (!d.available) { pill.textContent = '未连接'; pill.className = 'mp bad'; }
-    else { pill.textContent = `${(d.items || []).length} 条`; pill.className = 'mp ok'; }
+    if (!d.installed) { pill.textContent = t('notLoaded'); pill.className = 'mp'; }
+    else if (!d.available) { pill.textContent = t('notConnected'); pill.className = 'mp bad'; }
+    else { pill.textContent = t('itemsCount', { n: (d.items || []).length }); pill.className = 'mp ok'; }
     renderMemoryRows($('sMemList'), d, async (id, btn) => {
       btn.disabled = true; errEl.textContent = '';
-      try { await api(`/api/memory/${encodeURIComponent(id)}`, { method: 'DELETE' }); toast('已删除记忆'); await loadGlobalMemories(); }
+      try { await api(`/api/memory/${encodeURIComponent(id)}`, { method: 'DELETE' }); toast(t('memDeleted')); await loadGlobalMemories(); }
       catch (e) { btn.disabled = false; if (e.message !== 'unauthorized') errEl.textContent = e.message; }
     });
   } catch (e) {
-    pill.textContent = '失败'; pill.className = 'mp bad';
+    pill.textContent = t('failed'); pill.className = 'mp bad';
     if (e.message !== 'unauthorized') errEl.textContent = e.message;
   }
 }
@@ -3165,13 +3997,13 @@ async function loadBotMemories(botId) {
   const listEl = $('pMemList');
   const errEl = $('pMemErr');
   errEl.textContent = '';
-  listEl.innerHTML = '<div class="set-card-desc">加载中…</div>';
+  listEl.innerHTML = `<div class="set-card-desc">${esc(t('loadingEllipsis'))}</div>`;
   try {
     const d = await api(`/api/memory?botId=${encodeURIComponent(botId)}&limit=30`);
     if (panelDetail?.id !== botId) return;
     renderMemoryRows(listEl, d, async (id, btn) => {
       btn.disabled = true; errEl.textContent = '';
-      try { await api(`/api/memory/${encodeURIComponent(id)}`, { method: 'DELETE' }); toast('已删除记忆'); await loadBotMemories(botId); }
+      try { await api(`/api/memory/${encodeURIComponent(id)}`, { method: 'DELETE' }); toast(t('memDeleted')); await loadBotMemories(botId); }
       catch (e) { btn.disabled = false; if (e.message !== 'unauthorized') errEl.textContent = e.message; }
     });
   } catch (e) {
@@ -3188,13 +4020,13 @@ $('sMemAddToggle').onclick = () => { $('sMemAddBox').hidden = !$('sMemAddBox').h
 $('sMemAddCancel').onclick = () => { $('sMemAddBox').hidden = true; $('sMemErr').textContent = ''; };
 $('sMemAddSubmit').onclick = async () => {
   const text = $('sMemText').value.trim();
-  if (!text) { $('sMemErr').textContent = '请填写记忆内容'; $('sMemText').focus(); return; }
+  if (!text) { $('sMemErr').textContent = t('memContentReq'); $('sMemText').focus(); return; }
   const tags = $('sMemTags').value.split(/[,，]/).map(s => s.trim()).filter(Boolean);
   $('sMemAddSubmit').disabled = true; $('sMemErr').textContent = '';
   try {
     await api('/api/memory', { method: 'POST', body: { scope: 'global', kind: $('sMemKind').value, text, tags } });
     $('sMemText').value = ''; $('sMemTags').value = ''; $('sMemAddBox').hidden = true;
-    toast('已保存全局记忆');
+    toast(t('globalMemSaved'));
     await loadGlobalMemories();
   } catch (e) {
     if (e.message !== 'unauthorized') $('sMemErr').textContent = e.message;
@@ -3206,13 +4038,13 @@ $('pMemAddCancel').onclick = () => { $('pMemAddBox').hidden = true; $('pMemErr')
 $('pMemAddSubmit').onclick = async () => {
   if (!panelDetail) return;
   const text = $('pMemText').value.trim();
-  if (!text) { $('pMemErr').textContent = '请填写记忆内容'; $('pMemText').focus(); return; }
+  if (!text) { $('pMemErr').textContent = t('memContentReq'); $('pMemText').focus(); return; }
   const botId = panelDetail.id;
   $('pMemAddSubmit').disabled = true; $('pMemErr').textContent = '';
   try {
     await api('/api/memory', { method: 'POST', body: { botId, kind: $('pMemKind').value, text } });
     $('pMemText').value = ''; $('pMemAddBox').hidden = true;
-    toast('已保存专属记忆');
+    toast(t('botMemSaved'));
     await loadBotMemories(botId);
   } catch (e) {
     if (e.message !== 'unauthorized') $('pMemErr').textContent = e.message;
@@ -3242,7 +4074,7 @@ const deskState = {
 };
 
 function activeTakeoverForView() {
-  return state.takeovers.find(t => t.target === state.deskTarget) || state.takeovers[0] || null;
+  return state.takeovers.find(to => to.target === state.deskTarget) || state.takeovers[0] || null;
 }
 
 function renderTakeovers() {
@@ -3250,7 +4082,11 @@ function renderTakeovers() {
   $('deskDot').hidden = state.takeovers.length === 0;
   $('takeoverBanner').hidden = !first;
   if (first) {
-    $('takeoverBannerText').textContent = `人工接管（${first.botName || first.botId || 'Bot'} · ${first.target === 'local' ? '本机' : first.target}）：${first.reason}`;
+    $('takeoverBannerText').textContent = t('takeoverBanner', {
+      bot: first.botName || first.botId || 'Bot',
+      target: first.target === 'local' ? t('localHost') : first.target,
+      reason: first.reason,
+    });
   }
   deskSyncStatus();
 }
@@ -3273,10 +4109,10 @@ async function resolveActiveTakeover() {
   const to = activeTakeoverForView();
   if (!to) return;
   try {
-    const res = await api('/api/desktop/takeover/resolve', { method: 'POST', body: { id: to.id, note: '已在远程桌面完成操作，请继续。' } });
+    const res = await api('/api/desktop/takeover/resolve', { method: 'POST', body: { id: to.id, note: t('takeoverDoneNote') } });
     state.takeovers = res.items || [];
     renderTakeovers();
-    toast('已恢复 Bot 执行');
+    toast(t('resumedAI'));
   } catch (e) { if (e.message !== 'unauthorized') toast(e.message); }
 }
 
@@ -3287,30 +4123,30 @@ function deskSyncStatus() {
     lbl.textContent = `WebRTC · ${deskState.fps || 0} fps`;
   } else if (deskState.mode === 'jpeg') {
     dot.className = 'd-dot warn';
-    lbl.textContent = `截图流 · ${deskState.fps || 0} fps · ${deskState.rtt || 0} ms`;
+    lbl.textContent = t('deskJpegLabel', { fps: deskState.fps || 0, rtt: deskState.rtt || 0 });
   } else if (deskState.mode === 'sleeping') {
     dot.className = 'd-dot';
-    lbl.textContent = '已休眠';
+    lbl.textContent = t('deskSleeping');
   } else if (deskState.mode === 'error') {
     dot.className = 'd-dot err';
-    lbl.textContent = '连接受阻';
+    lbl.textContent = t('deskBlocked');
   } else {
     dot.className = 'd-dot';
-    lbl.textContent = '连接中…';
+    lbl.textContent = t('deskConnectingShort');
   }
-  $('ddMode').textContent = deskState.mode === 'webrtc' ? 'WebRTC H.264' : deskState.mode === 'jpeg' ? 'HTTP JPEG 实时流' : deskState.mode;
+  $('ddMode').textContent = deskState.mode === 'webrtc' ? 'WebRTC H.264' : deskState.mode === 'jpeg' ? t('deskJpegMode') : deskState.mode;
   $('ddRtt').textContent = deskState.rtt ? `${deskState.rtt} ms` : '—';
   $('ddRes').textContent = deskState.res || '—';
-  $('ddLock').textContent = deskState.screen?.owner === 'human' ? '人工接管' : '空闲';
+  $('ddLock').textContent = deskState.screen?.owner === 'human' ? t('deskHumanCtrl') : t('idle');
 
   const to = activeTakeoverForView();
   const alertEl = $('deskAlert');
   if (to) {
     alertEl.hidden = false;
     alertEl.classList.add('takeover');
-    $('deskAlertText').textContent = `人工接管：${to.reason}`;
+    $('deskAlertText').textContent = t('deskAlertTakeover', { reason: to.reason });
     $('deskAlertBtn').className = 'btn go';
-    $('deskAlertBtn').textContent = '完成并恢复 AI';
+    $('deskAlertBtn').textContent = t('resumeAI');
     $('deskAlertBtn').onclick = () => resolveActiveTakeover();
   } else {
     alertEl.hidden = true;
@@ -3321,8 +4157,8 @@ async function deskRefreshTargets() {
   try {
     const d = await api('/api/desktop/targets');
     const list = d.targets || [];
-    if (!list.some(t => t.id === state.deskTarget)) state.deskTarget = list[0]?.id || 'local';
-    $('deskTarget').innerHTML = list.map(t => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('');
+    if (!list.some(tr => tr.id === state.deskTarget)) state.deskTarget = list[0]?.id || 'local';
+    $('deskTarget').innerHTML = list.map(tr => `<option value="${esc(tr.id)}">${esc(tr.name)}</option>`).join('');
     $('deskTarget').value = state.deskTarget;
     state.takeovers = d.takeovers || [];
     renderTakeovers();
@@ -3333,13 +4169,13 @@ async function deskRefreshWindows() {
   try {
     const d = await api(`/api/desktop/windows?target=${encodeURIComponent(state.deskTarget)}`);
     deskState.windows = d.windows || [];
-    $('deskWindow').innerHTML = `<option value="">整个屏幕</option>` + deskState.windows.map(w =>
+    $('deskWindow').innerHTML = `<option value="">${esc(t('entireScreen'))}</option>` + deskState.windows.map(w =>
       `<option value="${esc(w.id)}">${esc(w.app || '')}${w.title ? ': ' + esc(w.title.slice(0, 22)) : ''}</option>`
     ).join('');
     $('deskWindow').value = deskState.selectedWindowId;
   } catch {
     deskState.windows = [];
-    $('deskWindow').innerHTML = '<option value="">整个屏幕</option>';
+    $('deskWindow').innerHTML = `<option value="">${esc(t('entireScreen'))}</option>`;
   }
 }
 
@@ -3445,7 +4281,7 @@ async function startJpegFallback() {
     } catch (err) {
       if (!alive) break;
       deskState.mode = 'error';
-      $('deskCenterText').textContent = err.message || '桌面连接失败';
+      $('deskCenterText').textContent = err.message || t('deskConnectFailed');
       $('deskRetryBtn').hidden = false;
       $('deskCenterMsg').hidden = false;
       deskSyncStatus();
@@ -3460,7 +4296,7 @@ async function startDesktopStream() {
   stopDesktopStreams();
   if (!state.deskOpen) return;
   deskState.mode = 'connecting';
-  $('deskCenterText').textContent = '正在连接桌面…';
+  $('deskCenterText').textContent = t('deskConnecting');
   $('deskRetryBtn').hidden = true;
   $('deskCenterMsg').hidden = false;
   deskSyncStatus();
@@ -3474,7 +4310,7 @@ async function startDesktopStream() {
     deskRefreshWindows();
   } catch (err) {
     deskState.mode = 'error';
-    $('deskCenterText').textContent = err.message || '目标桌面暂不可达';
+    $('deskCenterText').textContent = err.message || t('deskUnreachable');
     $('deskRetryBtn').hidden = false;
     $('deskCenterMsg').hidden = false;
     deskSyncStatus();
@@ -3589,7 +4425,7 @@ $('deskStatusBtn').onclick = () => { $('deskDetails').hidden = !$('deskDetails')
 $('deskZoomBtn').onclick = () => {
   deskState.zoom1 = !deskState.zoom1;
   $('deskViewport').classList.toggle('zoom1', deskState.zoom1);
-  $('deskZoomBtn').textContent = deskState.zoom1 ? '1:1' : '适应';
+  $('deskZoomBtn').textContent = deskState.zoom1 ? '1:1' : t('fitZoom');
   $('deskZoomBtn').classList.toggle('on', deskState.zoom1);
 };
 $('deskFsBtn').onclick = () => {
@@ -3695,6 +4531,8 @@ $('deskTypeIn').addEventListener('keydown', e => {
   });
 });
 
+applyAccentPref(getAccentPref());
+applyI18n();
 Promise.all([loadBots(), loadSettings()])
   .then(() => {
     connect();

@@ -16,12 +16,14 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BotAvatar } from '../components/BotAvatar';
 import { GlobeIcon, MonitorIcon, PlusIcon, SearchIcon, SettingsIcon } from '../components/Icons';
+import { useI18n } from '../i18n';
 import { formatShortTime, plainPreview, useHub } from '../store';
 import { useTheme } from '../theme';
 import type { BotStatus } from '../types';
 
 export default function BotsScreen() {
   const theme = useTheme();
+  const { t, lang } = useI18n();
   const {
     ready,
     activeServer,
@@ -63,14 +65,14 @@ export default function BotsScreen() {
   }, [connState, online, theme]);
 
   const statusText = useMemo(() => {
-    if (!activeServer) return '未连接';
-    if (connState === 'connecting') return `${activeServer.label} · 连接中`;
-    if (connState === 'unauthorized') return `${activeServer.label} · 需要口令`;
-    if (connState === 'error') return `${activeServer.label} · 连接断开`;
-    if (connState === 'connected' && !online) return `${activeServer.label} · 重连中`;
+    if (!activeServer) return t('disconnected');
+    if (connState === 'connecting') return `${activeServer.label} · ${t('connectingShort')}`;
+    if (connState === 'unauthorized') return `${activeServer.label} · ${t('needsToken')}`;
+    if (connState === 'error') return `${activeServer.label} · ${t('connLost')}`;
+    if (connState === 'connected' && !online) return `${activeServer.label} · ${t('reconnecting')}`;
     if (connState === 'connected') return activeServer.label;
-    return '未连接';
-  }, [activeServer, connState, online]);
+    return t('disconnected');
+  }, [activeServer, connState, online, t]);
 
   const onRefresh = useCallback(async () => {
     if (connState !== 'connected') {
@@ -106,11 +108,11 @@ export default function BotsScreen() {
     let subtitleText = item.description || item.harness;
     let subtitleColor = theme.mute;
     if (item.busy) {
-      subtitleText = toolName ? `正在调用 ${toolName}…` : '正在思考…';
+      subtitleText = toolName ? t('callingTool', { tool: toolName }) : t('thinking');
       subtitleColor = theme.busy;
     } else if (lastMsg) {
-      const prefix = lastMsg.role === 'user' ? '你: ' : '';
-      subtitleText = plainPreview(prefix + lastMsg.text) || ' ';
+      const prefix = lastMsg.role === 'user' ? t('youPrefix') : '';
+      subtitleText = plainPreview(prefix + lastMsg.text, t('codeTag')) || ' ';
       subtitleColor = theme.text2;
     }
 
@@ -129,7 +131,7 @@ export default function BotsScreen() {
               {item.name}
             </Text>
             <Text style={[styles.botTime, { color: theme.mute }]}>
-              {formatShortTime(lastMsg?.createdAt)}
+              {formatShortTime(lastMsg?.createdAt, lang)}
             </Text>
           </View>
           <View style={styles.botBottomRow}>
@@ -167,14 +169,14 @@ export default function BotsScreen() {
 
         <View style={styles.headerActions}>
           <Pressable
-            accessibilityLabel="新建 Bot"
+            accessibilityLabel={t('newBot')}
             onPress={() => router.push(connState === 'connected' ? '/create-bot' : '/connect')}
             style={[styles.iconBtn, { backgroundColor: theme.s1 }]}
           >
             <PlusIcon size={19} color={theme.text} />
           </Pressable>
           <Pressable
-            accessibilityLabel="远程桌面"
+            accessibilityLabel={t('remoteDesktop')}
             onPress={() =>
               router.push(
                 connState === 'connected'
@@ -192,7 +194,7 @@ export default function BotsScreen() {
             )}
           </Pressable>
           <Pressable
-            accessibilityLabel="设备与隧道"
+            accessibilityLabel={t('devicesTunnel')}
             onPress={() => router.push('/devices')}
             style={[styles.iconBtn, { backgroundColor: theme.s1 }]}
           >
@@ -204,7 +206,7 @@ export default function BotsScreen() {
             )}
           </Pressable>
           <Pressable
-            accessibilityLabel="设置"
+            accessibilityLabel={t('settings')}
             onPress={() => router.push(connState === 'connected' ? '/settings' : '/connect')}
             style={[styles.iconBtn, { backgroundColor: theme.s1 }]}
           >
@@ -219,7 +221,7 @@ export default function BotsScreen() {
           <TextInput
             value={query}
             onChangeText={setQuery}
-            placeholder="搜索 Bot"
+            placeholder={t('searchBot')}
             placeholderTextColor={theme.mute}
             style={[styles.searchInput, { color: theme.text }]}
             clearButtonMode="while-editing"
@@ -227,7 +229,7 @@ export default function BotsScreen() {
           />
           {Platform.OS !== 'ios' && query.length > 0 && (
             <Pressable onPress={() => setQuery('')} hitSlop={8}>
-              <Text style={[styles.clearTxt, { color: theme.mute }]}>清除</Text>
+              <Text style={[styles.clearTxt, { color: theme.mute }]}>{t('clear')}</Text>
             </Pressable>
           )}
         </View>
@@ -236,20 +238,20 @@ export default function BotsScreen() {
       {takeovers.length > 0 && (
         <View style={[styles.toBanner, { backgroundColor: theme.pink }]}>
           <Text numberOfLines={2} style={[styles.toBannerTxt, { color: theme.pinkInk }]}>
-            人工接管（{takeovers[0].botName || takeovers[0].botId}）：{takeovers[0].reason}
+            {t('takeoverBanner', { bot: takeovers[0].botName || takeovers[0].botId || 'Bot', reason: takeovers[0].reason })}
           </Text>
           <View style={styles.toBannerActs}>
             <Pressable
               onPress={() => router.push(`/desktop?target=${encodeURIComponent(takeovers[0].target || 'local')}`)}
               style={[styles.toBannerBtn, { backgroundColor: theme.card }]}
             >
-              <Text style={[styles.toBannerBtnTxt, { color: theme.text }]}>桌面</Text>
+              <Text style={[styles.toBannerBtnTxt, { color: theme.text }]}>{t('desktopShort')}</Text>
             </Pressable>
             <Pressable
               onPress={() => void resolveTakeover(takeovers[0].id)}
               style={[styles.toBannerBtn, { backgroundColor: theme.accent }]}
             >
-              <Text style={[styles.toBannerBtnTxt, { color: theme.accentText }]}>恢复 AI</Text>
+              <Text style={[styles.toBannerBtnTxt, { color: theme.accentText }]}>{t('resumeAI')}</Text>
             </Pressable>
           </View>
         </View>
@@ -259,20 +261,20 @@ export default function BotsScreen() {
         <View style={styles.centerBox}>
           <ActivityIndicator size="small" color={theme.accent} />
           <Text style={[styles.centerTxt, { color: theme.text2 }]}>
-            {connState === 'connecting' ? '正在连接主电脑…' : '加载中…'}
+            {connState === 'connecting' ? t('connectingHost') : t('loading')}
           </Text>
         </View>
       ) : needsFirstPairing ? (
         <View style={styles.cardWrap}>
           <View style={[styles.onboardCard, { backgroundColor: theme.card }]}>
-            <Text style={[styles.onboardTitle, { color: theme.text }]}>连接主电脑</Text>
+            <Text style={[styles.onboardTitle, { color: theme.text }]}>{t('connectHost')}</Text>
             <View style={styles.onboardSteps}>
               <View style={[styles.onboardStepRow, { backgroundColor: theme.s1 }]}>
                 <View style={[styles.stepBadge, { backgroundColor: theme.card }]}>
                   <Text style={[styles.stepBadgeTxt, { color: theme.text }]}>1</Text>
                 </View>
                 <Text style={[styles.onboardStepTxt, { color: theme.text2 }]}>
-                  在电脑端打开 Bot Hub，完成开箱引导或在设置中开启远程访问
+                  {t('onboardStep1')}
                 </Text>
               </View>
               <View style={[styles.onboardStepRow, { backgroundColor: theme.s1 }]}>
@@ -280,7 +282,7 @@ export default function BotsScreen() {
                   <Text style={[styles.stepBadgeTxt, { color: theme.text }]}>2</Text>
                 </View>
                 <Text style={[styles.onboardStepTxt, { color: theme.text2 }]}>
-                  扫描二维码或输入连接地址
+                  {t('onboardStep2')}
                 </Text>
               </View>
             </View>
@@ -289,13 +291,13 @@ export default function BotsScreen() {
                 onPress={() => router.push(Platform.OS === 'web' ? '/connect' : '/connect?scan=1')}
                 style={[styles.primaryBtn, { backgroundColor: theme.accent }]}
               >
-                <Text style={[styles.primaryBtnTxt, { color: theme.accentText }]}>扫码连接</Text>
+                <Text style={[styles.primaryBtnTxt, { color: theme.accentText }]}>{t('scanConnect')}</Text>
               </Pressable>
               <Pressable
                 onPress={() => router.push('/connect')}
                 style={[styles.secondaryBtn, { backgroundColor: theme.s1 }]}
               >
-                <Text style={[styles.secondaryBtnTxt, { color: theme.text2 }]}>手动输入地址</Text>
+                <Text style={[styles.secondaryBtnTxt, { color: theme.text2 }]}>{t('manualEnterAddr')}</Text>
               </Pressable>
             </View>
           </View>
@@ -305,15 +307,13 @@ export default function BotsScreen() {
           <View style={[styles.onboardCard, { backgroundColor: theme.card }]}>
             <Text style={[styles.onboardTitle, { color: theme.text }]}>
               {connState === 'unauthorized'
-                ? '需要访问令牌'
+                ? t('tokenRequired')
                 : connState === 'error'
-                  ? '无法连接主电脑'
-                  : '连接主电脑'}
+                  ? t('cantConnectHost')
+                  : t('connectHost')}
             </Text>
             <Text style={[styles.onboardDesc, { color: theme.text2 }]}>
-              {connState === 'error' && connError
-                ? connError
-                : '在电脑端打开「远程访问」，扫码即可通过加密隧道直连，或输入局域网地址。'}
+              {connState === 'error' && connError ? connError : t('onboardDesc')}
             </Text>
             <View style={styles.onboardBtns}>
               <Pressable
@@ -321,7 +321,7 @@ export default function BotsScreen() {
                 style={[styles.primaryBtn, { backgroundColor: theme.accent }]}
               >
                 <Text style={[styles.primaryBtnTxt, { color: theme.accentText }]}>
-                  {connState === 'unauthorized' ? '更新访问口令' : '扫码或输入地址'}
+                  {connState === 'unauthorized' ? t('updateToken') : t('scanOrEnterAddr')}
                 </Text>
               </Pressable>
               {activeServer && (
@@ -329,7 +329,7 @@ export default function BotsScreen() {
                   onPress={() => void reconnect()}
                   style={[styles.secondaryBtn, { backgroundColor: theme.s1 }]}
                 >
-                  <Text style={[styles.secondaryBtnTxt, { color: theme.text2 }]}>重试</Text>
+                  <Text style={[styles.secondaryBtnTxt, { color: theme.text2 }]}>{t('retry')}</Text>
                 </Pressable>
               )}
             </View>
@@ -352,7 +352,7 @@ export default function BotsScreen() {
           ListEmptyComponent={
             <View style={styles.centerBox}>
               <Text style={[styles.centerTxt, { color: theme.mute }]}>
-                {query.trim() ? '没有匹配的 Bot' : '还没有 Bot，点右上角 + 创建一个'}
+                {query.trim() ? t('noMatchedBots') : t('noBotsYet')}
               </Text>
             </View>
           }

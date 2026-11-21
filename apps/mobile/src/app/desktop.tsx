@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 
 import { ModalHeader } from '../components/ModalHeader';
+import { useI18n } from '../i18n';
 import { useHub } from '../store';
 import { MONO_FONT, useTheme } from '../theme';
 import type { DesktopFrame, DesktopTarget, ScreenState } from '../types';
@@ -22,6 +23,7 @@ import type { DesktopFrame, DesktopTarget, ScreenState } from '../types';
 export default function DesktopScreen() {
   const { target: initialTarget } = useLocalSearchParams<{ target?: string }>();
   const theme = useTheme();
+  const { t } = useI18n();
   const {
     desktopTargets,
     takeovers,
@@ -81,7 +83,7 @@ export default function DesktopScreen() {
           setError('');
         } catch (err: any) {
           if (cancelled) break;
-          setError(err?.message || '抓屏失败');
+          setError(err?.message || t('captureFailed'));
           await new Promise((r) => setTimeout(r, 1500));
         }
         await new Promise((r) => setTimeout(r, 140));
@@ -91,17 +93,17 @@ export default function DesktopScreen() {
     return () => {
       cancelled = true;
     };
-  }, [fetchDesktopFrame, selectedTarget, streaming]);
+  }, [fetchDesktopFrame, selectedTarget, streaming, t]);
 
   const activeTakeover = useMemo(
-    () => takeovers.find((t) => t.target === selectedTarget) || takeovers[0] || null,
+    () => takeovers.find((item) => item.target === selectedTarget) || takeovers[0] || null,
     [selectedTarget, takeovers]
   );
 
   const targets: DesktopTarget[] = useMemo(() => {
     if (desktopTargets.length > 0) return desktopTargets;
-    return [{ id: 'local', name: '本机桌面', local: true, supported: true, screen }];
-  }, [desktopTargets, screen]);
+    return [{ id: 'local', name: t('localDesktopName'), local: true, supported: true, screen }];
+  }, [desktopTargets, screen, t]);
 
   const onStageLayout = (e: LayoutChangeEvent) => {
     const { width, height } = e.nativeEvent.layout;
@@ -134,10 +136,10 @@ export default function DesktopScreen() {
       try {
         await sendDesktopInput({ target: selectedTarget, ...payload });
       } catch (err: any) {
-        setError(err?.message || '操作失败');
+        setError(err?.message || t('opFailed'));
       }
     },
-    [selectedTarget, sendDesktopInput]
+    [selectedTarget, sendDesktopInput, t]
   );
 
   const onTapScreen = (locX: number, locY: number, kind: 'click' | 'right_click') => {
@@ -162,9 +164,9 @@ export default function DesktopScreen() {
   return (
     <View style={[styles.root, { backgroundColor: theme.page }]}>
       <ModalHeader
-        title="远程桌面"
+        title={t('remoteDesktop')}
         onClose={closeSheet}
-        rightLabel={streaming ? '暂停' : '恢复'}
+        rightLabel={streaming ? t('pause') : t('resume')}
         onRightPress={() => setStreaming((v) => !v)}
       />
 
@@ -174,13 +176,13 @@ export default function DesktopScreen() {
       >
         <View style={styles.topStrip}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.targetRow}>
-            {targets.map((t) => {
-              const active = selectedTarget === t.id;
+            {targets.map((item) => {
+              const active = selectedTarget === item.id;
               return (
                 <Pressable
-                  key={t.id}
+                  key={item.id}
                   onPress={() => {
-                    setSelectedTarget(t.id);
+                    setSelectedTarget(item.id);
                     setFrame(null);
                   }}
                   style={[
@@ -189,7 +191,7 @@ export default function DesktopScreen() {
                   ]}
                 >
                   <Text style={[styles.targetTxt, { color: active ? theme.accent : theme.text2 }]}>
-                    {t.name}
+                    {item.name}
                   </Text>
                 </Pressable>
               );
@@ -200,13 +202,13 @@ export default function DesktopScreen() {
         {activeTakeover ? (
           <View style={[styles.alertCard, { backgroundColor: theme.pink }]}>
             <Text style={[styles.alertTxt, { color: theme.pinkInk }]}>
-              人工接管（{activeTakeover.botName || activeTakeover.botId}）：{activeTakeover.reason}
+              {t('takeoverBanner', { bot: activeTakeover.botName || activeTakeover.botId, reason: activeTakeover.reason })}
             </Text>
             <Pressable
               onPress={() => void resolveTakeover(activeTakeover.id)}
               style={[styles.alertBtn, { backgroundColor: theme.accent }]}
             >
-              <Text style={[styles.alertBtnTxt, { color: theme.accentText }]}>完成并恢复 AI</Text>
+              <Text style={[styles.alertBtnTxt, { color: theme.accentText }]}>{t('doneResumeAI')}</Text>
             </Pressable>
           </View>
         ) : null}
@@ -227,7 +229,7 @@ export default function DesktopScreen() {
           ) : (
             <View style={styles.centerBox}>
               <ActivityIndicator size="small" color={theme.accent} />
-              <Text style={styles.waitTxt}>{error || '正在获取远程桌面画面…'}</Text>
+              <Text style={styles.waitTxt}>{error || t('fetchingDesktop')}</Text>
             </View>
           )}
           {frame && error ? (
@@ -243,7 +245,7 @@ export default function DesktopScreen() {
               <TextInput
                 value={textDraft}
                 onChangeText={setTextDraft}
-                placeholder="输入要发送到桌面的文本…"
+                placeholder={t('typeDesktopPh')}
                 placeholderTextColor={theme.mute}
                 onSubmitEditing={() => void onSendText()}
                 style={[styles.typeInput, { backgroundColor: theme.s1, color: theme.text }]}
@@ -252,7 +254,7 @@ export default function DesktopScreen() {
                 onPress={() => void onSendText()}
                 style={[styles.keyBtn, { backgroundColor: theme.accent }]}
               >
-                <Text style={[styles.keyTxt, { color: theme.accentText }]}>发送</Text>
+                <Text style={[styles.keyTxt, { color: theme.accentText }]}>{t('send')}</Text>
               </Pressable>
             </View>
           )}
@@ -262,15 +264,15 @@ export default function DesktopScreen() {
               onPress={() => setShowTextBar((v) => !v)}
               style={[styles.keyBtn, { backgroundColor: showTextBar ? theme.accentSoft : theme.s1 }]}
             >
-              <Text style={[styles.keyTxt, { color: showTextBar ? theme.accent : theme.text }]}>Aa 输入</Text>
+              <Text style={[styles.keyTxt, { color: showTextBar ? theme.accent : theme.text }]}>{t('aaInput')}</Text>
             </Pressable>
             {[
-              { label: '回车', body: { kind: 'key', key: 'Return' } },
-              { label: '退格', body: { kind: 'key', key: 'Backspace' } },
+              { label: t('keyEnter'), body: { kind: 'key', key: 'Return' } },
+              { label: t('keyBackspace'), body: { kind: 'key', key: 'Backspace' } },
               { label: 'Esc', body: { kind: 'key', key: 'Escape' } },
               { label: 'Tab', body: { kind: 'key', key: 'Tab' } },
-              { label: '上滑', body: { kind: 'scroll', deltaY: 8 } },
-              { label: '下滑', body: { kind: 'scroll', deltaY: -8 } },
+              { label: t('keyScrollUp'), body: { kind: 'scroll', deltaY: 8 } },
+              { label: t('keyScrollDown'), body: { kind: 'scroll', deltaY: -8 } },
             ].map((item) => (
               <Pressable
                 key={item.label}

@@ -1,5 +1,7 @@
 import { Alert, Platform } from 'react-native';
 
+import { tStatic } from './i18n';
+
 export function confirmAction(
   title: string,
   message: string,
@@ -16,9 +18,9 @@ export function confirmAction(
     return;
   }
   Alert.alert(title, message, [
-    { text: '取消', style: 'cancel' },
+    { text: tStatic('cancel'), style: 'cancel' },
     {
-      text: '确认',
+      text: tStatic('confirm'),
       style: destructive ? 'destructive' : 'default',
       onPress: () => {
         void onConfirm();
