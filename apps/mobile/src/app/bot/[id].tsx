@@ -25,7 +25,14 @@ import { confirmAction } from '../../confirm';
 import { useI18n } from '../../i18n';
 import { formatStamp, useHub } from '../../store';
 import { getBotPalette, MONO_FONT, useTheme } from '../../theme';
-import type { BotDetail, ChatMessage, MagpieMemoryList } from '../../types';
+import type {
+  BotDetail,
+  ChatMessage,
+  MagpieMemoryList,
+  RoutineDelivery,
+  RoutineItem,
+  RoutineRun,
+} from '../../types';
 
 const FIVE_MIN_MS = 5 * 60 * 1000;
 
@@ -53,6 +60,13 @@ export default function BotChatScreen() {
     fetchMemories,
     saveMemory,
     deleteMemory,
+    routines,
+    fetchRoutines,
+    createRoutine,
+    updateRoutine,
+    deleteRoutine,
+    runRoutine,
+    fetchRoutineRuns,
   } = useHub();
 
   const botIndex = useMemo(() => bots.findIndex((b) => b.id === botId), [bots, botId]);
@@ -90,6 +104,24 @@ export default function BotChatScreen() {
   const [botMemShowAdd, setBotMemShowAdd] = useState(false);
   const [botMemText, setBotMemText] = useState('');
   const [botMemSaving, setBotMemSaving] = useState(false);
+
+  const botRoutines = routines[botId] || [];
+  const [rtLoading, setRtLoading] = useState(false);
+  const [rtShowForm, setRtShowForm] = useState(false);
+  const [rtEditId, setRtEditId] = useState('');
+  const [rtName, setRtName] = useState('');
+  const [rtMode, setRtMode] = useState<'interval' | 'daily'>('interval');
+  const [rtEvery, setRtEvery] = useState('60');
+  const [rtDaily, setRtDaily] = useState('09:00');
+  const [rtDelivery, setRtDelivery] = useState<RoutineDelivery>('receipt');
+  const [rtModel, setRtModel] = useState('');
+  const [rtTgChat, setRtTgChat] = useState('');
+  const [rtPrompt, setRtPrompt] = useState('');
+  const [rtEnabled, setRtEnabled] = useState(true);
+  const [rtSaving, setRtSaving] = useState(false);
+  const [rtErr, setRtErr] = useState('');
+  const [rtRunsOpenId, setRtRunsOpenId] = useState('');
+  const [rtRunsMap, setRtRunsMap] = useState<Record<string, RoutineRun[]>>({});
 
   const listRef = useRef<FlatList<ChatMessage>>(null);
   const inputRef = useRef<React.ComponentRef<typeof TextInput>>(null);
@@ -130,14 +162,92 @@ export default function BotChatScreen() {
     }
   }, [botId, fetchMemories]);
 
+  const loadBotRoutines = useCallback(async () => {
+    setRtLoading(true);
+    try {
+      await fetchRoutines(botId);
+    } catch {
+      // ignore transient error
+    } finally {
+      setRtLoading(false);
+    }
+  }, [botId, fetchRoutines]);
+
+  const openRoutineEditor = (rt?: RoutineItem) => {
+    setRtErr('');
+    setRtEditId(rt?.id || '');
+    setRtName(rt?.name || '');
+    const isDaily = !!rt?.dailyAt && !(rt?.everyMinutes && rt.everyMinutes > 0);
+    setRtMode(isDaily ? 'daily' : 'interval');
+    setRtEvery(rt?.everyMinutes && rt.everyMinutes > 0 ? String(rt.everyMinutes) : '60');
+    setRtDaily(rt?.dailyAt || '09:00');
+    setRtDelivery(rt?.mainDelivery || 'receipt');
+    setRtModel(rt?.model || '');
+    setRtTgChat(rt?.notifyTelegramChatId || '');
+    setRtPrompt(rt?.prompt || '');
+    setRtEnabled(rt ? rt.enabled : true);
+    setRtShowForm(true);
+  };
+
+  const onSaveRoutine = async () => {
+    const name = rtName.trim();
+    const prompt = rtPrompt.trim();
+    if (!name) {
+      setRtErr('请填写任务名称');
+      return;
+    }
+    if (!prompt) {
+      setRtErr('请填写任务指令');
+      return;
+    }
+    const isDaily = rtMode === 'daily';
+    const everyMinutes = isDaily ? 0 : parseInt(rtEvery, 10);
+    const dailyAt = isDaily ? rtDaily.trim() : '';
+    if (!isDaily && !(everyMinutes > 0)) {
+      setRtErr('间隔分钟需大于 0');
+      return;
+    }
+    if (isDaily && !/^\d{2}:\d{2}$/.test(dailyAt)) {
+      setRtErr('时间格式需为 HH:MM');
+      return;
+    }
+    setRtErr('');
+    setRtSaving(true);
+    try {
+      const payload = {
+        name,
+        everyMinutes,
+        dailyAt,
+        prompt,
+        model: rtModel.trim(),
+        mainDelivery: rtDelivery,
+        notifyTelegramChatId: rtTgChat.trim(),
+        enabled: rtEnabled,
+      };
+      if (rtEditId) {
+        await updateRoutine(botId, rtEditId, payload);
+      } else {
+        await createRoutine(botId, payload);
+      }
+      setRtShowForm(false);
+    } catch (err: any) {
+      setRtErr(err?.message || '保存定时任务失败');
+    } finally {
+      setRtSaving(false);
+    }
+  };
+
   const handleOpenDetail = useCallback(async () => {
     setEditMode(false);
     setTechExpanded(false);
     setBotMemShowAdd(false);
+    setRtShowForm(false);
+    setRtErr('');
     setEditErr('');
     setDetailOpen(true);
     setDetailLoading(true);
     void loadBotMemories();
+    void loadBotRoutines();
     try {
       const d = await getBotDetail(botId);
       setDetail(d);
@@ -146,7 +256,7 @@ export default function BotChatScreen() {
     } finally {
       setDetailLoading(false);
     }
-  }, [botId, getBotDetail, loadBotMemories]);
+  }, [botId, getBotDetail, loadBotMemories, loadBotRoutines]);
 
   const enterEditMode = () => {
     const src = detail || bot;
@@ -329,9 +439,15 @@ export default function BotChatScreen() {
       if (item.costUsd && item.costUsd > 0) {
         metaParts.push(`$${item.costUsd.toFixed(4)}`);
       }
+      const routineLabel = item.from?.startsWith('routine:') ? `定时回执 · ${item.from.slice(8)}` : '';
       bubble = (
         <View style={styles.assistantRow}>
           <View style={[styles.assistantBubble, { backgroundColor: theme.card }]}>
+            {routineLabel ? (
+              <Text style={[styles.botRelLabel, { color: theme.accent, marginBottom: 4 }]}>
+                {routineLabel}
+              </Text>
+            ) : null}
             <MarkdownText text={item.text} theme={theme} />
             {metaParts.length > 0 && (
               <Text style={[styles.msgMeta, { color: theme.mute }]}>{metaParts.join(' · ')}</Text>
@@ -826,6 +942,297 @@ export default function BotChatScreen() {
                           </Text>
                         )}
                       </View>
+                    </View>
+                  )}
+                </View>
+
+                <View style={[styles.detailCard, { backgroundColor: theme.card }]}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <Text style={[styles.sectionLabel, { color: theme.mute }]}>定时任务</Text>
+                    <Pressable
+                      onPress={() => {
+                        if (rtShowForm && !rtEditId) setRtShowForm(false);
+                        else openRoutineEditor();
+                      }}
+                      style={{ borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4, backgroundColor: theme.accentSoft }}
+                    >
+                      <Text style={{ fontSize: 12, fontWeight: '700', color: theme.accent }}>
+                        {rtShowForm && !rtEditId ? '收起' : '+ 添加'}
+                      </Text>
+                    </Pressable>
+                  </View>
+
+                  {rtShowForm && (
+                    <View style={{ gap: 8, backgroundColor: theme.s1, borderRadius: 14, padding: 10 }}>
+                      <TextInput
+                        value={rtName}
+                        onChangeText={setRtName}
+                        placeholder="任务名称（如：晨间简报）"
+                        placeholderTextColor={theme.mute}
+                        style={[styles.editInput, { backgroundColor: theme.card, color: theme.text }]}
+                      />
+                      <View style={{ flexDirection: 'row', gap: 8 }}>
+                        {(['interval', 'daily'] as const).map((m) => (
+                          <Pressable
+                            key={m}
+                            onPress={() => setRtMode(m)}
+                            style={{
+                              flex: 1,
+                              borderRadius: 999,
+                              paddingVertical: 7,
+                              alignItems: 'center',
+                              backgroundColor: rtMode === m ? theme.accent : theme.card,
+                            }}
+                          >
+                            <Text style={{ fontSize: 12.5, fontWeight: '700', color: rtMode === m ? theme.accentText : theme.text2 }}>
+                              {m === 'interval' ? '按间隔（分钟）' : '每天定时'}
+                            </Text>
+                          </Pressable>
+                        ))}
+                      </View>
+                      {rtMode === 'interval' ? (
+                        <TextInput
+                          value={rtEvery}
+                          onChangeText={setRtEvery}
+                          keyboardType="number-pad"
+                          placeholder="间隔分钟，例如 60"
+                          placeholderTextColor={theme.mute}
+                          style={[styles.editInput, { backgroundColor: theme.card, color: theme.text, fontFamily: MONO_FONT }]}
+                        />
+                      ) : (
+                        <TextInput
+                          value={rtDaily}
+                          onChangeText={setRtDaily}
+                          placeholder="每天触发时间 HH:MM（如 09:00）"
+                          placeholderTextColor={theme.mute}
+                          style={[styles.editInput, { backgroundColor: theme.card, color: theme.text, fontFamily: MONO_FONT }]}
+                        />
+                      )}
+                      <View style={{ flexDirection: 'row', gap: 6 }}>
+                        {(
+                          [
+                            ['receipt', '回执'],
+                            ['notify', '通知主会话'],
+                            ['none', '仅记录'],
+                          ] as const
+                        ).map(([val, lbl]) => (
+                          <Pressable
+                            key={val}
+                            onPress={() => setRtDelivery(val)}
+                            style={{
+                              flex: 1,
+                              borderRadius: 999,
+                              paddingVertical: 7,
+                              alignItems: 'center',
+                              backgroundColor: rtDelivery === val ? theme.accent : theme.card,
+                            }}
+                          >
+                            <Text style={{ fontSize: 12, fontWeight: '700', color: rtDelivery === val ? theme.accentText : theme.text2 }}>
+                              {lbl}
+                            </Text>
+                          </Pressable>
+                        ))}
+                      </View>
+                      <TextInput
+                        value={rtModel}
+                        onChangeText={setRtModel}
+                        placeholder="模型覆盖（可选，留空沿用 Bot 默认）"
+                        placeholderTextColor={theme.mute}
+                        autoCapitalize="none"
+                        style={[styles.editInput, { backgroundColor: theme.card, color: theme.text, fontFamily: MONO_FONT }]}
+                      />
+                      <TextInput
+                        value={rtTgChat}
+                        onChangeText={setRtTgChat}
+                        placeholder="Telegram Chat ID（可选）"
+                        placeholderTextColor={theme.mute}
+                        autoCapitalize="none"
+                        style={[styles.editInput, { backgroundColor: theme.card, color: theme.text, fontFamily: MONO_FONT }]}
+                      />
+                      <TextInput
+                        value={rtPrompt}
+                        onChangeText={setRtPrompt}
+                        placeholder="任务指令（无异常回复 NO_REPLY）"
+                        placeholderTextColor={theme.mute}
+                        multiline
+                        textAlignVertical="top"
+                        style={[styles.editInput, { minHeight: 72, backgroundColor: theme.card, color: theme.text }]}
+                      />
+                      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <Text style={{ fontSize: 13, color: theme.text }}>启用定时</Text>
+                        <Switch
+                          value={rtEnabled}
+                          onValueChange={setRtEnabled}
+                          trackColor={{ false: theme.s2, true: theme.accent }}
+                        />
+                      </View>
+                      <View style={{ flexDirection: 'row', gap: 8 }}>
+                        <Pressable
+                          onPress={() => {
+                            setRtShowForm(false);
+                            setRtErr('');
+                          }}
+                          style={{ flex: 1, borderRadius: 999, paddingVertical: 9, alignItems: 'center', backgroundColor: theme.card }}
+                        >
+                          <Text style={{ fontSize: 13, fontWeight: '700', color: theme.text2 }}>取消</Text>
+                        </Pressable>
+                        <Pressable
+                          disabled={rtSaving}
+                          onPress={() => void onSaveRoutine()}
+                          style={{ flex: 1, borderRadius: 999, paddingVertical: 9, alignItems: 'center', backgroundColor: theme.accent }}
+                        >
+                          <Text style={{ fontSize: 13, fontWeight: '700', color: theme.accentText }}>
+                            {rtSaving ? '保存中…' : '保存任务'}
+                          </Text>
+                        </Pressable>
+                      </View>
+                    </View>
+                  )}
+
+                  {rtErr ? (
+                    <Text style={{ fontSize: 12.5, color: theme.danger }}>{rtErr}</Text>
+                  ) : null}
+
+                  {rtLoading && botRoutines.length === 0 ? (
+                    <ActivityIndicator size="small" color={theme.accent} />
+                  ) : botRoutines.length === 0 ? (
+                    <Text style={[styles.instructionsTxt, { color: theme.mute }]}>暂无定时任务</Text>
+                  ) : (
+                    <View style={{ gap: 8 }}>
+                      {botRoutines.map((rt) => {
+                        const trig = [
+                          rt.everyMinutes && rt.everyMinutes > 0 ? `每 ${rt.everyMinutes}m` : '',
+                          rt.dailyAt ? `每日 ${rt.dailyAt}` : '',
+                        ]
+                          .filter(Boolean)
+                          .join(' · ');
+                        const delivLbl = rt.mainDelivery === 'notify' ? '通知主会话' : rt.mainDelivery === 'none' ? '仅记录' : '回执';
+                        const statusTxt = rt.running
+                          ? '执行中'
+                          : rt.lastRun?.status === 'ok'
+                            ? '已产出'
+                            : rt.lastRun?.status === 'silent'
+                              ? '无变化'
+                              : rt.lastRun?.status === 'error'
+                                ? '失败'
+                                : '';
+                        const runsOpen = rtRunsOpenId === rt.id;
+                        const runList = rtRunsMap[rt.id] || [];
+                        return (
+                          <View key={rt.id} style={{ backgroundColor: theme.s1, borderRadius: 14, padding: 10, gap: 6 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
+                                <Text style={{ fontSize: 14, fontWeight: '700', color: theme.text }} numberOfLines={1}>
+                                  {rt.name}
+                                </Text>
+                                {statusTxt ? (
+                                  <Text
+                                    style={{
+                                      fontSize: 11.5,
+                                      fontWeight: '700',
+                                      color: rt.lastRun?.status === 'error' && !rt.running ? theme.danger : theme.sageInk,
+                                    }}
+                                  >
+                                    {statusTxt}
+                                  </Text>
+                                ) : null}
+                              </View>
+                              <Switch
+                                value={rt.enabled}
+                                onValueChange={(v) => {
+                                  void updateRoutine(botId, rt.id, { enabled: v }).catch((err: any) =>
+                                    setRtErr(err?.message || '更新状态失败')
+                                  );
+                                }}
+                                trackColor={{ false: theme.s2, true: theme.accent }}
+                              />
+                            </View>
+                            <Text style={{ fontSize: 12, color: theme.mute }}>
+                              {[trig, delivLbl, rt.model].filter(Boolean).join(' · ')}
+                            </Text>
+                            <Text selectable style={[styles.instructionsTxt, { color: theme.text }]}>
+                              {rt.prompt}
+                            </Text>
+                            <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap' }}>
+                              <Pressable
+                                disabled={rt.running}
+                                onPress={() => {
+                                  setRtErr('');
+                                  void runRoutine(botId, rt.id).catch((err: any) => setRtErr(err?.message || '触发失败'));
+                                }}
+                                style={{ borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4, backgroundColor: theme.card }}
+                              >
+                                <Text style={{ fontSize: 12, fontWeight: '700', color: theme.text }}>
+                                  {rt.running ? '运行中…' : '立即运行'}
+                                </Text>
+                              </Pressable>
+                              <Pressable
+                                onPress={async () => {
+                                  if (runsOpen) {
+                                    setRtRunsOpenId('');
+                                    return;
+                                  }
+                                  setRtRunsOpenId(rt.id);
+                                  try {
+                                    const list = await fetchRoutineRuns(botId, rt.id, 6);
+                                    setRtRunsMap((prev) => ({ ...prev, [rt.id]: list }));
+                                  } catch {
+                                    // ignore
+                                  }
+                                }}
+                                style={{ borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4, backgroundColor: theme.card }}
+                              >
+                                <Text style={{ fontSize: 12, fontWeight: '700', color: theme.text2 }}>
+                                  {runsOpen ? '收起记录' : '记录'}
+                                </Text>
+                              </Pressable>
+                              <Pressable
+                                onPress={() => openRoutineEditor(rt)}
+                                style={{ borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4, backgroundColor: theme.card }}
+                              >
+                                <Text style={{ fontSize: 12, fontWeight: '700', color: theme.text2 }}>编辑</Text>
+                              </Pressable>
+                              <Pressable
+                                onPress={() => {
+                                  confirmAction(
+                                    `删除「${rt.name}」？`,
+                                    '将移除此定时任务并立即停止计时器。',
+                                    async () => {
+                                      await deleteRoutine(botId, rt.id);
+                                    },
+                                    true
+                                  );
+                                }}
+                                style={{ borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4, backgroundColor: theme.card }}
+                              >
+                                <Text style={{ fontSize: 12, fontWeight: '700', color: theme.danger }}>删除</Text>
+                              </Pressable>
+                            </View>
+                            {runsOpen && (
+                              <View style={{ gap: 4, paddingTop: 4 }}>
+                                {runList.length === 0 ? (
+                                  <Text style={{ fontSize: 12, color: theme.mute }}>暂无执行记录</Text>
+                                ) : (
+                                  runList.map((r) => (
+                                    <View key={r.id} style={{ backgroundColor: theme.card, borderRadius: 8, padding: 6, gap: 2 }}>
+                                      <Text style={{ fontSize: 11.5, color: theme.mute }}>
+                                        {`${r.status === 'ok' ? '已产出' : r.status === 'silent' ? '无变化' : '失败'} · ${r.trigger} · ${((r.durationMs || 0) / 1000).toFixed(1)}s`}
+                                      </Text>
+                                      {r.error ? (
+                                        <Text style={{ fontSize: 12, color: theme.danger }}>{r.error}</Text>
+                                      ) : r.output ? (
+                                        <Text numberOfLines={3} style={{ fontSize: 12, color: theme.text2 }}>
+                                          {r.output}
+                                        </Text>
+                                      ) : null}
+                                    </View>
+                                  ))
+                                )}
+                              </View>
+                            )}
+                          </View>
+                        );
+                      })}
                     </View>
                   )}
                 </View>

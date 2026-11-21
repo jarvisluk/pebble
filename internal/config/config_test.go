@@ -174,4 +174,102 @@ func TestEnsureStarterConfig(t *testing.T) {
 	}
 }
 
+func TestScheduleConfigNormalizationAndValidation(t *testing.T) {
+	t.Setenv("TEST_TG_CHAT", "123456789")
+	t.Setenv("TEST_ROUTINE_MODEL", "magpie/mac-mini/auto/flash")
+
+	root := t.TempDir()
+	cfg := &HubConfig{ProjectRoot: root}
+	bot := BotConfig{
+		ID: "assistant",
+		Schedules: []ScheduleConfig{
+			{
+				Name:                 "Morning Brief",
+				DailyAt:              "09:00",
+				Prompt:               "summarize todo",
+				Model:                "${TEST_ROUTINE_MODEL}",
+				NotifyTelegramChatID: "${TEST_TG_CHAT}",
+			},
+			{
+				Name:         "晨间简报",
+				EveryMinutes: 30,
+				Prompt:       "check inbox",
+				MainDelivery: "notify",
+			},
+			{
+				Name:         "晚间简报",
+				EveryMinutes: 60,
+				Prompt:       "evening check",
+				MainDelivery: "none",
+			},
+		},
+	}
+	NormalizeBot(&bot, cfg)
+
+	if bot.Schedules[0].ID != "morning-brief" {
+		t.Fatalf("expected slugified ID morning-brief, got %q", bot.Schedules[0].ID)
+	}
+	if bot.Schedules[0].NotifyTelegramChatID != "123456789" {
+		t.Fatalf("expected expanded NotifyTelegramChatID 123456789, got %q", bot.Schedules[0].NotifyTelegramChatID)
+	}
+	if bot.Schedules[0].Model != "magpie/mac-mini/auto/flash" {
+		t.Fatalf("expected expanded Model, got %q", bot.Schedules[0].Model)
+	}
+	if bot.Schedules[0].MainDelivery != RoutineDeliveryReceipt {
+		t.Fatalf("expected default MainDelivery receipt, got %q", bot.Schedules[0].MainDelivery)
+	}
+	if bot.Schedules[1].ID != "routine" || bot.Schedules[2].ID != "routine-2" {
+		t.Fatalf("expected deduplicated fallback IDs routine and routine-2, got %q and %q", bot.Schedules[1].ID, bot.Schedules[2].ID)
+	}
+	for i, s := range bot.Schedules {
+		if err := s.Validate(); err != nil {
+			t.Fatalf("schedule %d unexpectedly invalid: %v", i, err)
+		}
+	}
+
+	invalid := []ScheduleConfig{
+		{Name: "", EveryMinutes: 10, Prompt: "x"},
+		{Name: "a", EveryMinutes: 10, Prompt: ""},
+		{ID: "bad id!", Name: "a", EveryMinutes: 10, Prompt: "x"},
+		{Name: "a", Prompt: "x"},
+		{Name: "a", DailyAt: "25:00", Prompt: "x"},
+		{Name: "a", EveryMinutes: 5, MainDelivery: "bogus", Prompt: "x"},
+	}
+	for i, s := range invalid {
+		if err := s.Validate(); err == nil {
+			t.Fatalf("invalid case %d (%+v) should have failed Validate", i, s)
+		}
+	}
+}
+
+func TestDesktopWorkerConfigAndHasDesktopModel(t *testing.T) {
+	root := t.TempDir()
+	cfgDir := filepath.Join(root, "config")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TEST_DESK_MODEL", "magpie/mac-mini/auto/flash")
+	cfgPath := filepath.Join(cfgDir, "bots.json")
+	if err := os.WriteFile(cfgPath, []byte(`{"desktopHarness":"opencode","desktopModel":"${TEST_DESK_MODEL}","bots":[{"id":"a"}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _, err := Load(root, cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.DesktopHarness != "opencode" || cfg.DesktopModel != "magpie/mac-mini/auto/flash" {
+		t.Fatalf("unexpected desktop worker config: harness=%q model=%q", cfg.DesktopHarness, cfg.DesktopModel)
+	}
+	if !HasDesktopModel(cfgPath) {
+		t.Fatal("expected HasDesktopModel=true")
+	}
+
+	emptyPath := filepath.Join(cfgDir, "empty.json")
+	if err := os.WriteFile(emptyPath, []byte(`{"bots":[{"id":"a"}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if HasDesktopModel(emptyPath) {
+		t.Fatal("expected HasDesktopModel=false when unset")
+	}
+}
 

@@ -218,12 +218,14 @@ func runServe(parent context.Context, h *hub.Hub, cfgPath string) error {
 	tg.Start(ctx)
 
 	sched := scheduler.New(h, tg)
+	h.SetOnSchedulesChanged(sched.Sync)
 	sched.Start(ctx)
 
 	var httpSrv *channel.HTTPServer
 	httpErr := make(chan error, 1)
 	if h.Config().HTTP.IsEnabled() {
 		httpSrv = channel.NewHTTPServer(h, h.Config().HTTP)
+		httpSrv.SetScheduler(sched)
 		go func() {
 			if err := httpSrv.Start(); err != nil {
 				log.Printf("[http] server error: %v", err)

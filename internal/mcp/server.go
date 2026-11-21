@@ -23,6 +23,7 @@ type Server struct {
 	hubURL     string
 	selfBotID  string
 	configPath string
+	role       string
 	httpClient *http.Client
 
 	mu          sync.Mutex
@@ -45,6 +46,7 @@ func NewServerWithConfig(hubURL, selfBotID, configPath string) *Server {
 		hubURL:      hubURL,
 		selfBotID:   selfBotID,
 		configPath:  strings.TrimSpace(configPath),
+		role:        strings.TrimSpace(os.Getenv("BOT_HUB_MCP_ROLE")),
 		httpClient:  &http.Client{Timeout: 10 * time.Minute},
 		cachedToken: strings.TrimSpace(os.Getenv("BOT_HUB_API_TOKEN")),
 	}
@@ -129,7 +131,7 @@ func (s *Server) handle(ctx context.Context, req rpcRequest) rpcResponse {
 		return rpcResponse{
 			JSONRPC: "2.0",
 			ID:      req.ID,
-			Result:  map[string]any{"tools": toolDefinitions()},
+			Result:  map[string]any{"tools": s.visibleTools()},
 		}
 
 	case "tools/call":
@@ -308,6 +310,32 @@ func toolDefinitions() []map[string]any {
 			},
 		},
 		{
+			"name":        "desktop_task",
+			"description": "Delegate a multi-step desktop GUI or visible-browser task to an isolated computer-use worker running on the visible desktop (observable and take-over-ready via Remote Desktop). Use this instead of running headless browsers or multi-step screenshot/click loops in the main session.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"goal": map[string]any{
+						"type":        "string",
+						"description": "Clear description of the GUI goal to accomplish on the visible desktop.",
+					},
+					"nodeId": map[string]any{
+						"type":        "string",
+						"description": "Target desktop ('local' or remote node ID). Omit to auto-select.",
+					},
+					"app": map[string]any{
+						"type":        "string",
+						"description": "Optional application name involved.",
+					},
+					"timeoutSec": map[string]any{
+						"type":        "integer",
+						"description": "Optional timeout in seconds.",
+					},
+				},
+				"required": []string{"goal"},
+			},
+		},
+		{
 			"name":        "request_takeover",
 			"description": "Pause automation and request a human to handle an interactive step (such as QR login, 2FA/OTP code, CAPTCHA, or payment confirmation) via the live Remote Desktop view. Blocks until the user clicks '完成并恢复 AI'.",
 			"inputSchema": map[string]any{
@@ -358,7 +386,7 @@ func toolDefinitions() []map[string]any {
 				"properties": map[string]any{
 					"sessionId": map[string]any{
 						"type":        "string",
-						"description": "Target session ID (Hub ses_... ID or runtimeSessionId). Omit or pass 'previous' for the latest archived session.",
+						"description": "Target session ID (Hub ses_... ID or runtimeSessionId). Omit or pass 'previous' for the latest archived session, or 'active' for the current main session.",
 					},
 					"botId": map[string]any{
 						"type":        "string",
@@ -402,6 +430,106 @@ func toolDefinitions() []map[string]any {
 						"description": "Optional concise handoff summary carried into the next session's breadcrumb.",
 					},
 				},
+			},
+		},
+		{
+			"name":        "list_routines",
+			"description": "List scheduled routines configured for a bot, including their schedule, delivery mode, next run time, and last run status.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"botId": map[string]any{
+						"type":        "string",
+						"description": "Target bot ID (defaults to this bot).",
+					},
+				},
+			},
+		},
+		{
+			"name":        "upsert_routine",
+			"description": "Create or update a scheduled routine on a bot and arm it immediately without restarting bot-hub. Routines execute in isolated ephemeral turns.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"botId": map[string]any{
+						"type":        "string",
+						"description": "Target bot ID (defaults to this bot).",
+					},
+					"id": map[string]any{
+						"type":        "string",
+						"description": "Optional routine ID (letters, digits, - or _; auto-generated from name if omitted).",
+					},
+					"name": map[string]any{
+						"type":        "string",
+						"description": "Human-readable name for the routine.",
+					},
+					"everyMinutes": map[string]any{
+						"type":        "integer",
+						"description": "Run periodically every N minutes (set 0 when using dailyAt).",
+					},
+					"dailyAt": map[string]any{
+						"type":        "string",
+						"description": "Run daily at HH:MM local time (24h format).",
+					},
+					"prompt": map[string]any{
+						"type":        "string",
+						"description": "Task prompt sent to the isolated routine turn.",
+					},
+					"model": map[string]any{
+						"type":        "string",
+						"description": "Optional model override for this routine.",
+					},
+					"mainDelivery": map[string]any{
+						"type":        "string",
+						"enum":        []string{"receipt", "notify", "none"},
+						"description": "How non-empty findings reach the main session: 'receipt' (default: timeline card + auto-injected on user's next message), 'notify' (wake main session immediately), or 'none' (run log / Telegram only).",
+					},
+					"notifyTelegramChatId": map[string]any{
+						"type":        "string",
+						"description": "Optional Telegram chat/user ID (or ${VAR} reference) to push non-empty outputs.",
+					},
+					"enabled": map[string]any{
+						"type":        "boolean",
+						"description": "Whether the schedule is active (default true).",
+					},
+				},
+				"required": []string{"name", "prompt"},
+			},
+		},
+		{
+			"name":        "delete_routine",
+			"description": "Delete a scheduled routine from a bot and stop its timer immediately.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"botId": map[string]any{
+						"type":        "string",
+						"description": "Target bot ID (defaults to this bot).",
+					},
+					"routineId": map[string]any{
+						"type":        "string",
+						"description": "Routine ID to delete.",
+					},
+				},
+				"required": []string{"routineId"},
+			},
+		},
+		{
+			"name":        "run_routine",
+			"description": "Manually trigger a bot's scheduled routine immediately in an isolated ephemeral turn and return the run result.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"botId": map[string]any{
+						"type":        "string",
+						"description": "Target bot ID (defaults to this bot).",
+					},
+					"routineId": map[string]any{
+						"type":        "string",
+						"description": "Routine ID to execute.",
+					},
+				},
+				"required": []string{"routineId"},
 			},
 		},
 	}
@@ -515,6 +643,40 @@ func (s *Server) callTool(ctx context.Context, name string, rawArgs json.RawMess
 			"content": args.Content,
 			"append":  args.Append,
 		}, 0)
+
+	case "desktop_task":
+		if s.role == "computer_use" {
+			return "desktop_task cannot be called from inside a computer-use worker", true
+		}
+		if s.selfBotID == "" {
+			return "caller bot ID is unknown", true
+		}
+		var args struct {
+			Goal       string `json:"goal"`
+			NodeID     string `json:"nodeId"`
+			App        string `json:"app"`
+			TimeoutSec int    `json:"timeoutSec"`
+		}
+		if err := json.Unmarshal(rawArgs, &args); err != nil || strings.TrimSpace(args.Goal) == "" {
+			return "goal is required", true
+		}
+		body, err := s.doJSON(ctx, http.MethodPost, "/api/desktop/task", map[string]any{
+			"botId":      s.selfBotID,
+			"nodeId":     args.NodeID,
+			"goal":       args.Goal,
+			"app":        args.App,
+			"timeoutSec": args.TimeoutSec,
+		})
+		if err != nil {
+			return err.Error(), true
+		}
+		var resp struct {
+			Text string `json:"text"`
+		}
+		if json.Unmarshal(body, &resp) == nil && resp.Text != "" {
+			return resp.Text, false
+		}
+		return prettyJSON(body), false
 
 	case "request_takeover":
 		var args struct {
@@ -660,9 +822,103 @@ func (s *Server) callTool(ctx context.Context, name string, rawArgs json.RawMess
 		}
 		return prettyJSON(body), false
 
+	case "list_routines":
+		var args struct {
+			BotID string `json:"botId"`
+		}
+		if len(rawArgs) > 0 {
+			if err := json.Unmarshal(rawArgs, &args); err != nil {
+				return "invalid arguments", true
+			}
+		}
+		botID := s.resolveBotID(args.BotID)
+		if botID == "" {
+			return "botId is required", true
+		}
+		body, err := s.doJSON(ctx, http.MethodGet, "/api/bots/"+url.PathEscape(botID)+"/routines", nil)
+		if err != nil {
+			return err.Error(), true
+		}
+		return prettyJSON(body), false
+
+	case "upsert_routine":
+		var args map[string]any
+		if err := json.Unmarshal(rawArgs, &args); err != nil {
+			return "invalid arguments", true
+		}
+		rawBotID, _ := args["botId"].(string)
+		botID := s.resolveBotID(rawBotID)
+		if botID == "" {
+			return "botId is required", true
+		}
+		delete(args, "botId")
+		body, err := s.doJSON(ctx, http.MethodPost, "/api/bots/"+url.PathEscape(botID)+"/routines?upsert=1", args)
+		if err != nil {
+			return err.Error(), true
+		}
+		return prettyJSON(body), false
+
+	case "delete_routine":
+		var args struct {
+			BotID     string `json:"botId"`
+			RoutineID string `json:"routineId"`
+		}
+		if err := json.Unmarshal(rawArgs, &args); err != nil || strings.TrimSpace(args.RoutineID) == "" {
+			return "routineId is required", true
+		}
+		botID := s.resolveBotID(args.BotID)
+		if botID == "" {
+			return "botId is required", true
+		}
+		body, err := s.doJSON(ctx, http.MethodDelete, "/api/bots/"+url.PathEscape(botID)+"/routines/"+url.PathEscape(strings.TrimSpace(args.RoutineID)), nil)
+		if err != nil {
+			return err.Error(), true
+		}
+		return prettyJSON(body), false
+
+	case "run_routine":
+		var args struct {
+			BotID     string `json:"botId"`
+			RoutineID string `json:"routineId"`
+		}
+		if err := json.Unmarshal(rawArgs, &args); err != nil || strings.TrimSpace(args.RoutineID) == "" {
+			return "routineId is required", true
+		}
+		botID := s.resolveBotID(args.BotID)
+		if botID == "" {
+			return "botId is required", true
+		}
+		body, err := s.doJSON(ctx, http.MethodPost, "/api/bots/"+url.PathEscape(botID)+"/routines/"+url.PathEscape(strings.TrimSpace(args.RoutineID))+"/run", nil)
+		if err != nil {
+			return err.Error(), true
+		}
+		return prettyJSON(body), false
+
 	default:
 		return fmt.Sprintf("unknown tool %q", name), true
 	}
+}
+
+func (s *Server) resolveBotID(explicit string) string {
+	if id := strings.TrimSpace(explicit); id != "" {
+		return id
+	}
+	return strings.TrimSpace(s.selfBotID)
+}
+
+func (s *Server) visibleTools() []map[string]any {
+	all := toolDefinitions()
+	if s.role == "computer_use" {
+		out := make([]map[string]any, 0, 4)
+		for _, t := range all {
+			switch t["name"] {
+			case "list_nodes", "node_exec", "node_file", "request_takeover":
+				out = append(out, t)
+			}
+		}
+		return out
+	}
+	return all
 }
 
 func (s *Server) callNode(ctx context.Context, nodeID, action string, args any, timeoutSec int) (string, bool) {

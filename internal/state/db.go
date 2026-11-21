@@ -95,6 +95,28 @@ CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE OF text ON messages BEGIN
   INSERT INTO messages_fts(messages_fts, rowid, text) VALUES ('delete', old.id, old.text);
   INSERT INTO messages_fts(rowid, text) VALUES (new.id, new.text);
 END;
+
+CREATE TABLE IF NOT EXISTS routine_runs (
+  id            TEXT PRIMARY KEY,
+  bot_id        TEXT NOT NULL,
+  routine_id    TEXT NOT NULL,
+  routine_name  TEXT NOT NULL DEFAULT '',
+  trigger       TEXT NOT NULL DEFAULT 'schedule',
+  status        TEXT NOT NULL DEFAULT 'ok',
+  delivery      TEXT NOT NULL DEFAULT 'receipt',
+  model         TEXT NOT NULL DEFAULT '',
+  output        TEXT NOT NULL DEFAULT '',
+  error         TEXT NOT NULL DEFAULT '',
+  duration_ms   INTEGER NOT NULL DEFAULT 0,
+  cost_usd      REAL NOT NULL DEFAULT 0,
+  input_tokens  INTEGER NOT NULL DEFAULT 0,
+  output_tokens INTEGER NOT NULL DEFAULT 0,
+  started_at    TEXT NOT NULL,
+  finished_at   TEXT NOT NULL,
+  injected_at   TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_routine_runs_bot_routine ON routine_runs(bot_id, routine_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_routine_runs_pending     ON routine_runs(bot_id, delivery, status, injected_at);
 `
 
 func openSQLite(dbPath string) (*sql.DB, error) {

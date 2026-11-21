@@ -94,6 +94,17 @@ func (h *ClaudeHarness) proc(opts RunOptions) (*claudeProc, error) {
 		delete(h.procs, bot.ID)
 	}
 
+	p, err := h.startProc(opts, false)
+	if err != nil {
+		return nil, err
+	}
+	h.procs[bot.ID] = p
+	return p, nil
+}
+
+func (h *ClaudeHarness) startProc(opts RunOptions, ephemeral bool) (*claudeProc, error) {
+	bot := opts.Bot
+
 	// Claude Code reads CLAUDE.md; bridge _shared/BOT_HUB.md and @AGENTS.md
 	// unless the user already customized CLAUDE.md.
 	claudeMD := filepath.Join(bot.Workspace, "CLAUDE.md")
@@ -106,7 +117,9 @@ func (h *ClaudeHarness) proc(opts RunOptions) (*claudeProc, error) {
 	if bot.Model != "" {
 		args = append(args, "--model", bot.Model)
 	}
-	if opts.SessionID != "" {
+	if ephemeral {
+		args = append(args, "--no-session-persistence")
+	} else if opts.SessionID != "" {
 		args = append(args, "--resume", opts.SessionID)
 	}
 	if bot.ShouldAutoApprove() {
@@ -136,9 +149,7 @@ func (h *ClaudeHarness) proc(opts RunOptions) (*claudeProc, error) {
 	if err != nil {
 		return nil, err
 	}
-	p := &claudeProc{lineProc: lp, model: bot.Model, sessionID: opts.SessionID}
-	h.procs[bot.ID] = p
-	return p, nil
+	return &claudeProc{lineProc: lp, model: bot.Model, sessionID: opts.SessionID}, nil
 }
 
 func (h *ClaudeHarness) drop(botID string, p *claudeProc) {
@@ -159,16 +170,36 @@ func (h *ClaudeHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnResu
 		defer cancel()
 	}
 
-	p, err := h.proc(opts)
-	if err != nil {
-		return nil, err
+	var (
+		p   *claudeProc
+		err error
+	)
+	if opts.Ephemeral {
+		p, err = h.startProc(opts, true)
+		if err != nil {
+			return nil, err
+		}
+		defer p.kill()
+	} else {
+		p, err = h.proc(opts)
+		if err != nil {
+			return nil, err
+		}
 	}
+	dropProc := func() {
+		if opts.Ephemeral {
+			p.kill()
+		} else {
+			h.drop(bot.ID, p)
+		}
+	}
+
 	err = p.send(map[string]any{
 		"type":    "user",
 		"message": map[string]any{"role": "user", "content": opts.Prompt},
 	})
 	if err != nil {
-		h.drop(bot.ID, p)
+		dropProc()
 		return nil, fmt.Errorf("claude process: %w", err)
 	}
 
@@ -179,13 +210,13 @@ func (h *ClaudeHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnResu
 		case <-ctx.Done():
 			// Killing is the interrupt; the next turn resumes the session.
 			partial.Text = strings.Join(texts, "\n")
-			h.drop(bot.ID, p)
+			dropProc()
 			return partial, ctxErr(ctx, bot.ID, bot.TimeoutSec)
 
 		case line, ok := <-p.lines:
 			if !ok {
 				partial.Text = strings.Join(texts, "\n")
-				h.drop(bot.ID, p)
+				dropProc()
 				return partial, fmt.Errorf("claude failed for bot %q: %s", bot.ID, p.exitDetail())
 			}
 			var evt claudeEvent
