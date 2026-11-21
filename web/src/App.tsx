@@ -55,6 +55,18 @@ export default function App() {
       return false;
     }
   });
+  const [sideWidth, setSideWidth] = useState<number | null>(() => {
+    try {
+      const raw = localStorage.getItem('bothub.sideWidth');
+      if (!raw) return null;
+      const n = Number(raw);
+      if (!Number.isFinite(n)) return null;
+      return Math.min(480, Math.max(220, Math.round(n)));
+    } catch {
+      return null;
+    }
+  });
+  const [sideResizing, setSideResizing] = useState(false);
   const [mobileSideOpen, setMobileSideOpen] = useState(false);
 
   const [deskOpen, setDeskOpen] = useState(false);
@@ -447,11 +459,52 @@ export default function App() {
   const activeBot = bots.find((b) => b.id === activeBotId);
   const shadeOpen = mobileSideOpen || panelOpen;
 
+  const handleSideResizeStart = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      const sideEl = e.currentTarget.previousElementSibling as HTMLElement | null;
+      const startWidth = sideWidth ?? (sideEl ? Math.round(sideEl.getBoundingClientRect().width) : 300);
+      const startX = e.clientX;
+      let latest = startWidth;
+
+      setSideResizing(true);
+      document.body.classList.add('resizing-side');
+
+      const onMove = (ev: MouseEvent) => {
+        const maxW = Math.min(480, Math.floor(window.innerWidth * 0.45));
+        const next = Math.min(maxW, Math.max(220, Math.round(startWidth + (ev.clientX - startX))));
+        latest = next;
+        setSideWidth(next);
+      };
+      const onUp = () => {
+        window.removeEventListener('mousemove', onMove);
+        window.removeEventListener('mouseup', onUp);
+        document.body.classList.remove('resizing-side');
+        setSideResizing(false);
+        try {
+          localStorage.setItem('bothub.sideWidth', String(latest));
+        } catch {}
+      };
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onUp);
+    },
+    [sideWidth]
+  );
+
+  const handleSideResizeReset = useCallback(() => {
+    setSideWidth(null);
+    try {
+      localStorage.removeItem('bothub.sideWidth');
+    } catch {}
+  }, []);
+
   return (
     <>
       <div
         id="app"
         className={`app${sideCollapsed ? ' side-collapsed' : ''}${view === 'settings' ? ' in-settings' : ''}${deskOpen ? ' desk-open' : ''}`}
+        style={sideWidth != null ? ({ '--side-w': `${sideWidth}px` } as React.CSSProperties) : undefined}
       >
         <Sidebar
           open={mobileSideOpen}
@@ -492,6 +545,16 @@ export default function App() {
             setSettingsTab(nextTab);
             if (matchMedia('(max-width: 820px)').matches) closeAllOverlays();
           }}
+        />
+
+        <div
+          className={`side-resizer${sideResizing ? ' active' : ''}`}
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="调整侧边栏宽度"
+          title="拖动调整宽度，双击重置"
+          onMouseDown={handleSideResizeStart}
+          onDoubleClick={handleSideResizeReset}
         />
 
         <main className="main">

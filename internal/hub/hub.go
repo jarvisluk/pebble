@@ -63,14 +63,13 @@ type DesktopTaskRequest struct {
 }
 
 type RoutinePatch struct {
-	Name                 *string `json:"name,omitempty"`
-	EveryMinutes         *int    `json:"everyMinutes,omitempty"`
-	DailyAt              *string `json:"dailyAt,omitempty"`
-	Prompt               *string `json:"prompt,omitempty"`
-	Model                *string `json:"model,omitempty"`
-	MainDelivery         *string `json:"mainDelivery,omitempty"`
-	NotifyTelegramChatID *string `json:"notifyTelegramChatId,omitempty"`
-	Enabled              *bool   `json:"enabled,omitempty"`
+	Name         *string `json:"name,omitempty"`
+	EveryMinutes *int    `json:"everyMinutes,omitempty"`
+	DailyAt      *string `json:"dailyAt,omitempty"`
+	Prompt       *string `json:"prompt,omitempty"`
+	Model        *string `json:"model,omitempty"`
+	MainDelivery *string `json:"mainDelivery,omitempty"`
+	Enabled      *bool   `json:"enabled,omitempty"`
 }
 
 type BotStatus struct {
@@ -2128,9 +2127,6 @@ func (h *Hub) UpdateRoutine(botID, routineID string, patch RoutinePatch) (config
 	if patch.MainDelivery != nil {
 		base.MainDelivery = strings.TrimSpace(*patch.MainDelivery)
 	}
-	if patch.NotifyTelegramChatID != nil {
-		base.NotifyTelegramChatID = strings.TrimSpace(*patch.NotifyTelegramChatID)
-	}
 	if patch.Enabled != nil {
 		v := *patch.Enabled
 		base.Enabled = &v
@@ -2342,7 +2338,6 @@ func cleanScheduleInput(raw config.ScheduleConfig) config.ScheduleConfig {
 	raw.Prompt = strings.TrimSpace(raw.Prompt)
 	raw.Model = strings.TrimSpace(raw.Model)
 	raw.MainDelivery = raw.EffectiveMainDelivery()
-	raw.NotifyTelegramChatID = strings.TrimSpace(raw.NotifyTelegramChatID)
 	if raw.Enabled == nil {
 		v := true
 		raw.Enabled = &v
@@ -2351,9 +2346,6 @@ func cleanScheduleInput(raw config.ScheduleConfig) config.ScheduleConfig {
 }
 
 func preserveRoutineEnvRefs(next, curDisk, curExpanded config.ScheduleConfig) config.ScheduleConfig {
-	if next.NotifyTelegramChatID == curExpanded.NotifyTelegramChatID && config.ContainsEnvRef(curDisk.NotifyTelegramChatID) {
-		next.NotifyTelegramChatID = curDisk.NotifyTelegramChatID
-	}
 	if next.Model == curExpanded.Model && config.ContainsEnvRef(curDisk.Model) {
 		next.Model = curDisk.Model
 	}

@@ -19,16 +19,11 @@
       "harness": "opencode",
       "autoApprove": true,
       "timeoutSec": 300,
-      "telegram": {
-        "token": "${TELEGRAM_ASSISTANT_TOKEN}",
-        "allowedUserIds": ["${TELEGRAM_OWNER_USER_ID}"]
-      },
       "schedules": [
         {
           "name": "morning-brief",
           "dailyAt": "09:00",
           "prompt": "检查今天的重要事项与 memory/ 中的待办，给出一份简洁的晨间简报。",
-          "notifyTelegramChatId": "${TELEGRAM_OWNER_USER_ID}",
           "enabled": false
         }
       ]
@@ -40,11 +35,7 @@
       "workspace": "./workspaces/researcher",
       "harness": "opencode",
       "autoApprove": true,
-      "timeoutSec": 600,
-      "telegram": {
-        "token": "${TELEGRAM_RESEARCHER_TOKEN}",
-        "allowedUserIds": ["${TELEGRAM_OWNER_USER_ID}"]
-      }
+      "timeoutSec": 600
     }
   ]
 }

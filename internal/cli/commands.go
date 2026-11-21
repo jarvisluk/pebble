@@ -575,7 +575,6 @@ func runRoutineCmd(ctx context.Context, args []string, cwd string, stdout, stder
 		prompt := fs.String("prompt", "", "task prompt")
 		model := fs.String("model", "", "optional model override")
 		delivery := fs.String("main-delivery", "", "receipt|notify|none")
-		tgChat := fs.String("notify-telegram-chat-id", "", "Telegram chat ID for notifications")
 		enabled := fs.Bool("enabled", true, "whether routine is enabled")
 		if err := fs.Parse(rest); err != nil {
 			return err
@@ -608,9 +607,6 @@ func runRoutineCmd(ctx context.Context, args []string, cwd string, stdout, stder
 		}
 		if visited["main-delivery"] {
 			payload["mainDelivery"] = strings.TrimSpace(*delivery)
-		}
-		if visited["notify-telegram-chat-id"] {
-			payload["notifyTelegramChatId"] = strings.TrimSpace(*tgChat)
 		}
 		if visited["enabled"] {
 			payload["enabled"] = *enabled

@@ -88,7 +88,7 @@ func Main(args []string) {
 
 func printUsage() {
 	fmt.Println(`Usage:
-  bot-hub serve  [-config path]                                   Start Web UI, HTTP API, Telegram pollers, and scheduler
+  bot-hub serve  [-config path]                                   Start Web UI, HTTP API, and scheduler
   bot-hub chat   [-config path] [bot]                             Interactive terminal chat with a bot
   bot-hub status [-config path]                                   Show configured bots and persisted sessions
   bot-hub mcp     [--hub-url url] [--bot-id id] [--config path]   Run stdio MCP server exposing core runtime primitives
@@ -227,10 +227,7 @@ func runServe(parent context.Context, h *hub.Hub, cfgPath string) error {
 		log.Printf("[hub] bot=%s workspace=%s model=%s", b.ID, b.Workspace, b.Model)
 	}
 
-	tg := channel.NewTelegramManager(h)
-	tg.Start(ctx)
-
-	sched := scheduler.New(h, tg)
+	sched := scheduler.New(h)
 	h.SetOnSchedulesChanged(sched.Sync)
 	sched.Start(ctx)
 
@@ -257,7 +254,6 @@ func runServe(parent context.Context, h *hub.Hub, cfgPath string) error {
 		cancel()
 	}
 	sched.Wait()
-	tg.Wait()
 	log.Printf("[hub] stopped")
 	select {
 	case err := <-httpErr:

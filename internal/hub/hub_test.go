@@ -704,9 +704,8 @@ func TestRoutineCRUDPreservesEnvRefsOnDisk(t *testing.T) {
 	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("TEST_CHAT_ID", "99887766")
 	t.Setenv("TEST_R_MODEL", "magpie/flash")
-	rawCfg := `{"bots":[{"id":"ops","name":"Ops","schedules":[{"id":"morning","name":"Morning","dailyAt":"09:00","prompt":"check","model":"${TEST_R_MODEL}","notifyTelegramChatId":"${TEST_CHAT_ID}"}]}]}`
+	rawCfg := `{"bots":[{"id":"ops","name":"Ops","schedules":[{"id":"morning","name":"Morning","dailyAt":"09:00","prompt":"check","model":"${TEST_R_MODEL}"}]}]}`
 	cfgPath := filepath.Join(cfgDir, "bots.json")
 	if err := os.WriteFile(cfgPath, []byte(rawCfg), 0o600); err != nil {
 		t.Fatal(err)
@@ -729,20 +728,20 @@ func TestRoutineCRUDPreservesEnvRefsOnDisk(t *testing.T) {
 	var changes atomic.Int32
 	h.SetOnSchedulesChanged(func() { changes.Add(1) })
 
-	// Update prompt while keeping expanded chat ID -> must preserve ${TEST_CHAT_ID} on disk.
+	// Update prompt while keeping expanded model -> must preserve ${TEST_R_MODEL} on disk.
 	updated, err := h.UpdateRoutine("ops", "morning", RoutinePatch{
-		Prompt:               ptrString("updated check"),
-		NotifyTelegramChatID: ptrString("99887766"),
+		Prompt: ptrString("updated check"),
+		Model:  ptrString("magpie/flash"),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updated.NotifyTelegramChatID != "99887766" || updated.Model != "magpie/flash" || updated.Prompt != "updated check" {
+	if updated.Model != "magpie/flash" || updated.Prompt != "updated check" {
 		t.Fatalf("unexpected updated routine: %+v", updated)
 	}
 	diskBytes, _ := os.ReadFile(loadedPath)
 	diskStr := string(diskBytes)
-	if !strings.Contains(diskStr, "${TEST_CHAT_ID}") || !strings.Contains(diskStr, "${TEST_R_MODEL}") || strings.Contains(diskStr, "99887766") {
+	if !strings.Contains(diskStr, "${TEST_R_MODEL}") || strings.Contains(diskStr, "magpie/flash") {
 		t.Fatalf("env refs were flattened on disk:\n%s", diskStr)
 	}
 

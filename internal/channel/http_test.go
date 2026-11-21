@@ -60,13 +60,6 @@ func TestGuard(t *testing.T) {
 	}
 }
 
-func TestTelegramFailsClosed(t *testing.T) {
-	p := &telegramPoller{allowedUID: map[string]struct{}{}, allowedCID: map[string]struct{}{}}
-	if p.isAllowed(&tgMessage{}) {
-		t.Fatal("empty allowlist must deny")
-	}
-}
-
 func TestDesktopTakeoverRoutes(t *testing.T) {
 	s := NewHTTPServer(nil, config.HTTPConfig{Host: "127.0.0.1"})
 	defer s.Shutdown(t.Context())
@@ -387,7 +380,7 @@ func TestRoutineHTTPRoutes(t *testing.T) {
 	h := hub.New(cfg, store, nil, reg)
 	defer h.Close()
 
-	sched := scheduler.New(h, nil)
+	sched := scheduler.New(h)
 	h.SetOnSchedulesChanged(sched.Sync)
 	sctx, scancel := context.WithCancel(context.Background())
 	defer func() {

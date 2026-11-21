@@ -21,10 +21,6 @@ var (
 	ErrRoutineAlreadyRunning = errors.New("routine is already running")
 )
 
-type Notifier interface {
-	Notify(ctx context.Context, bot config.BotConfig, sched config.ScheduleConfig, text string) error
-}
-
 type RoutineRuntimeStatus struct {
 	Running   bool              `json:"running"`
 	NextRunAt string            `json:"nextRunAt,omitempty"`
@@ -55,8 +51,7 @@ func (j *scheduledJob) getNext() time.Time {
 }
 
 type Scheduler struct {
-	hub      *hub.Hub
-	notifier Notifier
+	hub *hub.Hub
 
 	mu     sync.Mutex
 	ctx    context.Context
@@ -65,12 +60,11 @@ type Scheduler struct {
 	wg     sync.WaitGroup
 }
 
-func New(h *hub.Hub, notifier Notifier) *Scheduler {
+func New(h *hub.Hub) *Scheduler {
 	return &Scheduler{
-		hub:      h,
-		notifier: notifier,
-		jobs:     make(map[string]*scheduledJob),
-		active:   make(map[string]bool),
+		hub:    h,
+		jobs:   make(map[string]*scheduledJob),
+		active: make(map[string]bool),
 	}
 }
 
@@ -403,12 +397,6 @@ func (s *Scheduler) execute(ctx context.Context, botID string, sched config.Sche
 
 	s.hub.BroadcastRoutineRun(run)
 	log.Printf("[scheduler] done %s/%s in %dms (delivery=%s)", botID, rid, run.DurationMs, delivery)
-
-	if s.notifier != nil && strings.TrimSpace(sched.NotifyTelegramChatID) != "" {
-		if nerr := s.notifier.Notify(ctx, bot, sched, run.Output); nerr != nil {
-			log.Printf("[scheduler] notify failed %s/%s: %v", botID, rid, nerr)
-		}
-	}
 	return &run, nil
 }
 

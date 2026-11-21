@@ -19,13 +19,13 @@
 
 - **一支常驻本机的个人 Bot 团队。** 严格落实 `1 Bot = 1 Workspace = 1 Session`：每个 Bot 拥有独立目录、`AGENTS.md` 职责规范、串行执行队列与持久会话，互不串味。
 - **直接复用已有的 Agent 运行时与订阅。** 原生驱动本机 **OpenCode**、**Claude Code**、**Pi** 与 **DeepSeek Harness (`dsh`)**；既可通过 **Magpie** 统一模型路由与配额回退，也可保留各 CLI 自有配置。
-- **数据留在自己机器上，随处安全可达。** 单个 Go 二进制内嵌 Web UI、Telegram 长轮询、定时唤醒与 **Tailcat** 点对点加密隧道——无需公网 IP、无需 Tailscale 账号即可跨设备连接。
+- **数据留在自己机器上，随处安全可达。** 单个 Go 二进制内嵌 Web UI、定时唤醒与 **Tailcat** 点对点加密隧道——无需公网 IP、无需 Tailscale 账号即可跨设备连接。
 
 ## 核心特性
 
 ### 隔离工作区与共享记忆：`1 Bot = 1 Workspace = 1 Session`
 
-把日常杂事、深度调研、运维巡检塞进同一个聊天窗口，上下文很快就会腐化。`bot-hub` 为每个 Bot 分配独立的磁盘工作区、唯一的长期会话与专属串行队列（`botLane`）：同一时刻来自网页、Telegram、定时任务或其他 Bot 的请求按序执行，支持随时中断当前轮次。
+把日常杂事、深度调研、运维巡检塞进同一个聊天窗口，上下文很快就会腐化。`bot-hub` 为每个 Bot 分配独立的磁盘工作区、唯一的长期会话与专属串行队列（`botLane`）：同一时刻来自网页、定时任务或其他 Bot 的请求按序执行，支持随时中断当前轮次。
 
 与此同时，每个工作区自动软链 `_shared/` 公共目录并维护各自的 `memory/`：在 `_shared/USER.md` 写一次全局偏好，所有 Bot 都能读到；把关键结论沉淀进 `memory/`，即使重置会话（`/reset`）也不会丢失长期记忆。
 
@@ -34,7 +34,7 @@
 
 ```text
 bot-hub/
-├── config/bots.json              # Bot 列表、模型接入、Telegram 与定时规则（保留 ${VAR} 引用）
+├── config/bots.json              # Bot 列表、模型接入与定时规则（保留 ${VAR} 引用）
 ├── state/
 │   ├── hub.db                    # 单文件 SQLite 状态库（会话归档与 FTS5 检索）
 │   ├── sessions.json             # 历史兼容会话快照（首次启动自动导入 hub.db）
@@ -138,12 +138,12 @@ bot-hub/
 
 </details>
 
-### 主动唤醒与多通道触达：定时任务、Telegram 与 Webhook
+### 主动唤醒与多通道触达：定时任务与 Webhook
 
-Bot 不必只在浏览器标签页里被动等待输入。通过内置调度器（`schedules`），Bot 可以按固定间隔（`everyMinutes`）或每日指定时刻（`dailyAt`）自动醒来整理待办、巡检状态，并将结果主动推送到你的 Telegram；外部脚本、CI 或监控告警也可随时通过 `/hooks/{id}` 唤醒指定 Bot。
+Bot 不必只在浏览器标签页里被动等待输入。通过内置调度器（`schedules`），Bot 可以按固定间隔（`everyMinutes`）或每日指定时刻（`dailyAt`）自动醒来整理待办、巡检状态，并将回执或通知送达主会话；外部脚本、CI 或监控告警也可随时通过 `/hooks/{id}` 唤醒指定 Bot。
 
 <details>
-<summary><b>配置示例：</b><code>config/bots.json</code> 中的多 Bot、Telegram 白名单与定时简报</summary>
+<summary><b>配置示例：</b><code>config/bots.json</code> 中的多 Bot 与定时简报</summary>
 
 ```json
 {
@@ -161,16 +161,11 @@ Bot 不必只在浏览器标签页里被动等待输入。通过内置调度器�
       "name": "Personal Assistant",
       "description": "日常助理：待办、日程、信息整理与日常问答",
       "harness": "opencode",
-      "telegram": {
-        "token": "${TELEGRAM_ASSISTANT_TOKEN}",
-        "allowedUserIds": ["${TELEGRAM_OWNER_USER_ID}"]
-      },
       "schedules": [
         {
           "name": "morning-brief",
           "dailyAt": "09:00",
           "prompt": "检查今天的重要事项与 memory/ 中的待办，给出一份简洁的晨间简报。",
-          "notifyTelegramChatId": "${TELEGRAM_OWNER_USER_ID}",
           "enabled": true
         }
       ]
@@ -205,7 +200,7 @@ make build
 # 2. （可选）从模板准备自己的配置与环境变量
 cp config/bots.example.json config/bots.json
 
-# 3. 启动 Web UI、HTTP/SSE API、Telegram 轮询与定时调度器
+# 3. 启动 Web UI、HTTP/SSE API 与定时调度器
 ./bin/bot-hub serve
 ```
 
@@ -252,7 +247,7 @@ macOS 桌面端采用「系统 `PATH` 优先、App 内置 `Contents/Resources/bi
 
 | 命令 | 说明 |
 | --- | --- |
-| `bot-hub serve [-config path]` | 启动内嵌 Web UI、HTTP/SSE API、Telegram 长轮询与定时调度器 |
+| `bot-hub serve [-config path]` | 启动内嵌 Web UI、HTTP/SSE API 与定时调度器 |
 | `bot-hub chat [-config path] [bot]` | 在终端与指定 Bot 交互对话（支持 `/status`、`/reset`、`/bots`、`/ask`、`/exit`） |
 | `bot-hub status [-config path]` | 查看所有已配置 Bot、工作区路径与持久化 Session 统计 |
 | `bot-hub connect [-listen addr] <link>` | 通过 Tailcat 链接将远端 `bot-hub` 映射到本地地址（默认 `127.0.0.1:3790`） |
@@ -299,7 +294,7 @@ macOS 桌面端采用「系统 `PATH` 优先、App 内置 `Contents/Resources/bi
   </tr>
   <tr>
     <td><a href="config/bots.example.json"><code>config/bots.example.json</code></a></td>
-    <td>完整配置模板，包含多 Bot、Telegram 白名单与定时任务示例。</td>
+    <td>完整配置模板，包含多 Bot 与定时任务示例。</td>
   </tr>
 </table>
 
@@ -307,7 +302,6 @@ macOS 桌面端采用「系统 `PATH` 优先、App 内置 `Contents/Resources/bi
 
 - **防跨站与防重绑定**：所有请求校验 `Origin`，拒绝跨站请求（防 CSRF）；仅监听回环地址时同时校验 `Host`（防 DNS rebinding）。
 - **令牌强校验**：`http.apiToken`（如 `${BOT_HUB_API_TOKEN}`）启用后，`/api/*` 需要 `Authorization: Bearer <token>` 或 `SameSite=Strict` 的 `HttpOnly` 登录 Cookie；当 `host` 不是回环地址时必须设置 `apiToken`，否则拒绝启动。Bot 内的 `bot-hub mcp` 会自动携带令牌。
-- **Telegram 白名单**：Telegram Bot 必须配置 `allowedUserIds` 或 `allowedChatIds`，两者均为空时不会启动该 Bot 的轮询。
 - **Tailcat 隧道鉴权**：启用 `http.tailcat.enabled` 必须配合 `http.apiToken`，经隧道进入的所有请求一律强制校验令牌。连接链接内含服务端身份密钥，只应发给自己的设备；删除 `state/tailcat-identity.json` 并重启服务即可立即作废旧链接。默认使用 Tailscale 公共 DERP，也可通过 `derpMapURL` 指向自建 DERP。
 - **Webhook 签名与密钥保护**：配置 `http.webhookSecret` 后，`/hooks/{id}` 采用常量时间比对校验密钥；新建或修改 Bot 写回 `config/bots.json` 时始终保留原始 `${VAR}` 引用，密钥绝不以明文落盘。
 

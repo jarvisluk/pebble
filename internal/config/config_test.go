@@ -12,7 +12,7 @@ func TestSaveLocalKeepsEnvRefs(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(root, "config"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	raw := `{"http":{"webhookSecret":"${T_SECRET}"},"bots":[{"id":"a","workspace":"./workspaces/a","telegram":{"token":"${T_TOKEN}","allowedUserIds":["1"]}}]}`
+	raw := `{"http":{"webhookSecret":"${T_SECRET}"},"bots":[{"id":"a","workspace":"./workspaces/a","env":{"T_KEY":"${T_TOKEN}"}}]}`
 	if err := os.WriteFile(filepath.Join(root, "config", "bots.example.json"), []byte(raw), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -23,7 +23,7 @@ func TestSaveLocalKeepsEnvRefs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Bots[0].Telegram.Token != "plain-token" {
+	if cfg.Bots[0].Env["T_KEY"] != "plain-token" {
 		t.Fatalf("env not expanded in memory")
 	}
 	b := BotConfig{ID: "b"}
@@ -176,7 +176,6 @@ func TestEnsureStarterConfig(t *testing.T) {
 }
 
 func TestScheduleConfigNormalizationAndValidation(t *testing.T) {
-	t.Setenv("TEST_TG_CHAT", "123456789")
 	t.Setenv("TEST_ROUTINE_MODEL", "magpie/mac-mini/auto/flash")
 
 	root := t.TempDir()
@@ -185,11 +184,10 @@ func TestScheduleConfigNormalizationAndValidation(t *testing.T) {
 		ID: "assistant",
 		Schedules: []ScheduleConfig{
 			{
-				Name:                 "Morning Brief",
-				DailyAt:              "09:00",
-				Prompt:               "summarize todo",
-				Model:                "${TEST_ROUTINE_MODEL}",
-				NotifyTelegramChatID: "${TEST_TG_CHAT}",
+				Name:    "Morning Brief",
+				DailyAt: "09:00",
+				Prompt:  "summarize todo",
+				Model:   "${TEST_ROUTINE_MODEL}",
 			},
 			{
 				Name:         "晨间简报",
@@ -209,9 +207,6 @@ func TestScheduleConfigNormalizationAndValidation(t *testing.T) {
 
 	if bot.Schedules[0].ID != "morning-brief" {
 		t.Fatalf("expected slugified ID morning-brief, got %q", bot.Schedules[0].ID)
-	}
-	if bot.Schedules[0].NotifyTelegramChatID != "123456789" {
-		t.Fatalf("expected expanded NotifyTelegramChatID 123456789, got %q", bot.Schedules[0].NotifyTelegramChatID)
 	}
 	if bot.Schedules[0].Model != "magpie/mac-mini/auto/flash" {
 		t.Fatalf("expected expanded Model, got %q", bot.Schedules[0].Model)

@@ -19,13 +19,13 @@
 
 - **A persistent bot team on your machine.** Built strictly around `1 Bot = 1 Workspace = 1 Session`: every bot gets its own directory, `AGENTS.md` instructions, serialized execution queue, and long-lived session.
 - **Bring your own agent runtime.** Drives **OpenCode**, **Claude Code**, **Pi**, and **DeepSeek Harness (`dsh`)** directly on your computer—routed through **Magpie** with automatic quota fallback, or running on the CLI subscriptions you already pay for.
-- **Local data, reachable anywhere.** One Go binary ships the Web UI, Telegram long-polling, scheduled routines, and a **Tailcat** peer-to-peer tunnel—no public IP, no Tailscale account, and no system VPN required.
+- **Local data, reachable anywhere.** One Go binary ships the Web UI, scheduled routines, and a **Tailcat** peer-to-peer tunnel—no public IP, no Tailscale account, and no system VPN required.
 
 ## Cool features
 
 ### Isolated workspaces, shared memory: `1 Bot = 1 Workspace = 1 Session`
 
-Mixing daily tasks, deep research, and ops checks in a single chat thread pollutes context fast. `bot-hub` gives every bot an isolated workspace on disk, one persistent session, and a dedicated serial lane (`botLane`): messages from the Web UI, Telegram, schedules, or other bots run in order without stepping on each other, and any running turn can be interrupted on the spot.
+Mixing daily tasks, deep research, and ops checks in a single chat thread pollutes context fast. `bot-hub` gives every bot an isolated workspace on disk, one persistent session, and a dedicated serial lane (`botLane`): messages from the Web UI, schedules, or other bots run in order without stepping on each other, and any running turn can be interrupted on the spot.
 
 Every workspace also symlinks a shared `_shared/` folder while keeping its own `memory/` directory. Write your preferences once in `_shared/USER.md` and every bot reads them; save ongoing decisions in `memory/` and they survive even when a session is reset.
 
@@ -34,7 +34,7 @@ Every workspace also symlinks a shared `_shared/` folder while keeping its own `
 
 ```text
 bot-hub/
-├── config/bots.json              # Bot roster, model access, Telegram & schedules (keeps ${VAR} refs)
+├── config/bots.json              # Bot roster, model access & schedules (keeps ${VAR} refs)
 ├── state/
 │   ├── hub.db                    # SQLite store (active + archived sessions, FTS5 message search)
 │   ├── sessions.json             # Legacy session snapshot (auto-imported on first run)
@@ -140,10 +140,10 @@ Bot-to-bot calls enforce `hop <= 4` loop protection and appear live in **both** 
 
 ### Proactive routines: It reaches out when it matters
 
-Bots do not just wait in a browser tab. Built-in `schedules` wake a bot up at a fixed interval (`everyMinutes`) or time of day (`dailyAt`) to review `memory/`, check ongoing work, and push a brief straight to Telegram. External scripts, CI pipelines, and monitors can also wake any bot on demand through `/hooks/{id}`.
+Bots do not just wait in a browser tab. Built-in `schedules` wake a bot up at a fixed interval (`everyMinutes`) or time of day (`dailyAt`) to review `memory/`, check ongoing work, and deliver receipts or notifications to the main session. External scripts, CI pipelines, and monitors can also wake any bot on demand through `/hooks/{id}`.
 
 <details>
-<summary><b>Configuration:</b> multi-bot setup, Telegram allowlists, and daily briefs in <code>config/bots.json</code></summary>
+<summary><b>Configuration:</b> multi-bot setup and daily briefs in <code>config/bots.json</code></summary>
 
 ```json
 {
@@ -161,16 +161,11 @@ Bots do not just wait in a browser tab. Built-in `schedules` wake a bot up at a 
       "name": "Personal Assistant",
       "description": "Daily tasks, notes, and personal briefings",
       "harness": "opencode",
-      "telegram": {
-        "token": "${TELEGRAM_ASSISTANT_TOKEN}",
-        "allowedUserIds": ["${TELEGRAM_OWNER_USER_ID}"]
-      },
       "schedules": [
         {
           "name": "morning-brief",
           "dailyAt": "09:00",
           "prompt": "Check today's priorities and open items in memory/, then write a concise morning brief.",
-          "notifyTelegramChatId": "${TELEGRAM_OWNER_USER_ID}",
           "enabled": true
         }
       ]
@@ -205,7 +200,7 @@ make build
 # 2. (Optional) Create your local config from the example
 cp config/bots.example.json config/bots.json
 
-# 3. Start Web UI, HTTP/SSE API, Telegram pollers, and scheduler
+# 3. Start Web UI, HTTP/SSE API, and scheduler
 ./bin/bot-hub serve
 ```
 
@@ -252,7 +247,7 @@ To reach a `bot-hub` running at home or in the office from your laptop:
 
 | Command | Description |
 | --- | --- |
-| `bot-hub serve [-config path]` | Start Web UI, HTTP/SSE API, Telegram pollers, and scheduler |
+| `bot-hub serve [-config path]` | Start Web UI, HTTP/SSE API, and scheduler |
 | `bot-hub chat [-config path] [bot]` | Interactive terminal chat (`/status`, `/reset`, `/bots`, `/ask`, `/exit`) |
 | `bot-hub status [-config path]` | Show configured bots, workspaces, and persisted session stats |
 | `bot-hub connect [-listen addr] <link>` | Expose a remote `bot-hub` over Tailcat on a local address (default `127.0.0.1:3790`) |
@@ -299,7 +294,7 @@ To reach a `bot-hub` running at home or in the office from your laptop:
   </tr>
   <tr>
     <td><a href="config/bots.example.json"><code>config/bots.example.json</code></a></td>
-    <td>Starter configuration with multiple bots, Telegram allowlists, and scheduled routines.</td>
+    <td>Starter configuration with multiple bots and scheduled routines.</td>
   </tr>
 </table>
 
@@ -307,7 +302,6 @@ To reach a `bot-hub` running at home or in the office from your laptop:
 
 - **CSRF & DNS-rebinding protection:** Every request checks `Origin` and rejects cross-origin calls; when bound to a loopback address, the server also validates `Host` against loopback names.
 - **API token enforcement:** When `http.apiToken` (e.g. `${BOT_HUB_API_TOKEN}`) is set, `/api/*` requires `Authorization: Bearer <token>` or a `SameSite=Strict`, `HttpOnly` login cookie. Binding to a non-loopback `host` without `http.apiToken` refuses to start. Bots' `bot-hub mcp` subprocesses receive the token automatically.
-- **Telegram allowlists:** Each Telegram bot must configure `allowedUserIds` or `allowedChatIds`; polling will not start when both are empty.
 - **Authenticated Tailcat tunnel:** Enabling `http.tailcat.enabled` requires `http.apiToken`, and every tunneled request must present the token. The `tailcat://` link embeds the server identity key—share it only with your own devices; delete `state/tailcat-identity.json` and restart to revoke old links immediately. Tailscale's public DERP map is used by default, or point `derpMapURL` at a self-hosted DERP server.
 - **Webhook & secret hygiene:** `http.webhookSecret` is verified in constant time on `/hooks/{id}`. Creating or updating bots rewrites `config/bots.json` from the unexpanded source so `${VAR}` references never turn into plaintext secrets on disk.
 

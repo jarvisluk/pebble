@@ -113,8 +113,6 @@ export default function BotChatScreen() {
   const [rtEvery, setRtEvery] = useState('60');
   const [rtDaily, setRtDaily] = useState('09:00');
   const [rtDelivery, setRtDelivery] = useState<RoutineDelivery>('receipt');
-  const [rtModel, setRtModel] = useState('');
-  const [rtTgChat, setRtTgChat] = useState('');
   const [rtPrompt, setRtPrompt] = useState('');
   const [rtEnabled, setRtEnabled] = useState(true);
   const [rtSaving, setRtSaving] = useState(false);
@@ -181,8 +179,6 @@ export default function BotChatScreen() {
     setRtEvery(rt?.everyMinutes && rt.everyMinutes > 0 ? String(rt.everyMinutes) : '60');
     setRtDaily(rt?.dailyAt || '09:00');
     setRtDelivery(rt?.mainDelivery || 'receipt');
-    setRtModel(rt?.model || '');
-    setRtTgChat(rt?.notifyTelegramChatId || '');
     setRtPrompt(rt?.prompt || '');
     setRtEnabled(rt ? rt.enabled : true);
     setRtShowForm(true);
@@ -218,9 +214,7 @@ export default function BotChatScreen() {
         everyMinutes,
         dailyAt,
         prompt,
-        model: rtModel.trim(),
         mainDelivery: rtDelivery,
-        notifyTelegramChatId: rtTgChat.trim(),
         enabled: rtEnabled,
       };
       if (rtEditId) {
@@ -1006,22 +1000,6 @@ export default function BotChatScreen() {
                           </Pressable>
                         ))}
                       </View>
-                      <TextInput
-                        value={rtModel}
-                        onChangeText={setRtModel}
-                        placeholder={t('rtModelPh')}
-                        placeholderTextColor={theme.mute}
-                        autoCapitalize="none"
-                        style={[styles.editInput, { backgroundColor: theme.card, color: theme.text, fontFamily: MONO_FONT }]}
-                      />
-                      <TextInput
-                        value={rtTgChat}
-                        onChangeText={setRtTgChat}
-                        placeholder={t('rtTgChatPh')}
-                        placeholderTextColor={theme.mute}
-                        autoCapitalize="none"
-                        style={[styles.editInput, { backgroundColor: theme.card, color: theme.text, fontFamily: MONO_FONT }]}
-                      />
                       <TextInput
                         value={rtPrompt}
                         onChangeText={setRtPrompt}

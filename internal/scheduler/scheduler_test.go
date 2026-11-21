@@ -65,18 +65,6 @@ func (f *fakeRoutineHarness) RunTurn(ctx context.Context, opts harness.RunOption
 	}, nil
 }
 
-type fakeNotifier struct {
-	mu    sync.Mutex
-	calls []string
-}
-
-func (n *fakeNotifier) Notify(_ context.Context, bot config.BotConfig, sched config.ScheduleConfig, text string) error {
-	n.mu.Lock()
-	n.calls = append(n.calls, bot.ID+"/"+sched.EffectiveID()+":"+text)
-	n.mu.Unlock()
-	return nil
-}
-
 func newTestSchedulerHub(t *testing.T, fh *fakeRoutineHarness) (*hub.Hub, *state.Store) {
 	t.Helper()
 	tmp := t.TempDir()
@@ -102,8 +90,7 @@ func newTestSchedulerHub(t *testing.T, fh *fakeRoutineHarness) (*hub.Hub, *state
 func TestSchedulerSilentReceiptNotifyNoneAndOverlap(t *testing.T) {
 	fh := &fakeRoutineHarness{reply: "`NO_REPLY`"}
 	h, store := newTestSchedulerHub(t, fh)
-	notif := &fakeNotifier{}
-	s := New(h, notif)
+	s := New(h)
 	h.SetOnSchedulesChanged(s.Sync)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -116,13 +103,12 @@ func TestSchedulerSilentReceiptNotifyNoneAndOverlap(t *testing.T) {
 	// 1. Add routine via Hub (hot-reload arms it)
 	enabled := true
 	r1, err := h.CreateRoutine("ops", config.ScheduleConfig{
-		ID:                   "disk",
-		Name:                 "Disk Check",
-		EveryMinutes:         30,
-		Prompt:               "check df",
-		MainDelivery:         "receipt",
-		NotifyTelegramChatID: "1001",
-		Enabled:              &enabled,
+		ID:           "disk",
+		Name:         "Disk Check",
+		EveryMinutes: 30,
+		Prompt:       "check df",
+		MainDelivery: "receipt",
+		Enabled:      &enabled,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -132,21 +118,16 @@ func TestSchedulerSilentReceiptNotifyNoneAndOverlap(t *testing.T) {
 		t.Fatalf("expected armed job with NextRunAt after CreateRoutine, got %+v", stMap)
 	}
 
-	// 2. NO_REPLY -> status=silent, no Telegram, no timeline message, no main turn
+	// 2. NO_REPLY -> status=silent, no timeline message, no main turn
 	res, err := s.RunNow(ctx, "ops", "disk")
 	if err != nil || res.Status != "silent" {
 		t.Fatalf("expected silent run, got %+v err=%v", res, err)
 	}
-	notif.mu.Lock()
-	if len(notif.calls) != 0 {
-		t.Fatalf("expected 0 telegram notifications for NO_REPLY, got %v", notif.calls)
-	}
-	notif.mu.Unlock()
 	if msgs, _ := h.Messages("ops", 10); len(msgs) != 0 {
 		t.Fatalf("expected 0 timeline messages for NO_REPLY, got %+v", msgs)
 	}
 
-	// 3. Real output with receipt delivery -> Telegram + timeline message, NO main session wakeup yet
+	// 3. Real output with receipt delivery -> timeline message, NO main session wakeup yet
 	fh.mu.Lock()
 	fh.reply = "告警：根分区 92%"
 	fh.mu.Unlock()
@@ -154,11 +135,6 @@ func TestSchedulerSilentReceiptNotifyNoneAndOverlap(t *testing.T) {
 	if err != nil || res.Status != "ok" {
 		t.Fatalf("expected ok run, got %+v err=%v", res, err)
 	}
-	notif.mu.Lock()
-	if len(notif.calls) != 1 {
-		t.Fatalf("expected 1 telegram notification, got %v", notif.calls)
-	}
-	notif.mu.Unlock()
 	msgs, _ := h.Messages("ops", 10)
 	if len(msgs) != 1 || msgs[0].From != "routine:Disk Check" {
 		t.Fatalf("expected timeline receipt message, got %+v", msgs)

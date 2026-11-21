@@ -837,32 +837,30 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 }
 
 type routineDTO struct {
-	ID                   string            `json:"id"`
-	Name                 string            `json:"name"`
-	EveryMinutes         int               `json:"everyMinutes,omitempty"`
-	DailyAt              string            `json:"dailyAt,omitempty"`
-	Prompt               string            `json:"prompt"`
-	Model                string            `json:"model,omitempty"`
-	MainDelivery         string            `json:"mainDelivery"`
-	NotifyTelegramChatID string            `json:"notifyTelegramChatId,omitempty"`
-	Enabled              bool              `json:"enabled"`
-	Running              bool              `json:"running"`
-	NextRunAt            string            `json:"nextRunAt,omitempty"`
-	LastRun              *state.RoutineRun `json:"lastRun,omitempty"`
+	ID           string            `json:"id"`
+	Name         string            `json:"name"`
+	EveryMinutes int               `json:"everyMinutes,omitempty"`
+	DailyAt      string            `json:"dailyAt,omitempty"`
+	Prompt       string            `json:"prompt"`
+	Model        string            `json:"model,omitempty"`
+	MainDelivery string            `json:"mainDelivery"`
+	Enabled      bool              `json:"enabled"`
+	Running      bool              `json:"running"`
+	NextRunAt    string            `json:"nextRunAt,omitempty"`
+	LastRun      *state.RoutineRun `json:"lastRun,omitempty"`
 }
 
 func (s *HTTPServer) buildRoutineDTO(botID string, sc config.ScheduleConfig, rt map[string]scheduler.RoutineRuntimeStatus) routineDTO {
 	rid := sc.EffectiveID()
 	dto := routineDTO{
-		ID:                   rid,
-		Name:                 sc.Name,
-		EveryMinutes:         sc.EveryMinutes,
-		DailyAt:              sc.DailyAt,
-		Prompt:               sc.Prompt,
-		Model:                sc.Model,
-		MainDelivery:         sc.EffectiveMainDelivery(),
-		NotifyTelegramChatID: sc.NotifyTelegramChatID,
-		Enabled:              sc.IsEnabled(),
+		ID:           rid,
+		Name:         sc.Name,
+		EveryMinutes: sc.EveryMinutes,
+		DailyAt:      sc.DailyAt,
+		Prompt:       sc.Prompt,
+		Model:        sc.Model,
+		MainDelivery: sc.EffectiveMainDelivery(),
+		Enabled:      sc.IsEnabled(),
 	}
 	if st, ok := rt[rid]; ok {
 		dto.Running = st.Running

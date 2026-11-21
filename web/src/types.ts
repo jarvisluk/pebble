@@ -157,7 +157,6 @@ export interface RoutineItem {
   prompt: string;
   model?: string;
   mainDelivery: 'receipt' | 'notify' | 'none' | string;
-  notifyTelegramChatId?: string;
   enabled: boolean;
   running?: boolean;
   nextRunAt?: string;

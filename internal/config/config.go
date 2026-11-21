@@ -19,15 +19,14 @@ const (
 )
 
 type ScheduleConfig struct {
-	ID                   string `json:"id,omitempty"`
-	Name                 string `json:"name"`
-	EveryMinutes         int    `json:"everyMinutes,omitempty"`
-	DailyAt              string `json:"dailyAt,omitempty"` // "HH:MM" local time
-	Prompt               string `json:"prompt"`
-	Model                string `json:"model,omitempty"`
-	MainDelivery         string `json:"mainDelivery,omitempty"` // "receipt" (default) | "notify" | "none"
-	NotifyTelegramChatID string `json:"notifyTelegramChatId,omitempty"`
-	Enabled              *bool  `json:"enabled,omitempty"`
+	ID           string `json:"id,omitempty"`
+	Name         string `json:"name"`
+	EveryMinutes int    `json:"everyMinutes,omitempty"`
+	DailyAt      string `json:"dailyAt,omitempty"` // "HH:MM" local time
+	Prompt       string `json:"prompt"`
+	Model        string `json:"model,omitempty"`
+	MainDelivery string `json:"mainDelivery,omitempty"` // "receipt" (default) | "notify" | "none"
+	Enabled      *bool  `json:"enabled,omitempty"`
 }
 
 func (s ScheduleConfig) IsEnabled() bool {
@@ -117,12 +116,6 @@ func slugifyRoutineID(name string) string {
 	return slug
 }
 
-type TelegramBotConfig struct {
-	Token          string   `json:"token"`
-	AllowedUserIDs []string `json:"allowedUserIds,omitempty"`
-	AllowedChatIDs []string `json:"allowedChatIds,omitempty"`
-}
-
 type BotConfig struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
@@ -132,14 +125,13 @@ type BotConfig struct {
 	Model       string `json:"model,omitempty"`
 	// ModelInherited is true when Model came from the hub default rather
 	// than the bot's own config.
-	ModelInherited bool               `json:"-"`
-	Agent          string             `json:"agent,omitempty"`
-	AutoApprove     *bool              `json:"autoApprove,omitempty"` // default: true
-	TimeoutSec      int                `json:"timeoutSec,omitempty"`  // default: 300
-	PrivateSessions bool               `json:"privateSessions,omitempty"`
-	Env             map[string]string  `json:"env,omitempty"`
-	Telegram       *TelegramBotConfig `json:"telegram,omitempty"`
-	Schedules      []ScheduleConfig   `json:"schedules,omitempty"`
+	ModelInherited  bool              `json:"-"`
+	Agent           string            `json:"agent,omitempty"`
+	AutoApprove     *bool             `json:"autoApprove,omitempty"` // default: true
+	TimeoutSec      int               `json:"timeoutSec,omitempty"`  // default: 300
+	PrivateSessions bool              `json:"privateSessions,omitempty"`
+	Env             map[string]string `json:"env,omitempty"`
+	Schedules       []ScheduleConfig  `json:"schedules,omitempty"`
 }
 
 func (b BotConfig) ShouldAutoApprove() bool {
@@ -417,15 +409,6 @@ func NormalizeBot(b *BotConfig, cfg *HubConfig) {
 	for k, v := range b.Env {
 		b.Env[k] = expandEnv(v)
 	}
-	if b.Telegram != nil {
-		b.Telegram.Token = expandEnv(b.Telegram.Token)
-		for j := range b.Telegram.AllowedUserIDs {
-			b.Telegram.AllowedUserIDs[j] = expandEnv(b.Telegram.AllowedUserIDs[j])
-		}
-		for j := range b.Telegram.AllowedChatIDs {
-			b.Telegram.AllowedChatIDs[j] = expandEnv(b.Telegram.AllowedChatIDs[j])
-		}
-	}
 	b.Schedules = NormalizeSchedules(b.Schedules)
 }
 
@@ -441,7 +424,6 @@ func NormalizeSchedules(in []ScheduleConfig) []ScheduleConfig {
 		sc.Name = strings.TrimSpace(sc.Name)
 		sc.DailyAt = strings.TrimSpace(sc.DailyAt)
 		sc.Model = strings.TrimSpace(expandEnv(sc.Model))
-		sc.NotifyTelegramChatID = strings.TrimSpace(expandEnv(sc.NotifyTelegramChatID))
 		sc.MainDelivery = sc.EffectiveMainDelivery()
 		baseID := sc.EffectiveID()
 		if n, exists := usedIDs[baseID]; exists {

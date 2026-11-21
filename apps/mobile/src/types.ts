@@ -197,7 +197,6 @@ export interface RoutineItem {
   prompt: string;
   model?: string;
   mainDelivery: RoutineDelivery;
-  notifyTelegramChatId?: string;
   enabled: boolean;
   running: boolean;
   nextRunAt?: string;
@@ -212,6 +211,5 @@ export interface RoutineUpsertInput {
   prompt: string;
   model?: string;
   mainDelivery?: RoutineDelivery;
-  notifyTelegramChatId?: string;
   enabled?: boolean;
 }

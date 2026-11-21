@@ -37,7 +37,7 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
   detail,
   bots,
   settings,
-  models,
+  models: _models,
   routineRefreshSeq,
   lang,
   onClose,
@@ -81,8 +81,6 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
   const [rtEvery, setRtEvery] = useState('60');
   const [rtDaily, setRtDaily] = useState('09:00');
   const [rtDelivery, setRtDelivery] = useState('receipt');
-  const [rtModel, setRtModel] = useState('');
-  const [rtTgChat, setRtTgChat] = useState('');
   const [rtPrompt, setRtPrompt] = useState('');
   const [rtEnabled, setRtEnabled] = useState(true);
   const [rtSaving, setRtSaving] = useState(false);
@@ -200,8 +198,6 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
     setRtEvery((rt?.everyMinutes || 0) > 0 ? String(rt?.everyMinutes) : '60');
     setRtDaily(rt?.dailyAt || '09:00');
     setRtDelivery(rt?.mainDelivery || 'receipt');
-    setRtModel(rt?.model || '');
-    setRtTgChat(rt?.notifyTelegramChatId || '');
     setRtPrompt(rt?.prompt || '');
     setRtEnabled(rt ? rt.enabled !== false : true);
     setRtFormOpen(true);
@@ -238,9 +234,7 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
       everyMinutes,
       dailyAt,
       prompt,
-      model: rtModel.trim(),
       mainDelivery: rtDelivery,
-      notifyTelegramChatId: rtTgChat.trim(),
       enabled: rtEnabled,
     };
     try {
@@ -302,8 +296,6 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
       if (e instanceof Error && e.message !== 'unauthorized') setMemErr(e.message);
     }
   };
-
-  const modelSuggestions = detail?.harness ? models[detail.harness] || [] : [];
 
   return (
     <aside id="panel" className={`panel${open ? ' open' : ''}`} aria-label={t('botDetails')} style={botAccentStyle}>
@@ -529,40 +521,6 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
                     <option value="notify">{t('rtDeliveryNotifyFull')}</option>
                     <option value="none">{t('rtDeliveryNoneFull')}</option>
                   </select>
-                </div>
-                <div className="two">
-                  <div className="fld">
-                    <label>
-                      {t('rtModelOverride')} <em>{t('rtOptional')}</em>
-                    </label>
-                    <input
-                      id="pRtModel"
-                      className="mono"
-                      list="pRtModelList"
-                      placeholder={t('rtModelPh')}
-                      spellCheck={false}
-                      value={rtModel}
-                      onChange={(e) => setRtModel(e.target.value)}
-                    />
-                    <datalist id="pRtModelList">
-                      {modelSuggestions.map((m) => (
-                        <option key={m} value={m} />
-                      ))}
-                    </datalist>
-                  </div>
-                  <div className="fld">
-                    <label>
-                      Telegram Chat ID <em>{t('rtOptional')}</em>
-                    </label>
-                    <input
-                      id="pRtTgChat"
-                      className="mono"
-                      placeholder="${TELEGRAM_OWNER_USER_ID}"
-                      spellCheck={false}
-                      value={rtTgChat}
-                      onChange={(e) => setRtTgChat(e.target.value)}
-                    />
-                  </div>
                 </div>
                 <div className="fld">
                   <label>{t('rtPrompt')}</label>
