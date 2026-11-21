@@ -257,6 +257,9 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
           } else if (type === 'bot_created' && payload?.id) {
             const st = payload as BotStatus;
             setBots((prev) => (prev.some((b) => b.id === st.id) ? prev : [...prev, st]));
+          } else if (type === 'bot_deleted') {
+            const bid = payload?.id || payload?.botId;
+            if (bid) removeBotState(String(bid));
           } else if (type === 'nodes_changed' && Array.isArray(payload?.nodes)) {
             setNodes(payload.nodes);
           } else if (type === 'takeover' && Array.isArray(payload?.items)) {
@@ -265,7 +268,7 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
         },
       });
     },
-    [pushIncomingMessage]
+    [pushIncomingMessage, removeBotState]
   );
 
   const connectProfile = useCallback(
@@ -581,6 +584,30 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
     []
   );
 
+  const updateBot = useCallback(
+    async (botId: string, body: { name?: string; description?: string; instructions?: string }) => {
+      const st = await apiRequest<BotStatus>(
+        baseURLRef.current,
+        authTokenRef.current,
+        `/api/bots/${encodeURIComponent(botId)}`,
+        { method: 'PATCH', body }
+      );
+      setBots((prev) => prev.map((b) => (b.id === st.id ? st : b)));
+      return st;
+    },
+    []
+  );
+
+  const deleteBot = useCallback(
+    async (botId: string) => {
+      await apiRequest(baseURLRef.current, authTokenRef.current, `/api/bots/${encodeURIComponent(botId)}`, {
+        method: 'DELETE',
+      });
+      removeBotState(botId);
+    },
+    [removeBotState]
+  );
+
   const loadSettings = useCallback(async () => {
     const s = await apiRequest<SettingsData>(baseURLRef.current, authTokenRef.current, '/api/settings');
     setSettings(s);
@@ -600,15 +627,22 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
 
   const saveSettings = useCallback(
     async (opts: {
-      defaultModelChanged: boolean;
+      settingsChanged: boolean;
       defaultModel: string;
+      defaultModels: Record<string, string>;
+      sharedUserMd: string;
       botUpdates: { id: string; harness: string; model: string }[];
     }) => {
-      if (opts.defaultModelChanged) {
-        await apiRequest(baseURLRef.current, authTokenRef.current, '/api/settings', {
+      if (opts.settingsChanged) {
+        const s = await apiRequest<SettingsData>(baseURLRef.current, authTokenRef.current, '/api/settings', {
           method: 'PUT',
-          body: { defaultModel: opts.defaultModel, defaultModels: {} },
+          body: {
+            defaultModel: opts.defaultModel,
+            defaultModels: opts.defaultModels,
+            sharedUserMd: opts.sharedUserMd,
+          },
         });
+        setSettings(s);
       }
       for (const u of opts.botUpdates) {
         const st = await apiRequest<BotStatus>(
@@ -785,6 +819,8 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
         resetBot,
         getBotDetail,
         createBot,
+        updateBot,
+        deleteBot,
         loadSettings,
         loadModels,
         saveSettings,

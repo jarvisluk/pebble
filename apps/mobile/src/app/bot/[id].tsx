@@ -52,6 +52,8 @@ export default function BotChatScreen() {
     interruptBot,
     resetBot,
     getBotDetail,
+    updateBot,
+    deleteBot,
     resolveTakeover,
   } = useHub();
 
@@ -64,10 +66,23 @@ export default function BotChatScreen() {
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detail, setDetail] = useState<BotDetail | null>(null);
+  const [editMode, setEditMode] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editDesc, setEditDesc] = useState('');
+  const [editInst, setEditInst] = useState('');
+  const [editSaving, setEditSaving] = useState(false);
+  const [editErr, setEditErr] = useState('');
   const [sendErr, setSendErr] = useState('');
 
   const listRef = useRef<FlatList<ChatMessage>>(null);
   const inputRef = useRef<React.ComponentRef<typeof TextInput>>(null);
+
+  useEffect(() => {
+    if (bots.length > 0 && !bot) {
+      setDetailOpen(false);
+      router.replace('/');
+    }
+  }, [bot, bots.length]);
 
   useEffect(() => {
     if (!botId) return;
@@ -89,7 +104,7 @@ export default function BotChatScreen() {
   const modelLabel = useMemo(() => {
     if (bot?.model) return bot.model;
     if (settings && bot?.harness) {
-      return resolveDefaultModel(settings.defaultModel, bot.harness) || bot.harness;
+      return settings.defaultModels?.[bot.harness] || resolveDefaultModel(settings.defaultModel, bot.harness) || bot.harness;
     }
     return bot?.harness || '默认';
   }, [bot, settings]);
@@ -103,6 +118,8 @@ export default function BotChatScreen() {
   }, [bot?.busy, botId, modelLabel, tools]);
 
   const handleOpenDetail = useCallback(async () => {
+    setEditMode(false);
+    setEditErr('');
     setDetailOpen(true);
     setDetailLoading(true);
     try {
@@ -114,6 +131,57 @@ export default function BotChatScreen() {
       setDetailLoading(false);
     }
   }, [botId, getBotDetail]);
+
+  const enterEditMode = () => {
+    const src = detail || bot;
+    setEditName(src?.name || botId);
+    setEditDesc(src?.description || '');
+    setEditInst(detail?.instructions || '');
+    setEditErr('');
+    setEditMode(true);
+  };
+
+  const onSaveEdit = async () => {
+    const trimmed = editName.trim();
+    if (!trimmed) {
+      setEditErr('名称不能为空');
+      return;
+    }
+    setEditErr('');
+    setEditSaving(true);
+    try {
+      await updateBot(botId, {
+        name: trimmed,
+        description: editDesc.trim(),
+        instructions: editInst,
+      });
+      const fresh = await getBotDetail(botId);
+      setDetail(fresh);
+      setEditMode(false);
+    } catch (err: any) {
+      setEditErr(err?.message || '保存失败');
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
+  const handleDeleteConfirm = () => {
+    if (bots.length <= 1) return;
+    confirmAction(
+      `删除 ${bot?.name || botId}？`,
+      '将从配置中移除此 Bot 并停止其队列，磁盘上的 workspace 与历史文件会保留。',
+      async () => {
+        try {
+          await deleteBot(botId);
+          setDetailOpen(false);
+          router.replace('/');
+        } catch (err: any) {
+          setEditErr(err?.message || '删除失败');
+        }
+      },
+      true
+    );
+  };
 
   const handleSendText = useCallback(
     async (raw: string, restoreOnError = false) => {
@@ -488,81 +556,161 @@ export default function BotChatScreen() {
         visible={detailOpen}
         animationType="slide"
         presentationStyle={Platform.OS === 'ios' ? 'pageSheet' : 'fullScreen'}
-        onRequestClose={() => setDetailOpen(false)}
+        onRequestClose={() => {
+          setEditMode(false);
+          setDetailOpen(false);
+        }}
       >
         <View style={[styles.modalRoot, { backgroundColor: theme.page }]}>
-          <ModalHeader title="Bot 详情" onClose={() => setDetailOpen(false)} />
-          <ScrollView contentContainerStyle={styles.detailScroll}>
-            <View style={[styles.detailCard, { backgroundColor: theme.card }]}>
-              <View style={styles.detailTop}>
-                <BotAvatar id={botId} size={76} index={botIndex} />
-                <View style={styles.detailTitleCol}>
-                  <Text style={[styles.detailName, { color: theme.text }]}>
-                    {activeDetail?.name || botId}
-                  </Text>
-                  <Text style={[styles.detailId, { color: theme.mute, fontFamily: MONO_FONT }]}>
-                    @{botId}
-                  </Text>
-                </View>
+          {editMode ? (
+            <ModalHeader
+              title="编辑 Bot"
+              closeLabel="取消"
+              onClose={() => {
+                setEditMode(false);
+                setEditErr('');
+              }}
+              rightLabel="保存"
+              onRightPress={() => void onSaveEdit()}
+              rightDisabled={!editName.trim() || editSaving}
+              rightLoading={editSaving}
+            />
+          ) : (
+            <ModalHeader
+              title="Bot 详情"
+              onClose={() => setDetailOpen(false)}
+              rightLabel="编辑"
+              onRightPress={enterEditMode}
+              rightDisabled={detailLoading}
+            />
+          )}
+          <ScrollView contentContainerStyle={styles.detailScroll} keyboardShouldPersistTaps="handled">
+            {editErr ? (
+              <View style={[styles.errBanner, { backgroundColor: theme.pink, marginHorizontal: 0 }]}>
+                <Text style={[styles.errTxt, { color: theme.danger }]}>{editErr}</Text>
               </View>
-              {activeDetail?.description ? (
-                <Text style={[styles.detailDesc, { color: theme.text2 }]}>
-                  {activeDetail.description}
-                </Text>
-              ) : null}
+            ) : null}
+            {editMode ? (
+              <>
+                <View style={[styles.detailCard, { backgroundColor: theme.card }]}>
+                  <Text style={[styles.sectionLabel, { color: theme.mute }]}>名称</Text>
+                  <TextInput
+                    value={editName}
+                    onChangeText={setEditName}
+                    placeholder="Bot 名称"
+                    placeholderTextColor={theme.mute}
+                    style={[styles.editInput, { backgroundColor: theme.s1, color: theme.text }]}
+                  />
+                  <Text style={[styles.sectionLabel, { color: theme.mute }]}>简介（可选）</Text>
+                  <TextInput
+                    value={editDesc}
+                    onChangeText={setEditDesc}
+                    placeholder="一句话说明它负责什么"
+                    placeholderTextColor={theme.mute}
+                    style={[styles.editInput, { backgroundColor: theme.s1, color: theme.text }]}
+                  />
+                </View>
 
-              <View style={styles.statGrid}>
-                <View style={[styles.statPill, { backgroundColor: theme.s1 }]}>
-                  <Text style={[styles.statLbl, { color: theme.mute }]}>轮次</Text>
-                  <Text style={[styles.statVal, { color: theme.text }]}>
-                    {activeDetail?.session?.turnCount || 0}
+                <View style={[styles.detailCard, { backgroundColor: theme.card }]}>
+                  <Text style={[styles.sectionLabel, { color: theme.mute }]}>AGENTS.md</Text>
+                  <TextInput
+                    value={editInst}
+                    onChangeText={setEditInst}
+                    placeholder="# Bot 指令…"
+                    placeholderTextColor={theme.mute}
+                    multiline
+                    textAlignVertical="top"
+                    style={[
+                      styles.editInput,
+                      styles.editTextarea,
+                      { backgroundColor: theme.s1, color: theme.text, fontFamily: MONO_FONT },
+                    ]}
+                  />
+                </View>
+              </>
+            ) : (
+              <>
+                <View style={[styles.detailCard, { backgroundColor: theme.card }]}>
+                  <View style={styles.detailTop}>
+                    <BotAvatar id={botId} size={76} index={botIndex} />
+                    <View style={styles.detailTitleCol}>
+                      <Text style={[styles.detailName, { color: theme.text }]}>
+                        {activeDetail?.name || botId}
+                      </Text>
+                      <Text style={[styles.detailId, { color: theme.mute, fontFamily: MONO_FONT }]}>
+                        @{botId}
+                      </Text>
+                    </View>
+                  </View>
+                  {activeDetail?.description ? (
+                    <Text style={[styles.detailDesc, { color: theme.text2 }]}>
+                      {activeDetail.description}
+                    </Text>
+                  ) : null}
+
+                  <View style={styles.statGrid}>
+                    <View style={[styles.statPill, { backgroundColor: theme.s1 }]}>
+                      <Text style={[styles.statLbl, { color: theme.mute }]}>轮次</Text>
+                      <Text style={[styles.statVal, { color: theme.text }]}>
+                        {activeDetail?.session?.turnCount || 0}
+                      </Text>
+                    </View>
+                    <View style={[styles.statPill, { backgroundColor: theme.s1 }]}>
+                      <Text style={[styles.statLbl, { color: theme.mute }]}>开销</Text>
+                      <Text style={[styles.statVal, { color: theme.text }]}>
+                        ${(activeDetail?.session?.totalCostUsd || 0).toFixed(4)}
+                      </Text>
+                    </View>
+                    <View style={[styles.statPill, { backgroundColor: theme.s1 }]}>
+                      <Text style={[styles.statLbl, { color: theme.mute }]}>后端</Text>
+                      <Text style={[styles.statVal, { color: theme.text }]}>
+                        {activeDetail?.harness || '-'}
+                      </Text>
+                    </View>
+                    <View style={[styles.statPill, { backgroundColor: theme.s1 }]}>
+                      <Text style={[styles.statLbl, { color: theme.mute }]}>模型</Text>
+                      <Text numberOfLines={1} style={[styles.statVal, { color: theme.text }]}>
+                        {activeDetail?.model || '默认'}
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+
+                <View style={[styles.detailCard, { backgroundColor: theme.card }]}>
+                  <Text style={[styles.sectionLabel, { color: theme.mute }]}>工作目录</Text>
+                  <Text selectable style={[styles.monoBlock, { color: theme.text2, fontFamily: MONO_FONT }]}>
+                    {activeDetail?.workspace || '-'}
                   </Text>
                 </View>
-                <View style={[styles.statPill, { backgroundColor: theme.s1 }]}>
-                  <Text style={[styles.statLbl, { color: theme.mute }]}>开销</Text>
-                  <Text style={[styles.statVal, { color: theme.text }]}>
-                    ${(activeDetail?.session?.totalCostUsd || 0).toFixed(4)}
-                  </Text>
-                </View>
-                <View style={[styles.statPill, { backgroundColor: theme.s1 }]}>
-                  <Text style={[styles.statLbl, { color: theme.mute }]}>后端</Text>
-                  <Text style={[styles.statVal, { color: theme.text }]}>
-                    {activeDetail?.harness || '-'}
-                  </Text>
-                </View>
-                <View style={[styles.statPill, { backgroundColor: theme.s1 }]}>
-                  <Text style={[styles.statLbl, { color: theme.mute }]}>模型</Text>
-                  <Text numberOfLines={1} style={[styles.statVal, { color: theme.text }]}>
-                    {activeDetail?.model || '默认'}
-                  </Text>
-                </View>
-              </View>
-            </View>
 
-            <View style={[styles.detailCard, { backgroundColor: theme.card }]}>
-              <Text style={[styles.sectionLabel, { color: theme.mute }]}>工作目录</Text>
-              <Text selectable style={[styles.monoBlock, { color: theme.text2, fontFamily: MONO_FONT }]}>
-                {activeDetail?.workspace || '-'}
-              </Text>
-            </View>
+                <View style={[styles.detailCard, { backgroundColor: theme.card }]}>
+                  <Text style={[styles.sectionLabel, { color: theme.mute }]}>AGENTS.md</Text>
+                  {detailLoading ? (
+                    <ActivityIndicator size="small" color={theme.accent} />
+                  ) : (
+                    <Text selectable style={[styles.instructionsTxt, { color: theme.text2 }]}>
+                      {detail?.instructions?.trim() ? detail.instructions : '未配置指令'}
+                    </Text>
+                  )}
+                </View>
 
-            <View style={[styles.detailCard, { backgroundColor: theme.card }]}>
-              <Text style={[styles.sectionLabel, { color: theme.mute }]}>AGENTS.md</Text>
-              {detailLoading ? (
-                <ActivityIndicator size="small" color={theme.accent} />
-              ) : (
-                <Text selectable style={[styles.instructionsTxt, { color: theme.text2 }]}>
-                  {detail?.instructions?.trim() ? detail.instructions : '未配置指令'}
-                </Text>
-              )}
-            </View>
+                <Pressable
+                  onPress={handleResetConfirm}
+                  style={[styles.dangerBtn, { backgroundColor: theme.s1 }]}
+                >
+                  <Text style={[styles.dangerBtnTxt, { color: theme.text }]}>重置会话</Text>
+                </Pressable>
 
-            <Pressable
-              onPress={handleResetConfirm}
-              style={[styles.dangerBtn, { backgroundColor: theme.pink }]}
-            >
-              <Text style={[styles.dangerBtnTxt, { color: theme.danger }]}>重置会话</Text>
-            </Pressable>
+                {bots.length > 1 && (
+                  <Pressable
+                    onPress={handleDeleteConfirm}
+                    style={[styles.dangerBtn, { backgroundColor: theme.pink }]}
+                  >
+                    <Text style={[styles.dangerBtnTxt, { color: theme.danger }]}>删除 Bot</Text>
+                  </Pressable>
+                )}
+              </>
+            )}
           </ScrollView>
         </View>
       </Modal>
@@ -865,5 +1013,16 @@ const styles = StyleSheet.create({
   dangerBtnTxt: {
     fontSize: 15,
     fontWeight: '700',
+  },
+  editInput: {
+    borderRadius: 14,
+    paddingHorizontal: 13,
+    paddingVertical: 10,
+    fontSize: 15,
+  },
+  editTextarea: {
+    minHeight: 200,
+    fontSize: 13,
+    lineHeight: 19,
   },
 });

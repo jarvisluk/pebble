@@ -17,15 +17,33 @@ import { BotAvatar } from '../components/BotAvatar';
 import { ModalHeader } from '../components/ModalHeader';
 import { confirmAction } from '../confirm';
 import { resolveDefaultModel, useHub } from '../store';
-import { MONO_FONT, useTheme } from '../theme';
+import { MONO_FONT, useTheme, useThemePref } from '../theme';
+import type { ThemePreference } from '../storage';
 
 interface BotDraft {
   harness: string;
   model: string;
 }
 
+function cleanModelsMap(src: Record<string, string> | undefined): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(src || {})) {
+    const trimmed = v.trim();
+    if (trimmed) out[k] = trimmed;
+  }
+  return out;
+}
+
+function mapsEqual(a: Record<string, string>, b: Record<string, string>): boolean {
+  const ka = Object.keys(a);
+  const kb = Object.keys(b);
+  if (ka.length !== kb.length) return false;
+  return ka.every((k) => a[k] === b[k]);
+}
+
 export default function SettingsScreen() {
   const theme = useTheme();
+  const { pref: themePref, setPref: setThemePref } = useThemePref();
   const {
     activeServer,
     bots,
@@ -43,6 +61,11 @@ export default function SettingsScreen() {
 
   const [defaultModel, setDefaultModel] = useState('');
   const [defaultModelTouched, setDefaultModelTouched] = useState(false);
+  const [defaultModelsDraft, setDefaultModelsDraft] = useState<Record<string, string>>({});
+  const [defaultModelsTouched, setDefaultModelsTouched] = useState(false);
+  const [perHarnessExpanded, setPerHarnessExpanded] = useState(false);
+  const [sharedUserMd, setSharedUserMd] = useState('');
+  const [sharedUserMdTouched, setSharedUserMdTouched] = useState(false);
   const [botDrafts, setBotDrafts] = useState<Record<string, BotDraft>>({});
   const [loadingModelsFor, setLoadingModelsFor] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -67,10 +90,20 @@ export default function SettingsScreen() {
     if (settings && !defaultModelTouched) {
       setDefaultModel(settings.defaultModel || '');
     }
+    if (settings && !defaultModelsTouched) {
+      const dm = cleanModelsMap(settings.defaultModels);
+      setDefaultModelsDraft(dm);
+      if (Object.keys(dm).length > 0) {
+        setPerHarnessExpanded(true);
+      }
+    }
+    if (settings && !sharedUserMdTouched) {
+      setSharedUserMd(settings.sharedUserMd || '');
+    }
     if (settings?.magpie?.presets?.length && !settings.magpie.presets.some((p) => p.id === provPreset)) {
       setProvPreset(settings.magpie.presets[0].id);
     }
-  }, [defaultModelTouched, provPreset, settings]);
+  }, [defaultModelTouched, defaultModelsTouched, provPreset, settings, sharedUserMdTouched]);
 
   useEffect(() => {
     setBotDrafts((prev) => {
@@ -113,8 +146,14 @@ export default function SettingsScreen() {
     return out;
   }, [botDrafts, bots]);
 
-  const defaultModelChanged = defaultModel.trim() !== (settings?.defaultModel || '');
-  const dirty = defaultModelChanged || botUpdates.length > 0;
+  const cleanedDraftPerHarness = useMemo(() => cleanModelsMap(defaultModelsDraft), [defaultModelsDraft]);
+  const cleanedBasePerHarness = useMemo(() => cleanModelsMap(settings?.defaultModels), [settings?.defaultModels]);
+
+  const settingsChanged =
+    defaultModel.trim() !== (settings?.defaultModel || '') ||
+    !mapsEqual(cleanedDraftPerHarness, cleanedBasePerHarness) ||
+    sharedUserMd.replace(/\s+$/, '') !== (settings?.sharedUserMd || '').replace(/\s+$/, '');
+  const dirty = settingsChanged || botUpdates.length > 0;
 
   const closeSheet = () => {
     if (router.canGoBack()) {
@@ -130,11 +169,15 @@ export default function SettingsScreen() {
     setSaving(true);
     try {
       await saveSettings({
-        defaultModelChanged,
+        settingsChanged,
         defaultModel: defaultModel.trim(),
+        defaultModels: cleanedDraftPerHarness,
+        sharedUserMd,
         botUpdates,
       });
       setDefaultModelTouched(false);
+      setDefaultModelsTouched(false);
+      setSharedUserMdTouched(false);
       setBotDrafts({});
       setSavedMsg('已保存');
     } catch (err: any) {
@@ -518,17 +561,58 @@ export default function SettingsScreen() {
           </View>
 
           <View style={[styles.card, { backgroundColor: theme.card }]}>
+            <Text style={[styles.sectionTitle, { color: theme.text }]}>外观</Text>
+            <View style={styles.segmentRow}>
+              {(
+                [
+                  { key: 'system', label: '跟随系统' },
+                  { key: 'light', label: '浅色' },
+                  { key: 'dark', label: '深色' },
+                ] as { key: ThemePreference; label: string }[]
+              ).map((opt) => (
+                <Pressable
+                  key={opt.key}
+                  onPress={() => setThemePref(opt.key)}
+                  style={[
+                    styles.segmentPill,
+                    { backgroundColor: themePref === opt.key ? theme.accentSoft : theme.s1 },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.segmentTxt,
+                      { color: themePref === opt.key ? theme.accent : theme.text2 },
+                    ]}
+                  >
+                    {opt.label}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+
+          <View style={[styles.card, { backgroundColor: theme.card }]}>
             <View style={styles.rowBetween}>
               <Text style={[styles.sectionTitle, { color: theme.text }]}>全局默认模型</Text>
-              <Pressable
-                disabled={loadingModelsFor === primaryHarness}
-                onPress={() => void onLoadModels(primaryHarness)}
-                style={[styles.smallBtn, { backgroundColor: theme.s1 }]}
-              >
-                <Text style={[styles.smallBtnTxt, { color: theme.text2 }]}>
-                  {loadingModelsFor === primaryHarness ? '加载中…' : '可选列表'}
-                </Text>
-              </Pressable>
+              <View style={styles.magpieActs}>
+                <Pressable
+                  onPress={() => setPerHarnessExpanded((v) => !v)}
+                  style={[styles.smallBtn, { backgroundColor: theme.s1 }]}
+                >
+                  <Text style={[styles.smallBtnTxt, { color: theme.accent }]}>
+                    {perHarnessExpanded ? '收起' : '按后端设置'}
+                  </Text>
+                </Pressable>
+                <Pressable
+                  disabled={loadingModelsFor === primaryHarness}
+                  onPress={() => void onLoadModels(primaryHarness)}
+                  style={[styles.smallBtn, { backgroundColor: theme.s1 }]}
+                >
+                  <Text style={[styles.smallBtnTxt, { color: theme.text2 }]}>
+                    {loadingModelsFor === primaryHarness ? '加载中…' : '可选列表'}
+                  </Text>
+                </Pressable>
+              </View>
             </View>
             <TextInput
               value={defaultModel}
@@ -543,6 +627,31 @@ export default function SettingsScreen() {
               autoCorrect={false}
               style={[styles.input, { backgroundColor: theme.s1, color: theme.text, fontFamily: MONO_FONT }]}
             />
+            {perHarnessExpanded && (
+              <View style={[styles.addProvBox, { backgroundColor: theme.s1 }]}>
+                <Text style={[styles.subLabel, { color: theme.text2 }]}>
+                  按 Harness 覆盖全局默认模型
+                </Text>
+                {harnessOptions.map((h) => (
+                  <View key={h.id} style={styles.perHarnessItem}>
+                    <Text style={[styles.magpieSub, { color: theme.mute }]}>{h.label || h.id}</Text>
+                    <TextInput
+                      value={defaultModelsDraft[h.id] || ''}
+                      onChangeText={(val) => {
+                        setDefaultModelsTouched(true);
+                        setSavedMsg('');
+                        setDefaultModelsDraft((prev) => ({ ...prev, [h.id]: val }));
+                      }}
+                      placeholder="留空跟随全局默认"
+                      placeholderTextColor={theme.mute}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      style={[styles.input, { backgroundColor: theme.card, color: theme.text, fontFamily: MONO_FONT }]}
+                    />
+                  </View>
+                ))}
+              </View>
+            )}
             {candidateModels.length > 0 && (
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.pillRow}>
                 {candidateModels.slice(0, 12).map((m) => (
@@ -583,7 +692,10 @@ export default function SettingsScreen() {
                     harness: b.harness,
                     model: b.modelInherited ? '' : b.model || '',
                   };
-                  const ph = resolveDefaultModel(defaultModel.trim(), draft.harness) || '继承默认模型';
+                  const ph =
+                    defaultModelsDraft[draft.harness]?.trim() ||
+                    resolveDefaultModel(defaultModel.trim(), draft.harness) ||
+                    '继承默认模型';
                   return (
                     <View key={b.id} style={[styles.botItem, { backgroundColor: theme.s1 }]}>
                       <View style={styles.botHead}>
@@ -642,6 +754,26 @@ export default function SettingsScreen() {
                 })}
               </View>
             )}
+          </View>
+
+          <View style={[styles.card, { backgroundColor: theme.card }]}>
+            <View style={styles.rowBetween}>
+              <Text style={[styles.sectionTitle, { color: theme.text }]}>全局共享记忆</Text>
+              <Text style={[styles.magpieSub, { color: theme.mute, fontFamily: MONO_FONT }]}>_shared/USER.md</Text>
+            </View>
+            <TextInput
+              value={sharedUserMd}
+              onChangeText={(val) => {
+                setSharedUserMdTouched(true);
+                setSavedMsg('');
+                setSharedUserMd(val);
+              }}
+              placeholder="记录你的常用偏好、身份背景或全局约定（所有 Bot 共读）…"
+              placeholderTextColor={theme.mute}
+              multiline
+              textAlignVertical="top"
+              style={[styles.input, styles.textArea, { backgroundColor: theme.s1, color: theme.text, fontFamily: MONO_FONT }]}
+            />
           </View>
 
           <View style={[styles.card, { backgroundColor: theme.card }]}>
@@ -722,6 +854,8 @@ const styles = StyleSheet.create({
   smallBtn: { borderRadius: 999, paddingHorizontal: 11, paddingVertical: 5 },
   smallBtnTxt: { fontSize: 12.5, fontWeight: '600' },
   input: { borderRadius: 14, paddingHorizontal: 13, paddingVertical: 10, fontSize: 15 },
+  textArea: { minHeight: 110, fontSize: 13, lineHeight: 19 },
+  perHarnessItem: { gap: 4 },
   pillRow: { gap: 8 },
   wrapRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   pill: { borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
