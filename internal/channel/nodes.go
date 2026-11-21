@@ -94,16 +94,6 @@ func (s *HTTPServer) handleNodeCall(w http.ResponseWriter, r *http.Request) {
 	if timeout <= 0 {
 		timeout = 60 * time.Second
 	}
-	if req.Action == "osascript" || req.Action == "open" || req.Action == "desktop_input" || req.Action == "desktop_focus" {
-		if nodeID != "" {
-			botName := req.BotID
-			if s.hub != nil && req.BotID != "" {
-				botName = s.hub.BotName(req.BotID)
-			}
-			s.desktopCoord().BeginAgentTool(nodeID, req.BotID, botName, req.Action)
-			defer s.desktopCoord().EndAgentTool(nodeID, req.BotID)
-		}
-	}
 	res, resolvedID, err := s.nodes().Call(r.Context(), nodeID, req.Action, req.Args, timeout)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})

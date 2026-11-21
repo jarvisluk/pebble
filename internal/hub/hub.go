@@ -11,7 +11,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"bot-hub/internal/config"
 	"bot-hub/internal/desktop"
@@ -199,15 +198,6 @@ func New(cfg *config.HubConfig, store *state.Store, messages *state.MessageStore
 		},
 		func(items []desktop.TakeoverRequest) {
 			h.broadcast(Event{Type: "takeover", Payload: map[string]any{"items": items}})
-		},
-		func(target string, enabled bool) {
-			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-			defer cancel()
-			if desktop.NormalizeTarget(target) == "local" {
-				_ = h.localDesk.SetStreamInput(ctx, enabled)
-				return
-			}
-			_, _, _ = h.nodes.Call(ctx, target, "desktop_stream_set_input", map[string]any{"enabled": enabled}, 3*time.Second)
 		},
 	)
 	for _, bot := range cfg.Bots {
@@ -1574,24 +1564,6 @@ func (h *Hub) SetDefaultModels(defaultModel string, perHarness map[string]string
 	return nil
 }
 
-// SetAllowLocalDesktop persists whether bots may drive the hub host's GUI desktop via MCP.
-func (h *Hub) SetAllowLocalDesktop(allow bool) error {
-	h.lanesMu.Lock()
-	defer h.lanesMu.Unlock()
-	val := allow
-	if h.cfg.ConfigPath != "" {
-		if err := config.UpdateRaw(h.cfg, func(raw *config.HubConfig) error {
-			v := allow
-			raw.AllowLocalDesktop = &v
-			return nil
-		}); err != nil {
-			return fmt.Errorf("save config: %w", err)
-		}
-	}
-	h.cfg.AllowLocalDesktop = &val
-	return nil
-}
-
 // OnboardingCompleted reports whether the first-run unbox wizard has been completed or skipped.
 func (h *Hub) OnboardingCompleted() bool {
 	h.lanesMu.RLock()
@@ -1639,7 +1611,6 @@ func (h *Hub) HasAnyConversation() bool {
 	}
 	return false
 }
-
 // SharedUserMD reads the shared _shared/USER.md memory file across all bots.
 func (h *Hub) SharedUserMD() string {
 	h.lanesMu.RLock()

@@ -308,62 +308,6 @@ func toolDefinitions() []map[string]any {
 			},
 		},
 		{
-			"name":        "node_desktop",
-			"description": "Interact with the GUI desktop on the local hub computer (nodeId='local') or a connected remote node inside the logged-in session: screenshot, osascript (macOS AppleScript/JXA), open app/URL/file, click, double_click, right_click, type text, press key combo, or scroll.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"nodeId": map[string]any{
-						"type":        "string",
-						"description": "Target node ID, or 'local' for the hub host desktop. Omit to auto-select the connected remote node (or 'local' when none are connected).",
-					},
-					"op": map[string]any{
-						"type":        "string",
-						"enum":        []string{"screenshot", "osascript", "open", "click", "double_click", "right_click", "type", "key", "scroll"},
-						"description": "Desktop action.",
-					},
-					"script": map[string]any{
-						"type":        "string",
-						"description": "AppleScript or JavaScript source (for op='osascript').",
-					},
-					"language": map[string]any{
-						"type":        "string",
-						"enum":        []string{"AppleScript", "JavaScript"},
-						"description": "Script language for op='osascript' (default AppleScript).",
-					},
-					"target": map[string]any{
-						"type":        "string",
-						"description": "File path or URL to open (for op='open').",
-					},
-					"app": map[string]any{
-						"type":        "string",
-						"description": "Application name to focus or open.",
-					},
-					"x": map[string]any{
-						"type":        "number",
-						"description": "Logical X coordinate on screen (for click/double_click/right_click/scroll).",
-					},
-					"y": map[string]any{
-						"type":        "number",
-						"description": "Logical Y coordinate on screen (for click/double_click/right_click/scroll).",
-					},
-					"deltaY": map[string]any{
-						"type":        "number",
-						"description": "Scroll amount (positive = up, negative = down, for op='scroll').",
-					},
-					"text": map[string]any{
-						"type":        "string",
-						"description": "Text to type (for op='type').",
-					},
-					"key": map[string]any{
-						"type":        "string",
-						"description": "Key or modifier combo like 'Return', 'Escape', 'cmd+c' (for op='key').",
-					},
-				},
-				"required": []string{"op"},
-			},
-		},
-		{
 			"name":        "request_takeover",
 			"description": "Pause automation and request a human to handle an interactive step (such as QR login, 2FA/OTP code, CAPTCHA, or payment confirmation) via the live Remote Desktop view. Blocks until the user clicks '完成并恢复 AI'.",
 			"inputSchema": map[string]any{
@@ -571,69 +515,6 @@ func (s *Server) callTool(ctx context.Context, name string, rawArgs json.RawMess
 			"content": args.Content,
 			"append":  args.Append,
 		}, 0)
-
-	case "node_desktop":
-		var args struct {
-			NodeID   string   `json:"nodeId"`
-			Op       string   `json:"op"`
-			Script   string   `json:"script"`
-			Language string   `json:"language"`
-			Target   string   `json:"target"`
-			App      string   `json:"app"`
-			X        *float64 `json:"x"`
-			Y        *float64 `json:"y"`
-			DeltaY   float64  `json:"deltaY"`
-			Text     string   `json:"text"`
-			Key      string   `json:"key"`
-		}
-		if err := json.Unmarshal(rawArgs, &args); err != nil || strings.TrimSpace(args.Op) == "" {
-			return "op is required", true
-		}
-		switch args.Op {
-		case "screenshot", "open":
-		case "osascript":
-			if strings.TrimSpace(args.Script) == "" {
-				return "script is required for osascript", true
-			}
-		case "click", "double_click", "right_click":
-			if args.X == nil || args.Y == nil {
-				return "x and y are required for " + args.Op, true
-			}
-		case "type":
-			if args.Text == "" {
-				return "text is required for type", true
-			}
-		case "key":
-			if strings.TrimSpace(args.Key) == "" {
-				return "key is required for key", true
-			}
-		case "scroll":
-		default:
-			return "unsupported op " + args.Op, true
-		}
-		payload := map[string]any{
-			"nodeId":   args.NodeID,
-			"botId":    s.selfBotID,
-			"op":       args.Op,
-			"script":   args.Script,
-			"language": args.Language,
-			"target":   args.Target,
-			"app":      args.App,
-			"x":        args.X,
-			"y":        args.Y,
-			"deltaY":   args.DeltaY,
-			"text":     args.Text,
-			"key":      args.Key,
-		}
-		body, err := s.doJSON(ctx, http.MethodPost, "/api/desktop/mcp", payload)
-		if err != nil {
-			return err.Error(), true
-		}
-		var res node.Result
-		if err := json.Unmarshal(body, &res); err != nil {
-			return prettyJSON(body), false
-		}
-		return formatNodeResult(args.Op, &res)
 
 	case "request_takeover":
 		var args struct {

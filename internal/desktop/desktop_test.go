@@ -2,59 +2,31 @@ package desktop
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"testing"
 	"time"
 )
 
-func TestCoordinatorScreenLockAndTakeover(t *testing.T) {
+func TestCoordinatorTakeover(t *testing.T) {
 	var mu sync.Mutex
-	var inputStates []bool
 	var takeovers []TakeoverRequest
+	var states []ScreenState
 
 	coord := NewCoordinator(
-		nil,
+		func(st ScreenState) {
+			mu.Lock()
+			states = append(states, st)
+			mu.Unlock()
+		},
 		func(list []TakeoverRequest) {
 			mu.Lock()
 			takeovers = list
 			mu.Unlock()
 		},
-		func(_ string, enabled bool) {
-			mu.Lock()
-			inputStates = append(inputStates, enabled)
-			mu.Unlock()
-		},
 	)
-	coord.grace = 40 * time.Millisecond
 
-	// Agent acquires screen -> human input locked.
-	coord.BeginAgentTool("local", "ops", "Ops", "click")
-	if st := coord.ScreenState("local"); st.Owner != "agent" || st.BotID != "ops" {
-		t.Fatalf("expected agent lock, got %+v", st)
-	}
-	if err := coord.CheckHumanInput("local"); !errors.Is(err, ErrAgentBusy) {
-		t.Fatalf("expected ErrAgentBusy while agent owns screen, got %v", err)
-	}
-
-	// EndAgentTool releases after grace window.
-	coord.EndAgentTool("local", "ops")
-	time.Sleep(80 * time.Millisecond)
 	if st := coord.ScreenState("local"); st.Owner != "idle" {
-		t.Fatalf("expected idle after grace window, got %+v", st)
-	}
-	if err := coord.CheckHumanInput("local"); err != nil {
-		t.Fatalf("expected human input allowed after grace, got %v", err)
-	}
-
-	// ForceTakeover returns active botID and unlocks input.
-	coord.BeginAgentTool("node-b", "ops", "Ops", "type")
-	paused := coord.ForceTakeover("node-b")
-	if paused != "ops" {
-		t.Fatalf("ForceTakeover paused=%q, want ops", paused)
-	}
-	if st := coord.ScreenState("node-b"); st.Owner != "human" {
-		t.Fatalf("expected human after ForceTakeover, got %+v", st)
+		t.Fatalf("expected initial idle state, got %+v", st)
 	}
 
 	// RequestTakeover blocks until ResolveTakeover wakes it.
@@ -79,6 +51,9 @@ func TestCoordinatorScreenLockAndTakeover(t *testing.T) {
 	if len(list) != 1 || list[0].Reason != "需要扫码登录" {
 		t.Fatalf("expected pending takeover, got %+v", list)
 	}
+	if st := coord.ScreenState("local"); st.Owner != "human" || st.BotID != "helper" {
+		t.Fatalf("expected human owner during takeover, got %+v", st)
+	}
 	if !coord.ResolveTakeover(list[0].ID, "已扫码完成") {
 		t.Fatalf("expected ResolveTakeover to return true")
 	}
@@ -92,11 +67,38 @@ func TestCoordinatorScreenLockAndTakeover(t *testing.T) {
 		t.Fatal("RequestTakeover did not unblock after ResolveTakeover")
 	}
 
+	if st := coord.ScreenState("local"); st.Owner != "idle" {
+		t.Fatalf("expected idle after resolve, got %+v", st)
+	}
+
+	// CancelTakeoversByBot aborts pending takeover cleanly.
+	cancelCh := make(chan error, 1)
+	go func() {
+		_, err := coord.RequestTakeover(context.Background(), "node-b", "ops", "Ops", "2FA", "")
+		cancelCh <- err
+	}()
+	for time.Now().Before(time.Now().Add(2 * time.Second)) {
+		if len(coord.ListTakeovers()) == 1 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	coord.CancelTakeoversByBot("ops")
+	select {
+	case err := <-cancelCh:
+		if err != context.Canceled {
+			t.Fatalf("expected context.Canceled after CancelTakeoversByBot, got %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("RequestTakeover did not abort after CancelTakeoversByBot")
+	}
+	if st := coord.ScreenState("node-b"); st.Owner != "idle" {
+		t.Fatalf("expected idle after cancel, got %+v", st)
+	}
+
 	mu.Lock()
 	_ = takeovers
-	if len(inputStates) == 0 {
-		t.Fatalf("expected SetInput callbacks to fire")
-	}
+	_ = states
 	mu.Unlock()
 }
 

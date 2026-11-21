@@ -7,7 +7,6 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Switch,
   Text,
   TextInput,
   View,
@@ -57,7 +56,6 @@ export default function SettingsScreen() {
     connectMagpie,
     disconnectMagpie,
     magpieProviderAction,
-    setAllowLocalDesktop,
     fetchMemories,
     saveMemory,
     deleteMemory,
@@ -972,16 +970,6 @@ export default function SettingsScreen() {
 
           <View style={[styles.card, { backgroundColor: theme.card }]}>
             <Text style={[styles.sectionTitle, { color: theme.text }]}>远程与设备</Text>
-            <View style={styles.rowBetween}>
-              <Text style={[styles.noteTxt, { color: theme.text }]}>允许 Bot 操控本机桌面</Text>
-              <Switch
-                value={settings?.allowLocalDesktop !== false}
-                onValueChange={(v) => {
-                  void setAllowLocalDesktop(v).catch((err: any) => setError(err?.message || '更新失败'));
-                }}
-                trackColor={{ false: theme.s2, true: theme.accent }}
-              />
-            </View>
             <View style={styles.rowBetween}>
               <View style={styles.connCol}>
                 <Text style={[styles.connLbl, { color: theme.text }]}>

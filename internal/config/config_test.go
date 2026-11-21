@@ -123,7 +123,9 @@ func TestPlatformInstructionsAndOpenCodeSync(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected _shared/BOT_HUB.md: %v", err)
 	}
-	if !strings.Contains(string(botHubMD), "recall_session") || !strings.Contains(string(botHubMD), "bot:<your-bot-id>") {
+	if !strings.Contains(string(botHubMD), "recall_session") || !strings.Contains(string(botHubMD), "bot:<your-bot-id>") ||
+		!strings.Contains(string(botHubMD), "agent-desktop") || !strings.Contains(string(botHubMD), "agent-browser") ||
+		!strings.Contains(string(botHubMD), "request_takeover") || strings.Contains(string(botHubMD), "node_desktop") {
 		t.Fatalf("unexpected BOT_HUB.md content:\n%s", botHubMD)
 	}
 	agentsMD, err := os.ReadFile(filepath.Join(cfg.Bots[0].Workspace, "AGENTS.md"))

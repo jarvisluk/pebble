@@ -265,7 +265,6 @@ try {
   }
   .desk-media[hidden] { display: none; }
   .desk-viewport.zoom1 .desk-media { width: auto; height: auto; max-width: none; max-height: none; margin: auto; }
-  .desk-stage.locked .desk-media { cursor: not-allowed; }
   .desk-media:focus { outline: 2px solid var(--accent); outline-offset: -2px; }
 
   .d-top-stack {
@@ -845,7 +844,7 @@ try {
                 <dt>模式</dt><dd id="ddMode">—</dd>
                 <dt>延迟</dt><dd id="ddRtt">—</dd>
                 <dt>分辨率</dt><dd id="ddRes">—</dd>
-                <dt>锁状态</dt><dd id="ddLock">空闲</dd>
+                <dt>状态</dt><dd id="ddLock">空闲</dd>
               </dl>
             </div>
 
@@ -1006,10 +1005,9 @@ try {
 
             <section class="set-card" id="localDeskBox">
               <div class="set-card-hd">
-                <h2>本机远程桌面与自动化</h2>
+                <h2>本机远程桌面</h2>
                 <span id="localDeskEngine" class="mp">检测中</span>
               </div>
-              <label class="perm" style="align-self:flex-start"><input type="checkbox" id="sAllowLocalDesk" />允许 Bot 通过 MCP 操控本机桌面（点击/输入/截图）</label>
             </section>
 
             <section class="set-card" id="remoteNodesBox">
@@ -2347,7 +2345,6 @@ function closeSettings() {
 
 function renderSettingsView(s, draft = null) {
   if (!s) return;
-  $('sAllowLocalDesk').checked = s.allowLocalDesktop !== false;
   $('sTheme').value = getThemePref();
   $('sDefaultModel').value = draft ? draft.defaultModel : (s.defaultModel || '');
   const perValues = draft ? (draft.defaultModels || {}) : (s.defaultModels || {});
@@ -2595,16 +2592,6 @@ function refreshRemoteTab() {
     $('localDeskEngine').className = 'mp' + (st?.status?.supported ? ' ok' : '');
   }).catch(() => { $('localDeskEngine').textContent = '不可用'; });
 }
-$('sAllowLocalDesk').onchange = async () => {
-  const next = $('sAllowLocalDesk').checked;
-  try {
-    state.settings = await api('/api/settings', { method: 'PUT', body: { allowLocalDesktop: next } });
-    toast(next ? '已允许 Bot 操控本机桌面' : '已关闭 Bot 操控本机桌面');
-  } catch (e) {
-    $('sAllowLocalDesk').checked = !next;
-    if (e.message !== 'unauthorized') $('remoteErr').textContent = e.message;
-  }
-};
 $('localNodeToggle').onclick = () => {
   if (!localNodeState) return;
   const next = !localNodeState.enabled;
@@ -3294,8 +3281,6 @@ async function resolveActiveTakeover() {
 }
 
 function deskSyncStatus() {
-  const busy = deskState.screen?.owner === 'agent';
-  $('deskStage').classList.toggle('locked', busy);
   const dot = $('deskStatusDot'), lbl = $('deskStatusLabel');
   if (deskState.mode === 'webrtc') {
     dot.className = 'd-dot ok';
@@ -3316,7 +3301,7 @@ function deskSyncStatus() {
   $('ddMode').textContent = deskState.mode === 'webrtc' ? 'WebRTC H.264' : deskState.mode === 'jpeg' ? 'HTTP JPEG 实时流' : deskState.mode;
   $('ddRtt').textContent = deskState.rtt ? `${deskState.rtt} ms` : '—';
   $('ddRes').textContent = deskState.res || '—';
-  $('ddLock').textContent = busy ? `AI 操作中 (${deskState.screen.tool || 'desktop'})` : (deskState.screen?.owner === 'human' ? '人工控制' : '空闲');
+  $('ddLock').textContent = deskState.screen?.owner === 'human' ? '人工接管' : '空闲';
 
   const to = activeTakeoverForView();
   const alertEl = $('deskAlert');
@@ -3327,20 +3312,6 @@ function deskSyncStatus() {
     $('deskAlertBtn').className = 'btn go';
     $('deskAlertBtn').textContent = '完成并恢复 AI';
     $('deskAlertBtn').onclick = () => resolveActiveTakeover();
-  } else if (busy) {
-    alertEl.hidden = false;
-    alertEl.classList.remove('takeover');
-    $('deskAlertText').textContent = `AI 正在操作屏幕（${deskState.screen.tool || 'desktop'}）`;
-    $('deskAlertBtn').className = 'btn bad';
-    $('deskAlertBtn').textContent = '强制接管';
-    $('deskAlertBtn').onclick = async () => {
-      try {
-        const res = await api('/api/desktop/force-takeover', { method: 'POST', body: { target: state.deskTarget } });
-        deskState.screen = res.screen || { owner: 'human' };
-        deskSyncStatus();
-        toast('已中断 AI 并恢复操控');
-      } catch (e) { if (e.message !== 'unauthorized') toast(e.message); }
-    };
   } else {
     alertEl.hidden = true;
   }
@@ -3417,7 +3388,7 @@ function selectedWinApp() {
 }
 
 function deskSendInput(ev, ephemeral = false) {
-  if (!state.deskOpen || deskState.screen?.owner === 'agent') return;
+  if (!state.deskOpen) return;
   if (deskState.mode === 'webrtc' && deskState.dc && deskState.dc.readyState === 'open') {
     if (ephemeral && deskState.dc.bufferedAmount > 65536) return;
     // Translate unified fields to bot-host RemoteInputEvent

@@ -66,32 +66,10 @@ func TestTelegramFailsClosed(t *testing.T) {
 	}
 }
 
-func TestDesktopLockAndTakeoverRoutes(t *testing.T) {
+func TestDesktopTakeoverRoutes(t *testing.T) {
 	s := NewHTTPServer(nil, config.HTTPConfig{Host: "127.0.0.1"})
 	defer s.Shutdown(t.Context())
 	mux := s.srv.Handler
-
-	// Lock screen by agent and confirm /api/desktop/input returns 409 Conflict.
-	s.desktopCoord().BeginAgentTool("local", "ops", "Ops", "click")
-	inReq := httptest.NewRequest(http.MethodPost, "/api/desktop/input", bytes.NewBufferString(`{"target":"local","kind":"click","x":10,"y":10}`))
-	inReq.Host = "127.0.0.1:3789"
-	inRec := httptest.NewRecorder()
-	mux.ServeHTTP(inRec, inReq)
-	if inRec.Code != http.StatusConflict {
-		t.Fatalf("expected 409 while agent owns screen, got %d (%s)", inRec.Code, inRec.Body.String())
-	}
-
-	// Force takeover unlocks screen lock.
-	ftReq := httptest.NewRequest(http.MethodPost, "/api/desktop/force-takeover", bytes.NewBufferString(`{"target":"local"}`))
-	ftReq.Host = "127.0.0.1:3789"
-	ftRec := httptest.NewRecorder()
-	mux.ServeHTTP(ftRec, ftReq)
-	if ftRec.Code != http.StatusOK {
-		t.Fatalf("force-takeover failed: %d %s", ftRec.Code, ftRec.Body.String())
-	}
-	if st := s.desktopCoord().ScreenState("local"); st.Owner != "human" {
-		t.Fatalf("expected human owner after force-takeover, got %+v", st)
-	}
 
 	// Blocking takeover/request resumes when takeover/resolve hits.
 	done := make(chan int, 1)
@@ -114,6 +92,9 @@ func TestDesktopLockAndTakeoverRoutes(t *testing.T) {
 	if len(list) != 1 {
 		t.Fatalf("expected 1 active takeover, got %d", len(list))
 	}
+	if st := s.desktopCoord().ScreenState("local"); st.Owner != "human" {
+		t.Fatalf("expected human owner during takeover, got %+v", st)
+	}
 
 	resReq := httptest.NewRequest(http.MethodPost, "/api/desktop/takeover/resolve", bytes.NewBufferString(`{"id":"`+list[0].ID+`","note":"ok-done"}`))
 	resReq.Host = "127.0.0.1:3789"
@@ -131,6 +112,9 @@ func TestDesktopLockAndTakeoverRoutes(t *testing.T) {
 	}
 	if code := <-done; code != http.StatusOK {
 		t.Fatalf("expected takeover/request 200 after resolve, got %d", code)
+	}
+	if st := s.desktopCoord().ScreenState("local"); st.Owner != "idle" {
+		t.Fatalf("expected idle owner after resolve, got %+v", st)
 	}
 }
 
@@ -171,8 +155,8 @@ func TestSettingsPreserveDefaultsAndDeleteBotRoute(t *testing.T) {
 	defer s.Shutdown(t.Context())
 	mux := s.srv.Handler
 
-	// Partial PUT /api/settings (only allowLocalDesktop + sharedUserMd) must preserve defaultModel & defaultModels.
-	req := httptest.NewRequest(http.MethodPut, "/api/settings", bytes.NewBufferString(`{"allowLocalDesktop":false,"sharedUserMd":"# User\nNotes"}`))
+	// Partial PUT /api/settings (only sharedUserMd) must preserve defaultModel & defaultModels.
+	req := httptest.NewRequest(http.MethodPut, "/api/settings", bytes.NewBufferString(`{"sharedUserMd":"# User\nNotes"}`))
 	req.Host = "127.0.0.1:3789"
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
@@ -180,16 +164,12 @@ func TestSettingsPreserveDefaultsAndDeleteBotRoute(t *testing.T) {
 		t.Fatalf("PUT /api/settings failed: %d %s", rec.Code, rec.Body.String())
 	}
 	var got struct {
-		AllowLocalDesktop bool              `json:"allowLocalDesktop"`
-		DefaultModel      string            `json:"defaultModel"`
-		DefaultModels     map[string]string `json:"defaultModels"`
-		SharedUserMD      string            `json:"sharedUserMd"`
+		DefaultModel  string            `json:"defaultModel"`
+		DefaultModels map[string]string `json:"defaultModels"`
+		SharedUserMD  string            `json:"sharedUserMd"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
-	}
-	if got.AllowLocalDesktop {
-		t.Fatal("expected allowLocalDesktop=false")
 	}
 	if got.DefaultModel != "global-model" || got.DefaultModels["claude"] != "claude-sonnet" {
 		t.Fatalf("expected defaults preserved, got model=%q models=%v", got.DefaultModel, got.DefaultModels)
