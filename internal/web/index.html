@@ -1518,6 +1518,8 @@ const I18N = {
     cmdAskDesc: '转给另一个 Bot',
     cmdResetDesc: '开新会话',
     deskConnecting: '正在连接桌面…',
+    deskScreenRecordingDenied: '缺少 macOS「屏幕录制」权限，请在「系统设置 → 隐私与安全性 → 录屏与系统录音」中允许 Bot Hub 后点击重试。',
+    deskAccessibilityHint: '（如需远程鼠标/键盘控制，还需开启「辅助功能」权限）',
     retryConnect: '重试连接',
     deskToggleDetails: '展开链路详情',
     deskPreparing: '准备中',
@@ -1884,6 +1886,8 @@ const I18N = {
     cmdAskDesc: 'Delegate to bot',
     cmdResetDesc: 'New session',
     deskConnecting: 'Connecting to desktop…',
+    deskScreenRecordingDenied: 'macOS Screen Recording permission is denied. Enable Bot Hub in System Settings → Privacy & Security → Screen & System Audio Recording, then retry.',
+    deskAccessibilityHint: ' (Enable Accessibility permission for mouse/keyboard control)',
     retryConnect: 'Retry',
     deskToggleDetails: 'Toggle link details',
     deskPreparing: 'Preparing',
@@ -4694,6 +4698,10 @@ async function startJpegFallback() {
       $('deskRetryBtn').hidden = false;
       $('deskCenterMsg').hidden = false;
       deskSyncStatus();
+      const msg = String(err.message || '');
+      if (err.status === 403 || msg.includes('屏幕录制') || msg.includes('Screen Recording') || msg.includes('screen_recording_denied')) {
+        break;
+      }
       await new Promise(r => setTimeout(r, 1800));
       continue;
     }
@@ -4716,6 +4724,14 @@ async function startDesktopStream() {
     deskState.screen = st.screen || { owner: 'idle' };
     state.takeovers = st.takeovers || state.takeovers;
     renderTakeovers();
+    if (st.status?.screenRecording === 'denied') {
+      deskState.mode = 'error';
+      $('deskCenterText').textContent = t('deskScreenRecordingDenied') + (st.status?.accessibility === 'denied' ? t('deskAccessibilityHint') : '');
+      $('deskRetryBtn').hidden = false;
+      $('deskCenterMsg').hidden = false;
+      deskSyncStatus();
+      return;
+    }
     deskRefreshWindows();
   } catch (err) {
     deskState.mode = 'error';

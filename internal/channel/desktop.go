@@ -212,7 +212,13 @@ func (s *HTTPServer) handleDesktopFrame(w http.ResponseWriter, r *http.Request) 
 	if target == "local" {
 		fr, err := s.localDesk().Frame(ctx, winID, maxDim, quality)
 		if err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			status := http.StatusBadRequest
+			payload := map[string]any{"error": err.Error()}
+			if errors.Is(err, desktop.ErrScreenRecordingDenied) {
+				status = http.StatusForbidden
+				payload["code"] = "screen_recording_denied"
+			}
+			writeJSON(w, status, payload)
 			return
 		}
 		writeJSON(w, http.StatusOK, fr)
@@ -294,7 +300,13 @@ func (s *HTTPServer) handleDesktopStreamOffer(w http.ResponseWriter, r *http.Req
 		}, 20*time.Second, &res)
 	}
 	if err != nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": err.Error()})
+		status := http.StatusServiceUnavailable
+		payload := map[string]any{"error": err.Error()}
+		if errors.Is(err, desktop.ErrScreenRecordingDenied) {
+			status = http.StatusForbidden
+			payload["code"] = "screen_recording_denied"
+		}
+		writeJSON(w, status, payload)
 		return
 	}
 	writeJSON(w, http.StatusOK, res)

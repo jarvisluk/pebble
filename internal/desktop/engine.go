@@ -78,16 +78,54 @@ type UnifiedInput struct {
 	App      string   `json:"app,omitempty"`
 }
 
+// ErrScreenRecordingDenied indicates macOS Screen Recording permission is not granted.
+var ErrScreenRecordingDenied = errors.New("缺少 macOS 屏幕录制权限，请在「系统设置 → 隐私与安全性 → 录屏与系统录音」中允许 Bot Hub 后重试")
+
 // Engine drives local desktop capture, WebRTC streaming, window inspection, and input injection,
 // preferring opencode-remote-desktop's native `bot-host` sidecar with OS fallback when absent.
 type Engine struct {
-	host     *botHostClient
-	wakeMu   sync.Mutex
-	lastWake time.Time
+	host      *botHostClient
+	wakeMu    sync.Mutex
+	lastWake  time.Time
+	permMu    sync.Mutex
+	srDenied  bool
+	srChecked time.Time
 }
 
 func NewEngine() *Engine {
 	return &Engine{host: newBotHostClient()}
+}
+
+func (e *Engine) recordScreenRecording(state string) {
+	if state == "" {
+		return
+	}
+	e.permMu.Lock()
+	e.srDenied = strings.EqualFold(state, "denied")
+	e.srChecked = time.Now()
+	e.permMu.Unlock()
+}
+
+func (e *Engine) isScreenRecordingDenied(ctx context.Context) bool {
+	if runtime.GOOS != "darwin" || !e.host.Available() {
+		return false
+	}
+	e.permMu.Lock()
+	if !e.srChecked.IsZero() && time.Since(e.srChecked) < 2*time.Second {
+		denied := e.srDenied
+		e.permMu.Unlock()
+		return denied
+	}
+	e.permMu.Unlock()
+
+	var hs struct {
+		ScreenRecording string `json:"screenRecording"`
+	}
+	if err := e.host.Request(ctx, "host.status", map[string]any{}, &hs); err == nil && hs.ScreenRecording != "" {
+		e.recordScreenRecording(hs.ScreenRecording)
+		return strings.EqualFold(hs.ScreenRecording, "denied")
+	}
+	return false
 }
 
 // wakeMacDisplay wakes the macOS display via caffeinate so ScreenCaptureKit has an active display
@@ -153,12 +191,16 @@ func (e *Engine) Status(ctx context.Context) (*HostStatus, error) {
 		}
 		var hs hostStatusPayload
 		err := e.host.Request(ctx, "host.status", map[string]any{}, &hs)
-		if (err == nil && len(hs.Displays) == 0 && runtime.GOOS == "darwin") || (err != nil && runtime.GOOS == "darwin") {
+		if err == nil {
+			e.recordScreenRecording(hs.ScreenRecording)
+		}
+		if ((err == nil && len(hs.Displays) == 0 && !strings.EqualFold(hs.ScreenRecording, "denied")) || err != nil) && runtime.GOOS == "darwin" {
 			if e.wakeMacDisplay(true) {
 				var hsRetry hostStatusPayload
 				if rerr := e.host.Request(ctx, "host.status", map[string]any{}, &hsRetry); rerr == nil {
 					hs = hsRetry
 					err = nil
+					e.recordScreenRecording(hs.ScreenRecording)
 				}
 			}
 		}
@@ -184,10 +226,14 @@ func (e *Engine) Status(ctx context.Context) (*HostStatus, error) {
 
 func (e *Engine) Windows(ctx context.Context) ([]WindowInfo, error) {
 	if e.host.Available() {
-		var list []WindowInfo
-		if err := e.host.Request(ctx, "window.list", map[string]any{}, &list); err == nil {
-			return list, nil
+		if e.isScreenRecordingDenied(ctx) {
+			return []WindowInfo{}, nil
 		}
+		var list []WindowInfo
+		if err := e.host.Request(ctx, "window.list", map[string]any{}, &list); err != nil {
+			return []WindowInfo{}, err
+		}
+		return list, nil
 	}
 	return listFallbackWindows(ctx)
 }
@@ -197,6 +243,9 @@ func (e *Engine) Focus(ctx context.Context, app, windowID string) error {
 }
 
 func (e *Engine) Frame(ctx context.Context, windowID string, maxDim, quality int) (*FrameResult, error) {
+	if e.isScreenRecordingDenied(ctx) {
+		return nil, ErrScreenRecordingDenied
+	}
 	if maxDim <= 0 {
 		maxDim = 1440
 	}
@@ -275,6 +324,9 @@ func (e *Engine) SendInput(ctx context.Context, ev UnifiedInput) error {
 func (e *Engine) StreamOffer(ctx context.Context, sdp, target string, fps, maxDim, bitrate int) (*StreamOfferResult, error) {
 	if !e.host.Available() {
 		return nil, errors.New("bot-host unavailable; using JPEG stream")
+	}
+	if e.isScreenRecordingDenied(ctx) {
+		return nil, ErrScreenRecordingDenied
 	}
 	e.wakeMacDisplay(false)
 	if fps <= 0 {

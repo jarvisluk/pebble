@@ -60,7 +60,12 @@ export default function DesktopScreen() {
     const pollState = async () => {
       try {
         const st = await fetchDesktopState(selectedTarget);
-        if (!stop && st?.screen) setScreen(st.screen);
+        if (stop) return;
+        if (st?.screen) setScreen(st.screen);
+        if (st?.status?.screenRecording === 'denied') {
+          setStreaming(false);
+          setError('缺少 macOS 屏幕录制权限，请在「系统设置 → 隐私与安全性 → 录屏与系统录音」中允许 Bot Hub 后重试');
+        }
       } catch {}
     };
     void pollState();
@@ -83,7 +88,12 @@ export default function DesktopScreen() {
           setError('');
         } catch (err: any) {
           if (cancelled) break;
-          setError(err?.message || t('captureFailed'));
+          const msg = String(err?.message || '');
+          setError(msg || t('captureFailed'));
+          if (err?.status === 403 || msg.includes('屏幕录制') || msg.includes('Screen Recording') || msg.includes('screen_recording_denied')) {
+            setStreaming(false);
+            break;
+          }
           await new Promise((r) => setTimeout(r, 1500));
         }
         await new Promise((r) => setTimeout(r, 140));

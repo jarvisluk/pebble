@@ -113,3 +113,22 @@ func TestToBotHostEvents(t *testing.T) {
 		t.Fatalf("unexpected key combo mapping: ok=%v evs=%+v", ok, kevs)
 	}
 }
+
+func TestEngineScreenRecordingDeniedCache(t *testing.T) {
+	eng := NewEngine()
+	eng.recordScreenRecording("denied")
+	eng.permMu.Lock()
+	if !eng.srDenied || eng.srChecked.IsZero() {
+		eng.permMu.Unlock()
+		t.Fatalf("expected srDenied=true and srChecked set")
+	}
+	eng.permMu.Unlock()
+
+	eng.recordScreenRecording("granted")
+	eng.permMu.Lock()
+	if eng.srDenied {
+		eng.permMu.Unlock()
+		t.Fatalf("expected srDenied=false after granted")
+	}
+	eng.permMu.Unlock()
+}

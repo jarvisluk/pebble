@@ -137,7 +137,11 @@ interface HubContextValue {
   refreshNodes: () => Promise<void>;
   refreshTailcat: () => Promise<TailcatStatus>;
   refreshDesktopTargets: () => Promise<DesktopTarget[]>;
-  fetchDesktopState: (target: string) => Promise<{ screen: ScreenState; takeovers: TakeoverRequest[] }>;
+  fetchDesktopState: (target: string) => Promise<{
+    screen: ScreenState;
+    takeovers: TakeoverRequest[];
+    status?: { screenRecording?: string; accessibility?: string };
+  }>;
   fetchDesktopFrame: (target: string, windowId?: string) => Promise<DesktopFrame>;
   sendDesktopInput: (body: Record<string, unknown>) => Promise<void>;
   resolveTakeover: (id: string, note?: string) => Promise<void>;
@@ -869,7 +873,11 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const fetchDesktopState = useCallback(async (target: string) => {
-    const d = await apiRequest<{ screen: ScreenState; takeovers: TakeoverRequest[] }>(
+    const d = await apiRequest<{
+      screen: ScreenState;
+      takeovers: TakeoverRequest[];
+      status?: { screenRecording?: string; accessibility?: string };
+    }>(
       baseURLRef.current,
       authTokenRef.current,
       `/api/desktop/state?target=${encodeURIComponent(target)}`
