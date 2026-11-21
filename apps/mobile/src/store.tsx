@@ -122,14 +122,12 @@ interface HubContextValue {
     protocol?: string;
     key?: string;
   }) => Promise<{ ok: boolean; output?: string }>;
-  setAllowLocalDesktop: (allow: boolean) => Promise<SettingsData>;
   refreshNodes: () => Promise<void>;
   refreshTailcat: () => Promise<TailcatStatus>;
   refreshDesktopTargets: () => Promise<DesktopTarget[]>;
   fetchDesktopState: (target: string) => Promise<{ screen: ScreenState; takeovers: TakeoverRequest[] }>;
   fetchDesktopFrame: (target: string, windowId?: string) => Promise<DesktopFrame>;
   sendDesktopInput: (body: Record<string, unknown>) => Promise<void>;
-  forceDesktopTakeover: (target: string) => Promise<void>;
   resolveTakeover: (id: string, note?: string) => Promise<void>;
 }
 
@@ -742,15 +740,6 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
     [loadSettings]
   );
 
-  const setAllowLocalDesktop = useCallback(async (allow: boolean) => {
-    const s = await apiRequest<SettingsData>(baseURLRef.current, authTokenRef.current, '/api/settings', {
-      method: 'PUT',
-      body: { allowLocalDesktop: allow },
-    });
-    setSettings(s);
-    return s;
-  }, []);
-
   const refreshNodes = useCallback(async () => {
     if (!baseURLRef.current) return;
     const d = await apiRequest<{ nodes: NodeInfo[] }>(baseURLRef.current, authTokenRef.current, '/api/nodes');
@@ -797,13 +786,6 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
     await apiRequest(baseURLRef.current, authTokenRef.current, '/api/desktop/input', {
       method: 'POST',
       body,
-    });
-  }, []);
-
-  const forceDesktopTakeover = useCallback(async (target: string) => {
-    await apiRequest(baseURLRef.current, authTokenRef.current, '/api/desktop/force-takeover', {
-      method: 'POST',
-      body: { target },
     });
   }, []);
 
@@ -866,14 +848,12 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
         connectMagpie,
         disconnectMagpie,
         magpieProviderAction,
-        setAllowLocalDesktop,
         refreshNodes,
         refreshTailcat,
         refreshDesktopTargets,
         fetchDesktopState,
         fetchDesktopFrame,
         sendDesktopInput,
-        forceDesktopTakeover,
         resolveTakeover,
       }}
     >

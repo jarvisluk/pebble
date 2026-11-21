@@ -59,7 +59,7 @@ Every bot automatically receives the built-in `bot-hub mcp` server (stdio JSON-R
 Bot-to-bot calls enforce `hop <= 4` loop protection and appear live in **both** bots' chat timelines. You can also delegate directly from any chat input with `/ask <bot> <message>`.
 
 <details>
-<summary><b>MCP tools:</b> four native primitives wired into every bot</summary>
+<summary><b>MCP tools:</b> native primitives wired into every bot (plus <code>agent-desktop</code> / <code>agent-browser</code> CLIs)</summary>
 
 <table>
   <tr>
@@ -83,6 +83,22 @@ Bot-to-bot calls enforce `hop <= 4` loop protection and appear live in **both** 
     <td>Sends a task to another bot and returns its reply, recording the exchange in both timelines (capped at <code>hop &lt;= 4</code>).</td>
   </tr>
   <tr>
+    <td><code>list_nodes</code></td>
+    <td>Lists connected remote computer nodes and their granted scopes (<code>files</code>, <code>exec</code>, <code>desktop</code>).</td>
+  </tr>
+  <tr>
+    <td><code>node_exec</code></td>
+    <td>Runs a shell command on a connected remote node (including remote <code>agent-desktop</code> / <code>agent-browser</code> calls).</td>
+  </tr>
+  <tr>
+    <td><code>node_file</code></td>
+    <td>Reads, writes, or lists files on a connected remote node.</td>
+  </tr>
+  <tr>
+    <td><code>request_takeover</code></td>
+    <td>Pauses automation and asks the user to complete QR login, 2FA, CAPTCHA, or payment in the Remote Desktop view until resumed.</td>
+  </tr>
+  <tr>
     <td><code>list_sessions</code></td>
     <td>Lists or searches active and archived sessions across accessible bots (includes <code>magpieSession</code> references).</td>
   </tr>
@@ -95,6 +111,8 @@ Bot-to-bot calls enforce `hop <= 4` loop protection and appear live in **both** 
     <td>Schedules archiving the current session after the turn finishes (with an optional <code>handoffNote</code>).</td>
   </tr>
 </table>
+
+<p>For GUI and web automation, bots call <code>agent-desktop</code> and <code>agent-browser</code> directly via shell (or via <code>node_exec</code> on remote nodes), preferring <code>agent-browser --auto-connect --pin-tab</code> to attach to the running Chromium browser before falling back to headless or headed isolated profiles.</p>
 
 </details>
 
@@ -221,14 +239,14 @@ Open <http://127.0.0.1:3789> in your browser. To chat or inspect sessions straig
 Best for everyday single-machine use, or as a native window connected to a remote `bot-hub`:
 
 ```bash
-# macOS: build ad-hoc signed bin/Bot Hub.app
+# macOS: build ad-hoc signed bin/Bot Hub.app (bundles agent-desktop, agent-browser, and optional bot-host into Contents/Resources/bin)
 make app
 
 # Other platforms: build native bin/bot-hub-desktop binary
 make desktop
 ```
 
-On first launch, pick how this computer should run (you can switch anytime from the menu bar icon):
+On macOS, the desktop app keeps system `PATH` binaries first and appends `Contents/Resources/bin` as a self-contained fallback, while automatically pointing `AGENT_BROWSER_EXECUTABLE_PATH` at your default Chromium browser (Edge/Chrome/Brave/Arc) when unset. On first launch, pick how this computer should run (you can switch anytime from the menu bar icon):
 
 1. **Run locally:** Initializes `config/bots.json`, `state/`, and `workspaces/` under your OS user config directory and starts the hub in-process.
 2. **Connect to a remote Bot Hub:** Paste a `tailcat://` link from another machine—no Tailscale installation required.

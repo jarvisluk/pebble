@@ -59,7 +59,7 @@ bot-hub/
 跨 Bot 调用自带 `hop <= 4` 防死循环保护，且双方的聊天时间线都会实时展示协作记录；你也可以在对话框里直接用 `/ask <bot> <消息>` 点名协作。
 
 <details>
-<summary><b>MCP 工具清单：</b>自动暴露给每个 Bot 的 4 个原生工具</summary>
+<summary><b>MCP 工具清单：</b>自动暴露给每个 Bot 的原生工具（配合 <code>agent-desktop</code> / <code>agent-browser</code> CLI）</summary>
 
 <table>
   <tr>
@@ -83,6 +83,22 @@ bot-hub/
     <td>向目标 Bot 发送任务并同步获取回复，双方聊天记录同步留痕（最大跳数 <code>hop &lt;= 4</code>）。</td>
   </tr>
   <tr>
+    <td><code>list_nodes</code></td>
+    <td>列出已连接的远端设备节点及其授权范围（<code>files</code>、<code>exec</code>、<code>desktop</code>）。</td>
+  </tr>
+  <tr>
+    <td><code>node_exec</code></td>
+    <td>在远端节点执行 Shell 命令（包括调用远端 <code>agent-desktop</code> / <code>agent-browser</code>）。</td>
+  </tr>
+  <tr>
+    <td><code>node_file</code></td>
+    <td>在远端节点读取、写入或列举文件。</td>
+  </tr>
+  <tr>
+    <td><code>request_takeover</code></td>
+    <td>遇到扫码登录、2FA、验证码或支付确认时暂停自动化，通知用户到远程桌面页面处理并恢复。</td>
+  </tr>
+  <tr>
     <td><code>list_sessions</code></td>
     <td>列举或检索当前/其他可访问 Bot 的历史与活跃会话（附带 <code>magpieSession</code> 引用）。</td>
   </tr>
@@ -95,6 +111,8 @@ bot-hub/
     <td>预约本轮结束后平滑归档当前会话并附带 <code>handoffNote</code> 交接摘要。</td>
   </tr>
 </table>
+
+<p>桌面与网页自动化直接复用 <code>agent-desktop</code> 与 <code>agent-browser</code> CLI（远端设备经 <code>node_exec</code> 调用）：浏览器优先用 <code>agent-browser --auto-connect --pin-tab</code> 接管正在运行的 Chromium 标签页，连不上时按需回退到无头模式或 <code>--headed --profile ~/.bot-hub/browser/&lt;bot-id&gt;</code>。</p>
 
 </details>
 
@@ -221,14 +239,14 @@ cp config/bots.example.json config/bots.json
 适合日常在单机使用，或作为轻量客户端连接另一台主机上的 `bot-hub`：
 
 ```bash
-# macOS：构建签名后的 bin/Bot Hub.app
+# macOS：构建签名后的 bin/Bot Hub.app（自动将 agent-desktop、agent-browser 与可选 bot-host 打入 Contents/Resources/bin）
 make app
 
 # 其他平台：构建原生桌面可执行文件 bin/bot-hub-desktop
 make desktop
 ```
 
-首次打开桌面端时可选择工作模式（之后可随时从系统菜单栏图标「切换模式…」更改）：
+macOS 桌面端采用「系统 `PATH` 优先、App 内置 `Contents/Resources/bin` 兜底」的混合策略，并在未指定 `AGENT_BROWSER_EXECUTABLE_PATH` 时自动探测系统默认 Chromium 浏览器（Edge/Chrome/Brave/Arc）。首次打开桌面端时可选择工作模式（之后可随时从系统菜单栏图标「切换模式…」更改）：
 
 1. **在这台电脑上运行**：在系统用户配置目录自动初始化 `config/bots.json`、`state/` 与 `workspaces/` 并启动本机服务。
 2. **连接远端 Bot Hub**：粘贴远端主机生成的 `tailcat://` 链接直接打开聊天界面，无需安装 Tailscale 或配置端口转发。

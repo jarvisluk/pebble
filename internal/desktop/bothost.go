@@ -44,9 +44,13 @@ func ResolveBotHost() string {
 		exeName = "bot-host.exe"
 	}
 	if exe, err := os.Executable(); err == nil {
-		cand := filepath.Join(filepath.Dir(exe), exeName)
-		if info, err := os.Stat(cand); err == nil && !info.IsDir() {
-			return cand
+		for _, cand := range []string{
+			filepath.Join(filepath.Dir(exe), exeName),
+			filepath.Join(filepath.Dir(exe), "..", "Resources", "bin", exeName),
+		} {
+			if info, err := os.Stat(cand); err == nil && !info.IsDir() {
+				return cand
+			}
 		}
 	}
 	if p, err := exec.LookPath("bot-host"); err == nil {

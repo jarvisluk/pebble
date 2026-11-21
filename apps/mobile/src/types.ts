@@ -91,7 +91,6 @@ export interface SettingsData {
       docs?: string;
     };
   };
-  allowLocalDesktop?: boolean;
   defaultModel: string;
   defaultModels?: Record<string, string>;
   sharedUserMd?: string;
@@ -120,11 +119,9 @@ export interface NodeInfo {
 
 export interface ScreenState {
   target: string;
-  owner: 'idle' | 'agent' | 'human';
+  owner: 'idle' | 'human';
   botId?: string;
   botName?: string;
-  tool?: string;
-  lockedAt?: string;
 }
 
 export interface TakeoverRequest {

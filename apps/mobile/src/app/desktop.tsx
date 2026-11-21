@@ -29,7 +29,6 @@ export default function DesktopScreen() {
     fetchDesktopState,
     fetchDesktopFrame,
     sendDesktopInput,
-    forceDesktopTakeover,
     resolveTakeover,
   } = useHub();
 
@@ -208,18 +207,6 @@ export default function DesktopScreen() {
               style={[styles.alertBtn, { backgroundColor: theme.accent }]}
             >
               <Text style={[styles.alertBtnTxt, { color: theme.accentText }]}>完成并恢复 AI</Text>
-            </Pressable>
-          </View>
-        ) : screen.owner === 'agent' ? (
-          <View style={[styles.alertCard, { backgroundColor: theme.card }]}>
-            <Text style={[styles.alertTxt, { color: theme.busy }]}>
-              AI 正在操作屏幕（{screen.tool || 'desktop'}）
-            </Text>
-            <Pressable
-              onPress={() => void forceDesktopTakeover(selectedTarget)}
-              style={[styles.alertBtn, { backgroundColor: theme.danger }]}
-            >
-              <Text style={[styles.alertBtnTxt, { color: '#fff' }]}>强制接管</Text>
             </Pressable>
           </View>
         ) : null}

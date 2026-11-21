@@ -598,6 +598,131 @@ func shellEnv() {
 		}
 	}
 	if home, err := os.UserHomeDir(); err == nil {
-		os.Setenv("PATH", os.Getenv("PATH")+string(os.PathListSeparator)+filepath.Join(home, ".opencode", "bin"))
+		os.Setenv("PATH", appendPathIfMissing(os.Getenv("PATH"), filepath.Join(home, ".opencode", "bin")))
 	}
+	if exe, err := os.Executable(); err == nil {
+		resBin := filepath.Clean(filepath.Join(filepath.Dir(exe), "..", "Resources", "bin"))
+		if info, err := os.Stat(resBin); err == nil && info.IsDir() {
+			os.Setenv("PATH", appendPathIfMissing(os.Getenv("PATH"), resBin))
+		}
+	}
+	if runtime.GOOS == "darwin" && strings.TrimSpace(os.Getenv("AGENT_BROWSER_EXECUTABLE_PATH")) == "" {
+		if p := detectDefaultChromiumExecutable(); p != "" {
+			os.Setenv("AGENT_BROWSER_EXECUTABLE_PATH", p)
+		}
+	}
+}
+
+func appendPathIfMissing(pathEnv, dir string) string {
+	dir = strings.TrimSpace(dir)
+	if dir == "" {
+		return pathEnv
+	}
+	cleanDir := filepath.Clean(dir)
+	var parts []string
+	found := false
+	for _, seg := range strings.Split(pathEnv, string(os.PathListSeparator)) {
+		if seg == "" {
+			continue
+		}
+		if filepath.Clean(seg) == cleanDir {
+			found = true
+		}
+		parts = append(parts, seg)
+	}
+	if !found {
+		parts = append(parts, cleanDir)
+	}
+	return strings.Join(parts, string(os.PathListSeparator))
+}
+
+var macChromiumApps = map[string]string{
+	"com.microsoft.edgemac":        "Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+	"com.google.chrome":            "Google Chrome.app/Contents/MacOS/Google Chrome",
+	"com.google.chrome.canary":     "Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary",
+	"com.brave.browser":            "Brave Browser.app/Contents/MacOS/Brave Browser",
+	"company.thebrowser.browser":   "Arc.app/Contents/MacOS/Arc",
+	"company.thebrowser.dia":       "Dia.app/Contents/MacOS/Dia",
+	"com.vivaldi.vivaldi":          "Vivaldi.app/Contents/MacOS/Vivaldi",
+	"org.chromium.chromium":        "Chromium.app/Contents/MacOS/Chromium",
+}
+
+var macChromiumFallbackBundles = []string{
+	"com.microsoft.edgemac",
+	"com.google.chrome",
+	"com.brave.browser",
+}
+
+func detectDefaultChromiumExecutable() string {
+	home, _ := os.UserHomeDir()
+	var plistJSON []byte
+	if home != "" {
+		plistPath := filepath.Join(home, "Library", "Preferences", "com.apple.LaunchServices", "com.apple.launchservices.secure.plist")
+		if _, err := os.Stat(plistPath); err == nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			if out, err := exec.CommandContext(ctx, "/usr/bin/plutil", "-convert", "json", "-o", "-", plistPath).Output(); err == nil {
+				plistJSON = out
+			}
+		}
+	}
+	return chromiumExecutableFromHandlers(plistJSON, home, func(p string) bool {
+		info, err := os.Stat(p)
+		return err == nil && !info.IsDir()
+	})
+}
+
+func chromiumExecutableFromHandlers(plistJSON []byte, home string, exists func(string) bool) string {
+	resolveBundle := func(bundleID string) string {
+		rel, ok := macChromiumApps[strings.ToLower(strings.TrimSpace(bundleID))]
+		if !ok {
+			return ""
+		}
+		candidates := []string{filepath.Join("/Applications", rel)}
+		if home != "" {
+			candidates = append(candidates, filepath.Join(home, "Applications", rel))
+		}
+		for _, c := range candidates {
+			if exists(c) {
+				return c
+			}
+		}
+		return ""
+	}
+
+	if len(plistJSON) > 0 {
+		var doc struct {
+			LSHandlers []struct {
+				RoleAll     string `json:"LSHandlerRoleAll"`
+				URLScheme   string `json:"LSHandlerURLScheme"`
+				ContentType string `json:"LSHandlerContentType"`
+			} `json:"LSHandlers"`
+		}
+		if json.Unmarshal(plistJSON, &doc) == nil {
+			var httpsBundle, browserBundle string
+			for _, h := range doc.LSHandlers {
+				switch strings.ToLower(strings.TrimSpace(h.URLScheme)) {
+				case "https":
+					if httpsBundle == "" {
+						httpsBundle = h.RoleAll
+					}
+				}
+				if strings.EqualFold(strings.TrimSpace(h.ContentType), "com.apple.default-app.web-browser") && browserBundle == "" {
+					browserBundle = h.RoleAll
+				}
+			}
+			for _, b := range []string{httpsBundle, browserBundle} {
+				if p := resolveBundle(b); p != "" {
+					return p
+				}
+			}
+		}
+	}
+
+	for _, b := range macChromiumFallbackBundles {
+		if p := resolveBundle(b); p != "" {
+			return p
+		}
+	}
+	return ""
 }

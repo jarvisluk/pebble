@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -19,7 +18,7 @@ func (s *HTTPServer) desktopCoord() *desktop.Coordinator {
 		return s.hub.Desktop()
 	}
 	s.deskOnce.Do(func() {
-		s.fallbackDesk = desktop.NewCoordinator(nil, nil, nil)
+		s.fallbackDesk = desktop.NewCoordinator(nil, nil)
 	})
 	return s.fallbackDesk
 }
@@ -29,7 +28,7 @@ func (s *HTTPServer) localDesk() *desktop.Engine {
 		return s.hub.LocalDesktop()
 	}
 	s.deskOnce.Do(func() {
-		s.fallbackDesk = desktop.NewCoordinator(nil, nil, nil)
+		s.fallbackDesk = desktop.NewCoordinator(nil, nil)
 	})
 	if s.fallbackEngine == nil {
 		s.fallbackEngine = desktop.NewEngine()
@@ -103,15 +102,9 @@ func (s *HTTPServer) handleDesktopTargets(w http.ResponseWriter, r *http.Request
 		})
 	}
 
-	allowLocal := true
-	if s.hub != nil {
-		allowLocal = s.hub.Config().LocalDesktopAllowed()
-	}
-
 	writeJSON(w, http.StatusOK, map[string]any{
-		"targets":           targets,
-		"takeovers":         coord.ListTakeovers(),
-		"allowLocalDesktop": allowLocal,
+		"targets":   targets,
+		"takeovers": coord.ListTakeovers(),
 	})
 }
 
@@ -191,10 +184,6 @@ func (s *HTTPServer) handleDesktopFocus(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	target := s.resolveDesktopTarget(r, body.Target)
-	if err := s.desktopCoord().CheckHumanInput(target); err != nil {
-		writeJSON(w, http.StatusConflict, map[string]any{"error": err.Error()})
-		return
-	}
 	ctx, cancel := context.WithTimeout(r.Context(), 6*time.Second)
 	defer cancel()
 	var err error
@@ -252,10 +241,6 @@ func (s *HTTPServer) handleDesktopInput(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	target := s.resolveDesktopTarget(r, body.Target)
-	if err := s.desktopCoord().CheckHumanInput(target); err != nil {
-		writeJSON(w, http.StatusConflict, map[string]any{"error": err.Error()})
-		return
-	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
@@ -311,13 +296,6 @@ func (s *HTTPServer) handleDesktopStreamOffer(w http.ResponseWriter, r *http.Req
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": err.Error()})
 		return
 	}
-	if s.desktopCoord().ScreenState(target).Owner == "agent" {
-		if target == "local" {
-			_ = s.localDesk().SetStreamInput(ctx, false)
-		} else {
-			_, _, _ = s.nodes().Call(ctx, target, "desktop_stream_set_input", map[string]any{"enabled": false}, 3*time.Second)
-		}
-	}
 	writeJSON(w, http.StatusOK, res)
 }
 
@@ -336,29 +314,6 @@ func (s *HTTPServer) handleDesktopStreamClose(w http.ResponseWriter, r *http.Req
 		_, _, _ = s.nodes().Call(ctx, target, "desktop_stream_close", map[string]any{"session": body.Session}, 5*time.Second)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
-}
-
-func (s *HTTPServer) handleDesktopForceTakeover(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Target string `json:"target"`
-		BotID  string `json:"botId"`
-	}
-	_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body)
-	target := s.resolveDesktopTarget(r, body.Target)
-	paused := s.desktopCoord().ForceTakeover(target)
-	if paused == "" {
-		paused = strings.TrimSpace(body.BotID)
-	}
-	interrupted := false
-	if paused != "" && s.hub != nil {
-		interrupted, _ = s.hub.Interrupt(paused)
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":             true,
-		"screen":         s.desktopCoord().ScreenState(target),
-		"interruptedBot": paused,
-		"interrupted":    interrupted,
-	})
 }
 
 func (s *HTTPServer) handleDesktopTakeovers(w http.ResponseWriter, _ *http.Request) {
@@ -413,167 +368,4 @@ func (s *HTTPServer) handleDesktopTakeoverResolve(w http.ResponseWriter, r *http
 	}
 	ok := s.desktopCoord().ResolveTakeover(key, body.Note)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": ok, "items": s.desktopCoord().ListTakeovers()})
-}
-
-// handleDesktopMCP executes Bot-initiated `node_desktop` operations uniformly across local and remote nodes,
-// updating ScreenLock while automation runs.
-func (s *HTTPServer) handleDesktopMCP(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		NodeID     string   `json:"nodeId"`
-		BotID      string   `json:"botId"`
-		Op         string   `json:"op"`
-		Script     string   `json:"script"`
-		Language   string   `json:"language"`
-		Target     string   `json:"target"`
-		App        string   `json:"app"`
-		X          *float64 `json:"x"`
-		Y          *float64 `json:"y"`
-		DeltaY     float64  `json:"deltaY"`
-		Text       string   `json:"text"`
-		Key        string   `json:"key"`
-		TimeoutSec int      `json:"timeoutSec"`
-	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json body"})
-		return
-	}
-	op := strings.TrimSpace(body.Op)
-	if op == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "op is required"})
-		return
-	}
-
-	target := strings.TrimSpace(body.NodeID)
-	if target == "" {
-		// If at least one remote node is connected, keep `_default` node resolution unless explicitly "local".
-		connectedNodes := 0
-		for _, n := range s.nodes().List() {
-			if n.Connected {
-				connectedNodes++
-			}
-		}
-		if connectedNodes == 0 {
-			target = "local"
-		}
-	}
-
-	isLocal := strings.EqualFold(target, "local")
-	if isLocal {
-		target = "local"
-		if s.hub != nil && !s.hub.Config().LocalDesktopAllowed() {
-			writeJSON(w, http.StatusForbidden, map[string]any{"error": "本机桌面操控已在「设置 › 远程与设备」中关闭"})
-			return
-		}
-	}
-
-	botName := body.BotID
-	if s.hub != nil && body.BotID != "" {
-		botName = s.hub.BotName(body.BotID)
-	}
-	lockTarget := target
-	if lockTarget == "" {
-		lockTarget = "_default"
-	}
-	if op != "screenshot" {
-		s.desktopCoord().BeginAgentTool(lockTarget, body.BotID, botName, op)
-		defer s.desktopCoord().EndAgentTool(lockTarget, body.BotID)
-	}
-
-	timeout := time.Duration(body.TimeoutSec) * time.Second
-	if timeout <= 0 {
-		timeout = 45 * time.Second
-	}
-	ctx, cancel := context.WithTimeout(r.Context(), timeout)
-	defer cancel()
-
-	if isLocal {
-		switch op {
-		case "screenshot":
-			fr, err := s.localDesk().Frame(ctx, "", 1920, 80)
-			if err != nil {
-				writeJSON(w, http.StatusOK, node.Result{NodeID: "local", OK: false, Error: err.Error()})
-				return
-			}
-			res := &node.Result{NodeID: "local", OK: true, MimeType: "image/jpeg", DataBase64: fr.JPEGBase64, Output: "captured local screen"}
-			if p, saveErr := s.saveNodeBinary(body.BotID, "local", res); saveErr == nil {
-				res.SavedPath = p
-				res.DataBase64 = ""
-			}
-			writeJSON(w, http.StatusOK, res)
-			return
-		case "osascript":
-			out, err := node.RunOSAScript(ctx, body.Script, body.Language)
-			if err != nil {
-				writeJSON(w, http.StatusOK, node.Result{NodeID: "local", OK: false, ExitCode: 1, Error: err.Error()})
-				return
-			}
-			writeJSON(w, http.StatusOK, node.Result{NodeID: "local", OK: true, Output: out})
-			return
-		case "open":
-			home, _ := os.UserHomeDir()
-			if err := node.OpenTarget(ctx, body.Target, body.App, home); err != nil {
-				writeJSON(w, http.StatusOK, node.Result{NodeID: "local", OK: false, Error: err.Error()})
-				return
-			}
-			writeJSON(w, http.StatusOK, node.Result{NodeID: "local", OK: true, Output: "opened"})
-			return
-		case "click", "double_click", "right_click", "type", "key", "scroll":
-			err := s.localDesk().SendInput(ctx, desktop.UnifiedInput{
-				Kind:   op,
-				X:      body.X,
-				Y:      body.Y,
-				DeltaY: body.DeltaY,
-				Text:   body.Text,
-				Key:    body.Key,
-				App:    body.App,
-			})
-			if err != nil {
-				writeJSON(w, http.StatusOK, node.Result{NodeID: "local", OK: false, Error: err.Error()})
-				return
-			}
-			writeJSON(w, http.StatusOK, node.Result{NodeID: "local", OK: true, Output: "ok"})
-			return
-		default:
-			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "unsupported desktop op " + op})
-			return
-		}
-	}
-
-	var action string
-	var args any
-	switch op {
-	case "screenshot":
-		action, args = "screenshot", map[string]any{}
-	case "osascript":
-		action, args = "osascript", map[string]any{"script": body.Script, "language": body.Language}
-	case "open":
-		action, args = "open", map[string]any{"target": body.Target, "app": body.App}
-	case "click", "double_click", "right_click", "type", "key", "scroll":
-		action = "desktop_input"
-		args = desktop.UnifiedInput{
-			Kind:   op,
-			X:      body.X,
-			Y:      body.Y,
-			DeltaY: body.DeltaY,
-			Text:   body.Text,
-			Key:    body.Key,
-			App:    body.App,
-		}
-	default:
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "unsupported desktop op " + op})
-		return
-	}
-
-	res, resolvedID, err := s.nodes().Call(ctx, target, action, args, timeout)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
-		return
-	}
-	if res != nil && res.OK && res.DataBase64 != "" {
-		if path, saveErr := s.saveNodeBinary(body.BotID, resolvedID, res); saveErr == nil {
-			res.SavedPath = path
-			res.DataBase64 = ""
-		}
-	}
-	writeJSON(w, http.StatusOK, res)
 }

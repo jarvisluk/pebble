@@ -103,7 +103,6 @@ type HubConfig struct {
 	// IDs); DefaultModels overrides it per harness.
 	DefaultModel      string            `json:"defaultModel,omitempty"`
 	DefaultModels     map[string]string `json:"defaultModels,omitempty"`
-	AllowLocalDesktop *bool             `json:"allowLocalDesktop,omitempty"` // default: true
 	OpenCodeServerURL string            `json:"opencodeServerUrl,omitempty"`
 	SharedDir         string            `json:"sharedDir,omitempty"`
 	StateFile         string            `json:"stateFile,omitempty"`
@@ -284,11 +283,6 @@ func NormalizeBot(b *BotConfig, cfg *HubConfig) {
 	}
 }
 
-// LocalDesktopAllowed reports whether bots may drive the hub host's GUI desktop via MCP.
-func (c *HubConfig) LocalDesktopAllowed() bool {
-	return c.AllowLocalDesktop == nil || *c.AllowLocalDesktop
-}
-
 // DefaultModelFor returns the model a bot of this harness inherits; empty
 // means the harness's own default.
 func (c *HubConfig) DefaultModelFor(harness string) string {
@@ -342,7 +336,14 @@ func PlatformInstructionsText() string {
 		"  - On a new session after `/reset` or an error, use `list_sessions` and `recall_session` (omit `sessionId` or pass `\"previous\"` for your prior session; keep slices small and fetch single oversized messages by `messageId` to avoid re-polluting context).",
 		"  - If `list_sessions` returns a `magpieSession` (e.g. `opencode:...` or `claude:...`) and you need raw tool transcripts, pass it to `magpie-sessions__read_session`.",
 		"  - When context gets noisy or off-track, call `rotate_session(handoffNote)` to cleanly archive this session after the turn.",
-		"- **Devices & Human Takeover**: `list_nodes`, `node_exec`, `node_file`, `node_desktop`, `request_takeover`.",
+		"- **Devices & Automation**:",
+		"  - Remote nodes (`bot-hub` MCP): `list_nodes`, `node_exec`, `node_file`.",
+		"  - Desktop GUI (`agent-desktop` CLI): operate apps via accessibility-tree `snapshot` + `@ref` instead of blind coordinates (run locally via shell, or remotely via `node_exec`).",
+		"  - Browser (`agent-browser` CLI, run locally or via `node_exec`):",
+		"    1. Prefer `agent-browser --auto-connect --pin-tab` to attach to the running Chromium browser in an isolated tab (reuses logins without stealing mouse/focus).",
+		"    2. If attach fails, use default headless mode for background/read-only work, or `--headed --profile ~/.bot-hub/browser/<bot-id>` when login or human visual takeover is needed.",
+		"    3. Pass `--session <bot-id>` to isolate state across bots.",
+		"  - Human takeover (`bot-hub` MCP): call `request_takeover(reason, ...)` on QR login, 2FA, CAPTCHA, or payment steps; it pauses until the user finishes on the Remote Desktop view and resumes you.",
 		"",
 	}, "\n")
 }

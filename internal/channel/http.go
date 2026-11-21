@@ -88,11 +88,9 @@ func NewHTTPServer(h *hub.Hub, cfg config.HTTPConfig) *HTTPServer {
 	mux.HandleFunc("POST /api/desktop/input", s.handleDesktopInput)
 	mux.HandleFunc("POST /api/desktop/stream/offer", s.handleDesktopStreamOffer)
 	mux.HandleFunc("POST /api/desktop/stream/close", s.handleDesktopStreamClose)
-	mux.HandleFunc("POST /api/desktop/force-takeover", s.handleDesktopForceTakeover)
 	mux.HandleFunc("GET /api/desktop/takeovers", s.handleDesktopTakeovers)
 	mux.HandleFunc("POST /api/desktop/takeover/request", s.handleDesktopTakeoverRequest)
 	mux.HandleFunc("POST /api/desktop/takeover/resolve", s.handleDesktopTakeoverResolve)
-	mux.HandleFunc("POST /api/desktop/mcp", s.handleDesktopMCP)
 
 	mux.HandleFunc("POST /api/login", s.handleLogin)
 	mux.HandleFunc("GET /api/tailcat", s.handleTailcat)
@@ -414,10 +412,9 @@ func (s *HTTPServer) handleInterrupt(w http.ResponseWriter, r *http.Request) {
 }
 
 type settingsBody struct {
-	DefaultModel      *string           `json:"defaultModel,omitempty"`
-	DefaultModels     map[string]string `json:"defaultModels,omitempty"`
-	AllowLocalDesktop *bool             `json:"allowLocalDesktop,omitempty"`
-	SharedUserMD      *string           `json:"sharedUserMd,omitempty"`
+	DefaultModel  *string           `json:"defaultModel,omitempty"`
+	DefaultModels map[string]string `json:"defaultModels,omitempty"`
+	SharedUserMD  *string           `json:"sharedUserMd,omitempty"`
 }
 
 func (s *HTTPServer) handleSettings(w http.ResponseWriter, r *http.Request) {
@@ -426,7 +423,6 @@ func (s *HTTPServer) handleSettings(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("fresh") == "1" {
 		harness.InvalidateMagpieCache()
 	}
-	cfg := s.hub.Config()
 	defaultModel, defaultModels := s.hub.DefaultModelsSnapshot()
 	installed := harness.MagpieInstalled()
 	var (
@@ -459,11 +455,10 @@ func (s *HTTPServer) handleSettings(w http.ResponseWriter, r *http.Request) {
 			"providers": providers,
 			"presets":   presets,
 		},
-		"allowLocalDesktop": cfg.LocalDesktopAllowed(),
-		"defaultModel":      defaultModel,
-		"defaultModels":     defaultModels,
-		"sharedUserMd":      s.hub.SharedUserMD(),
-		"harnesses":         harnesses,
+		"defaultModel":  defaultModel,
+		"defaultModels": defaultModels,
+		"sharedUserMd":  s.hub.SharedUserMD(),
+		"harnesses":     harnesses,
 	})
 }
 
@@ -472,12 +467,6 @@ func (s *HTTPServer) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json body"})
 		return
-	}
-	if body.AllowLocalDesktop != nil {
-		if err := s.hub.SetAllowLocalDesktop(*body.AllowLocalDesktop); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
-			return
-		}
 	}
 	if body.DefaultModel != nil || body.DefaultModels != nil {
 		curDefault, curPerHarness := s.hub.DefaultModelsSnapshot()
