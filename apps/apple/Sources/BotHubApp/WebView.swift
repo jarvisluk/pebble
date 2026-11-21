@@ -21,6 +21,9 @@ struct WebView: PlatformViewRepresentable {
     private func makeWebView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .default()
+        #if os(macOS)
+        config.userContentController.add(context.coordinator, name: "bothubDrag")
+        #endif
 
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = context.coordinator
@@ -62,13 +65,24 @@ struct WebView: PlatformViewRepresentable {
     func updateNSView(_ nsView: WKWebView, context: Context) { update(nsView, context: context) }
     #endif
 
-    final class Coordinator: NSObject, WKNavigationDelegate {
+    final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
         var parent: WebView
         var lastURL: URL?
         var lastReloadToken: UUID?
 
         init(_ parent: WebView) {
             self.parent = parent
+        }
+
+        func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+            #if os(macOS)
+            guard message.name == "bothubDrag",
+                  let event = NSApp.currentEvent,
+                  event.type == .leftMouseDown || event.type == .leftMouseDragged else {
+                return
+            }
+            message.webView?.window?.performDrag(with: event)
+            #endif
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {

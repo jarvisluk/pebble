@@ -88,12 +88,23 @@ func (d *desktop) run() {
 		OnShutdown:  d.halt,
 	})
 	d.win = d.app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Title: "Bot Hub", Width: 1100, Height: 760, URL: "/",
-		JS: "if(/Mac/.test(navigator.platform))document.documentElement.classList.add('mac-app');",
+		Title:            "Bot Hub",
+		Width:            1100,
+		Height:           760,
+		MinWidth:         680,
+		MinHeight:        520,
+		BackgroundColour: application.NewRGB(239, 236, 232),
+		URL:              "/",
+		JS:               "if(/Mac/.test(navigator.platform))document.documentElement.classList.add('mac-app');",
 		Mac: application.MacWindow{
-			TitleBar:                application.MacTitleBarHiddenInset,
-			InvisibleTitleBarHeight: 32,
+			TitleBar: application.MacTitleBarHiddenInset,
 		},
+	})
+	d.win.RegisterHook(events.Mac.WindowDidOrderOnScreen, func(*application.WindowEvent) {
+		configureMacWindow(d.win.NativeWindow())
+	})
+	d.win.RegisterHook(events.Mac.WebViewDidFinishNavigation, func(*application.WindowEvent) {
+		configureMacWindow(d.win.NativeWindow())
 	})
 	d.win.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) { d.win.Hide(); e.Cancel() })
 	d.app.Event.OnApplicationEvent(events.Mac.ApplicationShouldHandleReopen, func(*application.ApplicationEvent) { d.win.Show() })

@@ -126,11 +126,10 @@ try {
     grid-template-columns: var(--side-w) minmax(0, 1fr);
     gap: var(--gap);
     padding: var(--edge-t) var(--edge-r) var(--edge-b) var(--edge-l);
-    height: 100vh;
-    height: 100dvh;
-    transition: grid-template-columns 180ms cubic-bezier(0.2, 0, 0, 1), gap 180ms cubic-bezier(0.2, 0, 0, 1);
+    width: 100%;
+    height: 100%;
   }
-  .app.side-collapsed { grid-template-columns: 0px minmax(0, 1fr); gap: 0; }
+  .app.side-collapsed:not(.in-settings) { grid-template-columns: minmax(0, 1fr); gap: 0; }
 
   /* ---------- avatar: blob with two eyes, no backdrop ---------- */
   .av { position: relative; flex: none; }
@@ -144,17 +143,21 @@ try {
   .ghost:active:not(:disabled) { transform: scale(.94); }
   .ghost svg { width: 18px; height: 18px; }
   .ghost.active { background: var(--accent-soft); color: var(--accent); }
-  .chat-hd .ghost:hover:not(:disabled) { background: var(--card); }
-  .chat-hd .ghost.active:hover:not(:disabled) { background: var(--accent-soft); }
+  .chat-hd .ghost:hover:not(:disabled), .set-hd .ghost:hover:not(:disabled) { background: var(--card); }
+  .chat-hd .ghost.active:hover:not(:disabled), .set-hd .ghost.active:hover:not(:disabled) { background: var(--accent-soft); }
   .desk-dot { position: absolute; top: 5px; right: 5px; width: 7px; height: 7px; border-radius: 50%; background: var(--danger); box-shadow: 0 0 0 2px var(--page); }
   .circle { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; flex: none; background: var(--s1); color: var(--text-2); transition: background .15s, color .15s, transform .15s; }
   .circle:hover:not(:disabled) { background: var(--s2); color: var(--text); }
   .circle:active:not(:disabled) { transform: scale(.94); }
 
   /* ---------- sidebar ---------- */
-  .side { background: var(--card); border-radius: var(--r-card); display: flex; flex-direction: column; min-height: 0; min-width: 0; padding: 0 var(--pad) var(--pad); overflow: hidden; transition: opacity 150ms ease, visibility 150ms; }
-  .app.side-collapsed .side { opacity: 0; visibility: hidden; pointer-events: none; padding: 0; }
+  .side { background: var(--card); border-radius: var(--r-card); display: flex; flex-direction: column; min-height: 0; min-width: 0; padding: 0 var(--pad) var(--pad); overflow: hidden; }
+  .app.side-collapsed:not(.in-settings) .side { display: none; }
+  .side-pane { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .side-pane[hidden] { display: none; }
   .side-hd { height: var(--bar); flex: none; display: flex; align-items: center; justify-content: space-between; margin-right: -4px; gap: 6px; }
+  .side-hd, .chat-hd, .set-hd { --wails-draggable: drag; -webkit-user-select: none; user-select: none; }
+  .side-hd button, .side-hd button *, .chat-hd button, .chat-hd button *, .set-hd button, .set-hd button * { --wails-draggable: no-drag; }
   .side-hd h2 { font-size: 17px; font-weight: 700; letter-spacing: -.01em; line-height: 1; white-space: nowrap; }
   .side-hd h2 span { font-size: 13px; font-weight: 600; color: var(--mute); margin-left: 6px; }
   .side-acts { display: flex; align-items: center; gap: 2px; }
@@ -179,24 +182,27 @@ try {
   .badge { flex: none; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--lilac); color: var(--lilac-ink); font-size: 11px; font-weight: 700; line-height: 18px; text-align: center; font-style: normal; }
   .none { color: var(--mute); font-size: 13px; padding: 12px 10px; }
 
-  .side-ft { flex: none; display: flex; align-items: center; gap: 4px; margin-top: 8px; }
-  .settings { flex: 1; display: flex; align-items: center; gap: 10px; height: 40px; padding: 0 10px; border-radius: var(--r-row); font-size: 14px; font-weight: 600; color: var(--text-2); text-align: left; transition: background .15s, color .15s; }
-  .settings:hover { background: var(--s1); color: var(--text); }
-  .settings svg { width: 18px; height: 18px; }
+  .snav-item { width: 100%; height: 40px; flex: none; display: flex; align-items: center; gap: 10px; padding: 0 12px; border-radius: var(--r-row); font-size: 14px; font-weight: 600; color: var(--text-2); text-align: left; transition: background .15s, color .15s; }
+  .snav-item svg { width: 18px; height: 18px; flex: none; }
+  @media (hover: hover) { .snav-item:hover { background: var(--s1); color: var(--text); } }
+  .snav-item.on { background: var(--sel); color: var(--text); }
+  .snav-back { margin: 8px 0 6px; color: var(--text); }
+
+  .side-ft { flex: none; display: flex; align-items: center; gap: 4px; margin: 8px 0 -2px -2px; }
 
   /* ---------- main & split stage ---------- */
   .main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-  .chat-hd { height: var(--bar); flex: none; display: flex; align-items: center; gap: 10px; padding: 0 var(--pad); }
+  .main-pane { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+  .main-pane[hidden] { display: none; }
+  .chat-hd, .set-hd { height: var(--bar); flex: none; display: flex; align-items: center; gap: 10px; padding: 0 var(--pad); }
   .chat-hd .av { width: 36px; height: 36px; }
-  .chat-hd .who { flex: 1; min-width: 0; line-height: 1.3; }
-  .chat-hd h1 { font-size: 15px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .chat-hd .st { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--mute); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .chat-hd .st i { width: 6px; height: 6px; border-radius: 50%; background: var(--busy); flex: none; animation: pulse 1.2s ease-in-out infinite; }
-  .chat-hd .st.off { color: var(--danger); }
-  .chat-hd .st.off i { background: var(--danger); animation: none; }
+  .chat-hd .who { flex: 1; min-width: 0; display: flex; align-items: center; }
+  .chat-hd h1, .set-hd h1 { flex: 1; min-width: 0; font-size: 15px; font-weight: 700; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .hd-acts { display: flex; align-items: center; gap: 2px; margin-right: -4px; }
   .menu { display: none; margin-left: -4px; }
-  .app.side-collapsed .menu { display: grid; }
+  .app.side-collapsed:not(.in-settings) .menu { display: grid; }
+  .set-save { height: 32px; padding: 0 14px; font-size: 13.5px; }
+  .set-save[hidden] { display: none; }
 
   /* takeover banner above thread/split */
   .to-banner {
@@ -506,10 +512,17 @@ try {
   .dlg-b { padding: 20px 24px 12px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
   .dlg-b > p { color: var(--text-2); }
   .dlg-f { padding: 12px 24px 24px; display: flex; justify-content: flex-end; gap: 8px; }
-  .seg { display: inline-flex; background: var(--s1); padding: 4px; border-radius: 999px; gap: 4px; margin: 14px 24px -4px; align-self: flex-start; }
-  .seg-btn { padding: 6px 16px; border-radius: 999px; font-size: 13.5px; font-weight: 600; color: var(--text-2); transition: background .15s, color .15s; }
-  .seg-btn.on { background: var(--card); color: var(--text); box-shadow: 0 1px 4px rgba(0,0,0,.08); }
-  .tab-pane { display: flex; flex-direction: column; gap: 12px; }
+
+  /* full-window settings view */
+  .set-body { max-width: 760px; width: 100%; margin: 0 auto; padding: 16px 24px 28px; display: flex; flex-direction: column; gap: 16px; }
+  .set-card { background: var(--card); border-radius: var(--r-card); padding: 16px 20px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+  .set-card[hidden] { display: none; }
+  .set-card-hd { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .set-card-hd h2 { font-size: 15px; font-weight: 700; line-height: 1.35; }
+  .set-card-desc { font-size: 12.5px; color: var(--mute); }
+  .set-stack { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+  .set-stack[hidden] { display: none; }
+  .tab-pane { display: flex; flex-direction: column; gap: 16px; }
   .tab-pane[hidden] { display: none; }
 
   .two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
@@ -528,8 +541,7 @@ try {
     width: 100%; height: 36px; background-color: var(--s1); border: 1px solid transparent;
     border-radius: var(--r-row); padding: 0 12px; font-size: 14px; outline: none; transition: border-color .15s;
   }
-  .note .fld input, .note .fld textarea, .note .fld select, .note-in { background-color: var(--card); }
-  .note .add-prov .fld input, .note .add-prov .fld textarea, .note .add-prov .fld select { background-color: var(--s1); }
+  .note .fld input, .note .fld textarea, .note .fld select, .note .note-in { background-color: var(--card); }
   .fld input:hover, .fld textarea:hover, .fld select:hover, .brow input:hover, .brow select:hover, .mp-hrow input:hover, .note-in:hover { border-color: var(--s2); }
   .fld input:focus, .fld textarea:focus, .fld select:focus, .brow input:focus, .brow select:focus, .mp-hrow input:focus, .note-in:focus { border-color: var(--accent); }
   .fld input::placeholder, .fld textarea::placeholder, .brow input::placeholder, .mp-hrow input::placeholder, .note-in::placeholder { color: var(--mute); font-family: var(--font); }
@@ -550,10 +562,12 @@ try {
   .hint { font-size: 12.5px; color: var(--mute); margin: -4px 2px 0; }
   .note { background: var(--s1); border-radius: var(--r-row); padding: 12px; font-size: 13px; color: var(--text-2); display: flex; flex-direction: column; gap: 8px; min-width: 0; }
   .note[hidden] { display: none; }
-  .note .cmd { min-width: 0; display: flex; align-items: center; gap: 8px; background: var(--card); border-radius: 10px; padding: 4px 4px 4px 12px; }
-  .note .cmd code { flex: 1; width: 0; min-width: 0; font-family: var(--mono); font-size: 12.5px; overflow-x: auto; white-space: nowrap; }
-  .note .cmd button { height: 28px; padding: 0 12px; border-radius: 999px; font-size: 12.5px; background: var(--s1); }
-  .note .cmd button:hover { background: var(--s2); }
+  .cmd { min-width: 0; display: flex; align-items: center; gap: 8px; background: var(--s1); border-radius: 10px; padding: 4px 4px 4px 12px; }
+  .note .cmd { background: var(--card); }
+  .cmd code { flex: 1; width: 0; min-width: 0; font-family: var(--mono); font-size: 12.5px; overflow-x: auto; white-space: nowrap; }
+  .cmd button { height: 28px; padding: 0 12px; border-radius: 999px; font-size: 12.5px; background: var(--card); }
+  .note .cmd button { background: var(--s1); }
+  .cmd button:hover { background: var(--s2); }
   .note a { color: var(--text); }
   .mp { display: inline-flex; align-items: center; height: 24px; font-size: 12px; padding: 0 10px; border-radius: 999px; background: var(--s1); color: var(--text-2); white-space: nowrap; }
   button.mp:hover { background: var(--s2); color: var(--text); }
@@ -570,15 +584,16 @@ try {
     grid-template-columns: 126px minmax(0, 1fr) auto;
     gap: 8px;
     align-items: center;
-    background: var(--card);
+    background: var(--s1);
     padding: 8px 10px;
     border-radius: var(--r-row);
   }
   .mp-hname { font-weight: 600; font-size: 13px; color: var(--text); display: flex; flex-direction: column; gap: 2px; }
   .mp-hname small { font-weight: 500; font-size: 11.5px; color: var(--mute); }
   .mp-hacts { display: flex; align-items: center; gap: 5px; }
-  .mp-hrow button.mp:not(.go):not(.ok):not(.bad), .prov-row button.mp:not(.go):not(.ok):not(.bad), .add-prov button.mp:not(.go):not(.ok):not(.bad) { background: var(--s1); }
-  .mp-hrow button.mp:not(.go):not(.ok):not(.bad):hover, .prov-row button.mp:not(.go):not(.ok):not(.bad):hover, .add-prov button.mp:not(.go):not(.ok):not(.bad):hover { background: var(--s2); }
+  .mp-hrow input { background-color: var(--card); }
+  .mp-hrow button.mp:not(.go):not(.ok):not(.bad), .prov-row button.mp:not(.go):not(.ok):not(.bad), .add-prov button.mp:not(.go):not(.ok):not(.bad), .node-row button.mp:not(.go):not(.ok):not(.bad) { background: var(--card); }
+  .mp-hrow button.mp:not(.go):not(.ok):not(.bad):hover, .prov-row button.mp:not(.go):not(.ok):not(.bad):hover, .add-prov button.mp:not(.go):not(.ok):not(.bad):hover, .node-row button.mp:not(.go):not(.ok):not(.bad):hover { background: var(--s2); }
 
   .prov-row {
     display: flex;
@@ -587,20 +602,25 @@ try {
     gap: 8px;
     padding: 8px 10px;
     border-radius: 10px;
-    background: var(--card);
+    background: var(--s1);
   }
   .prov-meta { min-width: 0; flex: 1; }
   .prov-meta .nm { font-weight: 600; font-size: 13px; color: var(--text); }
   .prov-meta .subt { font-size: 11.5px; color: var(--mute); word-break: break-all; }
   .prov-acts { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
-  .add-prov { background: var(--card); border-radius: var(--r-row); padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+  .add-prov { background: var(--s1); border-radius: var(--r-row); padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+  .add-prov .fld input, .add-prov .fld textarea, .add-prov .fld select { background-color: var(--card); }
   .add-prov[hidden] { display: none; }
 
   .perms { display: flex; flex-wrap: wrap; gap: 6px; }
-  .perm { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px 0 10px; border-radius: 999px; background: var(--card); color: var(--text-2); font-size: 12.5px; cursor: pointer; transition: background .15s, color .15s; user-select: none; }
+  .perm { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px 0 10px; border-radius: 999px; background: var(--s1); color: var(--text-2); font-size: 12.5px; cursor: pointer; transition: background .15s, color .15s; user-select: none; }
   .perm:hover { background: var(--s2); color: var(--text); }
   .perm input { accent-color: var(--accent); margin: 0; cursor: pointer; }
-  .node-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 12px; border-radius: 10px; background: var(--card); }
+  .node-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 12px; border-radius: 10px; background: var(--s1); }
+  .node-row .mp:not(.ok):not(.go):not(.bad) { background: var(--card); }
+  .note .perm, .note .node-row { background: var(--card); }
+  .note .node-row .mp:not(.ok):not(.go):not(.bad) { background: var(--s1); }
+  .note .perm:hover { background: var(--s2); }
   .node-row .nm { font-weight: 600; color: var(--text); font-size: 13px; }
   .node-row .meta { font-size: 12px; color: var(--mute); }
   .msg-err { font-size: 13px; color: var(--danger); padding: 0 2px; }
@@ -631,11 +651,12 @@ try {
     .app, .app.side-collapsed { grid-template-columns: minmax(0, 1fr); gap: 0; }
     .to-banner { flex-direction: column; align-items: stretch; gap: 8px; margin: 4px 0 8px; }
     .to-banner-acts { justify-content: flex-end; flex-wrap: wrap; }
-    .side { position: fixed; top: var(--edge-t); bottom: var(--edge-b); left: var(--edge-l); width: min(300px, 86vw); z-index: 32; box-shadow: 0 24px 60px rgba(0, 0, 0, .2); transform: translateX(calc(-100% - var(--edge-l))); visibility: hidden; opacity: 1 !important; pointer-events: auto !important; padding: 0 var(--pad) var(--pad) !important; transition: transform .25s ease, visibility .25s; }
+    .side { display: flex !important; position: fixed; top: var(--edge-t); bottom: var(--edge-b); left: var(--edge-l); width: min(300px, 86vw); z-index: 32; box-shadow: 0 24px 60px rgba(0, 0, 0, .2); transform: translateX(calc(-100% - var(--edge-l))); visibility: hidden; transition: transform .25s ease, visibility .25s; }
     .side.open { transform: none; visibility: visible; }
     .menu { display: grid; }
     .desk-pane { position: absolute; inset: 0; min-width: 0; z-index: 20; }
     .thread { padding: 12px 0; }
+    .set-body { padding: 12px 4px 24px; }
     .bubble { max-width: 92%; }
     .msg.me .bubble { max-width: 85%; }
     .composer-wrap { padding: 0; }
@@ -647,43 +668,71 @@ try {
 
   /* macOS desktop: traffic lights sit in the sidebar's top bar (12px from its top-left corner) */
   html.mac-app .side-hd h2 { visibility: hidden; }
-  html.mac-app .app.side-collapsed .chat-hd { padding-left: 84px; }
+  html.mac-app .app.side-collapsed:not(.in-settings) .chat-hd { padding-left: 84px; }
   html.mac-app .dlg-wrap { padding-top: 52px; }
   @media (max-width: 820px) {
-    html.mac-app .chat-hd { padding-left: 84px; }
+    html.mac-app .chat-hd, html.mac-app .set-hd { padding-left: 84px; }
   }
 </style>
 </head>
 <body>
 <div id="app" class="app">
   <aside id="side" class="side">
-    <div class="side-hd">
-      <h2>Bots<span id="botCount"></span></h2>
-      <div class="side-acts">
-        <button id="openCreate" class="ghost" aria-label="新建 Bot" title="新建 Bot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
-        <button id="collapseSideBtn" class="ghost" aria-label="折叠侧边栏" title="折叠侧边栏 (⌘B)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="4"/><path d="M9 4v16"/></svg></button>
+    <div id="sideChat" class="side-pane">
+      <div class="side-hd">
+        <h2>Bots<span id="botCount"></span></h2>
+        <div class="side-acts">
+          <button id="openCreate" class="ghost" aria-label="新建 Bot" title="新建 Bot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
+          <button id="collapseSideBtn" class="ghost" aria-label="折叠侧边栏" title="折叠侧边栏 (⌘B)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="4"/><path d="M9 4v16"/></svg></button>
+        </div>
       </div>
+      <label class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="filter" placeholder="搜索 Bot" autocomplete="off" /></label>
+      <nav id="bots" class="list"></nav>
     </div>
-    <label class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="filter" placeholder="搜索 Bot" autocomplete="off" /></label>
-    <nav id="bots" class="list"></nav>
+
+    <div id="sideSettings" class="side-pane" hidden>
+      <div class="side-hd">
+        <h2>设置</h2>
+      </div>
+      <button type="button" id="settingsBack" class="snav-item snav-back">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+        <span>返回会话</span>
+      </button>
+      <nav id="settingsTabs" class="list" role="tablist" aria-label="设置分组">
+        <button type="button" class="snav-item on" role="tab" aria-selected="true" data-stab="models">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 2 7l10 5 10-5-10-5z"/><path d="m2 12 10 5 10-5"/><path d="m2 17 10 5 10-5"/></svg>
+          <span>模型与 Bot</span>
+        </button>
+        <button type="button" class="snav-item" role="tab" aria-selected="false" data-stab="remote">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3.6 9h16.8M3.6 15h16.8"/><path d="M12 3a14.5 14.5 0 0 0 0 18 14.5 14.5 0 0 0 0-18z"/></svg>
+          <span>远程与设备</span>
+        </button>
+        <button type="button" class="snav-item" role="tab" aria-selected="false" data-stab="general">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M4 17h16M9 5v4M15 15v4"/></svg>
+          <span>通用</span>
+        </button>
+      </nav>
+    </div>
+
     <div class="side-ft">
-      <button id="settingsBtn" class="settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>设置</button>
+      <button type="button" id="settingsBtn" class="ghost" aria-label="设置" title="设置 (⌘,)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
     </div>
   </aside>
 
   <main class="main">
-    <div class="chat-hd">
-      <button id="menuBtn" class="ghost menu" aria-label="展开侧边栏" title="侧边栏 (⌘B)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h10"/></svg></button>
-      <div id="hdAv"></div>
-      <div class="who"><h1 id="hdName"></h1><div id="hdState" class="st"></div></div>
-      <div class="hd-acts">
-        <button id="deskBtn" class="ghost" aria-label="远程桌面" title="远程桌面">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="14" rx="2.5"/><path d="M8 21h8M12 18v3"/></svg>
-          <span id="deskDot" class="desk-dot" hidden></span>
-        </button>
-        <button id="detailBtn" class="ghost" aria-label="详情" title="详情" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg></button>
+    <div id="chatView" class="main-pane">
+      <div class="chat-hd">
+        <button id="menuBtn" class="ghost menu" aria-label="展开侧边栏" title="侧边栏 (⌘B)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h10"/></svg></button>
+        <div id="hdAv"></div>
+        <div class="who"><h1 id="hdName"></h1></div>
+        <div class="hd-acts">
+          <button id="deskBtn" class="ghost" aria-label="远程桌面" title="远程桌面">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="14" rx="2.5"/><path d="M8 21h8M12 18v3"/></svg>
+            <span id="deskDot" class="desk-dot" hidden></span>
+          </button>
+          <button id="detailBtn" class="ghost" aria-label="详情" title="详情" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg></button>
+        </div>
       </div>
-    </div>
 
     <div id="takeoverBanner" class="to-banner" hidden>
       <span id="takeoverBannerText" class="to-banner-txt"></span>
@@ -763,6 +812,187 @@ try {
         </div>
       </section>
     </div>
+    </div>
+
+    <section id="settingsView" class="main-pane" aria-label="设置" hidden>
+      <div class="set-hd">
+        <button type="button" id="settingsMenuBtn" class="ghost menu" aria-label="打开设置分组" title="设置分组"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h10"/></svg></button>
+        <h1 id="setTitle">模型与 Bot</h1>
+        <div class="hd-acts">
+          <button type="submit" form="settingsForm" id="settingsSubmit" class="btn go set-save" disabled>保存配置</button>
+        </div>
+      </div>
+      <div class="scroll">
+        <form id="settingsForm" class="set-body" autocomplete="off">
+          <div id="sTabModels" class="tab-pane">
+            <section class="set-card">
+              <div class="set-card-hd">
+                <h2>Magpie 统一管理</h2>
+                <span id="sMagpieStatusPill" class="mp">检测中</span>
+              </div>
+              <div id="sMagpieInstall" class="note" hidden></div>
+              <div id="sMagpieBox" class="set-stack" hidden>
+                <p class="set-card-desc">未接管时各 CLI 直接读取自身配置；通过下方「接管」可调用原生 Magpie 将多个后端统一到同一套网关与路由。</p>
+                <div id="sMagpieHarnesses" class="stack6"></div>
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:4px">
+                  <span style="font-size:13px;color:var(--text-2)">模型源（Providers · <em id="sProvCount" style="font-style:normal">0</em>）</span>
+                  <div style="display:flex;gap:6px">
+                    <button type="button" id="sToggleProvs" class="mp">展开列表</button>
+                    <button type="button" id="sShowAddProv" class="mp go">+ 添加模型源</button>
+                  </div>
+                </div>
+                <div id="sAddProvBox" class="add-prov" hidden>
+                  <div class="two">
+                    <div class="fld">
+                      <label>添加方式</label>
+                      <select id="apKind">
+                        <option value="preset">预设厂商</option>
+                        <option value="custom">自定义兼容接口</option>
+                      </select>
+                    </div>
+                    <div class="fld" id="apPresetFld">
+                      <label>预设厂商</label>
+                      <select id="apPreset"></select>
+                    </div>
+                    <div class="fld" id="apProtoFld" hidden>
+                      <label>接口协议</label>
+                      <select id="apProtocol">
+                        <option value="openai">OpenAI 兼容 (/v1)</option>
+                        <option value="anthropic">Anthropic 兼容</option>
+                        <option value="responses">OpenAI Responses</option>
+                        <option value="gemini">Google Gemini</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div class="two">
+                    <div class="fld"><label id="apNameLbl">别名 <em>可选</em></label><input id="apName" placeholder="例如 my-relay" /></div>
+                    <div class="fld"><label>API Key <em>直传给 magpie</em></label><input id="apKey" type="password" class="mono" placeholder="sk-..." autocomplete="new-password" /></div>
+                  </div>
+                  <div id="apCustomUrlRow" class="two" hidden>
+                    <div class="fld"><label>Base URL</label><input id="apUrl" class="mono" placeholder="https://api.example.com/v1" /></div>
+                    <div class="fld"><label>模型列表 <em>可选，逗号分隔</em></label><input id="apModels" class="mono" placeholder="model-a,model-b" /></div>
+                  </div>
+                  <div style="display:flex;justify-content:flex-end;gap:6px">
+                    <button type="button" id="apCancel" class="mp">取消</button>
+                    <button type="button" id="apSubmit" class="mp go">确认添加</button>
+                  </div>
+                </div>
+                <div id="sMagpieProviders" class="stack6" hidden></div>
+              </div>
+            </section>
+
+            <section class="set-card">
+              <div class="set-card-hd">
+                <h2>默认模型</h2>
+                <button type="button" id="sTogglePerHarness" class="link-btn">按后端设置</button>
+              </div>
+              <div class="fld">
+                <label>全局默认模型 <em>留空则用 CLI 当前配置模型</em></label>
+                <input id="sDefaultModel" class="mono" spellcheck="false" list="models-global" placeholder="留空则用 CLI 当前配置模型" />
+              </div>
+              <div id="sPerHarnessBox" class="note" hidden>
+                <div style="font-size:12.5px;color:var(--mute)">按 Harness 覆盖全局默认模型（留空则继承上方全局默认）</div>
+                <div id="sPerHarnessFields" class="two"></div>
+              </div>
+            </section>
+
+            <section class="set-card">
+              <div class="set-card-hd">
+                <h2>Bot 模型分配</h2>
+                <span class="set-card-desc">模型留空则继承全局默认</span>
+              </div>
+              <div id="sBots" class="rows"></div>
+            </section>
+          </div>
+
+          <div id="sTabRemote" class="tab-pane" hidden>
+            <section class="set-card" id="localNodeBox" hidden>
+              <div class="set-card-hd">
+                <h2>本机节点 <em id="localNodeId" style="font-style:normal;font-weight:400;font-size:12.5px;color:var(--mute)"></em></h2>
+                <div style="display:flex;align-items:center;gap:6px">
+                  <span class="mp" id="localNodeState">未开启</span>
+                  <button type="button" class="mp" id="localNodeToggle">开启操控…</button>
+                </div>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px">
+                <input id="localNodeNameIn" class="note-in" placeholder="本机节点名称" autocomplete="off" />
+                <button type="button" class="mp" id="localNodeNameSave">保存名称</button>
+              </div>
+              <p class="set-card-desc">开启后，主电脑上的 Bot 可通过本机 Bot Hub 执行勾选的操作（系统权限归属本应用）。</p>
+              <div class="perms" id="localNodePerms">
+                <label class="perm"><input type="checkbox" data-perm="files" />文件读写</label>
+                <label class="perm"><input type="checkbox" data-perm="exec" />执行命令</label>
+                <label class="perm"><input type="checkbox" data-perm="desktop" />桌面与自动化</label>
+              </div>
+            </section>
+
+            <section class="set-card">
+              <div class="set-card-hd">
+                <h2>Tailcat 远程加密隧道 <em style="font-style:normal;font-weight:500;font-size:12.5px;color:var(--mute)">· <span id="remoteState">未读取</span></em></h2>
+                <button type="button" id="remoteToggle" class="mp go">开启远程访问</button>
+              </div>
+              <img id="remoteQR" alt="" style="display:none;width:190px;align-self:center;border-radius:12px;background:#fff;padding:8px" />
+              <div class="fld" id="remoteLinkFld" style="display:none"><textarea id="remoteLink" class="mono" readonly style="min-height:66px"></textarea></div>
+              <div class="fld" id="remoteTokenFld" style="display:none"><label>访问口令 <em>留空自动生成</em></label><input id="remoteTokenIn" class="mono" placeholder="自定义 apiToken 或留空" autocomplete="off" /></div>
+              <div class="row-end" id="remoteCopyWrap" hidden>
+                <button type="button" id="remoteCopy" class="mp go">复制配对链接</button>
+              </div>
+              <p id="remoteHelp" class="set-card-desc"></p>
+              <div class="note" id="remoteTokBox" hidden>
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:8px"><span id="remoteTokTitle">访问口令（可复用）</span><div id="remoteTokActs" style="display:flex;gap:6px"><button type="button" class="mp" id="remoteTokEye">显示</button><button type="button" class="mp" id="remoteTokReset">更换口令</button></div></div>
+                <div id="remoteTokEnv" style="font-size:12.5px;color:var(--mute)" hidden></div>
+                <div class="cmd" id="remoteTokCmd"><code id="remoteTokVal"></code><button type="button" id="remoteTokCopy">复制</button></div>
+              </div>
+            </section>
+
+            <section class="set-card" id="localDeskBox">
+              <div class="set-card-hd">
+                <h2>本机远程桌面与自动化</h2>
+                <span id="localDeskEngine" class="mp">检测中</span>
+              </div>
+              <label class="perm" style="align-self:flex-start"><input type="checkbox" id="sAllowLocalDesk" />允许 Bot 通过 MCP 操控本机桌面（点击/输入/截图）</label>
+            </section>
+
+            <section class="set-card" id="remoteNodesBox">
+              <div class="set-card-hd">
+                <h2>已连接远端设备节点</h2>
+                <span class="mp" id="remoteNodeCount">0</span>
+              </div>
+              <div id="remoteNodesList" class="stack6"></div>
+            </section>
+            <div id="remoteErr" class="msg-err"></div>
+          </div>
+
+          <div id="sTabGeneral" class="tab-pane" hidden>
+            <section class="set-card">
+              <div class="set-card-hd">
+                <h2>外观</h2>
+                <span class="set-card-desc">选择浅色、深色或跟随系统</span>
+              </div>
+              <div class="fld">
+                <select id="sTheme">
+                  <option value="system">跟随系统</option>
+                  <option value="light">浅色</option>
+                  <option value="dark">深色</option>
+                </select>
+              </div>
+            </section>
+
+            <section class="set-card">
+              <div class="set-card-hd">
+                <h2>全局共享记忆</h2>
+                <span class="set-card-desc">_shared/USER.md · 所有 Bot 共读</span>
+              </div>
+              <div class="fld">
+                <textarea id="sUserMd" rows="8" style="min-height:160px" spellcheck="false" placeholder="记录你的常用偏好、身份背景或全局约定…"></textarea>
+              </div>
+            </section>
+          </div>
+
+          <div id="settingsErr" class="msg-err"></div>
+        </form>
+      </div>
+    </section>
   </main>
 </div>
 
@@ -836,160 +1066,6 @@ try {
   </form>
 </div>
 
-<div id="settingsDlg" class="dlg-wrap">
-  <form id="settingsForm" class="dlg wide" autocomplete="off">
-    <div class="dlg-h">
-      <div><h3>设置</h3><p>模型接入（Magpie 原生接管）与远程设备配对</p></div>
-    </div>
-    <div class="seg" role="tablist">
-      <button type="button" class="seg-btn on" data-stab="models">模型与 Bot</button>
-      <button type="button" class="seg-btn" data-stab="remote">远程与设备</button>
-    </div>
-    <div class="dlg-b">
-      <div id="sTabModels" class="tab-pane">
-        <div class="sub">
-          <span>Magpie 统一管理</span>
-          <span id="sMagpieStatusPill" class="mp">检测中</span>
-        </div>
-        <div id="sMagpieInstall" class="note" hidden></div>
-        <div id="sMagpieBox" class="note" hidden>
-          <div style="font-size:12.5px;color:var(--mute)">未接管时各 CLI 直接读取自身配置；通过下方「接管」可调用原生 Magpie 将多个后端统一到同一套网关与路由。</div>
-          <div id="sMagpieHarnesses" class="stack6"></div>
-          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:4px">
-            <span>模型源（Providers · <em id="sProvCount" style="font-style:normal">0</em>）</span>
-            <div style="display:flex;gap:6px">
-              <button type="button" id="sToggleProvs" class="mp">展开列表</button>
-              <button type="button" id="sShowAddProv" class="mp go">+ 添加模型源</button>
-            </div>
-          </div>
-          <div id="sAddProvBox" class="add-prov" hidden>
-            <div class="two">
-              <div class="fld">
-                <label>添加方式</label>
-                <select id="apKind">
-                  <option value="preset">预设厂商</option>
-                  <option value="custom">自定义兼容接口</option>
-                </select>
-              </div>
-              <div class="fld" id="apPresetFld">
-                <label>预设厂商</label>
-                <select id="apPreset"></select>
-              </div>
-              <div class="fld" id="apProtoFld" hidden>
-                <label>接口协议</label>
-                <select id="apProtocol">
-                  <option value="openai">OpenAI 兼容 (/v1)</option>
-                  <option value="anthropic">Anthropic 兼容</option>
-                  <option value="responses">OpenAI Responses</option>
-                  <option value="gemini">Google Gemini</option>
-                </select>
-              </div>
-            </div>
-            <div class="two">
-              <div class="fld"><label id="apNameLbl">别名 <em>可选</em></label><input id="apName" placeholder="例如 my-relay" /></div>
-              <div class="fld"><label>API Key <em>直传给 magpie</em></label><input id="apKey" type="password" class="mono" placeholder="sk-..." autocomplete="new-password" /></div>
-            </div>
-            <div id="apCustomUrlRow" class="two" hidden>
-              <div class="fld"><label>Base URL</label><input id="apUrl" class="mono" placeholder="https://api.example.com/v1" /></div>
-              <div class="fld"><label>模型列表 <em>可选，逗号分隔</em></label><input id="apModels" class="mono" placeholder="model-a,model-b" /></div>
-            </div>
-            <div style="display:flex;justify-content:flex-end;gap:6px">
-              <button type="button" id="apCancel" class="mp">取消</button>
-              <button type="button" id="apSubmit" class="mp go">确认添加</button>
-            </div>
-          </div>
-          <div id="sMagpieProviders" class="stack6" hidden></div>
-        </div>
-
-        <div class="two">
-          <div class="fld">
-            <label>全局默认模型 <button type="button" id="sTogglePerHarness" class="link-btn">按后端设置</button></label>
-            <input id="sDefaultModel" class="mono" spellcheck="false" list="models-global" placeholder="留空则用 CLI 当前配置模型" />
-          </div>
-          <div class="fld">
-            <label>外观</label>
-            <select id="sTheme">
-              <option value="system">跟随系统</option>
-              <option value="light">浅色</option>
-              <option value="dark">深色</option>
-            </select>
-          </div>
-        </div>
-        <div id="sPerHarnessBox" class="note" hidden>
-          <div style="font-size:12.5px;color:var(--mute)">按 Harness 覆盖全局默认模型（留空则继承上方全局默认）</div>
-          <div id="sPerHarnessFields" class="two"></div>
-        </div>
-        <div class="sub"><span>Bot</span><em>模型留空则继承全局默认</em></div>
-        <div id="sBots" class="rows"></div>
-        <div class="fld">
-          <label>全局共享记忆 <em>_shared/USER.md · 所有 Bot 共读</em></label>
-          <textarea id="sUserMd" rows="4" style="min-height:92px" spellcheck="false" placeholder="记录你的常用偏好、身份背景或全局约定…"></textarea>
-        </div>
-        <div id="settingsErr" class="msg-err"></div>
-      </div>
-
-      <div id="sTabRemote" class="tab-pane" hidden>
-        <div class="note" id="localNodeBox" hidden>
-          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-            <span>本机节点 <em id="localNodeId" style="font-style:normal;color:var(--mute)"></em></span>
-            <div style="display:flex;align-items:center;gap:6px">
-              <span class="mp" id="localNodeState">未开启</span>
-              <button type="button" class="mp" id="localNodeToggle">开启操控…</button>
-            </div>
-          </div>
-          <div style="display:flex;align-items:center;gap:8px">
-            <input id="localNodeNameIn" class="note-in" placeholder="本机节点名称" autocomplete="off" />
-            <button type="button" class="mp" id="localNodeNameSave">保存名称</button>
-          </div>
-          <div style="font-size:12.5px;color:var(--mute)">开启后，主电脑上的 Bot 可通过本机 Bot Hub 执行勾选的操作（系统权限归属本应用）。</div>
-          <div class="perms" id="localNodePerms">
-            <label class="perm"><input type="checkbox" data-perm="files" />文件读写</label>
-            <label class="perm"><input type="checkbox" data-perm="exec" />执行命令</label>
-            <label class="perm"><input type="checkbox" data-perm="desktop" />桌面与自动化</label>
-          </div>
-        </div>
-
-        <div class="note">
-          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-            <div><strong style="color:var(--text)">Tailcat 远程加密隧道</strong> · <span id="remoteState" style="color:var(--mute)">未读取</span></div>
-            <button type="button" id="remoteToggle" class="mp go">开启远程访问</button>
-          </div>
-          <img id="remoteQR" alt="" style="display:none;width:190px;align-self:center;border-radius:12px;background:#fff;padding:8px" />
-          <div class="fld" id="remoteLinkFld" style="display:none"><textarea id="remoteLink" class="mono" readonly style="min-height:66px"></textarea></div>
-          <div class="fld" id="remoteTokenFld" style="display:none"><label>访问口令 <em>留空自动生成</em></label><input id="remoteTokenIn" class="mono" placeholder="自定义 apiToken 或留空" autocomplete="off" /></div>
-          <div class="row-end" id="remoteCopyWrap" hidden>
-            <button type="button" id="remoteCopy" class="mp go">复制配对链接</button>
-          </div>
-          <p id="remoteHelp" style="font-size:12.5px;color:var(--mute)"></p>
-        </div>
-
-        <div class="note" id="remoteTokBox" hidden>
-          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px"><span id="remoteTokTitle">访问口令（可复用）</span><div id="remoteTokActs" style="display:flex;gap:6px"><button type="button" class="mp" id="remoteTokEye">显示</button><button type="button" class="mp" id="remoteTokReset">更换口令</button></div></div>
-          <div id="remoteTokEnv" style="font-size:12.5px;color:var(--mute)" hidden></div>
-          <div class="cmd" id="remoteTokCmd"><code id="remoteTokVal"></code><button type="button" id="remoteTokCopy">复制</button></div>
-        </div>
-
-        <div class="note" id="localDeskBox">
-          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-            <span>本机远程桌面与自动化</span>
-            <span id="localDeskEngine" class="mp">检测中</span>
-          </div>
-          <label class="perm" style="align-self:flex-start"><input type="checkbox" id="sAllowLocalDesk" />允许 Bot 通过 MCP 操控本机桌面（点击/输入/截图）</label>
-        </div>
-
-        <div class="note" id="remoteNodesBox">
-          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px"><span>已连接远端设备节点</span><span class="mp" id="remoteNodeCount">0</span></div>
-          <div id="remoteNodesList" class="stack6"></div>
-        </div>
-        <div id="remoteErr" class="msg-err"></div>
-      </div>
-    </div>
-    <div class="dlg-f">
-      <button type="button" class="btn" data-close>关闭</button>
-      <button type="submit" id="settingsSubmit" class="btn go" disabled>保存配置</button>
-    </div>
-  </form>
-</div>
 <div id="modelLists" hidden><datalist id="models-global"></datalist></div>
 
 <div id="confirmDlg" class="dlg-wrap">
@@ -1031,6 +1107,7 @@ const state = {
   takeovers: [],
   deskOpen: false,
   deskTarget: 'local',
+  view: 'chat',
 };
 
 try {
@@ -1179,11 +1256,6 @@ function renderHead() {
   $('detailBtn').disabled = !b;
   $('hdAv').innerHTML = b ? avatar(b.id) : '';
   $('hdName').textContent = b ? b.name : 'bot-hub';
-  const st = $('hdState');
-  st.classList.toggle('off', !state.online);
-  if (!state.online) st.innerHTML = '<i></i>连接已断开，正在重试…';
-  else if (b?.busy) st.innerHTML = `<i></i>${state.tool[b.id] ? `正在调用 ${esc(state.tool[b.id])}` : '正在思考'}${b.model ? ` · ${esc(b.model)}` : ''}`;
-  else st.textContent = b ? [b.queued ? `排队 ${b.queued}` : '空闲', b.model].filter(Boolean).join(' · ') : '';
   $('input').placeholder = b ? `发消息给 ${b.name}` : '发消息';
   syncSend();
 }
@@ -1252,6 +1324,7 @@ async function selectBot(id) {
   state.unread[id] = 0;
   try { localStorage.setItem('bothub.active', id); } catch {}
   closeAll();
+  if (state.view === 'settings') closeSettings();
   renderBots(); renderHead(); renderThread(); syncSend();
   await loadMessages(id, true);
   if (matchMedia('(min-width: 821px)').matches) $('input').focus();
@@ -1315,7 +1388,7 @@ let es;
 function connect() {
   es?.close();
   es = new EventSource('/api/events');
-  const set = ok => { if (state.online !== ok) { state.online = ok; renderHead(); } };
+  const set = ok => { state.online = ok; };
   es.addEventListener('ready', () => set(true));
   es.onerror = () => set(false);
   const on = (type, fn) => es.addEventListener(type, e => { try { fn(JSON.parse(e.data)); } catch {} });
@@ -1344,7 +1417,7 @@ function connect() {
   });
   on('nodes_changed', ({ payload }) => {
     const nodes = payload?.nodes || [];
-    if ($('settingsDlg').classList.contains('open')) renderNodes(nodes);
+    if (state.view === 'settings') renderNodes(nodes);
     if (state.deskOpen) deskRefreshTargets();
   });
   on('desktop', ({ payload }) => {
@@ -1543,7 +1616,7 @@ document.addEventListener('click', e => {
   if (t.dataset.bot) selectBot(t.dataset.bot);
   else if (t.hasAttribute('data-close')) closeAll();
   else if (t.hasAttribute('data-open-create')) $('openCreate').click();
-  else if (t.dataset.openDesk) { closeAll(); openDesktop(t.dataset.openDesk); }
+  else if (t.dataset.openDesk) { closeAll(); if (state.view === 'settings') closeSettings(); openDesktop(t.dataset.openDesk); }
   else if (t.dataset.fill || t.dataset.cmd) {
     $('pop').classList.remove('open');
     const el = $('input'); el.value = t.dataset.fill || t.dataset.cmd; resize(); el.focus();
@@ -1569,14 +1642,46 @@ document.addEventListener('keydown', e => {
   if (document.activeElement?.hasAttribute('data-desk-stage')) return;
   if (e.key === 'Escape') {
     if ($('confirmDlg').classList.contains('open')) $('confirmDlg').classList.remove('open');
-    else closeAll();
+    else if (document.querySelector('.dlg-wrap.open:not(#loginDlg), .panel.open, .side.open, .pop.open')) closeAll();
+    else if (state.view === 'settings') closeSettings();
   }
-  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); $('filter').focus(); }
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+    e.preventDefault();
+    if (state.view !== 'settings') $('filter').focus();
+  }
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'b' && matchMedia('(min-width: 821px)').matches) {
     e.preventDefault();
-    toggleDesktopSidebar();
+    if (state.view !== 'settings') toggleDesktopSidebar();
+  }
+  if ((e.metaKey || e.ctrlKey) && e.key === ',') {
+    e.preventDefault();
+    if (state.view === 'settings') closeSettings();
+    else openSettings(null, 'models');
   }
 });
+
+(() => {
+  let dragArmed = false;
+  const inBar = t => t instanceof Element && t.closest('.side-hd, .chat-hd, .set-hd') && !t.closest('button, input, select, textarea, a, label');
+  document.addEventListener('mousedown', e => {
+    dragArmed = e.button === 0 && e.detail === 1 && inBar(e.target);
+  });
+  document.addEventListener('mousemove', e => {
+    if (!dragArmed || !(e.buttons & 1)) { dragArmed = false; return; }
+    dragArmed = false;
+    if (window.webkit?.messageHandlers?.external) window.webkit.messageHandlers.external.postMessage('wails:drag');
+    else if (window.webkit?.messageHandlers?.bothubDrag) window.webkit.messageHandlers.bothubDrag.postMessage('drag');
+  });
+  document.addEventListener('mouseup', () => { dragArmed = false; });
+  window.addEventListener('blur', () => { dragArmed = false; });
+  document.addEventListener('dblclick', e => {
+    if (!inBar(e.target)) return;
+    if (window.webkit?.messageHandlers?.external) {
+      e.preventDefault();
+      window.webkit.messageHandlers.external.postMessage('wails:drag:doubleclick');
+    }
+  });
+})();
 
 $('menuBtn').onclick = () => {
   if (matchMedia('(min-width: 821px)').matches) {
@@ -1584,6 +1689,9 @@ $('menuBtn').onclick = () => {
   } else {
     open('side'); open('shade');
   }
+};
+$('settingsMenuBtn').onclick = () => {
+  open('side'); open('shade');
 };
 $('collapseSideBtn').onclick = () => {
   if (matchMedia('(max-width: 820px)').matches) {
@@ -1687,17 +1795,25 @@ function renderPerHarnessFields(harnesses, values) {
   });
 }
 
+const SETTINGS_TITLES = { models: '模型与 Bot', remote: '远程与设备', general: '通用' };
 function switchSettingsTab(tab) {
-  settingsTab = tab;
-  $('settingsDlg').querySelectorAll('[data-stab]').forEach(btn => btn.classList.toggle('on', btn.dataset.stab === tab));
-  $('sTabModels').hidden = tab !== 'models';
-  $('sTabRemote').hidden = tab !== 'remote';
-  $('settingsSubmit').hidden = tab !== 'models';
-  if (tab === 'remote') {
+  settingsTab = SETTINGS_TITLES[tab] ? tab : 'models';
+  $('sideSettings').querySelectorAll('[data-stab]').forEach(btn => {
+    const on = btn.dataset.stab === settingsTab;
+    btn.classList.toggle('on', on);
+    btn.setAttribute('aria-selected', on ? 'true' : 'false');
+  });
+  $('setTitle').textContent = SETTINGS_TITLES[settingsTab];
+  $('sTabModels').hidden = settingsTab !== 'models';
+  $('sTabRemote').hidden = settingsTab !== 'remote';
+  $('sTabGeneral').hidden = settingsTab !== 'general';
+  $('settingsSubmit').hidden = settingsTab === 'remote' && $('settingsSubmit').disabled;
+  if (settingsTab === 'remote') {
     refreshRemoteTab();
   }
+  if (matchMedia('(max-width: 820px)').matches) closeAll();
 }
-$('settingsDlg').querySelectorAll('[data-stab]').forEach(btn => btn.onclick = () => switchSettingsTab(btn.dataset.stab));
+$('sideSettings').querySelectorAll('[data-stab]').forEach(btn => btn.onclick = () => switchSettingsTab(btn.dataset.stab));
 
 const harnessLabel = id => state.settings?.harnesses.find(h => h.id === id)?.label || id || 'opencode';
 const defaultFor = h => state.settings?.harnesses.find(x => x.id === h)?.defaultModel || '';
@@ -1780,6 +1896,7 @@ function syncSettingsDirty() {
     }
   }
   $('settingsSubmit').disabled = !dirty;
+  if (settingsTab === 'remote') $('settingsSubmit').hidden = !dirty;
 }
 
 function renderMagpieSection(s) {
@@ -1954,8 +2071,22 @@ $('apSubmit').onclick = async () => {
   } finally { $('apSubmit').disabled = false; }
 };
 
+function closeSettings() {
+  state.view = 'chat';
+  clearTimeout(remoteTimer);
+  clearTimeout(localNodeTimer);
+  closeAll();
+  $('app').classList.remove('in-settings');
+  $('sideSettings').hidden = true;
+  $('sideChat').hidden = false;
+  $('settingsView').hidden = true;
+  $('chatView').hidden = false;
+  $('settingsBtn').classList.remove('active');
+}
+
 async function openSettings(draft = null, tab = 'models') {
   closeAll();
+  if (state.deskOpen) closeDesktop();
   $('settingsErr').textContent = '';
   $('remoteErr').textContent = '';
   try { await loadSettings(); } catch (e) { if (e.message !== 'unauthorized') toast(e.message); return; }
@@ -1990,10 +2121,17 @@ async function openSettings(draft = null, tab = 'models') {
   }
   syncSettingsDirty();
   s.harnesses.forEach(h => loadModels(h.id));
+  state.view = 'settings';
+  $('app').classList.add('in-settings');
+  $('sideChat').hidden = true;
+  $('sideSettings').hidden = false;
+  $('chatView').hidden = true;
+  $('settingsView').hidden = false;
+  $('settingsBtn').classList.add('active');
   switchSettingsTab(tab);
-  open('settingsDlg');
 }
-$('settingsBtn').onclick = () => openSettings(null, 'models');
+$('settingsBtn').onclick = () => state.view === 'settings' ? closeSettings() : openSettings(null, 'models');
+$('settingsBack').onclick = closeSettings;
 $('sDefaultModel').oninput = () => {
   $('sBots').querySelectorAll('[data-row]').forEach(syncRow);
   syncSettingsDirty();
@@ -2002,6 +2140,7 @@ $('sUserMd').oninput = syncSettingsDirty;
 $('settingsForm').onsubmit = async e => {
   e.preventDefault();
   $('settingsSubmit').disabled = true;
+  $('settingsErr').textContent = '';
   try {
     const general = $('sDefaultModel').value.trim();
     const perHarness = currentPerHarnessDefaults();
@@ -2018,13 +2157,16 @@ $('settingsForm').onsubmit = async e => {
     }
     for (const b of state.bots) {
       const row = $('sBots').querySelector(`[data-row="${CSS.escape(b.id)}"]`);
+      if (!row) continue;
       const h = row.querySelector('[data-h]').value, m = row.querySelector('[data-m]').value.trim();
       const cur = b.modelInherited ? '' : (b.model || '');
       if (h === b.harness && m === cur) continue;
       const st = await api(`/api/bots/${encodeURIComponent(b.id)}`, { method: 'PATCH', body: { harness: h, model: m } });
       Object.assign(b, st);
     }
-    closeAll(); toast('已保存'); await loadBots();
+    toast('已保存');
+    await loadBots();
+    if (state.view === 'settings') await openSettings(null, settingsTab);
   } catch (err) {
     if (err.message !== 'unauthorized') $('settingsErr').textContent = err.message;
     syncSettingsDirty();
@@ -2062,7 +2204,7 @@ function renderLocalNode(st) {
   const perms = new Set(localNodeState.permissions || []);
   $('localNodePerms').querySelectorAll('input[data-perm]').forEach(cb => { cb.checked = perms.has(cb.dataset.perm); });
   clearTimeout(localNodeTimer);
-  if (localNodeState && localNodeState.enabled && !localNodeState.connected && $('settingsDlg').classList.contains('open')) {
+  if (localNodeState && localNodeState.enabled && !localNodeState.connected && state.view === 'settings') {
     localNodeTimer = setTimeout(loadLocalNode, 1000);
   }
 }
@@ -2156,7 +2298,7 @@ function renderRemote(t) {
     : t.state === 'connecting' ? '正在连接 Tailcat 中继，请稍候…'
     : (t.error || '稍后再打开查看。');
   clearTimeout(remoteTimer);
-  if (t.state === 'connecting' && $('settingsDlg').classList.contains('open')) {
+  if (t.state === 'connecting' && state.view === 'settings') {
     remoteTimer = setTimeout(async () => { try { renderRemote(await api('/api/tailcat')); } catch {} }, 800);
   }
 }

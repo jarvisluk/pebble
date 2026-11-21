@@ -21,7 +21,7 @@ import { ChevronLeftIcon, DocIcon, MonitorIcon, SendIcon, StopIcon } from '../..
 import { MarkdownText } from '../../components/MarkdownText';
 import { ModalHeader } from '../../components/ModalHeader';
 import { confirmAction } from '../../confirm';
-import { formatStamp, resolveDefaultModel, useHub } from '../../store';
+import { formatStamp, useHub } from '../../store';
 import { MONO_FONT, useTheme } from '../../theme';
 import type { BotDetail, ChatMessage } from '../../types';
 
@@ -44,7 +44,6 @@ export default function BotChatScreen() {
     bots,
     msgs,
     tools,
-    settings,
     takeovers,
     setActiveChatBot,
     loadMessages,
@@ -100,22 +99,6 @@ export default function BotChatScreen() {
     }, 60);
     return () => clearTimeout(t);
   }, [chatList.length, bot?.busy]);
-
-  const modelLabel = useMemo(() => {
-    if (bot?.model) return bot.model;
-    if (settings && bot?.harness) {
-      return settings.defaultModels?.[bot.harness] || resolveDefaultModel(settings.defaultModel, bot.harness) || bot.harness;
-    }
-    return bot?.harness || '默认';
-  }, [bot, settings]);
-
-  const subtitle = useMemo(() => {
-    if (bot?.busy) {
-      const t = tools[botId];
-      return t ? `正在调用 ${t} · ${modelLabel}` : `正在思考 · ${modelLabel}`;
-    }
-    return `空闲 · ${modelLabel}`;
-  }, [bot?.busy, botId, modelLabel, tools]);
 
   const handleOpenDetail = useCallback(async () => {
     setEditMode(false);
@@ -382,12 +365,6 @@ export default function BotChatScreen() {
         <View style={styles.headInfo}>
           <Text numberOfLines={1} style={[styles.headName, { color: theme.text }]}>
             {bot?.name || botId}
-          </Text>
-          <Text
-            numberOfLines={1}
-            style={[styles.headSub, { color: bot?.busy ? theme.busy : theme.mute }]}
-          >
-            {subtitle}
           </Text>
         </View>
 
@@ -738,15 +715,11 @@ const styles = StyleSheet.create({
   headInfo: {
     flex: 1,
     minWidth: 0,
-    gap: 1,
+    justifyContent: 'center',
   },
   headName: {
     fontSize: 16,
     fontWeight: '700',
-  },
-  headSub: {
-    fontSize: 12,
-    fontWeight: '500',
   },
   docBtn: {
     width: 36,

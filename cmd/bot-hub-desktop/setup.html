@@ -32,6 +32,7 @@
 </style>
 </head>
 <body>
+<div id="dragBar" style="position:fixed;top:8px;left:76px;right:8px;height:36px;--wails-draggable:drag"></div>
 <main>
   <div><h1>Bot Hub</h1><p class="sub">选择这台电脑的用法，之后可从菜单栏图标「切换模式」</p></div>
 
@@ -76,6 +77,25 @@ async function start(body) {
 }
 $('local').onclick = () => start({ mode: 'local' });
 $('remote').onclick = () => start({ mode: 'remote', link: $('link').value.trim() });
+(() => {
+  let dragArmed = false;
+  $('dragBar').addEventListener('mousedown', e => {
+    dragArmed = e.button === 0 && e.detail === 1;
+  });
+  document.addEventListener('mousemove', e => {
+    if (!dragArmed || !(e.buttons & 1)) { dragArmed = false; return; }
+    dragArmed = false;
+    window.webkit?.messageHandlers?.external?.postMessage('wails:drag');
+  });
+  document.addEventListener('mouseup', () => { dragArmed = false; });
+  window.addEventListener('blur', () => { dragArmed = false; });
+  $('dragBar').addEventListener('dblclick', e => {
+    if (window.webkit?.messageHandlers?.external) {
+      e.preventDefault();
+      window.webkit.messageHandlers.external.postMessage('wails:drag:doubleclick');
+    }
+  });
+})();
 refresh();
 </script>
 </body>
