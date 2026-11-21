@@ -2,12 +2,14 @@ package harness
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -74,11 +76,63 @@ type MagpieProviderReq struct {
 	Models   string `json:"models,omitempty"`   // optional comma-separated models
 }
 
-var magpie = struct {
+type ttlCache[T any] struct {
 	mu      sync.Mutex
-	catalog []string
+	val     T
 	fetched time.Time
-}{}
+	ttl     time.Duration
+}
+
+func (c *ttlCache[T]) get(load func() (T, bool)) T {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.fetched.IsZero() && time.Since(c.fetched) < c.ttl {
+		return c.val
+	}
+	val, ok := load()
+	if ok {
+		c.val = val
+		c.fetched = time.Now()
+		return val
+	}
+	if !c.fetched.IsZero() {
+		return c.val
+	}
+	return val
+}
+
+func (c *ttlCache[T]) invalidate() {
+	c.mu.Lock()
+	c.fetched = time.Time{}
+	c.mu.Unlock()
+}
+
+var (
+	catalogCache   = ttlCache[[]string]{ttl: time.Minute}
+	healthCache    = ttlCache[bool]{ttl: 30 * time.Second}
+	providersCache = ttlCache[[]MagpieProvider]{ttl: 30 * time.Second}
+	presetsCache   = ttlCache[[]MagpiePreset]{ttl: 10 * time.Minute}
+	statusCachesMu sync.Mutex
+	statusCaches   = make(map[string]*ttlCache[MagpieStatus])
+
+	runMagpieOutput = func(ctx context.Context, args ...string) ([]byte, error) {
+		return exec.CommandContext(ctx, magpieBin(), args...).Output()
+	}
+	runMagpieCombined = func(ctx context.Context, args ...string) ([]byte, error) {
+		return exec.CommandContext(ctx, magpieBin(), args...).CombinedOutput()
+	}
+)
+
+func statusCacheFor(kind string) *ttlCache[MagpieStatus] {
+	statusCachesMu.Lock()
+	defer statusCachesMu.Unlock()
+	c := statusCaches[kind]
+	if c == nil {
+		c = &ttlCache[MagpieStatus]{ttl: 30 * time.Second}
+		statusCaches[kind] = c
+	}
+	return c
+}
 
 var (
 	spaces           = regexp.MustCompile(`\s{2,}`)
@@ -133,10 +187,41 @@ func magpieInstalled() bool {
 	return err == nil
 }
 
-func invalidateMagpieCache() {
-	magpie.mu.Lock()
-	magpie.fetched = time.Time{}
-	magpie.mu.Unlock()
+// InvalidateMagpieCache clears all cached Magpie gateway, provider, preset,
+// catalog, and per-harness status snapshots.
+func InvalidateMagpieCache() {
+	catalogCache.invalidate()
+	healthCache.invalidate()
+	providersCache.invalidate()
+	presetsCache.invalidate()
+	statusCachesMu.Lock()
+	for _, c := range statusCaches {
+		c.invalidate()
+	}
+	statusCachesMu.Unlock()
+}
+
+// WarmMagpieCache populates all Magpie caches concurrently in a single parallel
+// wave so interactive settings loads complete immediately.
+func WarmMagpieCache(ctx context.Context, kinds []string) {
+	if !magpieInstalled() {
+		return
+	}
+	var wg sync.WaitGroup
+	wg.Add(4)
+	go func() { defer wg.Done(); MagpieGatewayHealthy(ctx) }()
+	go func() { defer wg.Done(); MagpieListProviders(ctx) }()
+	go func() { defer wg.Done(); MagpiePresets(ctx) }()
+	go func() { defer wg.Done(); magpieCatalog(ctx) }()
+	for _, k := range kinds {
+		kind := k
+		if _, ok := magpieAgents[kind]; !ok {
+			continue
+		}
+		wg.Add(1)
+		go func() { defer wg.Done(); GetMagpieStatus(ctx, kind) }()
+	}
+	wg.Wait()
 }
 
 // MagpieGatewayHealthy reports whether magpie's local gateway answers `magpie healthcheck`.
@@ -144,34 +229,37 @@ func MagpieGatewayHealthy(ctx context.Context) bool {
 	if !magpieInstalled() {
 		return false
 	}
-	cctx, cancel := context.WithTimeout(ctx, 3*time.Second)
-	defer cancel()
-	return exec.CommandContext(cctx, magpieBin(), "healthcheck").Run() == nil
+	return healthCache.get(func() (bool, bool) {
+		cctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		defer cancel()
+		_, err := runMagpieOutput(cctx, "healthcheck")
+		if ctx.Err() != nil {
+			return false, false
+		}
+		return err == nil, true
+	})
 }
 
 // magpieCatalog lists the gateway's model IDs (cached for a minute).
 func magpieCatalog(ctx context.Context) []string {
-	magpie.mu.Lock()
-	defer magpie.mu.Unlock()
-	if time.Since(magpie.fetched) < time.Minute {
-		return magpie.catalog
-	}
 	if !magpieInstalled() {
 		return nil
 	}
-	out, err := exec.CommandContext(ctx, magpieBin(), "models").Output()
-	if err != nil {
-		return magpie.catalog
-	}
-	var ids []string
-	for _, line := range strings.Split(string(out), "\n") {
-		f := strings.Fields(line)
-		if len(f) > 0 && strings.Contains(f[0], "/") && !strings.Contains(f[0], "://") {
-			ids = append(ids, f[0])
+	ids := catalogCache.get(func() ([]string, bool) {
+		out, err := runMagpieOutput(ctx, "models")
+		if err != nil {
+			return nil, false
 		}
-	}
-	magpie.catalog, magpie.fetched = ids, time.Now()
-	return ids
+		var parsed []string
+		for _, line := range strings.Split(string(out), "\n") {
+			f := strings.Fields(line)
+			if len(f) > 0 && strings.Contains(f[0], "/") && !strings.Contains(f[0], "://") {
+				parsed = append(parsed, f[0])
+			}
+		}
+		return parsed, true
+	})
+	return append([]string(nil), ids...)
 }
 
 // MagpieModels returns magpie's catalog as model IDs for the given harness.
@@ -224,17 +312,19 @@ func GetMagpieStatus(ctx context.Context, kind string) MagpieStatus {
 	if !ok || !magpieInstalled() {
 		return MagpieStatus{}
 	}
-	st := MagpieStatus{Installed: true}
-	out, err := exec.CommandContext(ctx, magpieBin(), a.agent).Output()
-	if err != nil {
-		return st
-	}
-	var catalog []string
-	if a.prefix == "" {
-		catalog = magpieCatalog(ctx)
-	}
-	st.Connected, st.Model, st.NativeModel = parseAgentStatusLine(a.prefix, string(out), catalog)
-	return st
+	return statusCacheFor(kind).get(func() (MagpieStatus, bool) {
+		st := MagpieStatus{Installed: true}
+		out, err := runMagpieOutput(ctx, a.agent)
+		if err != nil {
+			return st, false
+		}
+		var catalog []string
+		if a.prefix == "" {
+			catalog = magpieCatalog(ctx)
+		}
+		st.Connected, st.Model, st.NativeModel = parseAgentStatusLine(a.prefix, string(out), catalog)
+		return st, true
+	})
 }
 
 // MagpieConnect runs `magpie <agent> <model>`, which points the harness's CLI
@@ -251,11 +341,11 @@ func MagpieConnect(ctx context.Context, kind, model string) error {
 	if id == "" {
 		return fmt.Errorf("请先选择或填写要接入的模型")
 	}
-	out, err := exec.CommandContext(ctx, magpieBin(), a.agent, id).CombinedOutput()
+	out, err := runMagpieCombined(ctx, a.agent, id)
 	if err != nil {
 		return fmt.Errorf("magpie %s %s: %s", a.agent, id, redactSecrets(strings.TrimSpace(string(out))))
 	}
-	invalidateMagpieCache()
+	InvalidateMagpieCache()
 	return nil
 }
 
@@ -268,11 +358,11 @@ func MagpieDisconnect(ctx context.Context, kind string) error {
 	if !magpieInstalled() {
 		return fmt.Errorf("magpie is not installed")
 	}
-	out, err := exec.CommandContext(ctx, magpieBin(), a.agent, "default").CombinedOutput()
+	out, err := runMagpieCombined(ctx, a.agent, "default")
 	if err != nil {
 		return fmt.Errorf("magpie %s default: %s", a.agent, redactSecrets(strings.TrimSpace(string(out))))
 	}
-	invalidateMagpieCache()
+	InvalidateMagpieCache()
 	return nil
 }
 
@@ -327,11 +417,17 @@ func MagpieListProviders(ctx context.Context) []MagpieProvider {
 	if !magpieInstalled() {
 		return nil
 	}
-	out, err := exec.CommandContext(ctx, magpieBin(), "providers").Output()
-	if err != nil {
+	list := providersCache.get(func() ([]MagpieProvider, bool) {
+		out, err := runMagpieOutput(ctx, "providers")
+		if err != nil {
+			return nil, false
+		}
+		return parseProvidersOutput(string(out)), true
+	})
+	if list == nil {
 		return nil
 	}
-	return parseProvidersOutput(string(out))
+	return append([]MagpieProvider(nil), list...)
 }
 
 func parsePresetsOutput(raw string) []MagpiePreset {
@@ -361,13 +457,19 @@ func MagpiePresets(ctx context.Context) []MagpiePreset {
 	if !magpieInstalled() {
 		return nil
 	}
-	out, err := exec.CommandContext(ctx, magpieBin(), "presets").Output()
-	if err == nil {
-		if list := parsePresetsOutput(string(out)); len(list) > 0 {
-			return list
+	list := presetsCache.get(func() ([]MagpiePreset, bool) {
+		out, err := runMagpieOutput(ctx, "presets")
+		if err == nil {
+			if parsed := parsePresetsOutput(string(out)); len(parsed) > 0 {
+				return parsed, true
+			}
 		}
-	}
-	return append([]MagpiePreset(nil), defaultPresets...)
+		if ctx.Err() != nil {
+			return nil, false
+		}
+		return append([]MagpiePreset(nil), defaultPresets...), true
+	})
+	return append([]MagpiePreset(nil), list...)
 }
 
 // MagpieProviderAction runs a native `magpie provider ...` management command.
@@ -439,7 +541,7 @@ func MagpieProviderAction(ctx context.Context, req MagpieProviderReq) (string, e
 		return "", fmt.Errorf("unsupported magpie provider action %q", action)
 	}
 
-	out, err := exec.CommandContext(ctx, magpieBin(), args...).CombinedOutput()
+	out, err := runMagpieCombined(ctx, args...)
 	cleaned := redactSecrets(strings.TrimSpace(string(out)))
 	if err != nil {
 		if cleaned != "" {
@@ -448,7 +550,351 @@ func MagpieProviderAction(ctx context.Context, req MagpieProviderReq) (string, e
 		return "", fmt.Errorf("magpie provider %s: %w", action, err)
 	}
 	if mutating {
-		invalidateMagpieCache()
+		InvalidateMagpieCache()
 	}
 	return cleaned, nil
+}
+
+// MagpieMemoryItem represents one memory record returned by `magpie tool memory_search`.
+type MagpieMemoryItem struct {
+	ID        string   `json:"id"`
+	Kind      string   `json:"kind,omitempty"`
+	Scope     string   `json:"scope,omitempty"`
+	Tags      []string `json:"tags,omitempty"`
+	UpdatedAt string   `json:"updatedAt,omitempty"`
+	Text      string   `json:"text"`
+}
+
+// MagpieMemoryList is the response returned for memory queries.
+type MagpieMemoryList struct {
+	Installed bool               `json:"installed"`
+	Available bool               `json:"available"`
+	Error     string             `json:"error,omitempty"`
+	Items     []MagpieMemoryItem `json:"items"`
+}
+
+// MagpieMemorySaveReq describes a memory create/update request passed to `magpie tool memory_save`.
+type MagpieMemorySaveReq struct {
+	ID      string   `json:"id,omitempty"`
+	Scope   string   `json:"scope,omitempty"` // "global" (default) or "project"
+	Project string   `json:"project,omitempty"`
+	BotID   string   `json:"botId,omitempty"`
+	Kind    string   `json:"kind,omitempty"`
+	Text    string   `json:"text"`
+	Why     string   `json:"why,omitempty"`
+	Tags    []string `json:"tags,omitempty"`
+}
+
+var (
+	memoryEntryRe = regexp.MustCompile(`(?s)^\[([^\]]+)\]\s+(.+)$`)
+	isoPrefixRe   = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}|$)`)
+)
+
+type magpieToolEnvelope struct {
+	Content []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	} `json:"content"`
+	IsError           bool            `json:"isError"`
+	StructuredContent json.RawMessage `json:"structuredContent"`
+}
+
+func runMagpieTool(ctx context.Context, toolName string, args ...string) (*magpieToolEnvelope, string, error) {
+	if !magpieInstalled() {
+		return nil, "", fmt.Errorf("magpie 未安装")
+	}
+	cmdArgs := append([]string{"tool", toolName, "--json"}, args...)
+	out, err := runMagpieCombined(ctx, cmdArgs...)
+	raw := strings.TrimSpace(string(out))
+
+	var env magpieToolEnvelope
+	// magpie tool may append a trailing warning line after JSON; extract the first JSON object if present.
+	if start := strings.IndexByte(raw, '{'); start >= 0 {
+		dec := json.NewDecoder(strings.NewReader(raw[start:]))
+		if decErr := dec.Decode(&env); decErr == nil {
+			var textParts []string
+			for _, c := range env.Content {
+				if strings.TrimSpace(c.Text) != "" {
+					textParts = append(textParts, c.Text)
+				}
+			}
+			joined := strings.TrimSpace(strings.Join(textParts, "\n"))
+			if env.IsError {
+				if joined == "" {
+					joined = redactSecrets(raw)
+				}
+				return &env, joined, fmt.Errorf("%s", joined)
+			}
+			if err != nil {
+				return &env, joined, fmt.Errorf("%s", redactSecrets(raw))
+			}
+			return &env, joined, nil
+		}
+	}
+	if err != nil {
+		msg := redactSecrets(raw)
+		if msg == "" {
+			msg = err.Error()
+		}
+		return nil, "", fmt.Errorf("magpie tool %s: %s", toolName, msg)
+	}
+	return &env, raw, nil
+}
+
+func botMemoryTag(botID string) string {
+	botID = strings.TrimSpace(botID)
+	if botID == "" {
+		return ""
+	}
+	return "bot:" + botID
+}
+
+func normalizeMemoryTags(tags []string, botID string) []string {
+	seen := make(map[string]bool, len(tags)+1)
+	var out []string
+	add := func(t string) {
+		t = strings.TrimSpace(strings.TrimPrefix(t, "#"))
+		if t == "" || seen[t] {
+			return
+		}
+		seen[t] = true
+		out = append(out, t)
+	}
+	for _, t := range tags {
+		add(t)
+	}
+	if bt := botMemoryTag(botID); bt != "" {
+		add(bt)
+	}
+	return out
+}
+
+func hasMemoryTag(tags []string, want string) bool {
+	if want == "" {
+		return true
+	}
+	for _, t := range tags {
+		if strings.EqualFold(strings.TrimPrefix(t, "#"), want) {
+			return true
+		}
+	}
+	return false
+}
+
+func parseMemorySearchOutput(env *magpieToolEnvelope, text string) []MagpieMemoryItem {
+	if env != nil && len(env.StructuredContent) > 0 {
+		var sc struct {
+			Items    []MagpieMemoryItem `json:"items"`
+			Memories []MagpieMemoryItem `json:"memories"`
+		}
+		if json.Unmarshal(env.StructuredContent, &sc) == nil {
+			if len(sc.Items) > 0 {
+				return sc.Items
+			}
+			if len(sc.Memories) > 0 {
+				return sc.Memories
+			}
+		}
+	}
+
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" || strings.HasPrefix(trimmed, "Nothing remembered") {
+		return []MagpieMemoryItem{}
+	}
+
+	lines := strings.Split(trimmed, "\n")
+	var entries []string
+	for _, line := range lines {
+		lineTrim := strings.TrimSpace(line)
+		if strings.HasPrefix(lineTrim, "(looked in:") && strings.HasSuffix(lineTrim, ")") {
+			continue
+		}
+		if memoryEntryRe.MatchString(line) {
+			entries = append(entries, line)
+		} else if len(entries) > 0 {
+			entries[len(entries)-1] += "\n" + line
+		}
+	}
+
+	items := make([]MagpieMemoryItem, 0, len(entries))
+	for _, entry := range entries {
+		if item, ok := parseMemoryEntryLine(entry); ok {
+			items = append(items, item)
+		}
+	}
+	return items
+}
+
+func parseMemoryEntryLine(entry string) (MagpieMemoryItem, bool) {
+	m := memoryEntryRe.FindStringSubmatch(strings.TrimSpace(entry))
+	if len(m) != 3 {
+		return MagpieMemoryItem{}, false
+	}
+	item := MagpieMemoryItem{ID: strings.TrimSpace(m[1])}
+	rest := m[2]
+
+	splitIdx := strings.Index(rest, ": ")
+	if splitIdx < 0 {
+		item.Text = strings.TrimSpace(rest)
+		return item, true
+	}
+	header := rest[:splitIdx]
+	item.Text = strings.TrimSpace(rest[splitIdx+2:])
+
+	parts := strings.Split(header, ",")
+	for idx, rawPart := range parts {
+		p := strings.TrimSpace(rawPart)
+		if p == "" {
+			continue
+		}
+		switch {
+		case idx == 0:
+			item.Kind = p
+		case strings.HasPrefix(p, "#"):
+			for _, tok := range strings.Fields(p) {
+				if tag := strings.TrimPrefix(strings.TrimSpace(tok), "#"); tag != "" {
+					item.Tags = append(item.Tags, tag)
+				}
+			}
+		case isoPrefixRe.MatchString(p):
+			item.UpdatedAt = p
+		case item.Scope == "":
+			item.Scope = p
+		}
+	}
+	return item, true
+}
+
+// MagpieMemorySearch queries memories via `magpie tool memory_search`.
+// When botID is non-empty, it scopes to projectDir AND enforces tag `bot:<botID>`
+// so multiple bots sharing a git repo root remain isolated.
+func MagpieMemorySearch(ctx context.Context, scope, projectDir, botID, query, kind string, limit int) MagpieMemoryList {
+	if !magpieInstalled() {
+		return MagpieMemoryList{Installed: false, Available: false, Items: []MagpieMemoryItem{}}
+	}
+	scope = strings.TrimSpace(scope)
+	botID = strings.TrimSpace(botID)
+	if botID != "" {
+		scope = "project"
+		if strings.TrimSpace(projectDir) == "" {
+			return MagpieMemoryList{Installed: true, Available: true, Items: []MagpieMemoryItem{}}
+		}
+		if info, err := os.Stat(projectDir); err != nil || !info.IsDir() {
+			return MagpieMemoryList{Installed: true, Available: true, Items: []MagpieMemoryItem{}}
+		}
+	}
+	if scope == "" {
+		scope = "global"
+	}
+	if limit <= 0 {
+		limit = 30
+	}
+	if limit > 50 {
+		limit = 50
+	}
+
+	args := []string{"--scope", scope, "--limit", strconv.Itoa(limit)}
+	if scope == "project" && strings.TrimSpace(projectDir) != "" {
+		args = append(args, "--project", projectDir)
+	}
+	if q := strings.TrimSpace(query); q != "" {
+		args = append(args, "--query", q)
+	}
+	if k := strings.TrimSpace(kind); k != "" {
+		args = append(args, "--kind", k)
+	}
+	botTag := botMemoryTag(botID)
+	if botTag != "" {
+		args = append(args, "--tags", botTag)
+	}
+
+	env, text, err := runMagpieTool(ctx, "memory_search", args...)
+	if err != nil {
+		return MagpieMemoryList{
+			Installed: true,
+			Available: false,
+			Error:     err.Error(),
+			Items:     []MagpieMemoryItem{},
+		}
+	}
+	items := parseMemorySearchOutput(env, text)
+	if botTag != "" {
+		filtered := make([]MagpieMemoryItem, 0, len(items))
+		for _, it := range items {
+			if hasMemoryTag(it.Tags, botTag) {
+				filtered = append(filtered, it)
+			}
+		}
+		items = filtered
+	}
+	return MagpieMemoryList{
+		Installed: true,
+		Available: true,
+		Items:     items,
+	}
+}
+
+// MagpieMemorySave saves or updates a memory via `magpie tool memory_save`.
+func MagpieMemorySave(ctx context.Context, req MagpieMemorySaveReq) (string, error) {
+	if !magpieInstalled() {
+		return "", fmt.Errorf("magpie 未安装")
+	}
+	text := strings.TrimSpace(req.Text)
+	if text == "" {
+		return "", fmt.Errorf("记忆内容不能为空")
+	}
+
+	scope := strings.TrimSpace(req.Scope)
+	botID := strings.TrimSpace(req.BotID)
+	if botID != "" {
+		scope = "project"
+		if strings.TrimSpace(req.Project) == "" {
+			return "", fmt.Errorf("缺少 Bot 工作目录")
+		}
+		if err := os.MkdirAll(req.Project, 0o755); err != nil {
+			return "", err
+		}
+	}
+	if scope == "" {
+		scope = "global"
+	}
+
+	args := []string{"--text", text, "--scope", scope}
+	if scope == "project" && strings.TrimSpace(req.Project) != "" {
+		args = append(args, "--project", req.Project)
+	}
+	if id := strings.TrimSpace(req.ID); id != "" {
+		args = append(args, "--id", id)
+	}
+	if k := strings.TrimSpace(req.Kind); k != "" {
+		args = append(args, "--kind", k)
+	}
+	if w := strings.TrimSpace(req.Why); w != "" {
+		args = append(args, "--why", w)
+	}
+	for _, t := range normalizeMemoryTags(req.Tags, botID) {
+		args = append(args, "--tags", t)
+	}
+
+	_, msg, err := runMagpieTool(ctx, "memory_save", args...)
+	if err != nil {
+		return "", err
+	}
+	return msg, nil
+}
+
+// MagpieMemoryForget removes/forgets a memory via `magpie tool memory_forget`.
+func MagpieMemoryForget(ctx context.Context, id string) (string, error) {
+	if !magpieInstalled() {
+		return "", fmt.Errorf("magpie 未安装")
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return "", fmt.Errorf("memory id is required")
+	}
+	_, msg, err := runMagpieTool(ctx, "memory_forget", "--id", id)
+	if err != nil {
+		return "", err
+	}
+	return msg, nil
 }

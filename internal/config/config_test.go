@@ -101,3 +101,44 @@ func TestAPITokenHelpers(t *testing.T) {
 		t.Fatalf("ReadAPIToken literal = %q", got)
 	}
 }
+
+func TestPlatformInstructionsAndOpenCodeSync(t *testing.T) {
+	root := t.TempDir()
+	cfgDir := filepath.Join(root, "config")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	raw := `{"bots":[{"id":"ops","name":"Ops","privateSessions":true}]}`
+	if err := os.WriteFile(filepath.Join(cfgDir, "bots.json"), []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _, err := Load(root, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Bots[0].PrivateSessions {
+		t.Fatal("expected PrivateSessions=true")
+	}
+	botHubMD, err := os.ReadFile(filepath.Join(cfg.SharedDir, PlatformInstructionsFilename))
+	if err != nil {
+		t.Fatalf("expected _shared/BOT_HUB.md: %v", err)
+	}
+	if !strings.Contains(string(botHubMD), "recall_session") || !strings.Contains(string(botHubMD), "bot:<your-bot-id>") {
+		t.Fatalf("unexpected BOT_HUB.md content:\n%s", botHubMD)
+	}
+	agentsMD, err := os.ReadFile(filepath.Join(cfg.Bots[0].Workspace, "AGENTS.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(agentsMD), "list_nodes") {
+		t.Fatalf("AGENTS.md should not embed platform MCP list:\n%s", agentsMD)
+	}
+	ocRaw, err := os.ReadFile(filepath.Join(cfg.Bots[0].Workspace, "opencode.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(ocRaw), `"_shared/BOT_HUB.md"`) {
+		t.Fatalf("expected _shared/BOT_HUB.md in opencode.json instructions:\n%s", ocRaw)
+	}
+}
+

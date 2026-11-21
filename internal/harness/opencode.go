@@ -310,6 +310,7 @@ func (h *OpenCodeHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnRe
 		select {
 		case <-ctx.Done():
 			// Stop the running execution so the session is free for the next turn.
+			partial.Text = strings.Join(texts, "\n")
 			ictx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			_, _ = api.do(ictx, http.MethodPost, "/api/session/"+sid+"/interrupt", nil, nil)
 			cancel()
@@ -364,12 +365,14 @@ func (h *OpenCodeHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnRe
 				}
 				_, _ = api.do(ctx, http.MethodPost, "/api/session/"+sid+"/permission/"+d.ID+"/reply", map[string]any{"decision": decision}, nil)
 			case "session.execution.failed":
+				partial.Text = strings.Join(texts, "\n")
 				msg := "unknown error"
 				if d.Error != nil && d.Error.Message != "" {
 					msg = d.Error.Message
 				}
 				return partial, fmt.Errorf("opencode failed for bot %q: %s", bot.ID, msg)
 			case "session.execution.interrupted":
+				partial.Text = strings.Join(texts, "\n")
 				return partial, fmt.Errorf("bot %q interrupted", bot.ID)
 			case "session.execution.succeeded":
 				dur := time.Since(started)

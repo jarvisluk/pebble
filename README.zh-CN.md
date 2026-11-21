@@ -36,18 +36,19 @@
 bot-hub/
 ├── config/bots.json              # Bot 列表、模型接入、Telegram 与定时规则（保留 ${VAR} 引用）
 ├── state/
-│   ├── sessions.json             # 每个 Bot 的当前 Session ID、轮次数与累计开销
-│   └── messages/                 # 持久化的聊天与跨 Bot 协作记录
+│   ├── hub.db                    # 单文件 SQLite 状态库（会话归档与 FTS5 检索）
+│   ├── sessions.json             # 历史兼容会话快照（首次启动自动导入 hub.db）
+│   └── messages/                 # 历史兼容 JSONL 记录（导入后保持只读）
 └── workspaces/
-    ├── _shared/                  # 所有 Bot 共享的全局上下文（如 USER.md）
+    ├── _shared/                  # 共享全局上下文（USER.md 与托管版 BOT_HUB.md）
     └── assistant/                # 单个 Bot 的专属工作区
         ├── AGENTS.md             # 该 Bot 的角色定义与行为边界
-        ├── memory/               # 跨会话保留的长期笔记与待办
+        ├── memory/               # 本地笔记（配合 Magpie Memory 使用）
         ├── _shared -> ../_shared # 自动创建的共享目录软链
-        └── opencode.json         # 自动注入的本地 bot-hub MCP 配置
+        └── opencode.json         # 自动注入的 bot-hub MCP 与 BOT_HUB.md 指令
 ```
 
-调用 `POST /api/bots/{id}/reset` 或发送 `/reset` 时，仅清空当前底层 Session ID 以释放上下文窗口；工作区文件、`AGENTS.md` 与 `memory/` 原封不动保留。
+调用 `POST /api/bots/{id}/reset` 或发送 `/reset` 时，会将当前会话归档进 `state/hub.db` 并开启干净的新会话；工作区文件、`AGENTS.md`、`memory/` 与历史会话切片召回均保留。
 
 </details>
 
@@ -80,6 +81,18 @@ bot-hub/
   <tr>
     <td><code>message_bot</code></td>
     <td>向目标 Bot 发送任务并同步获取回复，双方聊天记录同步留痕（最大跳数 <code>hop &lt;= 4</code>）。</td>
+  </tr>
+  <tr>
+    <td><code>list_sessions</code></td>
+    <td>列举或检索当前/其他可访问 Bot 的历史与活跃会话（附带 <code>magpieSession</code> 引用）。</td>
+  </tr>
+  <tr>
+    <td><code>recall_session</code></td>
+    <td>按切片和单条长度保护读取历史会话（支持 <code>previous</code>、分页与单条全文提取）。</td>
+  </tr>
+  <tr>
+    <td><code>rotate_session</code></td>
+    <td>预约本轮结束后平滑归档当前会话并附带 <code>handoffNote</code> 交接摘要。</td>
   </tr>
 </table>
 
@@ -257,7 +270,11 @@ make desktop
 - `GET  /api/bots/{id}/messages`：获取持久化聊天记录（支持 `?limit=`）
 - `POST /api/bots/{id}/message`：发送消息（支持 `fromBotId` / `hop` 跨 Bot 调用）
 - `POST /api/bots/{id}/interrupt`：中断该 Bot 正在执行的轮次
-- `POST /api/bots/{id}/reset`：重置 Session（保留 Workspace 和 `memory/`）
+- `POST /api/bots/{id}/reset`：归档当前 Session 并开启新会话（保留 Workspace 和 `memory/`）
+- `POST /api/bots/{id}/rotate`：立即或预约本轮结束后归档当前会话（支持 `handoffNote` / `defer`）
+- `GET  /api/sessions`、`GET /api/bots/{id}/sessions`：检索或列举历史与活跃会话（支持 `?query=&limit=`）
+- `GET  /api/sessions/{sessionId}`、`GET /api/bots/{id}/sessions/{sessionId}`：切片召回指定或 `previous` 会话内容
+- `GET  /api/memory`、`POST /api/memory`、`DELETE /api/memory/{id}`：Magpie Memory 记忆透传管理（全局与单 Bot）
 - `GET  /api/settings`、`PUT /api/settings`：读取或更新全局模型接入方式（`magpie` / `self`）与默认模型
 - `GET  /api/models`：列出指定 `?harness=` 可选的模型列表
 - `POST /api/harnesses/{id}/magpie`：通过 Magpie 将指定 Harness CLI 接入网关模型

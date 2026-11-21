@@ -223,3 +223,83 @@ func TestSettingsPreserveDefaultsAndDeleteBotRoute(t *testing.T) {
 		t.Fatalf("expected 404 deleting missing bot, got %d", recM.Code)
 	}
 }
+
+func TestSessionRecallRotatePrivateAndMemoryRoutes(t *testing.T) {
+	tmp := t.TempDir()
+	store, err := state.NewStore(filepath.Join(tmp, "sessions.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := harness.NewRegistry()
+	reg.Register(noopHarness{kind: "opencode"})
+
+	cfg := &config.HubConfig{
+		ProjectRoot: tmp,
+		SharedDir:   filepath.Join(tmp, "workspaces", "_shared"),
+		StateFile:   filepath.Join(tmp, "sessions.json"),
+		Bots: []config.BotConfig{
+			{ID: "a", Name: "A", Workspace: filepath.Join(tmp, "workspaces", "a"), Harness: "opencode", PrivateSessions: true},
+			{ID: "b", Name: "B", Workspace: filepath.Join(tmp, "workspaces", "b"), Harness: "opencode"},
+		},
+	}
+	h := hub.New(cfg, store, nil, reg)
+	defer h.Close()
+
+	s1, err := store.EnsureActiveSession("a", "opencode", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.AppendMessage(state.ChatMessage{
+		BotID: "a", SessionID: s1.ID, Turn: 1, Role: "user", From: "web", Text: "排查 Nginx 502 错误",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	s := NewHTTPServer(h, config.HTTPConfig{Host: "127.0.0.1"})
+	defer s.Shutdown(t.Context())
+	mux := s.srv.Handler
+
+	// Rotate bot a's session immediately with handoff note.
+	rotReq := httptest.NewRequest(http.MethodPost, "/api/bots/a/rotate", bytes.NewBufferString(`{"handoffNote":"handoff nginx","defer":false}`))
+	rotReq.Host = "127.0.0.1:3789"
+	rotRec := httptest.NewRecorder()
+	mux.ServeHTTP(rotRec, rotReq)
+	if rotRec.Code != http.StatusOK || !strings.Contains(rotRec.Body.String(), `"rotated":true`) {
+		t.Fatalf("POST /api/bots/a/rotate failed: %d %s", rotRec.Code, rotRec.Body.String())
+	}
+
+	// Human can list and recall bot a's session.
+	listReq := httptest.NewRequest(http.MethodGet, "/api/sessions?query=Nginx", nil)
+	listReq.Host = "127.0.0.1:3789"
+	listRec := httptest.NewRecorder()
+	mux.ServeHTTP(listRec, listReq)
+	if listRec.Code != http.StatusOK || !strings.Contains(listRec.Body.String(), s1.ID) {
+		t.Fatalf("GET /api/sessions failed: %d %s", listRec.Code, listRec.Body.String())
+	}
+
+	recallReq := httptest.NewRequest(http.MethodGet, "/api/bots/a/sessions/previous", nil)
+	recallReq.Host = "127.0.0.1:3789"
+	recallRec := httptest.NewRecorder()
+	mux.ServeHTTP(recallRec, recallReq)
+	if recallRec.Code != http.StatusOK || !strings.Contains(recallRec.Body.String(), "handoff nginx") {
+		t.Fatalf("GET /api/bots/a/sessions/previous failed: %d %s", recallRec.Code, recallRec.Body.String())
+	}
+
+	// Cross-bot caller b gets 403 on private bot a.
+	forbReq := httptest.NewRequest(http.MethodGet, "/api/sessions/"+s1.ID+"?callerBotId=b", nil)
+	forbReq.Host = "127.0.0.1:3789"
+	forbRec := httptest.NewRecorder()
+	mux.ServeHTTP(forbRec, forbReq)
+	if forbRec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for private bot session recall, got %d %s", forbRec.Code, forbRec.Body.String())
+	}
+
+	// Memory route gracefully answers even if magpie isn't installed or gateway offline.
+	memReq := httptest.NewRequest(http.MethodGet, "/api/memory?scope=global", nil)
+	memReq.Host = "127.0.0.1:3789"
+	memRec := httptest.NewRecorder()
+	mux.ServeHTTP(memRec, memReq)
+	if memRec.Code != http.StatusOK || !strings.Contains(memRec.Body.String(), `"items":`) {
+		t.Fatalf("GET /api/memory failed: %d %s", memRec.Code, memRec.Body.String())
+	}
+}

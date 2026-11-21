@@ -12,9 +12,27 @@ export interface BotStatus {
   harness: string;
   model?: string;
   modelInherited?: boolean;
+  privateSessions?: boolean;
+  archivedSessions?: number;
   busy?: boolean;
   queued?: number;
   session?: SessionRecord;
+}
+
+export interface MagpieMemoryItem {
+  id: string;
+  kind?: string;
+  scope?: string;
+  tags?: string[];
+  updatedAt?: string;
+  text: string;
+}
+
+export interface MagpieMemoryList {
+  installed: boolean;
+  available: boolean;
+  error?: string;
+  items: MagpieMemoryItem[];
 }
 
 export interface BotDetail extends BotStatus {

@@ -138,6 +138,11 @@ func (h *PiHarness) proc(opts RunOptions, sessionID string) (*piProc, error) {
 	if bot.Model != "" {
 		args = append(args, "--model", bot.Model)
 	}
+	if opts.PlatformInstructionsPath != "" {
+		if info, err := os.Stat(opts.PlatformInstructionsPath); err == nil && !info.IsDir() {
+			args = append(args, "--append-system-prompt", opts.PlatformInstructionsPath)
+		}
+	}
 	cmd := exec.Command(h.binary, args...)
 	cmd.Dir = bot.Workspace
 	cmd.Env = append(procEnv(cmd, opts), "PWD="+bot.Workspace)
@@ -214,10 +219,12 @@ func (h *PiHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnResult, 
 			_ = p.send(map[string]any{"type": "abort"})
 			abortDeadline = time.After(10 * time.Second)
 		case <-abortDeadline:
+			partial.Text = strings.Join(texts, "\n")
 			h.drop(bot.ID, p)
 			return partial, ctxErr(ctx, bot.ID, bot.TimeoutSec)
 		case line, ok := <-p.lines:
 			if !ok {
+				partial.Text = strings.Join(texts, "\n")
 				h.drop(bot.ID, p)
 				return partial, fmt.Errorf("pi failed for bot %q: %s", bot.ID, p.exitDetail())
 			}
@@ -262,9 +269,11 @@ func (h *PiHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnResult, 
 			case "agent_settled":
 				partial.Usage = usage
 				if interrupted || evt.Aborted {
+					partial.Text = strings.Join(texts, "\n")
 					return partial, ctxErr(ctx, bot.ID, bot.TimeoutSec)
 				}
 				if lastErr != "" {
+					partial.Text = strings.Join(texts, "\n")
 					return partial, fmt.Errorf("pi failed for bot %q: %s", bot.ID, lastErr)
 				}
 				return finish(partial, strings.Join(texts, "\n"), usage, started), nil

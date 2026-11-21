@@ -20,15 +20,17 @@ type TurnResult struct {
 	BotID      string        `json:"botId"`
 	SessionID  string        `json:"sessionId"`
 	Text       string        `json:"text"`
+	Tools      []string      `json:"tools,omitempty"`
 	DurationMs int64         `json:"durationMs"`
 	Duration   time.Duration `json:"-"`
 	Usage      Usage         `json:"usage,omitempty"`
 }
 
 type RunOptions struct {
-	Bot       config.BotConfig
-	Prompt    string
-	SessionID string
+	Bot                      config.BotConfig
+	Prompt                   string
+	SessionID                string
+	PlatformInstructionsPath string
 	// MCPCommand/MCPEnv describe the bot-hub MCP server for harnesses that
 	// take MCP config per process rather than from the workspace.
 	MCPCommand []string

@@ -41,9 +41,10 @@ type BotConfig struct {
 	// than the bot's own config.
 	ModelInherited bool               `json:"-"`
 	Agent          string             `json:"agent,omitempty"`
-	AutoApprove    *bool              `json:"autoApprove,omitempty"` // default: true
-	TimeoutSec     int                `json:"timeoutSec,omitempty"`  // default: 300
-	Env            map[string]string  `json:"env,omitempty"`
+	AutoApprove     *bool              `json:"autoApprove,omitempty"` // default: true
+	TimeoutSec      int                `json:"timeoutSec,omitempty"`  // default: 300
+	PrivateSessions bool               `json:"privateSessions,omitempty"`
+	Env             map[string]string  `json:"env,omitempty"`
 	Telegram       *TelegramBotConfig `json:"telegram,omitempty"`
 	Schedules      []ScheduleConfig   `json:"schedules,omitempty"`
 }
@@ -323,8 +324,55 @@ func absFrom(root, p string) string {
 	return filepath.Join(root, p)
 }
 
+const PlatformInstructionsFilename = "BOT_HUB.md"
+
+// PlatformInstructionsText returns the concise hub-wide usage guide written to
+// _shared/BOT_HUB.md on startup and workspace sync.
+func PlatformInstructionsText() string {
+	return strings.Join([]string{
+		"<!-- Managed by bot-hub; overwritten on startup. Put personal global preferences in _shared/USER.md. -->",
+		"# Bot Hub Platform Guide",
+		"",
+		"- **Workspace Model**: `1 Bot = 1 Workspace = 1 Active Session`. Keep replies concise and direct.",
+		"- **Shared Context & Memory**:",
+		"  - Read `_shared/USER.md` for hub-wide user preferences.",
+		"  - When Magpie Memory tools (`memory_search` / `memory_save`) are available, store cross-project preferences with `scope=\"global\"` and this bot's durable notes with `scope=\"project\"` and tag `bot:<your-bot-id>` (and pass that tag when searching so sibling workspaces inside a git repo never mix). Otherwise store durable notes in `memory/`.",
+		"- **Teammates (`bot-hub` MCP)**: `list_bots`, `get_bot`, `create_bot`, `message_bot`.",
+		"- **Session Recall & Hygiene**:",
+		"  - On a new session after `/reset` or an error, use `list_sessions` and `recall_session` (omit `sessionId` or pass `\"previous\"` for your prior session; keep slices small and fetch single oversized messages by `messageId` to avoid re-polluting context).",
+		"  - If `list_sessions` returns a `magpieSession` (e.g. `opencode:...` or `claude:...`) and you need raw tool transcripts, pass it to `magpie-sessions__read_session`.",
+		"  - When context gets noisy or off-track, call `rotate_session(handoffNote)` to cleanly archive this session after the turn.",
+		"- **Devices & Human Takeover**: `list_nodes`, `node_exec`, `node_file`, `node_desktop`, `request_takeover`.",
+		"",
+	}, "\n")
+}
+
+// EnsurePlatformInstructions writes the managed _shared/BOT_HUB.md file atomically.
+func EnsurePlatformInstructions(sharedDir string) (string, error) {
+	if strings.TrimSpace(sharedDir) == "" {
+		return "", errors.New("sharedDir is empty")
+	}
+	if err := os.MkdirAll(sharedDir, 0o755); err != nil {
+		return "", err
+	}
+	target := filepath.Join(sharedDir, PlatformInstructionsFilename)
+	want := PlatformInstructionsText()
+	if cur, err := os.ReadFile(target); err == nil && string(cur) == want {
+		return target, nil
+	}
+	tmp := target + ".tmp"
+	if err := os.WriteFile(tmp, []byte(want), 0o644); err != nil {
+		return "", err
+	}
+	if err := os.Rename(tmp, target); err != nil {
+		_ = os.Remove(tmp)
+		return "", err
+	}
+	return target, nil
+}
+
 func EnsureWorkspace(bot *BotConfig, cfg *HubConfig, customInstructions string) error {
-	if err := os.MkdirAll(cfg.SharedDir, 0o755); err != nil {
+	if _, err := EnsurePlatformInstructions(cfg.SharedDir); err != nil {
 		return err
 	}
 	if err := os.MkdirAll(filepath.Join(bot.Workspace, "memory"), 0o755); err != nil {
@@ -351,12 +399,9 @@ func EnsureWorkspace(bot *BotConfig, cfg *HubConfig, customInstructions string) 
 			"",
 			desc,
 			"",
-			"## Workspace & Memory Rules",
-			"- This directory is your dedicated workspace (1 Bot = 1 Workspace = 1 Session).",
-			"- Read `_shared/USER.md` for global user preferences and shared context.",
-			"- Persist important decisions, ongoing tasks, and facts into `memory/` so you can recover even if the session is reset.",
-			"- You have `bot-hub` MCP tools (`list_bots`, `get_bot`, `create_bot`, `message_bot` for teammates; `list_nodes`, `node_exec`, `node_file`, `node_desktop`, `request_takeover` for local/remote computers and human takeover).",
-			"- Keep replies concise and direct.",
+			"## Role & Focus",
+			"- Stay focused on your assigned responsibilities in this workspace.",
+			"- Follow platform conventions in `_shared/BOT_HUB.md` and shared user preferences in `_shared/USER.md`.",
 			"",
 		}, "\n")
 		if err := os.WriteFile(agentsMD, []byte(content), 0o644); err != nil {
@@ -365,7 +410,7 @@ func EnsureWorkspace(bot *BotConfig, cfg *HubConfig, customInstructions string) 
 	}
 
 	// Write workspace-local opencode.json so the bot automatically gets bot-hub MCP tools
-	// (list_bots, get_bot, create_bot, message_bot) without clobbering global Magpie MCPs.
+	// and _shared/BOT_HUB.md instructions without clobbering global Magpie config.
 	if err := ensureOpenCodeMCPConfig(bot, cfg); err != nil {
 		return err
 	}
@@ -455,6 +500,22 @@ func ensureOpenCodeMCPConfig(bot *BotConfig, cfg *HubConfig) error {
 	servers["bot-hub"] = server
 	mcpMap["servers"] = servers
 	doc["mcp"] = mcpMap
+
+	const platInstr = "_shared/" + PlatformInstructionsFilename
+	var nextInstr []string
+	seenInstr := map[string]bool{}
+	if rawList, ok := doc["instructions"].([]any); ok {
+		for _, item := range rawList {
+			if s, ok := item.(string); ok && strings.TrimSpace(s) != "" && !seenInstr[s] {
+				seenInstr[s] = true
+				nextInstr = append(nextInstr, s)
+			}
+		}
+	}
+	if !seenInstr[platInstr] {
+		nextInstr = append(nextInstr, platInstr)
+	}
+	doc["instructions"] = nextInstr
 
 	out, err := json.MarshalIndent(doc, "", "  ")
 	if err != nil {

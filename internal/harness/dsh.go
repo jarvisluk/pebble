@@ -392,6 +392,7 @@ func (h *DshHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnResult,
 			_ = p.send(map[string]any{"jsonrpc": "2.0", "method": "session/cancel", "params": map[string]any{"sessionId": sid}})
 			cancelDeadline = time.After(15 * time.Second)
 		case <-cancelDeadline:
+			partial.Text = strings.TrimSpace(texts.String())
 			return partial, ctxErr(ctx, bot.ID, bot.TimeoutSec)
 		case u := <-updates:
 			switch u.SessionUpdate {
@@ -420,6 +421,7 @@ func (h *DshHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnResult,
 				}
 			}
 			if r.err != nil {
+				partial.Text = strings.TrimSpace(texts.String())
 				return partial, fmt.Errorf("dsh failed for bot %q: %w", bot.ID, r.err)
 			}
 			var res struct {
@@ -427,6 +429,7 @@ func (h *DshHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnResult,
 			}
 			_ = json.Unmarshal(r.raw, &res)
 			if cancelled || res.StopReason == "cancelled" {
+				partial.Text = strings.TrimSpace(texts.String())
 				return partial, ctxErr(ctx, bot.ID, bot.TimeoutSec)
 			}
 			text := strings.TrimSpace(texts.String())

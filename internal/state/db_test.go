@@ -1,0 +1,229 @@
+package state
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestStoreSQLiteLifecycleSearchAndRecall(t *testing.T) {
+	tmp := t.TempDir()
+	store, err := NewStore(filepath.Join(tmp, "sessions.json"))
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer store.Close()
+
+	if !strings.HasSuffix(store.DBPath(), "hub.db") {
+		t.Fatalf("unexpected db path: %s", store.DBPath())
+	}
+
+	// Turn 1..2 on bot alpha
+	s1, err := store.EnsureActiveSession("alpha", "opencode", "magpie/sonnet")
+	if err != nil {
+		t.Fatalf("EnsureActiveSession: %v", err)
+	}
+	if _, err := store.AppendMessage(ChatMessage{
+		BotID:     "alpha",
+		SessionID: s1.ID,
+		Turn:      1,
+		Role:      "user",
+		From:      "web",
+		Text:      "排查 Docker 端口 8080 占用情况",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	longOut := strings.Repeat("A", 120)
+	replyMsg, err := store.AppendMessage(ChatMessage{
+		BotID:       "alpha",
+		SessionID:   s1.ID,
+		Turn:        1,
+		Role:        "assistant",
+		From:        "bot:alpha",
+		Text:        "Docker 服务占用了端口 8080：" + longOut,
+		Tools:       []string{"Bash×2", "Read"},
+		InputTokens: 4200,
+		CostUSD:     0.02,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec1, err := store.RecordTurnDetail(s1.ID, TurnRecordUpdate{
+		RuntimeSessionID: "oc_ses_1",
+		Harness:          "opencode",
+		Model:            "magpie/sonnet",
+		PromptTitle:      "排查 Docker 端口 8080 占用情况",
+		CostUSD:          0.02,
+		InputTokens:      4200,
+		IncrementTurn:    true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec1.SessionID != "oc_ses_1" || rec1.MagpieSession != "opencode:oc_ses_1" || rec1.LastInputTokens != 4200 {
+		t.Fatalf("unexpected TurnRecordUpdate result: %+v", rec1)
+	}
+
+	// Archive s1 as error
+	prev, existed, err := store.ArchiveActive("alpha", "error", "context_length_exceeded", "handoff to next")
+	if err != nil || !existed || prev.ID != s1.ID {
+		t.Fatalf("ArchiveActive failed: prev=%+v existed=%v err=%v", prev, existed, err)
+	}
+	if _, ok := store.Get("alpha"); ok {
+		t.Fatal("expected no active session after ArchiveActive")
+	}
+
+	// Another bot beta
+	s2, err := store.EnsureActiveSession("beta", "claude", "opus")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.AppendMessage(ChatMessage{
+		BotID:     "beta",
+		SessionID: s2.ID,
+		Turn:      1,
+		Role:      "user",
+		From:      "web",
+		Text:      "检查数据库迁移脚本",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.RecordTurnDetail(s2.ID, TurnRecordUpdate{
+		RuntimeSessionID: "cc_uuid_2",
+		Harness:          "claude",
+		IncrementTurn:    true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// ListSessions: FTS5 trigram query (>= 3 chars)
+	hits, err := store.ListSessions(SessionListOptions{Query: "Docker", Limit: 10})
+	if err != nil {
+		t.Fatalf("ListSessions trigram: %v", err)
+	}
+	if len(hits) != 1 || hits[0].SessionID != s1.ID || len(hits[0].Snippets) == 0 {
+		t.Fatalf("unexpected trigram search hits: %+v", hits)
+	}
+	if hits[0].MagpieSession != "opencode:oc_ses_1" {
+		t.Fatalf("expected magpieSession opencode:oc_ses_1, got %q", hits[0].MagpieSession)
+	}
+
+	// ListSessions: short 2-char Chinese query (< 3 runes) must fall back to LIKE
+	shortHits, err := store.ListSessions(SessionListOptions{Query: "端口", Limit: 10})
+	if err != nil {
+		t.Fatalf("ListSessions short LIKE: %v", err)
+	}
+	if len(shortHits) != 1 || shortHits[0].SessionID != s1.ID {
+		t.Fatalf("expected 1 hit for short query 端口, got %+v", shortHits)
+	}
+
+	// ExcludedBotIDs (privateSessions)
+	filtered, err := store.ListSessions(SessionListOptions{ExcludedBotIDs: []string{"alpha"}, Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, h := range filtered {
+		if h.BotID == "alpha" {
+			t.Fatalf("excluded bot alpha returned: %+v", h)
+		}
+	}
+
+	// RecallSession with "previous" & maxChars truncation
+	res, err := store.RecallSession(RecallOptions{
+		BotID:     "alpha",
+		SessionID: "previous",
+		MaxChars:  40,
+	})
+	if err != nil {
+		t.Fatalf("RecallSession previous: %v", err)
+	}
+	if res.Session.SessionID != s1.ID || res.Session.Status != "error" || len(res.Messages) != 2 {
+		t.Fatalf("unexpected recall result: %+v", res)
+	}
+	if !strings.Contains(res.Messages[1].Text, "[...truncated ") || !strings.Contains(res.Messages[1].Text, replyMsg.ID) {
+		t.Fatalf("expected truncation marker with messageId, got %q", res.Messages[1].Text)
+	}
+
+	// Single-message full recall bypasses truncation
+	fullRes, err := store.RecallSession(RecallOptions{MessageID: replyMsg.ID, MaxChars: 40})
+	if err != nil {
+		t.Fatalf("RecallSession messageId: %v", err)
+	}
+	if len(fullRes.Messages) != 1 || !strings.Contains(fullRes.Messages[0].Text, longOut) {
+		t.Fatalf("expected untruncated full text, got %+v", fullRes)
+	}
+
+	// Recall by runtimeSessionId directly
+	byRuntime, err := store.RecallSession(RecallOptions{SessionID: "oc_ses_1"})
+	if err != nil || byRuntime.Session.SessionID != s1.ID {
+		t.Fatalf("RecallSession by runtimeSessionId failed: res=%+v err=%v", byRuntime, err)
+	}
+}
+
+func TestLegacyMigrationFromJSONAndJSONL(t *testing.T) {
+	tmp := t.TempDir()
+	stateDir := filepath.Join(tmp, "state")
+	msgDir := filepath.Join(stateDir, "messages")
+	if err := os.MkdirAll(msgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	sessionsJSON := `{
+  "assistant": {
+    "sessionId": "ses_current",
+    "createdAt": "2026-11-20T10:00:00Z",
+    "lastActiveAt": "2026-11-20T11:00:00Z",
+    "turnCount": 2,
+    "totalCostUsd": 0.05
+  }
+}`
+	if err := os.WriteFile(filepath.Join(stateDir, "sessions.json"), []byte(sessionsJSON), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	jsonl := strings.Join([]string{
+		`{"id":"m1","botId":"assistant","role":"user","from":"web","text":"旧会话问题","createdAt":"2026-11-20T09:00:00Z"}`,
+		`{"id":"m2","botId":"assistant","role":"assistant","from":"bot:assistant","text":"旧会话回答","sessionId":"ses_old","costUsd":0.01,"createdAt":"2026-11-20T09:00:05Z"}`,
+		`{"id":"m3","botId":"assistant","role":"system","from":"system","text":"Session 已重置（旧 Session: ses_old），Workspace 和 memory/ 已保留。","createdAt":"2026-11-20T09:05:00Z"}`,
+		`{"id":"m4","botId":"assistant","role":"user","from":"web","text":"新会话第一问","createdAt":"2026-11-20T10:00:00Z"}`,
+		`{"id":"m5","botId":"assistant","role":"assistant","from":"bot:assistant","text":"新会话回答","sessionId":"ses_current","costUsd":0.03,"createdAt":"2026-11-20T10:00:05Z"}`,
+		"",
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(msgDir, "assistant.jsonl"), []byte(jsonl), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := NewStore(filepath.Join(stateDir, "sessions.json"))
+	if err != nil {
+		t.Fatalf("NewStore migrate: %v", err)
+	}
+	defer store.Close()
+
+	// Active session preserved with runtimeSessionId
+	act, ok := store.Get("assistant")
+	if !ok || act.SessionID != "ses_current" || act.TurnCount != 2 {
+		t.Fatalf("unexpected migrated active session: %+v (ok=%v)", act, ok)
+	}
+
+	// Archived previous session reconstructed from JSONL
+	prev, ok := store.LatestArchivedSession("assistant")
+	if !ok || prev.RuntimeSessionID != "ses_old" || prev.Status != "reset" {
+		t.Fatalf("unexpected migrated archived session: %+v (ok=%v)", prev, ok)
+	}
+
+	// Recall archived session shows m1, m2, m3 properly attached to ses_old
+	rec, err := store.RecallSession(RecallOptions{BotID: "assistant", SessionID: "previous"})
+	if err != nil {
+		t.Fatalf("RecallSession migrated previous: %v", err)
+	}
+	if len(rec.Messages) != 3 || rec.Messages[0].ID != "m1" || rec.Messages[2].ID != "m3" {
+		t.Fatalf("unexpected migrated messages for old session: %+v", rec.Messages)
+	}
+
+	// UI message list still returns all 5 messages chronologically
+	all, err := store.ListMessages("assistant", 50)
+	if err != nil || len(all) != 5 {
+		t.Fatalf("expected 5 migrated messages, got %d (err=%v)", len(all), err)
+	}
+}

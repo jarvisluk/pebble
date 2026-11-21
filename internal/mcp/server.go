@@ -385,6 +385,81 @@ func toolDefinitions() []map[string]any {
 				"required": []string{"reason"},
 			},
 		},
+		{
+			"name":        "list_sessions",
+			"description": "List archived and active sessions in bot-hub, optionally filtering by botId ('*' for all accessible bots) or keyword query. Includes magpieSession references when available.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"botId": map[string]any{
+						"type":        "string",
+						"description": "Optional target bot ID (defaults to this bot; pass '*' to search all accessible bots).",
+					},
+					"query": map[string]any{
+						"type":        "string",
+						"description": "Optional keyword to match session titles, errors, or message contents.",
+					},
+					"limit": map[string]any{
+						"type":        "integer",
+						"description": "Maximum number of sessions to return (default 20, max 100).",
+					},
+				},
+			},
+		},
+		{
+			"name":        "recall_session",
+			"description": "Read sliced messages from a prior or active session (yours or another accessible bot's). Defaults to the most recent archived session ('previous') and last 20 messages with length protection.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"sessionId": map[string]any{
+						"type":        "string",
+						"description": "Target session ID (Hub ses_... ID or runtimeSessionId). Omit or pass 'previous' for the latest archived session.",
+					},
+					"botId": map[string]any{
+						"type":        "string",
+						"description": "Optional target bot ID (defaults to this bot when sessionId is 'previous' or omitted).",
+					},
+					"tail": map[string]any{
+						"type":        "integer",
+						"description": "Return the last N messages (default 20, max 100).",
+					},
+					"offset": map[string]any{
+						"type":        "integer",
+						"description": "Zero-based start offset for forward pagination.",
+					},
+					"limit": map[string]any{
+						"type":        "integer",
+						"description": "Page size when paginating with offset (default 20, max 100).",
+					},
+					"query": map[string]any{
+						"type":        "string",
+						"description": "Optional keyword filter inside the session (returns matched messages with surrounding context).",
+					},
+					"maxChars": map[string]any{
+						"type":        "integer",
+						"description": "Per-message character limit before truncation (default 2000).",
+					},
+					"messageId": map[string]any{
+						"type":        "string",
+						"description": "Fetch the complete untruncated text of a single clipped message ID.",
+					},
+				},
+			},
+		},
+		{
+			"name":        "rotate_session",
+			"description": "Schedule archiving the current session after this turn completes (with an optional handoff note) so the next message starts a clean session.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"handoffNote": map[string]any{
+						"type":        "string",
+						"description": "Optional concise handoff summary carried into the next session's breadcrumb.",
+					},
+				},
+			},
+		},
 	}
 }
 
@@ -585,6 +660,124 @@ func (s *Server) callTool(ctx context.Context, name string, rawArgs json.RawMess
 			return resp.Note, false
 		}
 		return "人工接管已完成，可继续执行。", false
+
+	case "list_sessions":
+		var args struct {
+			BotID string `json:"botId"`
+			Query string `json:"query"`
+			Limit int    `json:"limit"`
+		}
+		if len(rawArgs) > 0 {
+			if err := json.Unmarshal(rawArgs, &args); err != nil {
+				return "invalid arguments", true
+			}
+		}
+		botID := strings.TrimSpace(args.BotID)
+		if botID == "" {
+			botID = s.selfBotID
+		}
+		q := url.Values{}
+		if botID != "" {
+			q.Set("botId", botID)
+		}
+		if s.selfBotID != "" {
+			q.Set("callerBotId", s.selfBotID)
+		}
+		if strings.TrimSpace(args.Query) != "" {
+			q.Set("query", strings.TrimSpace(args.Query))
+		}
+		if args.Limit > 0 {
+			q.Set("limit", strconv.Itoa(args.Limit))
+		}
+		path := "/api/sessions"
+		if enc := q.Encode(); enc != "" {
+			path += "?" + enc
+		}
+		body, err := s.doJSON(ctx, http.MethodGet, path, nil)
+		if err != nil {
+			return err.Error(), true
+		}
+		return prettyJSON(body), false
+
+	case "recall_session":
+		var args struct {
+			SessionID string `json:"sessionId"`
+			BotID     string `json:"botId"`
+			Tail      int    `json:"tail"`
+			Offset    int    `json:"offset"`
+			Limit     int    `json:"limit"`
+			Query     string `json:"query"`
+			MaxChars  int    `json:"maxChars"`
+			MessageID string `json:"messageId"`
+		}
+		if len(rawArgs) > 0 {
+			if err := json.Unmarshal(rawArgs, &args); err != nil {
+				return "invalid arguments", true
+			}
+		}
+		sid := strings.TrimSpace(args.SessionID)
+		if sid == "" {
+			sid = "previous"
+		}
+		botID := strings.TrimSpace(args.BotID)
+		if botID == "" && sid == "previous" {
+			botID = s.selfBotID
+		}
+		q := url.Values{}
+		if botID != "" {
+			q.Set("botId", botID)
+		}
+		if s.selfBotID != "" {
+			q.Set("callerBotId", s.selfBotID)
+		}
+		if args.Tail > 0 {
+			q.Set("tail", strconv.Itoa(args.Tail))
+		}
+		if args.Offset > 0 {
+			q.Set("offset", strconv.Itoa(args.Offset))
+		}
+		if args.Limit > 0 {
+			q.Set("limit", strconv.Itoa(args.Limit))
+		}
+		if strings.TrimSpace(args.Query) != "" {
+			q.Set("query", strings.TrimSpace(args.Query))
+		}
+		if args.MaxChars > 0 {
+			q.Set("maxChars", strconv.Itoa(args.MaxChars))
+		}
+		if strings.TrimSpace(args.MessageID) != "" {
+			q.Set("messageId", strings.TrimSpace(args.MessageID))
+		}
+		path := "/api/sessions/" + url.PathEscape(sid)
+		if enc := q.Encode(); enc != "" {
+			path += "?" + enc
+		}
+		body, err := s.doJSON(ctx, http.MethodGet, path, nil)
+		if err != nil {
+			return err.Error(), true
+		}
+		return prettyJSON(body), false
+
+	case "rotate_session":
+		if s.selfBotID == "" {
+			return "caller bot ID is unknown", true
+		}
+		var args struct {
+			HandoffNote string `json:"handoffNote"`
+		}
+		if len(rawArgs) > 0 {
+			if err := json.Unmarshal(rawArgs, &args); err != nil {
+				return "invalid arguments", true
+			}
+		}
+		body, err := s.doJSON(ctx, http.MethodPost, "/api/bots/"+url.PathEscape(s.selfBotID)+"/rotate", map[string]any{
+			"handoffNote": args.HandoffNote,
+			"defer":       true,
+		})
+		if err != nil {
+			return err.Error(), true
+		}
+		return prettyJSON(body), false
 
 	default:
 		return fmt.Sprintf("unknown tool %q", name), true

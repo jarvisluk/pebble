@@ -10,6 +10,7 @@ import type {
   ChatMessage,
   DesktopFrame,
   DesktopTarget,
+  MagpieMemoryList,
   NodeInfo,
   ScreenState,
   ServerProfile,
@@ -95,9 +96,12 @@ interface HubContextValue {
   interruptBot: (botId: string) => Promise<boolean>;
   resetBot: (botId: string) => Promise<void>;
   getBotDetail: (botId: string) => Promise<BotDetail>;
-  createBot: (body: { id: string; name: string; description?: string; harness?: string; model?: string; instructions?: string }) => Promise<BotStatus>;
-  updateBot: (botId: string, body: { name?: string; description?: string; instructions?: string }) => Promise<BotStatus>;
+  createBot: (body: { id: string; name: string; description?: string; harness?: string; model?: string; instructions?: string; privateSessions?: boolean }) => Promise<BotStatus>;
+  updateBot: (botId: string, body: { name?: string; description?: string; instructions?: string; privateSessions?: boolean }) => Promise<BotStatus>;
   deleteBot: (botId: string) => Promise<void>;
+  fetchMemories: (opts: { scope?: 'global' | 'project' | 'all'; botId?: string; query?: string; limit?: number }) => Promise<MagpieMemoryList>;
+  saveMemory: (body: { scope?: 'global' | 'project'; botId?: string; kind?: string; text: string; tags?: string[] }) => Promise<void>;
+  deleteMemory: (id: string) => Promise<void>;
   loadSettings: () => Promise<SettingsData>;
   loadModels: (harness: string) => Promise<string[]>;
   saveSettings: (opts: {
@@ -573,7 +577,7 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const createBot = useCallback(
-    async (body: { id: string; name: string; description?: string; harness?: string; model?: string; instructions?: string }) => {
+    async (body: { id: string; name: string; description?: string; harness?: string; model?: string; instructions?: string; privateSessions?: boolean }) => {
       const st = await apiRequest<BotStatus>(baseURLRef.current, authTokenRef.current, '/api/bots', {
         method: 'POST',
         body,
@@ -585,7 +589,7 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
   );
 
   const updateBot = useCallback(
-    async (botId: string, body: { name?: string; description?: string; instructions?: string }) => {
+    async (botId: string, body: { name?: string; description?: string; instructions?: string; privateSessions?: boolean }) => {
       const st = await apiRequest<BotStatus>(
         baseURLRef.current,
         authTokenRef.current,
@@ -607,6 +611,38 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
     },
     [removeBotState]
   );
+
+  const fetchMemories = useCallback(
+    async (opts: { scope?: 'global' | 'project' | 'all'; botId?: string; query?: string; limit?: number }) => {
+      const q = new URLSearchParams();
+      if (opts.scope) q.set('scope', opts.scope);
+      if (opts.botId) q.set('botId', opts.botId);
+      if (opts.query?.trim()) q.set('query', opts.query.trim());
+      if (opts.limit) q.set('limit', String(opts.limit));
+      return apiRequest<MagpieMemoryList>(
+        baseURLRef.current,
+        authTokenRef.current,
+        `/api/memory?${q.toString()}`
+      );
+    },
+    []
+  );
+
+  const saveMemory = useCallback(
+    async (body: { scope?: 'global' | 'project'; botId?: string; kind?: string; text: string; tags?: string[] }) => {
+      await apiRequest(baseURLRef.current, authTokenRef.current, '/api/memory', {
+        method: 'POST',
+        body,
+      });
+    },
+    []
+  );
+
+  const deleteMemory = useCallback(async (id: string) => {
+    await apiRequest(baseURLRef.current, authTokenRef.current, `/api/memory/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    });
+  }, []);
 
   const loadSettings = useCallback(async () => {
     const s = await apiRequest<SettingsData>(baseURLRef.current, authTokenRef.current, '/api/settings');
@@ -821,6 +857,9 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
         createBot,
         updateBot,
         deleteBot,
+        fetchMemories,
+        saveMemory,
+        deleteMemory,
         loadSettings,
         loadModels,
         saveSettings,

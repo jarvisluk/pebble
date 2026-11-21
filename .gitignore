@@ -1,5 +1,5 @@
 bin/
-state/
+/state/
 config/bots.json
 .env
 .DS_Store

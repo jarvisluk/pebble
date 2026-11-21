@@ -94,10 +94,12 @@ func (h *ClaudeHarness) proc(opts RunOptions) (*claudeProc, error) {
 		delete(h.procs, bot.ID)
 	}
 
-	// Claude Code reads CLAUDE.md; the workspace instructions live in AGENTS.md.
+	// Claude Code reads CLAUDE.md; bridge _shared/BOT_HUB.md and @AGENTS.md
+	// unless the user already customized CLAUDE.md.
 	claudeMD := filepath.Join(bot.Workspace, "CLAUDE.md")
-	if _, err := os.Stat(claudeMD); os.IsNotExist(err) {
-		_ = os.WriteFile(claudeMD, []byte("@AGENTS.md\n"), 0o644)
+	const wantClaudeMD = "@_shared/BOT_HUB.md\n@AGENTS.md\n"
+	if cur, err := os.ReadFile(claudeMD); os.IsNotExist(err) || (err == nil && string(cur) == "@AGENTS.md\n") {
+		_ = os.WriteFile(claudeMD, []byte(wantClaudeMD), 0o644)
 	}
 
 	args := []string{"-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose"}
@@ -176,11 +178,13 @@ func (h *ClaudeHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnResu
 		select {
 		case <-ctx.Done():
 			// Killing is the interrupt; the next turn resumes the session.
+			partial.Text = strings.Join(texts, "\n")
 			h.drop(bot.ID, p)
 			return partial, ctxErr(ctx, bot.ID, bot.TimeoutSec)
 
 		case line, ok := <-p.lines:
 			if !ok {
+				partial.Text = strings.Join(texts, "\n")
 				h.drop(bot.ID, p)
 				return partial, fmt.Errorf("claude failed for bot %q: %s", bot.ID, p.exitDetail())
 			}
@@ -214,6 +218,7 @@ func (h *ClaudeHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnResu
 				}
 			case "result":
 				if evt.IsError {
+					partial.Text = strings.Join(texts, "\n")
 					return partial, fmt.Errorf("claude failed for bot %q: %s", bot.ID, evt.Result)
 				}
 				text := strings.TrimSpace(evt.Result)

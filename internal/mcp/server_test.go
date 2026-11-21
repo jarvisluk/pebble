@@ -57,11 +57,65 @@ func TestMCPStdioToolsFlow(t *testing.T) {
 	if err := json.Unmarshal([]byte(lines[1]), &listResp); err != nil {
 		t.Fatalf("parse tools/list: %v", err)
 	}
-	if len(listResp.Result.Tools) != 9 {
-		t.Fatalf("expected 9 tools, got %d", len(listResp.Result.Tools))
+	if len(listResp.Result.Tools) != 12 {
+		t.Fatalf("expected 12 tools, got %d", len(listResp.Result.Tools))
 	}
 	if !strings.Contains(lines[3], "Reply from bot:researcher") {
 		t.Fatalf("expected message_bot reply, got %s", lines[3])
+	}
+}
+
+func TestMCPSessionRecallAndRotateTools(t *testing.T) {
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/sessions":
+			if r.URL.Query().Get("callerBotId") != "assistant" || r.URL.Query().Get("botId") != "*" || r.URL.Query().Get("query") != "docker" {
+				http.Error(w, `{"error":"bad list_sessions query"}`, http.StatusBadRequest)
+				return
+			}
+			_, _ = w.Write([]byte(`{"sessions":[{"sessionId":"ses_1","botId":"ops","status":"error"}]}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/sessions/previous":
+			if r.URL.Query().Get("callerBotId") != "assistant" || r.URL.Query().Get("botId") != "assistant" || r.URL.Query().Get("tail") != "5" {
+				http.Error(w, `{"error":"bad recall_session query"}`, http.StatusBadRequest)
+				return
+			}
+			_, _ = w.Write([]byte(`{"session":{"sessionId":"ses_prev"},"messages":[{"id":"m1","text":"old context"}]}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/bots/assistant/rotate":
+			var body struct {
+				HandoffNote string `json:"handoffNote"`
+				Defer       bool   `json:"defer"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			if !body.Defer || body.HandoffNote != "clean handoff" {
+				http.Error(w, `{"error":"bad rotate payload"}`, http.StatusBadRequest)
+				return
+			}
+			_, _ = w.Write([]byte(`{"deferred":true,"sessionId":"ses_cur"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer api.Close()
+
+	input := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_sessions","arguments":{"botId":"*","query":"docker"}}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"recall_session","arguments":{"tail":5}}}`,
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"rotate_session","arguments":{"handoffNote":"clean handoff"}}}`,
+		"",
+	}, "\n")
+
+	var out bytes.Buffer
+	srv := NewServer(api.URL, "assistant")
+	if err := srv.ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatalf("ServeStdio failed: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("expected 3 responses, got %d:\n%s", len(lines), out.String())
+	}
+	if !strings.Contains(lines[0], "ses_1") || !strings.Contains(lines[1], "old context") || !strings.Contains(lines[2], `"deferred": true`) && !strings.Contains(lines[2], `\"deferred\": true`) {
+		t.Fatalf("unexpected session/rotate outputs:\n%s", out.String())
 	}
 }
 

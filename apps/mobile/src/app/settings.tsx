@@ -19,6 +19,7 @@ import { confirmAction } from '../confirm';
 import { resolveDefaultModel, useHub } from '../store';
 import { MONO_FONT, useTheme, useThemePref } from '../theme';
 import type { ThemePreference } from '../storage';
+import type { MagpieMemoryList } from '../types';
 
 interface BotDraft {
   harness: string;
@@ -57,6 +58,9 @@ export default function SettingsScreen() {
     disconnectMagpie,
     magpieProviderAction,
     setAllowLocalDesktop,
+    fetchMemories,
+    saveMemory,
+    deleteMemory,
   } = useHub();
 
   const [defaultModel, setDefaultModel] = useState('');
@@ -81,9 +85,30 @@ export default function SettingsScreen() {
   const [provUrl, setProvUrl] = useState('');
   const [provKey, setProvKey] = useState('');
 
+  const [memData, setMemData] = useState<MagpieMemoryList | null>(null);
+  const [memLoading, setMemLoading] = useState(false);
+  const [memQuery, setMemQuery] = useState('');
+  const [memShowAdd, setMemShowAdd] = useState(false);
+  const [memKind, setMemKind] = useState<'fact' | 'preference' | 'rule' | 'reference'>('fact');
+  const [memText, setMemText] = useState('');
+  const [memTags, setMemTags] = useState('');
+
+  const loadGlobalMemories = async (q = memQuery) => {
+    setMemLoading(true);
+    try {
+      const res = await fetchMemories({ scope: 'global', query: q, limit: 30 });
+      setMemData(res);
+    } catch (err: any) {
+      setError(err?.message || '加载全局记忆失败');
+    } finally {
+      setMemLoading(false);
+    }
+  };
+
   useEffect(() => {
     loadSettings().catch(() => {});
     refreshBots().catch(() => {});
+    void loadGlobalMemories('');
   }, [loadSettings, refreshBots]);
 
   useEffect(() => {
@@ -774,6 +799,175 @@ export default function SettingsScreen() {
               textAlignVertical="top"
               style={[styles.input, styles.textArea, { backgroundColor: theme.s1, color: theme.text, fontFamily: MONO_FONT }]}
             />
+          </View>
+
+          <View style={[styles.card, { backgroundColor: theme.card }]}>
+            <View style={styles.rowBetween}>
+              <Text style={[styles.sectionTitle, { color: theme.text }]}>Magpie 全局记忆</Text>
+              <View style={styles.magpieActs}>
+                <Pressable
+                  onPress={() => void loadGlobalMemories(memQuery)}
+                  style={[styles.smallBtn, { backgroundColor: theme.s1 }]}
+                >
+                  <Text style={[styles.smallBtnTxt, { color: theme.text2 }]}>
+                    {memLoading ? '刷新中' : '刷新'}
+                  </Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => setMemShowAdd((v) => !v)}
+                  style={[styles.smallBtn, { backgroundColor: theme.accentSoft }]}
+                >
+                  <Text style={[styles.smallBtnTxt, { color: theme.accent }]}>
+                    {memShowAdd ? '收起' : '+ 添加'}
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+
+            {memShowAdd && (
+              <View style={[styles.addProvBox, { backgroundColor: theme.s1 }]}>
+                <View style={styles.wrapRow}>
+                  {(['fact', 'preference', 'rule', 'reference'] as const).map((k) => (
+                    <Pressable
+                      key={k}
+                      onPress={() => setMemKind(k)}
+                      style={[
+                        styles.pill,
+                        { backgroundColor: memKind === k ? theme.accentSoft : theme.card },
+                      ]}
+                    >
+                      <Text style={[styles.pillTxt, { color: memKind === k ? theme.accent : theme.text2 }]}>
+                        {k}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+                <TextInput
+                  value={memTags}
+                  onChangeText={setMemTags}
+                  placeholder="标签（可选，逗号分隔）"
+                  placeholderTextColor={theme.mute}
+                  autoCapitalize="none"
+                  style={[styles.input, { backgroundColor: theme.card, color: theme.text }]}
+                />
+                <TextInput
+                  value={memText}
+                  onChangeText={setMemText}
+                  placeholder="输入一条跨项目长期记忆…"
+                  placeholderTextColor={theme.mute}
+                  multiline
+                  textAlignVertical="top"
+                  style={[styles.input, styles.textArea, { minHeight: 80, backgroundColor: theme.card, color: theme.text }]}
+                />
+                <Pressable
+                  disabled={busyAction === 'mem:save'}
+                  onPress={async () => {
+                    const txt = memText.trim();
+                    if (!txt) {
+                      setError('请填写记忆内容');
+                      return;
+                    }
+                    setError('');
+                    setBusyAction('mem:save');
+                    try {
+                      const tags = memTags
+                        .split(/[,，]/)
+                        .map((s) => s.trim())
+                        .filter(Boolean);
+                      await saveMemory({ scope: 'global', kind: memKind, text: txt, tags });
+                      setMemText('');
+                      setMemTags('');
+                      setMemShowAdd(false);
+                      setSavedMsg('已保存全局记忆');
+                      await loadGlobalMemories(memQuery);
+                    } catch (err: any) {
+                      setError(err?.message || '保存记忆失败');
+                    } finally {
+                      setBusyAction('');
+                    }
+                  }}
+                  style={[styles.addBtn, { backgroundColor: theme.accent }]}
+                >
+                  <Text style={[styles.magpieBtnTxt, { color: theme.accentText }]}>
+                    {busyAction === 'mem:save' ? '保存中…' : '保存记忆'}
+                  </Text>
+                </Pressable>
+              </View>
+            )}
+
+            <View style={styles.rowBetween}>
+              <TextInput
+                value={memQuery}
+                onChangeText={setMemQuery}
+                onSubmitEditing={() => void loadGlobalMemories(memQuery)}
+                placeholder="搜索 Magpie 全局记忆…"
+                placeholderTextColor={theme.mute}
+                returnKeyType="search"
+                style={[styles.input, { flex: 1, backgroundColor: theme.s1, color: theme.text }]}
+              />
+              <Pressable
+                onPress={() => void loadGlobalMemories(memQuery)}
+                style={[styles.magpieBtn, { backgroundColor: theme.s1 }]}
+              >
+                <Text style={[styles.magpieBtnTxt, { color: theme.text2 }]}>搜索</Text>
+              </Pressable>
+            </View>
+
+            {!memData?.installed ? (
+              <Text style={[styles.emptyNote, { color: theme.mute }]}>主电脑未安装 Magpie，暂不可透传 Magpie 记忆。</Text>
+            ) : !memData.available ? (
+              <Text style={[styles.emptyNote, { color: theme.danger }]}>
+                Magpie 网关未响应{memData.error ? `：${memData.error}` : ''}
+              </Text>
+            ) : (memData.items || []).length === 0 ? (
+              <Text style={[styles.emptyNote, { color: theme.mute }]}>暂无全局记忆条目</Text>
+            ) : (
+              <View style={styles.magpieList}>
+                {memData.items.map((it) => (
+                  <View key={it.id} style={[styles.addProvBox, { backgroundColor: theme.s1, gap: 6 }]}>
+                    <View style={styles.rowBetween}>
+                      <View style={[styles.wrapRow, { flex: 1 }]}>
+                        {it.kind ? (
+                          <View style={[styles.smallBtn, { backgroundColor: theme.sage }]}>
+                            <Text style={[styles.smallBtnTxt, { color: theme.sageInk }]}>{it.kind}</Text>
+                          </View>
+                        ) : null}
+                        {(it.tags || [])
+                          .filter((t) => !t.startsWith('bot:'))
+                          .map((t) => (
+                            <View key={t} style={[styles.smallBtn, { backgroundColor: theme.card }]}>
+                              <Text style={[styles.smallBtnTxt, { color: theme.text2 }]}>#{t}</Text>
+                            </View>
+                          ))}
+                      </View>
+                      <Pressable
+                        onPress={() => {
+                          confirmAction(
+                            '删除记忆',
+                            '确认从 Magpie Memory 遗忘这条记忆？',
+                            async () => {
+                              try {
+                                await deleteMemory(it.id);
+                                await loadGlobalMemories(memQuery);
+                              } catch (err: any) {
+                                setError(err?.message || '删除失败');
+                              }
+                            },
+                            true
+                          );
+                        }}
+                        style={[styles.magpieBtn, { backgroundColor: theme.card }]}
+                      >
+                        <Text style={[styles.magpieBtnTxt, { color: theme.danger }]}>删除</Text>
+                      </Pressable>
+                    </View>
+                    <Text selectable style={[styles.noteTxt, { color: theme.text }]}>
+                      {it.text}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            )}
           </View>
 
           <View style={[styles.card, { backgroundColor: theme.card }]}>

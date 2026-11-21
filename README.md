@@ -36,18 +36,19 @@ Every workspace also symlinks a shared `_shared/` folder while keeping its own `
 bot-hub/
 ├── config/bots.json              # Bot roster, model access, Telegram & schedules (keeps ${VAR} refs)
 ├── state/
-│   ├── sessions.json             # Active session ID, turn count & cumulative cost per bot
-│   └── messages/                 # Persisted chat and bot-to-bot collaboration history
+│   ├── hub.db                    # SQLite store (active + archived sessions, FTS5 message search)
+│   ├── sessions.json             # Legacy session snapshot (auto-imported on first run)
+│   └── messages/                 # Legacy JSONL chat logs (kept read-only after import)
 └── workspaces/
-    ├── _shared/                  # Global context shared across all bots (e.g. USER.md)
+    ├── _shared/                  # Global context (USER.md + hub-managed BOT_HUB.md)
     └── assistant/                # Dedicated workspace for one bot
         ├── AGENTS.md             # Role definition and workspace rules
-        ├── memory/               # Durable notes that survive session resets
+        ├── memory/               # Durable local notes (complemented by Magpie Memory)
         ├── _shared -> ../_shared # Automatic symlink to shared context
-        └── opencode.json         # Auto-wired local bot-hub MCP server config
+        └── opencode.json         # Auto-wired local bot-hub MCP & BOT_HUB.md instructions
 ```
 
-Resetting a bot (`POST /api/bots/{id}/reset` or `/reset`) clears only the underlying runtime Session ID to free up the context window; `AGENTS.md`, `memory/`, and workspace files stay untouched.
+Resetting a bot (`POST /api/bots/{id}/reset` or `/reset`) archives the current session into `state/hub.db` so a clean session starts while `AGENTS.md`, `memory/`, workspace files, and sliced session recall remain intact.
 
 </details>
 
@@ -80,6 +81,18 @@ Bot-to-bot calls enforce `hop <= 4` loop protection and appear live in **both** 
   <tr>
     <td><code>message_bot</code></td>
     <td>Sends a task to another bot and returns its reply, recording the exchange in both timelines (capped at <code>hop &lt;= 4</code>).</td>
+  </tr>
+  <tr>
+    <td><code>list_sessions</code></td>
+    <td>Lists or searches active and archived sessions across accessible bots (includes <code>magpieSession</code> references).</td>
+  </tr>
+  <tr>
+    <td><code>recall_session</code></td>
+    <td>Fetches sliced messages from a prior or active session with per-message truncation and single-message full fetch.</td>
+  </tr>
+  <tr>
+    <td><code>rotate_session</code></td>
+    <td>Schedules archiving the current session after the turn finishes (with an optional <code>handoffNote</code>).</td>
   </tr>
 </table>
 
@@ -257,7 +270,11 @@ To reach a `bot-hub` running at home or in the office from your laptop:
 - `GET  /api/bots/{id}/messages` — Persisted chat history (`?limit=`)
 - `POST /api/bots/{id}/message` — Send a message (supports `fromBotId` / `hop` for cross-bot calls)
 - `POST /api/bots/{id}/interrupt` — Interrupt the bot's in-flight turn
-- `POST /api/bots/{id}/reset` — Reset session ID while keeping workspace and `memory/`
+- `POST /api/bots/{id}/reset` — Archive active session while keeping workspace and `memory/`
+- `POST /api/bots/{id}/rotate` — Archive active session immediately or after current turn (`handoffNote`, `defer`)
+- `GET  /api/sessions`, `GET /api/bots/{id}/sessions` — List or search archived and active sessions (`?query=&limit=`)
+- `GET  /api/sessions/{sessionId}`, `GET /api/bots/{id}/sessions/{sessionId}` — Sliced session transcript recall (`previous` supported)
+- `GET  /api/memory`, `POST /api/memory`, `DELETE /api/memory/{id}` — Magpie Memory pass-through (global & bot-scoped)
 - `GET  /api/settings`, `PUT /api/settings` — Read or update `modelAccess` (`magpie` / `self`) and default models
 - `GET  /api/models` — List available model IDs for `?harness=`
 - `POST /api/harnesses/{id}/magpie` — Connect a harness CLI to Magpie with a chosen model

@@ -10,6 +10,7 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View,
@@ -23,7 +24,7 @@ import { ModalHeader } from '../../components/ModalHeader';
 import { confirmAction } from '../../confirm';
 import { formatStamp, useHub } from '../../store';
 import { MONO_FONT, useTheme } from '../../theme';
-import type { BotDetail, ChatMessage } from '../../types';
+import type { BotDetail, ChatMessage, MagpieMemoryList } from '../../types';
 
 const FIVE_MIN_MS = 5 * 60 * 1000;
 
@@ -54,6 +55,9 @@ export default function BotChatScreen() {
     updateBot,
     deleteBot,
     resolveTakeover,
+    fetchMemories,
+    saveMemory,
+    deleteMemory,
   } = useHub();
 
   const botIndex = useMemo(() => bots.findIndex((b) => b.id === botId), [bots, botId]);
@@ -69,9 +73,16 @@ export default function BotChatScreen() {
   const [editName, setEditName] = useState('');
   const [editDesc, setEditDesc] = useState('');
   const [editInst, setEditInst] = useState('');
+  const [editPrivate, setEditPrivate] = useState(false);
   const [editSaving, setEditSaving] = useState(false);
   const [editErr, setEditErr] = useState('');
   const [sendErr, setSendErr] = useState('');
+
+  const [botMem, setBotMem] = useState<MagpieMemoryList | null>(null);
+  const [botMemLoading, setBotMemLoading] = useState(false);
+  const [botMemShowAdd, setBotMemShowAdd] = useState(false);
+  const [botMemText, setBotMemText] = useState('');
+  const [botMemSaving, setBotMemSaving] = useState(false);
 
   const listRef = useRef<FlatList<ChatMessage>>(null);
   const inputRef = useRef<React.ComponentRef<typeof TextInput>>(null);
@@ -100,11 +111,25 @@ export default function BotChatScreen() {
     return () => clearTimeout(t);
   }, [chatList.length, bot?.busy]);
 
+  const loadBotMemories = useCallback(async () => {
+    setBotMemLoading(true);
+    try {
+      const m = await fetchMemories({ scope: 'project', botId, limit: 30 });
+      setBotMem(m);
+    } catch {
+      // keep previous state on transient failure
+    } finally {
+      setBotMemLoading(false);
+    }
+  }, [botId, fetchMemories]);
+
   const handleOpenDetail = useCallback(async () => {
     setEditMode(false);
+    setBotMemShowAdd(false);
     setEditErr('');
     setDetailOpen(true);
     setDetailLoading(true);
+    void loadBotMemories();
     try {
       const d = await getBotDetail(botId);
       setDetail(d);
@@ -113,13 +138,14 @@ export default function BotChatScreen() {
     } finally {
       setDetailLoading(false);
     }
-  }, [botId, getBotDetail]);
+  }, [botId, getBotDetail, loadBotMemories]);
 
   const enterEditMode = () => {
     const src = detail || bot;
     setEditName(src?.name || botId);
     setEditDesc(src?.description || '');
     setEditInst(detail?.instructions || '');
+    setEditPrivate(!!src?.privateSessions);
     setEditErr('');
     setEditMode(true);
   };
@@ -137,6 +163,7 @@ export default function BotChatScreen() {
         name: trimmed,
         description: editDesc.trim(),
         instructions: editInst,
+        privateSessions: editPrivate,
       });
       const fresh = await getBotDetail(botId);
       setDetail(fresh);
@@ -586,6 +613,14 @@ export default function BotChatScreen() {
                     placeholderTextColor={theme.mute}
                     style={[styles.editInput, { backgroundColor: theme.s1, color: theme.text }]}
                   />
+                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 4 }}>
+                    <Text style={[styles.instructionsTxt, { color: theme.text, flex: 1 }]}>会话隐私隔离（其他 Bot 不可召回历史会话）</Text>
+                    <Switch
+                      value={editPrivate}
+                      onValueChange={setEditPrivate}
+                      trackColor={{ false: theme.s2, true: theme.accent }}
+                    />
+                  </View>
                 </View>
 
                 <View style={[styles.detailCard, { backgroundColor: theme.card }]}>
@@ -650,6 +685,12 @@ export default function BotChatScreen() {
                         {activeDetail?.model || '默认'}
                       </Text>
                     </View>
+                    <View style={[styles.statPill, { backgroundColor: theme.s1 }]}>
+                      <Text style={[styles.statLbl, { color: theme.mute }]}>历史会话</Text>
+                      <Text numberOfLines={1} style={[styles.statVal, { color: theme.text }]}>
+                        {`${activeDetail?.archivedSessions || 0} 条${activeDetail?.privateSessions ? ' · 隐私' : ''}`}
+                      </Text>
+                    </View>
                   </View>
                 </View>
 
@@ -668,6 +709,96 @@ export default function BotChatScreen() {
                     <Text selectable style={[styles.instructionsTxt, { color: theme.text2 }]}>
                       {detail?.instructions?.trim() ? detail.instructions : '未配置指令'}
                     </Text>
+                  )}
+                </View>
+
+                <View style={[styles.detailCard, { backgroundColor: theme.card }]}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <Text style={[styles.sectionLabel, { color: theme.mute }]}>Magpie 专属记忆</Text>
+                    <Pressable
+                      onPress={() => setBotMemShowAdd((v) => !v)}
+                      style={{ borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4, backgroundColor: theme.accentSoft }}
+                    >
+                      <Text style={{ fontSize: 12, fontWeight: '700', color: theme.accent }}>
+                        {botMemShowAdd ? '收起' : '+ 添加'}
+                      </Text>
+                    </Pressable>
+                  </View>
+                  {botMemShowAdd && (
+                    <View style={{ gap: 8, backgroundColor: theme.s1, borderRadius: 14, padding: 10 }}>
+                      <TextInput
+                        value={botMemText}
+                        onChangeText={setBotMemText}
+                        placeholder="记录此 Bot 的长期事实或约定…"
+                        placeholderTextColor={theme.mute}
+                        multiline
+                        textAlignVertical="top"
+                        style={[styles.editInput, { minHeight: 72, backgroundColor: theme.card, color: theme.text }]}
+                      />
+                      <Pressable
+                        disabled={botMemSaving}
+                        onPress={async () => {
+                          const txt = botMemText.trim();
+                          if (!txt) return;
+                          setBotMemSaving(true);
+                          try {
+                            await saveMemory({ scope: 'project', botId, kind: 'fact', text: txt });
+                            setBotMemText('');
+                            setBotMemShowAdd(false);
+                            await loadBotMemories();
+                          } catch (err: any) {
+                            setEditErr(err?.message || '保存专属记忆失败');
+                          } finally {
+                            setBotMemSaving(false);
+                          }
+                        }}
+                        style={{ borderRadius: 999, paddingVertical: 9, alignItems: 'center', backgroundColor: theme.accent }}
+                      >
+                        <Text style={{ fontSize: 13, fontWeight: '700', color: theme.accentText }}>
+                          {botMemSaving ? '保存中…' : '保存记忆'}
+                        </Text>
+                      </Pressable>
+                    </View>
+                  )}
+                  {botMemLoading ? (
+                    <ActivityIndicator size="small" color={theme.accent} />
+                  ) : !botMem?.installed ? (
+                    <Text style={[styles.instructionsTxt, { color: theme.mute }]}>主电脑未安装 Magpie</Text>
+                  ) : !botMem.available ? (
+                    <Text style={[styles.instructionsTxt, { color: theme.danger }]}>Magpie 网关未响应</Text>
+                  ) : (botMem.items || []).length === 0 ? (
+                    <Text style={[styles.instructionsTxt, { color: theme.mute }]}>暂无专属记忆</Text>
+                  ) : (
+                    <View style={{ gap: 8 }}>
+                      {botMem.items.map((it) => (
+                        <View key={it.id} style={{ backgroundColor: theme.s1, borderRadius: 14, padding: 10, gap: 6 }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <Text style={{ fontSize: 11.5, fontWeight: '700', color: theme.sageInk }}>
+                              {it.kind || 'memory'}
+                            </Text>
+                            <Pressable
+                              onPress={() => {
+                                confirmAction(
+                                  '删除记忆',
+                                  '确认遗忘该条专属记忆？',
+                                  async () => {
+                                    await deleteMemory(it.id);
+                                    await loadBotMemories();
+                                  },
+                                  true
+                                );
+                              }}
+                              style={{ borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3, backgroundColor: theme.card }}
+                            >
+                              <Text style={{ fontSize: 11.5, fontWeight: '700', color: theme.danger }}>删除</Text>
+                            </Pressable>
+                          </View>
+                          <Text selectable style={[styles.instructionsTxt, { color: theme.text }]}>
+                            {it.text}
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
                   )}
                 </View>
 
