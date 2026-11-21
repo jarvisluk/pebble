@@ -173,6 +173,13 @@ func runMCP(args []string) {
 }
 
 func load(root, cfgFlag string) (*hub.Hub, string, error) {
+	if cfgFlag == "" {
+		if _, err := config.ResolvePath(root, ""); err != nil {
+			if path, created, cerr := config.EnsureStarterConfig(root, harness.PreferredInstalledHarness()); cerr == nil && created {
+				log.Printf("[hub] initialized starter config at %s", path)
+			}
+		}
+	}
 	cfg, cfgPath, err := config.Load(root, cfgFlag)
 	if err != nil {
 		return nil, "", fmt.Errorf("load config: %w", err)

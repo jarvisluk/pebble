@@ -46,15 +46,18 @@ export default function ConnectScreen() {
     label: paramLabel,
     token: paramToken,
     autoconnect,
+    scan: paramScan,
   } = useLocalSearchParams<{
     address?: string;
     label?: string;
     token?: string;
     autoconnect?: string;
+    scan?: string;
   }>();
 
   const scanLockRef = useRef(false);
   const handledParamRef = useRef<string | null>(null);
+  const handledScanRef = useRef(false);
   const tunnelAvailable = isNativeTunnelAvailable();
 
   useEffect(() => {
@@ -132,6 +135,22 @@ export default function ConnectScreen() {
     scanLockRef.current = false;
     setScanning(true);
   };
+
+  useEffect(() => {
+    if (Platform.OS === 'web' || paramScan !== '1' || handledScanRef.current || !permission) return;
+    handledScanRef.current = true;
+    void (async () => {
+      if (!permission.granted) {
+        const res = await requestPermission();
+        if (!res.granted) {
+          setLocalError('需要相机权限才能扫描配对二维码');
+          return;
+        }
+      }
+      scanLockRef.current = false;
+      setScanning(true);
+    })();
+  }, [paramScan, permission, requestPermission]);
 
   const onBarcodeScanned = (result: BarcodeScanningResult) => {
     if (scanLockRef.current) return;

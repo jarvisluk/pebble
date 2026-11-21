@@ -101,10 +101,11 @@ type HubConfig struct {
 	ConfigPath  string `json:"-"`
 	// DefaultModel applies to opencode and pi bots (they share provider/model
 	// IDs); DefaultModels overrides it per harness.
-	DefaultModel      string            `json:"defaultModel,omitempty"`
-	DefaultModels     map[string]string `json:"defaultModels,omitempty"`
-	AllowLocalDesktop *bool             `json:"allowLocalDesktop,omitempty"` // default: true
-	OpenCodeServerURL string            `json:"opencodeServerUrl,omitempty"`
+	DefaultModel        string            `json:"defaultModel,omitempty"`
+	DefaultModels       map[string]string `json:"defaultModels,omitempty"`
+	AllowLocalDesktop   *bool             `json:"allowLocalDesktop,omitempty"` // default: true
+	OnboardingCompleted bool              `json:"onboardingCompleted,omitempty"`
+	OpenCodeServerURL   string            `json:"opencodeServerUrl,omitempty"`
 	SharedDir         string            `json:"sharedDir,omitempty"`
 	StateFile         string            `json:"stateFile,omitempty"`
 	MessagesDir       string            `json:"messagesDir,omitempty"`
@@ -177,6 +178,48 @@ func ResolvePath(projectRoot, explicit string) (string, error) {
 		return example, nil
 	}
 	return "", fmt.Errorf("no config file found; create %s from config/bots.example.json", local)
+}
+
+// EnsureStarterConfig creates a minimal config/bots.json in projectRoot with a
+// single general-purpose assistant bot if none exists yet.
+func EnsureStarterConfig(projectRoot, preferredHarness string) (string, bool, error) {
+	path := filepath.Join(projectRoot, "config", "bots.json")
+	if _, err := os.Stat(path); err == nil {
+		return path, false, nil
+	} else if !os.IsNotExist(err) {
+		return "", false, err
+	}
+	hKind := strings.TrimSpace(preferredHarness)
+	if hKind == "" {
+		hKind = "opencode"
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return "", false, err
+	}
+	starter := HubConfig{
+		HTTP: HTTPConfig{
+			Host: "127.0.0.1",
+			Port: 3789,
+		},
+		Bots: []BotConfig{
+			{
+				ID:          "assistant",
+				Name:        "通用助理",
+				Description: "日常问答、信息整理与任务协助",
+				Workspace:   "./workspaces/assistant",
+				Harness:     hKind,
+			},
+		},
+	}
+	raw, err := json.MarshalIndent(starter, "", "  ")
+	if err != nil {
+		return "", false, err
+	}
+	raw = append(raw, '\n')
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		return "", false, err
+	}
+	return path, true, nil
 }
 
 func Load(projectRoot, explicitPath string) (*HubConfig, string, error) {

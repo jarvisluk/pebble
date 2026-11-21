@@ -126,6 +126,7 @@ try {
   }
 
   * { box-sizing: border-box; margin: 0; padding: 0; }
+  [hidden] { display: none !important; }
   html, body { height: 100%; overflow: hidden; overscroll-behavior: none; }
   body { background: var(--page); color: var(--text); font: var(--fs-base)/1.6 var(--font); -webkit-font-smoothing: antialiased; }
   button, input, textarea, select { font: inherit; color: inherit; background: none; border: 0; }
@@ -689,6 +690,41 @@ try {
     .mp-hrow { grid-template-columns: 1fr; }
   }
 
+  /* unbox onboarding wizard */
+  .dlg.unbox { width: min(560px, 100%); }
+  .unbox-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+  .unbox-steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 12px; }
+  .unbox-step {
+    display: flex; align-items: center; justify-content: center; height: 28px; padding: 0 10px;
+    border-radius: var(--r-row); background: var(--s1); color: var(--mute);
+    font-size: var(--fs-xs); font-weight: 600;
+  }
+  .unbox-step.on { background: var(--sel); color: var(--text); }
+  .unbox-step.done { color: var(--sage-ink); }
+  .unbox-list { display: flex; flex-direction: column; gap: 8px; }
+  .unbox-item {
+    background: var(--s1); border-radius: var(--r-row); padding: 10px 12px;
+    display: flex; flex-direction: column; gap: 8px; border: 1px solid transparent;
+    transition: background .15s, border-color .15s;
+  }
+  .unbox-item.on { background: var(--sel); border-color: var(--accent); }
+  .unbox-item-hd { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .unbox-item-main {
+    display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; text-align: left;
+  }
+  .unbox-item-name { font-size: var(--fs-base); font-weight: 600; color: var(--text); }
+  .unbox-item-path {
+    font-size: var(--fs-xs); color: var(--mute); font-family: var(--mono);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .unbox-item-acts { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+  .unbox-item .mp:not(.ok):not(.go):not(.bad) { background: var(--card); }
+  .unbox-install { display: flex; flex-direction: column; gap: 6px; padding-top: 4px; }
+  .unbox-install a { color: var(--accent); font-size: var(--fs-xs); font-weight: 600; align-self: flex-start; }
+  .unbox-qr { width: 180px; align-self: center; border-radius: 12px; background: #fff; padding: 8px; }
+  .unbox-foot { justify-content: space-between; align-items: center; }
+  .unbox-foot-r { display: flex; align-items: center; gap: 8px; }
+
   /* macOS desktop: traffic lights sit in the sidebar's top bar (12px from its top-left corner) */
   html.mac-app .side-hd h2 { visibility: hidden; }
   html.mac-app .app.side-collapsed:not(.in-settings) .chat-hd { padding-left: 84px; }
@@ -1056,6 +1092,14 @@ try {
               <div id="sMemList" class="stack6"></div>
               <div id="sMemErr" class="msg-err"></div>
             </section>
+
+            <section class="set-card">
+              <div class="set-card-hd">
+                <h2>开箱引导</h2>
+                <button type="button" id="sReopenUnbox" class="mp">重新打开引导</button>
+              </div>
+              <p class="set-card-desc">重新检查本机 Agent 引擎、Magpie 模型配置与远程配对二维码。</p>
+            </section>
           </div>
 
           <div id="settingsErr" class="msg-err"></div>
@@ -1186,6 +1230,110 @@ try {
     </div>
     <div class="dlg-f"><button type="submit" class="btn go">进入</button></div>
   </form>
+</div>
+
+<div id="unboxDlg" class="dlg-wrap" aria-label="首次开箱引导">
+  <div class="dlg unbox">
+    <div class="dlg-h" style="flex-direction:column;align-items:stretch;gap:0">
+      <div class="unbox-top">
+        <div>
+          <h3 id="ubTitle">配置 Bot Hub</h3>
+          <p id="ubSub">确认运行引擎，快速开始使用</p>
+        </div>
+        <button type="button" id="ubSkipTop" class="link-btn">跳过</button>
+      </div>
+      <div class="unbox-steps" aria-label="步骤">
+        <div class="unbox-step" data-ub-step="1">1 引擎</div>
+        <div class="unbox-step" data-ub-step="2">2 模型</div>
+        <div class="unbox-step" data-ub-step="3">3 远程配对</div>
+      </div>
+    </div>
+    <div class="dlg-b">
+      <div id="ubStep1" class="set-stack">
+        <div class="set-card-hd">
+          <span class="set-card-desc">检测本机 Agent 引擎并绑定默认通用助理</span>
+          <button type="button" id="ubRecheck" class="mp">重新检测</button>
+        </div>
+        <div id="ubHarnessList" class="unbox-list"></div>
+      </div>
+
+      <div id="ubStep2" class="set-stack" hidden>
+        <div id="ubMagpiePanel" class="note"></div>
+        <div id="ubAddProvBox" class="add-prov" hidden>
+          <div class="two">
+            <div class="fld">
+              <label>添加方式</label>
+              <select id="ubApKind">
+                <option value="preset">预设厂商</option>
+                <option value="custom">自定义兼容接口</option>
+              </select>
+            </div>
+            <div class="fld" id="ubApPresetFld">
+              <label>预设厂商</label>
+              <select id="ubApPreset"></select>
+            </div>
+            <div class="fld" id="ubApProtoFld" hidden>
+              <label>接口协议</label>
+              <select id="ubApProtocol">
+                <option value="openai">OpenAI 兼容 (/v1)</option>
+                <option value="anthropic">Anthropic 兼容</option>
+                <option value="responses">OpenAI Responses</option>
+                <option value="gemini">Google Gemini</option>
+              </select>
+            </div>
+          </div>
+          <div class="two">
+            <div class="fld"><label id="ubApNameLbl">别名 <em>可选</em></label><input id="ubApName" placeholder="例如 my-relay" /></div>
+            <div class="fld"><label>API Key <em>直传给 magpie</em></label><input id="ubApKey" type="password" class="mono" placeholder="sk-..." autocomplete="new-password" /></div>
+          </div>
+          <div id="ubApCustomRow" class="two" hidden>
+            <div class="fld"><label>Base URL</label><input id="ubApUrl" class="mono" placeholder="https://api.example.com/v1" /></div>
+            <div class="fld"><label>模型列表 <em>可选，逗号分隔</em></label><input id="ubApModels" class="mono" placeholder="model-a,model-b" /></div>
+          </div>
+          <div style="display:flex;justify-content:flex-end;gap:6px">
+            <button type="button" id="ubApCancel" class="mp">取消</button>
+            <button type="button" id="ubApSubmit" class="mp go">确认添加</button>
+          </div>
+        </div>
+        <div id="ubConnectBox" class="note" hidden>
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
+            <span id="ubConnectText"></span>
+            <button type="button" id="ubConnectMagpie" class="mp go">一键接入 Magpie</button>
+          </div>
+        </div>
+        <div class="fld">
+          <label>默认模型 <em>可选，留空用 CLI 当前配置</em></label>
+          <input id="ubDefaultModel" class="mono" spellcheck="false" list="models-global" placeholder="留空继承 CLI 默认模型" />
+        </div>
+      </div>
+
+      <div id="ubStep3" class="set-stack" hidden>
+        <p class="set-card-desc">开启 Tailcat 加密隧道后，可在手机 App 或另一台电脑通过二维码直接配对。</p>
+        <div class="note">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+            <span>Tailcat 状态：<strong id="ubRemoteState">未开启</strong></span>
+            <button type="button" id="ubRemoteEnable" class="mp go">开启远程访问</button>
+          </div>
+          <img id="ubRemoteQR" class="unbox-qr" alt="" hidden />
+          <div id="ubRemoteLinkFld" class="fld" hidden>
+            <textarea id="ubRemoteLink" class="mono" readonly style="min-height:66px"></textarea>
+          </div>
+          <div id="ubRemoteCopyWrap" class="row-end" hidden>
+            <button type="button" id="ubRemoteCopy" class="mp go">复制配对链接</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="ubErr" class="msg-err"></div>
+    </div>
+    <div class="dlg-f unbox-foot">
+      <button type="button" id="ubPrev" class="btn" hidden>上一步</button>
+      <span id="ubFootSpacer"></span>
+      <div class="unbox-foot-r">
+        <button type="button" id="ubNext" class="btn go">下一步</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -1572,6 +1720,7 @@ function removeBotLocally(id) {
 
 function open(id) { $(id).classList.add('open'); }
 function closeAll() {
+  clearTimeout(unboxTailcatTimer);
   document.querySelectorAll('.dlg-wrap.open:not(#loginDlg), .panel.open, .side.open, .shade.open, .pop.open').forEach(el => el.classList.remove('open'));
   setPanelMode('view');
 }
@@ -1730,7 +1879,7 @@ document.addEventListener('click', e => {
   }
 });
 document.querySelectorAll('.dlg-wrap').forEach(w => w.addEventListener('mousedown', e => {
-  if (e.target !== w || w.id === 'loginDlg') return;
+  if (e.target !== w || w.id === 'loginDlg' || w.id === 'unboxDlg') return;
   if (w.id === 'confirmDlg') w.classList.remove('open');
   else closeAll();
 }));
@@ -1745,6 +1894,7 @@ document.addEventListener('keydown', e => {
   if (document.activeElement?.hasAttribute('data-desk-stage')) return;
   if (e.key === 'Escape') {
     if ($('confirmDlg').classList.contains('open')) $('confirmDlg').classList.remove('open');
+    else if ($('unboxDlg').classList.contains('open')) skipUnbox();
     else if (document.querySelector('.dlg-wrap.open:not(#loginDlg), .panel.open, .side.open, .pop.open')) closeAll();
     else if (state.view === 'settings') closeSettings();
   }
@@ -1937,8 +2087,8 @@ function syncGlobalModelList() {
   const el = $('models-global');
   if (el) el.innerHTML = [...seen].map(m => `<option value="${esc(m)}"></option>`).join('');
 }
-async function loadSettings() {
-  state.settings = await api('/api/settings');
+async function loadSettings(fresh = false) {
+  state.settings = await api(fresh ? '/api/settings?fresh=1' : '/api/settings');
   for (const h of state.settings.harnesses) {
     if (!$('models-' + h.id)) $('modelLists').insertAdjacentHTML('beforeend', `<datalist id="models-${esc(h.id)}"></datalist>`);
   }
@@ -2556,7 +2706,418 @@ $('loginForm').onsubmit = async e => {
     await api('/api/login', { method: 'POST', body: { token: $('loginToken').value } });
     $('loginToken').value = ''; $('loginErr').textContent = ''; $('loginDlg').classList.remove('open');
     connect(); await loadBots(); refreshTakeovers();
+    loadSettings().then(() => maybeAutoOpenUnbox()).catch(() => {});
   } catch (err) { $('loginErr').textContent = err.message; }
+};
+
+/* ---------- unbox onboarding wizard ---------- */
+let unboxStep = 1;
+let unboxHarness = '';
+const unboxExpandedInstall = new Set();
+let unboxTailcatTimer = null;
+let unboxProvDismissed = false;
+let unboxAutoPrompted = false;
+
+function defaultUnboxHarness(s) {
+  const harnesses = s?.harnesses || [];
+  const primary = state.bots[0];
+  if (primary) {
+    const match = harnesses.find(h => h.id === primary.harness);
+    if (match?.installed) return match.id;
+  }
+  const firstInstalled = harnesses.find(h => h.installed);
+  if (firstInstalled) return firstInstalled.id;
+  return primary?.harness || harnesses[0]?.id || 'opencode';
+}
+
+function renderUnboxHeader() {
+  const meta = {
+    1: { title: '选择 Agent 引擎', sub: '检测本机可用 CLI 并绑定默认通用助理' },
+    2: { title: '配置模型与 Magpie', sub: '使用 Magpie 统一管理或沿用 CLI 原生配置' },
+    3: { title: '远程访问与手机配对', sub: '可选开启 Tailcat 加密隧道，在手机端扫码直连' },
+  }[unboxStep];
+  $('ubTitle').textContent = meta.title;
+  $('ubSub').textContent = meta.sub;
+  document.querySelectorAll('#unboxDlg [data-ub-step]').forEach(el => {
+    const n = Number(el.dataset.ubStep);
+    el.classList.toggle('on', n === unboxStep);
+    el.classList.toggle('done', n < unboxStep);
+  });
+  $('ubStep1').hidden = unboxStep !== 1;
+  $('ubStep2').hidden = unboxStep !== 2;
+  $('ubStep3').hidden = unboxStep !== 3;
+  $('ubPrev').hidden = unboxStep === 1;
+  const anyInstalled = (state.settings?.harnesses || []).some(h => h.installed);
+  $('ubNext').textContent = unboxStep === 3 ? '完成并开始对话' : (unboxStep === 1 && !anyInstalled ? '继续' : '下一步');
+}
+
+function renderUnboxStep1() {
+  const harnesses = state.settings?.harnesses || [];
+  if (!unboxHarness || !harnesses.some(h => h.id === unboxHarness)) {
+    unboxHarness = defaultUnboxHarness(state.settings);
+  }
+  const listEl = $('ubHarnessList');
+  if (!harnesses.length) {
+    listEl.innerHTML = '<div class="set-card-desc">未读取到引擎信息</div>';
+    return;
+  }
+  listEl.innerHTML = harnesses.map(h => {
+    const selected = h.id === unboxHarness;
+    const expanded = unboxExpandedInstall.has(h.id);
+    const cmd = h.install?.command || '';
+    const url = h.install?.url || '';
+    const sub = h.installed
+      ? (h.binaryPath || '已就绪')
+      : '未检测到命令，可展开查看安装方式';
+    const installHtml = expanded ? `<div class="unbox-install">
+      ${cmd ? `<div class="cmd"><code>${esc(cmd)}</code>${cmd.includes(' ') && !cmd.startsWith('查看') ? `<button type="button" data-copy="${esc(cmd)}">复制</button>` : ''}</div>` : ''}
+      ${url ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">查看安装文档</a>` : ''}
+    </div>` : '';
+    return `<div class="unbox-item${selected ? ' on' : ''}" data-ub-row="${esc(h.id)}">
+      <div class="unbox-item-hd">
+        <button type="button" class="unbox-item-main" data-ub-pick="${esc(h.id)}">
+          <span class="unbox-item-name">${esc(h.label)}</span>
+          <span class="unbox-item-path">${esc(sub)}</span>
+        </button>
+        <div class="unbox-item-acts">
+          <span class="mp${h.installed ? ' ok' : ''}">${h.installed ? '已安装' : '未安装'}</span>
+          ${!h.installed ? `<button type="button" class="mp" data-ub-inst="${esc(h.id)}">${expanded ? '收起' : '查看安装'}</button>` : ''}
+        </div>
+      </div>
+      ${installHtml}
+    </div>`;
+  }).join('');
+
+  listEl.querySelectorAll('[data-ub-pick]').forEach(btn => {
+    btn.onclick = () => {
+      const id = btn.dataset.ubPick;
+      const item = harnesses.find(x => x.id === id);
+      if (item?.installed) {
+        unboxHarness = id;
+        $('ubErr').textContent = '';
+        renderUnboxStep1();
+      } else {
+        if (unboxExpandedInstall.has(id)) unboxExpandedInstall.delete(id);
+        else unboxExpandedInstall.add(id);
+        renderUnboxStep1();
+      }
+    };
+  });
+  listEl.querySelectorAll('[data-ub-inst]').forEach(btn => {
+    btn.onclick = () => {
+      const id = btn.dataset.ubInst;
+      if (unboxExpandedInstall.has(id)) unboxExpandedInstall.delete(id);
+      else unboxExpandedInstall.add(id);
+      renderUnboxStep1();
+    };
+  });
+}
+
+function renderUnboxStep2() {
+  const s = state.settings || {};
+  const mp = s.magpie || {};
+  const hInfo = (s.harnesses || []).find(h => h.id === unboxHarness);
+  const hLabel = hInfo?.label || harnessLabel(unboxHarness);
+  const panel = $('ubMagpiePanel');
+  const dmInput = $('ubDefaultModel');
+  dmInput.setAttribute('list', 'models-' + (unboxHarness || 'global'));
+  loadModels(unboxHarness);
+
+  if (!mp.installed) {
+    $('ubAddProvBox').hidden = true;
+    $('ubConnectBox').hidden = true;
+    const inst = mp.install || {};
+    const cmdRow = c => c ? `<div class="cmd"><code>${esc(c)}</code><button type="button" data-copy="${esc(c)}">复制</button></div>` : '';
+    panel.innerHTML = `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
+      <span><strong>Magpie 未安装</strong> · 当前可直接使用 ${esc(hLabel)} 原生配置</span>
+      <button type="button" id="ubRecheck2" class="mp">重新检测</button>
+    </div>
+    <div>如需跨 CLI 统一管理 API Key 与额度回退，可安装 Magpie：</div>
+    ${cmdRow(inst.script)}${cmdRow(inst.brew)}`;
+    $('ubRecheck2').onclick = () => recheckUnbox($('ubRecheck2'));
+    return;
+  }
+
+  const provs = mp.providers || [];
+  const presets = mp.presets || [];
+  const curPreset = $('ubApPreset').value;
+  $('ubApPreset').innerHTML = presets.map(p => `<option value="${esc(p.id)}">${esc(p.name)} (${esc(p.id)})</option>`).join('');
+  if (curPreset && presets.some(p => p.id === curPreset)) $('ubApPreset').value = curPreset;
+
+  const statusTag = mp.healthy
+    ? '<span class="mp ok">网关运行中</span>'
+    : '<span class="mp bad">网关未启动</span>';
+  panel.innerHTML = `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <strong>Magpie</strong>
+      ${statusTag}
+      <span class="mp">模型源 ${provs.length}</span>
+    </div>
+    <div style="display:flex;gap:6px">
+      <button type="button" id="ubRecheck2" class="mp">重新检测</button>
+      ${(provs.length > 0 || unboxProvDismissed) ? '<button type="button" id="ubShowAddProv" class="mp go">+ 添加模型源</button>' : ''}
+    </div>
+  </div>
+  <div>${provs.length ? '已配置模型源，可将当前引擎接入 Magpie 或继续使用原生配置。' : '尚未添加模型源，可直接在下方填写 API Key 添加，或留空沿用 CLI 原生配置。'}</div>`;
+  $('ubRecheck2').onclick = () => recheckUnbox($('ubRecheck2'));
+  if ($('ubShowAddProv')) {
+    $('ubShowAddProv').onclick = () => {
+      unboxProvDismissed = false;
+      $('ubAddProvBox').hidden = !$('ubAddProvBox').hidden;
+    };
+  }
+  $('ubAddProvBox').hidden = provs.length > 0 || unboxProvDismissed;
+
+  const connBox = $('ubConnectBox');
+  if (hInfo?.magpie?.connected) {
+    connBox.hidden = false;
+    $('ubConnectText').textContent = `${hLabel} 已接入 Magpie（${hInfo.magpie.model || '默认'}）`;
+    $('ubConnectMagpie').hidden = true;
+  } else if (provs.length > 0) {
+    connBox.hidden = false;
+    $('ubConnectText').textContent = `${hLabel} 当前使用 CLI 原生配置`;
+    $('ubConnectMagpie').hidden = false;
+    $('ubConnectMagpie').disabled = false;
+  } else {
+    connBox.hidden = true;
+  }
+}
+
+function renderUnboxTailcat(t) {
+  const ready = t.state === 'ready';
+  const connecting = t.state === 'connecting';
+  $('ubRemoteState').textContent = { disabled: '未开启', connecting: '正在连接中继…', ready: '已就绪', error: '出错' }[t.state] || t.state;
+  const btn = $('ubRemoteEnable');
+  btn.hidden = ready || connecting;
+  btn.disabled = false;
+  btn.textContent = t.state === 'error' ? '重试开启' : '开启远程访问';
+  $('ubRemoteQR').hidden = !ready;
+  $('ubRemoteLinkFld').hidden = !ready;
+  $('ubRemoteCopyWrap').hidden = !ready;
+  if (ready) {
+    if ($('ubRemoteQR').dataset.link !== t.link) {
+      $('ubRemoteQR').src = '/api/tailcat/qr.png?t=' + Date.now();
+      $('ubRemoteQR').dataset.link = t.link;
+    }
+    $('ubRemoteLink').value = t.link || '';
+  } else {
+    delete $('ubRemoteQR').dataset.link;
+  }
+  if (t.error) $('ubErr').textContent = t.error;
+  clearTimeout(unboxTailcatTimer);
+  if (connecting && $('unboxDlg').classList.contains('open') && unboxStep === 3) {
+    unboxTailcatTimer = setTimeout(refreshUnboxTailcat, 800);
+  }
+}
+
+async function refreshUnboxTailcat() {
+  try {
+    renderUnboxTailcat(await api('/api/tailcat'));
+  } catch (e) {
+    if (e.message !== 'unauthorized') $('ubErr').textContent = e.message;
+  }
+}
+
+function renderUnbox() {
+  renderUnboxHeader();
+  clearTimeout(unboxTailcatTimer);
+  if (unboxStep === 1) renderUnboxStep1();
+  else if (unboxStep === 2) renderUnboxStep2();
+  else if (unboxStep === 3) refreshUnboxTailcat();
+}
+
+async function recheckUnbox(btn) {
+  if (btn) btn.disabled = true;
+  $('ubErr').textContent = '';
+  try {
+    await loadSettings(true);
+    state.models = {};
+    renderUnbox();
+    toast('已重新检测');
+  } catch (e) {
+    if (e.message !== 'unauthorized') $('ubErr').textContent = e.message;
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function openUnbox(step = 1) {
+  closeAll();
+  $('ubErr').textContent = '';
+  unboxStep = step;
+  unboxProvDismissed = false;
+  if (!state.settings) {
+    try { await loadSettings(); } catch {}
+  }
+  unboxHarness = defaultUnboxHarness(state.settings);
+  $('ubDefaultModel').value = state.settings?.defaultModel || '';
+  renderUnbox();
+  open('unboxDlg');
+}
+
+async function persistUnboxHarness() {
+  const primary = state.bots[0];
+  if (!primary || !unboxHarness || primary.harness === unboxHarness) return;
+  const st = await api(`/api/bots/${encodeURIComponent(primary.id)}`, {
+    method: 'PATCH',
+    body: { harness: unboxHarness },
+  });
+  Object.assign(primary, st);
+  renderBots();
+  if (state.active === primary.id) { renderHead(); renderThread(); }
+  await loadSettings();
+}
+
+async function persistUnboxModelAndComplete(markCompleted) {
+  const dm = $('ubDefaultModel').value.trim();
+  const prevDm = state.settings?.defaultModel || '';
+  const body = {};
+  if (dm !== prevDm) body.defaultModel = dm;
+  if (markCompleted) body.onboardingCompleted = true;
+  if (Object.keys(body).length) {
+    state.settings = await api('/api/settings', { method: 'PUT', body });
+  }
+}
+
+async function skipUnbox() {
+  clearTimeout(unboxTailcatTimer);
+  if (state.settings && !state.settings.onboarding?.completed) {
+    try {
+      state.settings = await api('/api/settings', { method: 'PUT', body: { onboardingCompleted: true } });
+    } catch (e) {
+      if (e.message === 'unauthorized') return;
+    }
+  }
+  $('unboxDlg').classList.remove('open');
+  if (state.view !== 'settings' && matchMedia('(min-width: 821px)').matches) $('input').focus();
+}
+
+function maybeAutoOpenUnbox() {
+  if (unboxAutoPrompted) return;
+  if ($('loginDlg').classList.contains('open')) return;
+  if (state.settings?.onboarding?.needsSetup) {
+    unboxAutoPrompted = true;
+    openUnbox(1);
+  }
+}
+
+$('ubRecheck').onclick = () => recheckUnbox($('ubRecheck'));
+$('ubSkipTop').onclick = skipUnbox;
+$('ubPrev').onclick = () => {
+  $('ubErr').textContent = '';
+  if (unboxStep > 1) { unboxStep--; renderUnbox(); }
+};
+$('ubNext').onclick = async () => {
+  $('ubErr').textContent = '';
+  $('ubNext').disabled = true;
+  try {
+    if (unboxStep === 1) {
+      await persistUnboxHarness();
+      unboxStep = 2;
+      renderUnbox();
+      return;
+    }
+    if (unboxStep === 2) {
+      await persistUnboxModelAndComplete(false);
+      unboxStep = 3;
+      renderUnbox();
+      return;
+    }
+    await persistUnboxHarness();
+    await persistUnboxModelAndComplete(true);
+    clearTimeout(unboxTailcatTimer);
+    $('unboxDlg').classList.remove('open');
+    await loadBots();
+    toast('已完成初始化配置');
+    if (matchMedia('(min-width: 821px)').matches) $('input').focus();
+  } catch (e) {
+    if (e.message !== 'unauthorized') $('ubErr').textContent = e.message;
+  } finally {
+    $('ubNext').disabled = false;
+  }
+};
+$('ubApKind').onchange = () => {
+  const custom = $('ubApKind').value === 'custom';
+  $('ubApPresetFld').hidden = custom;
+  $('ubApProtoFld').hidden = !custom;
+  $('ubApCustomRow').hidden = !custom;
+  $('ubApNameLbl').innerHTML = custom ? '名称' : '别名 <em>可选</em>';
+};
+$('ubApCancel').onclick = () => {
+  unboxProvDismissed = true;
+  renderUnboxStep2();
+};
+$('ubApSubmit').onclick = async () => {
+  const custom = $('ubApKind').value === 'custom';
+  const body = {
+    action: 'add',
+    preset: custom ? '' : $('ubApPreset').value,
+    name: $('ubApName').value.trim(),
+    protocol: custom ? $('ubApProtocol').value : '',
+    url: custom ? $('ubApUrl').value.trim() : '',
+    key: $('ubApKey').value.trim(),
+    models: custom ? $('ubApModels').value.trim() : '',
+  };
+  $('ubApSubmit').disabled = true;
+  $('ubErr').textContent = '';
+  try {
+    await api('/api/magpie/providers', { method: 'POST', body });
+    $('ubApKey').value = ''; $('ubApName').value = ''; $('ubApUrl').value = ''; $('ubApModels').value = '';
+    unboxProvDismissed = false;
+    $('ubAddProvBox').hidden = true;
+    state.models = {};
+    await loadSettings(true);
+    await loadModels(unboxHarness, true);
+    toast('已添加模型源');
+    renderUnboxStep2();
+  } catch (e) {
+    if (e.message !== 'unauthorized') $('ubErr').textContent = e.message;
+  } finally {
+    $('ubApSubmit').disabled = false;
+  }
+};
+$('ubConnectMagpie').onclick = async () => {
+  $('ubErr').textContent = '';
+  $('ubConnectMagpie').disabled = true;
+  try {
+    await loadModels(unboxHarness);
+    const model = $('ubDefaultModel').value.trim() || (state.models[unboxHarness] || [])[0] || '';
+    if (!model) {
+      $('ubErr').textContent = '请先在下方输入或选择一个模型，再接入 Magpie';
+      $('ubConnectMagpie').disabled = false;
+      return;
+    }
+    state.settings = await api(`/api/harnesses/${encodeURIComponent(unboxHarness)}/magpie`, {
+      method: 'POST',
+      body: { action: 'connect', model },
+    });
+    if (!$('ubDefaultModel').value.trim()) $('ubDefaultModel').value = model;
+    delete state.models[unboxHarness];
+    toast(`${harnessLabel(unboxHarness)} 已接入 Magpie`);
+    renderUnboxStep2();
+  } catch (e) {
+    $('ubConnectMagpie').disabled = false;
+    if (e.message !== 'unauthorized') $('ubErr').textContent = e.message;
+  }
+};
+$('ubRemoteEnable').onclick = async () => {
+  $('ubErr').textContent = '';
+  $('ubRemoteEnable').disabled = true;
+  try {
+    renderUnboxTailcat(await api('/api/tailcat', { method: 'POST', body: { enabled: true } }));
+    toast('已开启远程访问');
+  } catch (e) {
+    $('ubRemoteEnable').disabled = false;
+    if (e.message !== 'unauthorized') $('ubErr').textContent = e.message;
+  }
+};
+$('ubRemoteCopy').onclick = async () => {
+  try { await navigator.clipboard.writeText($('ubRemoteLink').value); toast('已复制配对链接'); }
+  catch { toast('复制失败'); }
+};
+$('sReopenUnbox').onclick = () => {
+  closeSettings();
+  openUnbox(1);
 };
 
 /* ---------- Magpie Memory pass-through ---------- */
@@ -3163,8 +3724,13 @@ $('deskTypeIn').addEventListener('keydown', e => {
   });
 });
 
-loadSettings().catch(() => {});
-loadBots().then(() => { connect(); refreshTakeovers(); }).catch(() => {});
+Promise.all([loadBots(), loadSettings()])
+  .then(() => {
+    connect();
+    refreshTakeovers();
+    maybeAutoOpenUnbox();
+  })
+  .catch(() => {});
 resize();
 </script>
 </body>

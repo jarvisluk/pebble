@@ -30,6 +30,7 @@ import (
 
 	"bot-hub/internal/cli"
 	"bot-hub/internal/config"
+	"bot-hub/internal/harness"
 	"bot-hub/internal/node"
 	"bot-hub/internal/tunnel"
 )
@@ -37,8 +38,15 @@ import (
 //go:embed setup.html
 var setupHTML []byte
 
-//go:embed default-config.json
-var defaultConfig []byte
+var desktopHarnesses = []struct {
+	id    string
+	label string
+}{
+	{"opencode", "OpenCode"},
+	{"claude", "Claude Code"},
+	{"pi", "Pi"},
+	{"dsh", "DeepSeek Harness"},
+}
 
 func main() {
 	log.SetFlags(log.Ltime | log.Lmsgprefix)
@@ -182,10 +190,6 @@ func (d *desktop) start(p prefs) {
 }
 
 func (d *desktop) startLocal(ctx context.Context, done chan struct{}) (string, error) {
-	if _, err := exec.LookPath("opencode"); err != nil {
-		close(done)
-		return "", errors.New("没有找到 opencode，请先安装 OpenCode")
-	}
 	if err := ensureConfig(d.dir); err != nil {
 		close(done)
 		return "", err
@@ -505,8 +509,21 @@ func (d *desktop) serveSetup(w http.ResponseWriter, r *http.Request) {
 		d.mu.Lock()
 		out := map[string]any{"mode": d.prefs.Mode, "link": d.prefs.Link, "status": d.status, "dataDir": d.dir}
 		d.mu.Unlock()
-		_, err := exec.LookPath("opencode")
-		out["opencode"] = err == nil
+		harnesses := make([]map[string]any, 0, len(desktopHarnesses))
+		installedCount := 0
+		for _, item := range desktopHarnesses {
+			ok, _ := harness.DetectHarness(item.id)
+			if ok {
+				installedCount++
+			}
+			harnesses = append(harnesses, map[string]any{
+				"id":        item.id,
+				"label":     item.label,
+				"installed": ok,
+			})
+		}
+		out["harnesses"] = harnesses
+		out["installedCount"] = installedCount
 		writeJSON(w, out)
 	case r.URL.Path == "/api/desktop/start" && r.Method == http.MethodPost:
 		var p prefs
@@ -565,18 +582,12 @@ func dataDir() (string, error) {
 
 // ensureConfig writes a starter config/bots.json on first local run.
 func ensureConfig(dir string) error {
-	path := filepath.Join(dir, "config", "bots.json")
-	if _, err := os.Stat(path); err == nil {
-		return nil
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
-	}
-	return os.WriteFile(path, defaultConfig, 0o600)
+	_, _, err := config.EnsureStarterConfig(dir, harness.PreferredInstalledHarness())
+	return err
 }
 
 // shellEnv takes PATH and proxy settings from the login shell: an app started
-// from Finder or the Dock gets a bare environment, without ~/.opencode/bin or
+// from Finder or the Dock gets a bare environment, without user-local bins or
 // the proxy the DERP relay may need.
 func shellEnv() {
 	if runtime.GOOS == "windows" {
@@ -597,7 +608,27 @@ func shellEnv() {
 			}
 		}
 	}
-	if home, err := os.UserHomeDir(); err == nil {
-		os.Setenv("PATH", os.Getenv("PATH")+string(os.PathListSeparator)+filepath.Join(home, ".opencode", "bin"))
+	extraBins := []string{"/opt/homebrew/bin", "/usr/local/bin"}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		extraBins = append(extraBins,
+			filepath.Join(home, ".opencode", "bin"),
+			filepath.Join(home, ".local", "bin"),
+			filepath.Join(home, ".npm-global", "bin"),
+		)
 	}
+	curPath := os.Getenv("PATH")
+	parts := strings.Split(curPath, string(os.PathListSeparator))
+	seen := make(map[string]bool, len(parts))
+	for _, p := range parts {
+		if p != "" {
+			seen[p] = true
+		}
+	}
+	for _, p := range extraBins {
+		if !seen[p] {
+			parts = append(parts, p)
+			seen[p] = true
+		}
+	}
+	os.Setenv("PATH", strings.Join(parts, string(os.PathListSeparator)))
 }

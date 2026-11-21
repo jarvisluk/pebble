@@ -94,8 +94,9 @@ export default function BotsScreen() {
     router.push(`/bot/${encodeURIComponent(botId)}`);
   };
 
+  const needsFirstPairing = ready && !activeServer;
   const showDisconnectedCard =
-    ready && (!activeServer || connState === 'unauthorized' || (connState === 'error' && bots.length === 0));
+    ready && !!activeServer && (connState === 'unauthorized' || (connState === 'error' && bots.length === 0));
 
   const renderBotItem = ({ item, index }: { item: BotStatus; index: number }) => {
     const lastMsg = last[item.id];
@@ -212,23 +213,25 @@ export default function BotsScreen() {
         </View>
       </View>
 
-      <View style={[styles.searchBox, { backgroundColor: theme.s1 }]}>
-        <SearchIcon size={16} color={theme.mute} />
-        <TextInput
-          value={query}
-          onChangeText={setQuery}
-          placeholder="搜索 Bot"
-          placeholderTextColor={theme.mute}
-          style={[styles.searchInput, { color: theme.text }]}
-          clearButtonMode="while-editing"
-          returnKeyType="search"
-        />
-        {Platform.OS !== 'ios' && query.length > 0 && (
-          <Pressable onPress={() => setQuery('')} hitSlop={8}>
-            <Text style={[styles.clearTxt, { color: theme.mute }]}>清除</Text>
-          </Pressable>
-        )}
-      </View>
+      {!needsFirstPairing && (
+        <View style={[styles.searchBox, { backgroundColor: theme.s1 }]}>
+          <SearchIcon size={16} color={theme.mute} />
+          <TextInput
+            value={query}
+            onChangeText={setQuery}
+            placeholder="搜索 Bot"
+            placeholderTextColor={theme.mute}
+            style={[styles.searchInput, { color: theme.text }]}
+            clearButtonMode="while-editing"
+            returnKeyType="search"
+          />
+          {Platform.OS !== 'ios' && query.length > 0 && (
+            <Pressable onPress={() => setQuery('')} hitSlop={8}>
+              <Text style={[styles.clearTxt, { color: theme.mute }]}>清除</Text>
+            </Pressable>
+          )}
+        </View>
+      )}
 
       {takeovers.length > 0 && (
         <View style={[styles.toBanner, { backgroundColor: theme.pink }]}>
@@ -258,6 +261,44 @@ export default function BotsScreen() {
           <Text style={[styles.centerTxt, { color: theme.text2 }]}>
             {connState === 'connecting' ? '正在连接主电脑…' : '加载中…'}
           </Text>
+        </View>
+      ) : needsFirstPairing ? (
+        <View style={styles.cardWrap}>
+          <View style={[styles.onboardCard, { backgroundColor: theme.card }]}>
+            <Text style={[styles.onboardTitle, { color: theme.text }]}>连接主电脑</Text>
+            <View style={styles.onboardSteps}>
+              <View style={[styles.onboardStepRow, { backgroundColor: theme.s1 }]}>
+                <View style={[styles.stepBadge, { backgroundColor: theme.card }]}>
+                  <Text style={[styles.stepBadgeTxt, { color: theme.text }]}>1</Text>
+                </View>
+                <Text style={[styles.onboardStepTxt, { color: theme.text2 }]}>
+                  在电脑端打开 Bot Hub，完成开箱引导或在设置中开启远程访问
+                </Text>
+              </View>
+              <View style={[styles.onboardStepRow, { backgroundColor: theme.s1 }]}>
+                <View style={[styles.stepBadge, { backgroundColor: theme.card }]}>
+                  <Text style={[styles.stepBadgeTxt, { color: theme.text }]}>2</Text>
+                </View>
+                <Text style={[styles.onboardStepTxt, { color: theme.text2 }]}>
+                  扫描二维码或输入连接地址
+                </Text>
+              </View>
+            </View>
+            <View style={styles.onboardBtns}>
+              <Pressable
+                onPress={() => router.push(Platform.OS === 'web' ? '/connect' : '/connect?scan=1')}
+                style={[styles.primaryBtn, { backgroundColor: theme.accent }]}
+              >
+                <Text style={[styles.primaryBtnTxt, { color: theme.accentText }]}>扫码连接</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => router.push('/connect')}
+                style={[styles.secondaryBtn, { backgroundColor: theme.s1 }]}
+              >
+                <Text style={[styles.secondaryBtnTxt, { color: theme.text2 }]}>手动输入地址</Text>
+              </Pressable>
+            </View>
+          </View>
         </View>
       ) : showDisconnectedCard ? (
         <View style={styles.cardWrap}>
@@ -523,6 +564,34 @@ const styles = StyleSheet.create({
   onboardDesc: {
     fontSize: 14,
     lineHeight: 20,
+  },
+  onboardSteps: {
+    gap: 8,
+    marginTop: 2,
+  },
+  onboardStepRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  stepBadge: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepBadgeTxt: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  onboardStepTxt: {
+    flex: 1,
+    fontSize: 13.5,
+    lineHeight: 19,
   },
   onboardBtns: {
     flexDirection: 'row',

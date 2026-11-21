@@ -142,3 +142,34 @@ func TestPlatformInstructionsAndOpenCodeSync(t *testing.T) {
 	}
 }
 
+func TestEnsureStarterConfig(t *testing.T) {
+	root := t.TempDir()
+	path, created, err := EnsureStarterConfig(root, "claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !created {
+		t.Fatal("expected created=true on first call")
+	}
+	cfg, loadedPath, err := Load(root, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loadedPath != path {
+		t.Fatalf("loadedPath = %q, want %q", loadedPath, path)
+	}
+	if len(cfg.Bots) != 1 || cfg.Bots[0].ID != "assistant" || cfg.Bots[0].Harness != "claude" {
+		t.Fatalf("unexpected starter bots: %+v", cfg.Bots)
+	}
+
+	// Idempotent when config/bots.json already exists.
+	path2, created2, err := EnsureStarterConfig(root, "pi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created2 || path2 != path {
+		t.Fatalf("second call = (%q, %v), want (%q, false)", path2, created2, path)
+	}
+}
+
+

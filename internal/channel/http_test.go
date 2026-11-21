@@ -303,3 +303,76 @@ func TestSessionRecallRotatePrivateAndMemoryRoutes(t *testing.T) {
 		t.Fatalf("GET /api/memory failed: %d %s", memRec.Code, memRec.Body.String())
 	}
 }
+
+func TestOnboardingSettingsRoute(t *testing.T) {
+	tmp := t.TempDir()
+	if _, _, err := config.EnsureStarterConfig(tmp, "opencode"); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _, err := config.Load(tmp, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := state.NewStore(cfg.StateFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := harness.NewRegistry()
+	reg.Register(noopHarness{kind: "opencode"})
+
+	h := hub.New(cfg, store, nil, reg)
+	defer h.Close()
+
+	s := NewHTTPServer(h, config.HTTPConfig{Host: "127.0.0.1"})
+	defer s.Shutdown(t.Context())
+	mux := s.srv.Handler
+
+	// Fresh hub needs setup and includes harness install metadata.
+	getReq := httptest.NewRequest(http.MethodGet, "/api/settings", nil)
+	getReq.Host = "127.0.0.1:3789"
+	getRec := httptest.NewRecorder()
+	mux.ServeHTTP(getRec, getReq)
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/settings failed: %d %s", getRec.Code, getRec.Body.String())
+	}
+	var res struct {
+		Harnesses []struct {
+			ID        string                     `json:"id"`
+			Installed bool                       `json:"installed"`
+			Install   harness.HarnessInstallInfo `json:"install"`
+		} `json:"harnesses"`
+		Onboarding struct {
+			Completed  bool     `json:"completed"`
+			NeedsSetup bool     `json:"needsSetup"`
+			Installed  []string `json:"installedHarnesses"`
+		} `json:"onboarding"`
+	}
+	if err := json.Unmarshal(getRec.Body.Bytes(), &res); err != nil {
+		t.Fatal(err)
+	}
+	if !res.Onboarding.NeedsSetup || res.Onboarding.Completed {
+		t.Fatalf("expected needsSetup=true, completed=false; got %+v", res.Onboarding)
+	}
+	if res.Onboarding.Installed == nil {
+		t.Fatal("expected non-nil installedHarnesses slice")
+	}
+	if len(res.Harnesses) != 1 || res.Harnesses[0].Install.Command == "" {
+		t.Fatalf("expected harness install metadata, got %+v", res.Harnesses)
+	}
+
+	// Completing onboarding persists onboardingCompleted=true and clears needsSetup.
+	putReq := httptest.NewRequest(http.MethodPut, "/api/settings", bytes.NewBufferString(`{"onboardingCompleted":true}`))
+	putReq.Host = "127.0.0.1:3789"
+	putRec := httptest.NewRecorder()
+	mux.ServeHTTP(putRec, putReq)
+	if putRec.Code != http.StatusOK {
+		t.Fatalf("PUT /api/settings failed: %d %s", putRec.Code, putRec.Body.String())
+	}
+	if err := json.Unmarshal(putRec.Body.Bytes(), &res); err != nil {
+		t.Fatal(err)
+	}
+	if !res.Onboarding.Completed || res.Onboarding.NeedsSetup {
+		t.Fatalf("expected completed=true, needsSetup=false after PUT; got %+v", res.Onboarding)
+	}
+}
+

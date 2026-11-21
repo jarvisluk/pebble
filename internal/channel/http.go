@@ -414,10 +414,11 @@ func (s *HTTPServer) handleInterrupt(w http.ResponseWriter, r *http.Request) {
 }
 
 type settingsBody struct {
-	DefaultModel      *string           `json:"defaultModel,omitempty"`
-	DefaultModels     map[string]string `json:"defaultModels,omitempty"`
-	AllowLocalDesktop *bool             `json:"allowLocalDesktop,omitempty"`
-	SharedUserMD      *string           `json:"sharedUserMd,omitempty"`
+	DefaultModel        *string           `json:"defaultModel,omitempty"`
+	DefaultModels       map[string]string `json:"defaultModels,omitempty"`
+	AllowLocalDesktop   *bool             `json:"allowLocalDesktop,omitempty"`
+	SharedUserMD        *string           `json:"sharedUserMd,omitempty"`
+	OnboardingCompleted *bool             `json:"onboardingCompleted,omitempty"`
 }
 
 func (s *HTTPServer) handleSettings(w http.ResponseWriter, r *http.Request) {
@@ -451,6 +452,14 @@ func (s *HTTPServer) handleSettings(w http.ResponseWriter, r *http.Request) {
 	if presets == nil {
 		presets = []harness.MagpiePreset{}
 	}
+	installedIDs := []string{}
+	for _, hi := range harnesses {
+		if hi.Installed {
+			installedIDs = append(installedIDs, hi.ID)
+		}
+	}
+	completed := s.hub.OnboardingCompleted()
+	hasConversation := s.hub.HasAnyConversation()
 	writeJSON(w, http.StatusOK, map[string]any{
 		"magpie": map[string]any{
 			"installed": installed,
@@ -464,6 +473,11 @@ func (s *HTTPServer) handleSettings(w http.ResponseWriter, r *http.Request) {
 		"defaultModels":     defaultModels,
 		"sharedUserMd":      s.hub.SharedUserMD(),
 		"harnesses":         harnesses,
+		"onboarding": map[string]any{
+			"completed":          completed,
+			"needsSetup":         !completed && !hasConversation,
+			"installedHarnesses": installedIDs,
+		},
 	})
 }
 
@@ -494,6 +508,12 @@ func (s *HTTPServer) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.SharedUserMD != nil {
 		if err := s.hub.SetSharedUserMD(*body.SharedUserMD); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
+	}
+	if body.OnboardingCompleted != nil {
+		if err := s.hub.SetOnboardingCompleted(*body.OnboardingCompleted); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
 			return
 		}

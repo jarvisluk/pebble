@@ -86,10 +86,13 @@ type RotateResult struct {
 
 // HarnessInfo describes one available harness.
 type HarnessInfo struct {
-	ID           string               `json:"id"`
-	Label        string               `json:"label"`
-	DefaultModel string               `json:"defaultModel"`
-	Magpie       harness.MagpieStatus `json:"magpie"`
+	ID           string                     `json:"id"`
+	Label        string                     `json:"label"`
+	DefaultModel string                     `json:"defaultModel"`
+	Installed    bool                       `json:"installed"`
+	BinaryPath   string                     `json:"binaryPath,omitempty"`
+	Install      harness.HarnessInstallInfo `json:"install"`
+	Magpie       harness.MagpieStatus       `json:"magpie"`
 }
 
 type Event struct {
@@ -1247,7 +1250,15 @@ func (h *Hub) Harnesses(ctx context.Context) []HarnessInfo {
 	h.lanesMu.RLock()
 	var out []HarnessInfo
 	for _, r := range h.registry.All() {
-		out = append(out, HarnessInfo{ID: r.Kind(), Label: r.Label(), DefaultModel: h.cfg.DefaultModelFor(r.Kind())})
+		installed, binPath := harness.DetectHarness(r.Kind())
+		out = append(out, HarnessInfo{
+			ID:           r.Kind(),
+			Label:        r.Label(),
+			DefaultModel: h.cfg.DefaultModelFor(r.Kind()),
+			Installed:    installed,
+			BinaryPath:   binPath,
+			Install:      harness.HarnessInstallMeta(r.Kind()),
+		})
 	}
 	h.lanesMu.RUnlock()
 	var wg sync.WaitGroup
@@ -1579,6 +1590,54 @@ func (h *Hub) SetAllowLocalDesktop(allow bool) error {
 	}
 	h.cfg.AllowLocalDesktop = &val
 	return nil
+}
+
+// OnboardingCompleted reports whether the first-run unbox wizard has been completed or skipped.
+func (h *Hub) OnboardingCompleted() bool {
+	h.lanesMu.RLock()
+	defer h.lanesMu.RUnlock()
+	return h.cfg.OnboardingCompleted
+}
+
+// SetOnboardingCompleted persists whether the first-run unbox wizard has been completed.
+func (h *Hub) SetOnboardingCompleted(done bool) error {
+	h.lanesMu.Lock()
+	defer h.lanesMu.Unlock()
+	if h.cfg.ConfigPath != "" {
+		if err := config.UpdateRaw(h.cfg, func(raw *config.HubConfig) error {
+			raw.OnboardingCompleted = done
+			return nil
+		}); err != nil {
+			return fmt.Errorf("save config: %w", err)
+		}
+	}
+	h.cfg.OnboardingCompleted = done
+	return nil
+}
+
+// HasAnyConversation reports whether any configured bot has persisted turns or messages.
+func (h *Hub) HasAnyConversation() bool {
+	h.lanesMu.RLock()
+	ids := append([]string(nil), h.order...)
+	h.lanesMu.RUnlock()
+	for _, id := range ids {
+		if h.store != nil {
+			if rec, ok := h.store.Get(id); ok && rec.TurnCount > 0 {
+				return true
+			}
+			if h.store.ArchivedCount(id) > 0 {
+				return true
+			}
+			if msgs, err := h.store.ListMessages(id, 1); err == nil && len(msgs) > 0 {
+				return true
+			}
+		} else if h.messages != nil {
+			if msgs, err := h.messages.List(id, 1); err == nil && len(msgs) > 0 {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // SharedUserMD reads the shared _shared/USER.md memory file across all bots.
