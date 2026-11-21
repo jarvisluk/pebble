@@ -16,9 +16,6 @@ import (
 func TestMCPStdioToolsFlow(t *testing.T) {
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/api/bots":
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"bots":[{"id":"assistant","name":"Assistant"}]}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/api/bots/researcher/message":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"botId":"researcher","sessionId":"ses_r","text":"done"}`))
@@ -31,8 +28,7 @@ func TestMCPStdioToolsFlow(t *testing.T) {
 	input := strings.Join([]string{
 		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`,
 		`{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}`,
-		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_bots","arguments":{}}}`,
-		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"message_bot","arguments":{"botId":"researcher","message":"hi"}}}`,
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"message_bot","arguments":{"botId":"researcher","message":"hi"}}}`,
 		"",
 	}, "\n")
 
@@ -43,8 +39,8 @@ func TestMCPStdioToolsFlow(t *testing.T) {
 	}
 
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
-	if len(lines) != 4 {
-		t.Fatalf("expected 4 JSON-RPC responses, got %d:\n%s", len(lines), out.String())
+	if len(lines) != 3 {
+		t.Fatalf("expected 3 JSON-RPC responses, got %d:\n%s", len(lines), out.String())
 	}
 
 	var listResp struct {
@@ -57,65 +53,51 @@ func TestMCPStdioToolsFlow(t *testing.T) {
 	if err := json.Unmarshal([]byte(lines[1]), &listResp); err != nil {
 		t.Fatalf("parse tools/list: %v", err)
 	}
-	if len(listResp.Result.Tools) != 16 {
-		t.Fatalf("expected 16 tools, got %d", len(listResp.Result.Tools))
+	want := map[string]bool{
+		"message_bot":      true,
+		"node_exec":        true,
+		"node_file":        true,
+		"desktop_task":     true,
+		"request_takeover": true,
+		"recall_session":   true,
 	}
-	if !strings.Contains(lines[3], "Reply from bot:researcher") {
-		t.Fatalf("expected message_bot reply, got %s", lines[3])
+	if len(listResp.Result.Tools) != len(want) {
+		t.Fatalf("expected %d core tools, got %d: %+v", len(want), len(listResp.Result.Tools), listResp.Result.Tools)
+	}
+	for _, tool := range listResp.Result.Tools {
+		if !want[tool.Name] {
+			t.Fatalf("unexpected tool in MCP list: %q", tool.Name)
+		}
+	}
+	if !strings.Contains(lines[2], "Reply from bot:researcher") {
+		t.Fatalf("expected message_bot reply, got %s", lines[2])
 	}
 }
 
-func TestMCPSessionRecallAndRotateTools(t *testing.T) {
+func TestMCPRecallSessionTool(t *testing.T) {
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/api/sessions":
-			if r.URL.Query().Get("callerBotId") != "assistant" || r.URL.Query().Get("botId") != "*" || r.URL.Query().Get("query") != "docker" {
-				http.Error(w, `{"error":"bad list_sessions query"}`, http.StatusBadRequest)
-				return
-			}
-			_, _ = w.Write([]byte(`{"sessions":[{"sessionId":"ses_1","botId":"ops","status":"error"}]}`))
-		case r.Method == http.MethodGet && r.URL.Path == "/api/sessions/previous":
+		if r.Method == http.MethodGet && r.URL.Path == "/api/sessions/previous" {
 			if r.URL.Query().Get("callerBotId") != "assistant" || r.URL.Query().Get("botId") != "assistant" || r.URL.Query().Get("tail") != "5" {
 				http.Error(w, `{"error":"bad recall_session query"}`, http.StatusBadRequest)
 				return
 			}
 			_, _ = w.Write([]byte(`{"session":{"sessionId":"ses_prev"},"messages":[{"id":"m1","text":"old context"}]}`))
-		case r.Method == http.MethodPost && r.URL.Path == "/api/bots/assistant/rotate":
-			var body struct {
-				HandoffNote string `json:"handoffNote"`
-				Defer       bool   `json:"defer"`
-			}
-			_ = json.NewDecoder(r.Body).Decode(&body)
-			if !body.Defer || body.HandoffNote != "clean handoff" {
-				http.Error(w, `{"error":"bad rotate payload"}`, http.StatusBadRequest)
-				return
-			}
-			_, _ = w.Write([]byte(`{"deferred":true,"sessionId":"ses_cur"}`))
-		default:
-			http.NotFound(w, r)
+			return
 		}
+		http.NotFound(w, r)
 	}))
 	defer api.Close()
 
-	input := strings.Join([]string{
-		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_sessions","arguments":{"botId":"*","query":"docker"}}}`,
-		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"recall_session","arguments":{"tail":5}}}`,
-		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"rotate_session","arguments":{"handoffNote":"clean handoff"}}}`,
-		"",
-	}, "\n")
+	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"recall_session","arguments":{"tail":5}}}` + "\n"
 
 	var out bytes.Buffer
 	srv := NewServer(api.URL, "assistant")
 	if err := srv.ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
 		t.Fatalf("ServeStdio failed: %v", err)
 	}
-	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
-	if len(lines) != 3 {
-		t.Fatalf("expected 3 responses, got %d:\n%s", len(lines), out.String())
-	}
-	if !strings.Contains(lines[0], "ses_1") || !strings.Contains(lines[1], "old context") || !strings.Contains(lines[2], `"deferred": true`) && !strings.Contains(lines[2], `\"deferred\": true`) {
-		t.Fatalf("unexpected session/rotate outputs:\n%s", out.String())
+	if !strings.Contains(out.String(), "old context") {
+		t.Fatalf("unexpected recall_session output:\n%s", out.String())
 	}
 }
 
@@ -138,8 +120,6 @@ func TestMCPNodeToolsAndTokenRotation(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/api/nodes":
-			_, _ = w.Write([]byte(`{"nodes":[{"id":"macbook","connected":true,"permissions":["files","exec","desktop"]}]}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/api/nodes/_default/call":
 			var body struct {
 				Action string `json:"action"`
@@ -164,10 +144,9 @@ func TestMCPNodeToolsAndTokenRotation(t *testing.T) {
 
 	t.Setenv("BOT_HUB_API_TOKEN", "tok-v1")
 	input := strings.Join([]string{
-		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_nodes","arguments":{}}}`,
-		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"node_exec","arguments":{"command":"uname"}}}`,
-		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"node_file","arguments":{"op":"read","path":"~/a.txt"}}}`,
-		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"request_takeover","arguments":{"reason":"请扫码登录"}}}`,
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"node_exec","arguments":{"command":"uname"}}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"node_file","arguments":{"op":"read","path":"~/a.txt"}}}`,
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"request_takeover","arguments":{"reason":"请扫码登录"}}}`,
 		"",
 	}, "\n")
 
@@ -177,56 +156,15 @@ func TestMCPNodeToolsAndTokenRotation(t *testing.T) {
 		t.Fatalf("ServeStdio failed: %v", err)
 	}
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
-	if len(lines) != 4 {
-		t.Fatalf("expected 4 responses, got %d:\n%s", len(lines), out.String())
+	if len(lines) != 3 {
+		t.Fatalf("expected 3 responses, got %d:\n%s", len(lines), out.String())
 	}
 	if authCalls.Load() != 1 {
 		t.Fatalf("expected exactly 1 401 retry before caching fresh token, got %d", authCalls.Load())
 	}
-	if !strings.Contains(lines[0], "macbook") || !strings.Contains(lines[1], "ok-exec") ||
-		!strings.Contains(lines[2], "file-body") || !strings.Contains(lines[3], "人类已扫码完成") {
+	if !strings.Contains(lines[0], "ok-exec") ||
+		!strings.Contains(lines[1], "file-body") || !strings.Contains(lines[2], "人类已扫码完成") {
 		t.Fatalf("unexpected node/takeover tool outputs:\n%s", out.String())
-	}
-}
-
-func TestMCPRoutineTools(t *testing.T) {
-	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/api/bots/assistant/routines":
-			_, _ = w.Write([]byte(`{"routines":[{"id":"morning","name":"Morning Brief","dailyAt":"09:00","mainDelivery":"receipt"}]}`))
-		case r.Method == http.MethodPost && r.URL.Path == "/api/bots/assistant/routines" && r.URL.Query().Get("upsert") == "1":
-			_, _ = w.Write([]byte(`{"id":"morning","name":"Morning Brief","dailyAt":"09:00","mainDelivery":"receipt","enabled":true}`))
-		case r.Method == http.MethodPost && r.URL.Path == "/api/bots/assistant/routines/morning/run":
-			_, _ = w.Write([]byte(`{"id":"run_1","status":"ok","output":"all clear"}`))
-		case r.Method == http.MethodDelete && r.URL.Path == "/api/bots/assistant/routines/morning":
-			_, _ = w.Write([]byte(`{"ok":true}`))
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer api.Close()
-
-	input := strings.Join([]string{
-		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_routines","arguments":{}}}`,
-		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"upsert_routine","arguments":{"name":"Morning Brief","dailyAt":"09:00","prompt":"check memory/"}}}`,
-		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"run_routine","arguments":{"routineId":"morning"}}}`,
-		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"delete_routine","arguments":{"routineId":"morning"}}}`,
-		"",
-	}, "\n")
-
-	var out bytes.Buffer
-	srv := NewServer(api.URL, "assistant")
-	if err := srv.ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
-		t.Fatalf("ServeStdio failed: %v", err)
-	}
-	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
-	if len(lines) != 4 {
-		t.Fatalf("expected 4 responses, got %d:\n%s", len(lines), out.String())
-	}
-	if !strings.Contains(lines[0], "Morning Brief") || !strings.Contains(lines[1], "receipt") ||
-		!strings.Contains(lines[2], "all clear") || !strings.Contains(lines[3], `"isError":false`) {
-		t.Fatalf("unexpected routine MCP outputs:\n%s", out.String())
 	}
 }
 
@@ -269,7 +207,7 @@ func TestMCPDesktopTaskAndRoleFiltering(t *testing.T) {
 		t.Fatalf("expected desktop_task output, got %s", mainLines[1])
 	}
 
-	// 2. computer_use role exposes node_exec/request_takeover and blocks nested desktop_task.
+	// 2. computer_use role exposes 3 tools and blocks nested desktop_task.
 	t.Setenv("BOT_HUB_MCP_ROLE", "computer_use")
 	cuInput := strings.Join([]string{
 		`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`,
@@ -282,6 +220,19 @@ func TestMCPDesktopTaskAndRoleFiltering(t *testing.T) {
 		t.Fatal(err)
 	}
 	cuLines := strings.Split(strings.TrimSpace(cuOut.String()), "\n")
+	var cuList struct {
+		Result struct {
+			Tools []struct {
+				Name string `json:"name"`
+			} `json:"tools"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(cuLines[0]), &cuList); err != nil {
+		t.Fatal(err)
+	}
+	if len(cuList.Result.Tools) != 3 {
+		t.Fatalf("expected 3 tools for computer_use role, got %d: %+v", len(cuList.Result.Tools), cuList.Result.Tools)
+	}
 	if strings.Contains(cuLines[0], `"desktop_task"`) || !strings.Contains(cuLines[0], `"node_exec"`) {
 		t.Fatalf("expected computer_use role to expose node_exec and hide desktop_task:\n%s", cuLines[0])
 	}

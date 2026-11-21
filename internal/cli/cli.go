@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -41,6 +42,11 @@ func Main(args []string) {
 	if sub == "connect" {
 		runConnect(args[1:])
 		return
+	}
+	switch sub {
+	case "bot", "session", "routine", "node", "desktop":
+		cwd, _ := os.Getwd()
+		os.Exit(runCommand(context.Background(), args, cwd, os.Stdout, os.Stderr))
 	}
 
 	fs := flag.NewFlagSet(sub, flag.ExitOnError)
@@ -82,11 +88,16 @@ func Main(args []string) {
 
 func printUsage() {
 	fmt.Println(`Usage:
-  bot-hub serve  [-config path]                    Start Web UI, HTTP API, Telegram pollers, and scheduler
-  bot-hub chat   [-config path] [bot]              Interactive terminal chat with a bot
-  bot-hub status [-config path]                    Show configured bots and persisted sessions
-  bot-hub mcp     [--hub-url url] [--bot-id id] [--config path]  Run stdio MCP server exposing bot & node tools
-  bot-hub connect [-listen addr] [-node] <tailcat-link>        Reach a remote bot-hub over Tailcat (optionally register as a node)`)
+  bot-hub serve  [-config path]                                   Start Web UI, HTTP API, Telegram pollers, and scheduler
+  bot-hub chat   [-config path] [bot]                             Interactive terminal chat with a bot
+  bot-hub status [-config path]                                   Show configured bots and persisted sessions
+  bot-hub mcp     [--hub-url url] [--bot-id id] [--config path]   Run stdio MCP server exposing core runtime primitives
+  bot-hub connect [-listen addr] [-node] <tailcat-link>           Reach a remote bot-hub over Tailcat (optionally register as a node)
+  bot-hub bot     <list|get|create|update|delete|message> [flags] Manage bots or send messages via running Hub API
+  bot-hub session <list|recall|rotate> [flags]                    Inspect, recall, or rotate bot sessions
+  bot-hub routine <list|upsert|delete|run> [flags]                Manage and trigger scheduled routines
+  bot-hub node    <list|exec|file> [flags]                        List or invoke remote computer nodes
+  bot-hub desktop <task|takeover> [flags]                         Delegate desktop GUI tasks or request human takeover`)
 }
 
 func runConnect(args []string) {
@@ -206,6 +217,8 @@ func Serve(ctx context.Context, root string) error {
 }
 
 func runServe(parent context.Context, h *hub.Hub, cfgPath string) error {
+	ensureBotHubInPath(h.Config().ProjectRoot)
+
 	ctx, stop := context.WithCancel(parent)
 	defer stop()
 
@@ -320,5 +333,27 @@ func runStatus(h *hub.Hub, cfgPath string) {
 		fmt.Printf("  workspace: %s\n", st.Workspace)
 		fmt.Printf("  model:     %s\n", st.Model)
 		fmt.Printf("  session:   %s (turns=%d, cost=$%.4f)\n", sess, turns, cost)
+	}
+}
+
+func ensureBotHubInPath(projectRoot string) {
+	bin := config.ResolveBotHubBinary(projectRoot)
+	if bin == "" {
+		return
+	}
+	if _, err := os.Stat(bin); err != nil {
+		return
+	}
+	dir := filepath.Clean(filepath.Dir(bin))
+	cur := os.Getenv("PATH")
+	for _, seg := range strings.Split(cur, string(os.PathListSeparator)) {
+		if seg != "" && filepath.Clean(seg) == dir {
+			return
+		}
+	}
+	if cur == "" {
+		_ = os.Setenv("PATH", dir)
+	} else {
+		_ = os.Setenv("PATH", dir+string(os.PathListSeparator)+cur)
 	}
 }

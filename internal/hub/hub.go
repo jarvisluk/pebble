@@ -1064,13 +1064,19 @@ func (h *Hub) executeTurn(ctx context.Context, lane *botLane, bot config.BotConf
 
 	h.lanesMu.RLock()
 	apiToken := h.cfg.HTTP.APIToken
+	hubURL := h.cfg.HTTP.BaseURL()
+	cfgPath := h.cfg.ConfigPath
 	mcpCmd := config.MCPCommand(h.cfg, bot.ID)
 	h.lanesMu.RUnlock()
 
 	platPath := h.platformInstructionsPath()
 	extraEnv := map[string]string{
+		"BOT_HUB_URL":    hubURL,
 		"BOT_HUB_BOT_ID": bot.ID,
 		"BOT_HUB_HOP":    strconv.Itoa(opts.Hop),
+	}
+	if cfgPath != "" {
+		extraEnv["BOT_HUB_CONFIG"] = cfgPath
 	}
 	if apiToken != "" {
 		extraEnv["BOT_HUB_API_TOKEN"] = apiToken
@@ -1967,8 +1973,12 @@ func (h *Hub) RunIsolated(ctx context.Context, botID, prompt string, opts Isolat
 	}
 
 	extraEnv := map[string]string{
+		"BOT_HUB_URL":    h.cfg.HTTP.BaseURL(),
 		"BOT_HUB_BOT_ID": bot.ID,
 		"BOT_HUB_HOP":    "0",
+	}
+	if h.cfg.ConfigPath != "" {
+		extraEnv["BOT_HUB_CONFIG"] = h.cfg.ConfigPath
 	}
 	var mcpEnv map[string]string
 	if apiToken != "" {

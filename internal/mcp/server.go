@@ -2,7 +2,6 @@ package mcp
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -12,22 +11,11 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"sync"
-	"time"
-
-	"bot-hub/internal/config"
-	"bot-hub/internal/node"
 )
 
 type Server struct {
-	hubURL     string
-	selfBotID  string
-	configPath string
-	role       string
-	httpClient *http.Client
-
-	mu          sync.Mutex
-	cachedToken string
+	client *Client
+	role   string
 }
 
 func NewServer(hubURL, selfBotID string) *Server {
@@ -35,20 +23,9 @@ func NewServer(hubURL, selfBotID string) *Server {
 }
 
 func NewServerWithConfig(hubURL, selfBotID, configPath string) *Server {
-	hubURL = strings.TrimRight(strings.TrimSpace(hubURL), "/")
-	if hubURL == "" {
-		hubURL = "http://127.0.0.1:3789"
-	}
-	if selfBotID == "" {
-		selfBotID = os.Getenv("BOT_HUB_BOT_ID")
-	}
 	return &Server{
-		hubURL:      hubURL,
-		selfBotID:   selfBotID,
-		configPath:  strings.TrimSpace(configPath),
-		role:        strings.TrimSpace(os.Getenv("BOT_HUB_MCP_ROLE")),
-		httpClient:  &http.Client{Timeout: 10 * time.Minute},
-		cachedToken: strings.TrimSpace(os.Getenv("BOT_HUB_API_TOKEN")),
+		client: NewClient(hubURL, selfBotID, configPath, ""),
+		role:   strings.TrimSpace(os.Getenv("BOT_HUB_MCP_ROLE")),
 	}
 }
 
@@ -170,63 +147,6 @@ func (s *Server) handle(ctx context.Context, req rpcRequest) rpcResponse {
 func toolDefinitions() []map[string]any {
 	return []map[string]any{
 		{
-			"name":        "list_bots",
-			"description": "List all configured bots in bot-hub, including their ID, name, description, workspace, model, busy state, and session stats.",
-			"inputSchema": map[string]any{
-				"type":       "object",
-				"properties": map[string]any{},
-			},
-		},
-		{
-			"name":        "get_bot",
-			"description": "Get detailed information about a specific bot, including its status and full AGENTS.md instructions.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"botId": map[string]any{
-						"type":        "string",
-						"description": "The ID of the bot to inspect.",
-					},
-				},
-				"required": []string{"botId"},
-			},
-		},
-		{
-			"name":        "create_bot",
-			"description": "Create and immediately activate a new persistent bot with its own workspace, AGENTS.md instructions, and dedicated long-lived session.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"id": map[string]any{
-						"type":        "string",
-						"description": "Unique bot ID (letters, digits, '-' or '_'), e.g. 'ops' or 'writer'.",
-					},
-					"name": map[string]any{
-						"type":        "string",
-						"description": "Display name of the bot.",
-					},
-					"description": map[string]any{
-						"type":        "string",
-						"description": "Short summary of what this bot is responsible for.",
-					},
-					"instructions": map[string]any{
-						"type":        "string",
-						"description": "Optional Markdown instructions written to the bot's AGENTS.md.",
-					},
-					"model": map[string]any{
-						"type":        "string",
-						"description": "Optional model override (defaults to the hub default for the harness).",
-					},
-					"harness": map[string]any{
-						"type":        "string",
-						"enum":        []string{"opencode", "pi", "dsh", "claude"},
-						"description": "Optional agent runtime (default opencode).",
-					},
-				},
-				"required": []string{"id", "name"},
-			},
-		},
-		{
 			"name":        "message_bot",
 			"description": "Send a message to another bot in bot-hub and return its reply. Both bots' chat timelines will record the collaboration.",
 			"inputSchema": map[string]any{
@@ -242,14 +162,6 @@ func toolDefinitions() []map[string]any {
 					},
 				},
 				"required": []string{"botId", "message"},
-			},
-		},
-		{
-			"name":        "list_nodes",
-			"description": "List remote computer nodes connected to bot-hub over Tailcat, including their ID, name, OS, connected status, and granted permission scopes (files, exec, desktop).",
-			"inputSchema": map[string]any{
-				"type":       "object",
-				"properties": map[string]any{},
 			},
 		},
 		{
@@ -358,27 +270,6 @@ func toolDefinitions() []map[string]any {
 			},
 		},
 		{
-			"name":        "list_sessions",
-			"description": "List archived and active sessions in bot-hub, optionally filtering by botId ('*' for all accessible bots) or keyword query. Includes magpieSession references when available.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"botId": map[string]any{
-						"type":        "string",
-						"description": "Optional target bot ID (defaults to this bot; pass '*' to search all accessible bots).",
-					},
-					"query": map[string]any{
-						"type":        "string",
-						"description": "Optional keyword to match session titles, errors, or message contents.",
-					},
-					"limit": map[string]any{
-						"type":        "integer",
-						"description": "Maximum number of sessions to return (default 20, max 100).",
-					},
-				},
-			},
-		},
-		{
 			"name":        "recall_session",
 			"description": "Read sliced messages from a prior or active session (yours or another accessible bot's). Defaults to the most recent archived session ('previous') and last 20 messages with length protection.",
 			"inputSchema": map[string]any{
@@ -419,155 +310,12 @@ func toolDefinitions() []map[string]any {
 				},
 			},
 		},
-		{
-			"name":        "rotate_session",
-			"description": "Schedule archiving the current session after this turn completes (with an optional handoff note) so the next message starts a clean session.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"handoffNote": map[string]any{
-						"type":        "string",
-						"description": "Optional concise handoff summary carried into the next session's breadcrumb.",
-					},
-				},
-			},
-		},
-		{
-			"name":        "list_routines",
-			"description": "List scheduled routines configured for a bot, including their schedule, delivery mode, next run time, and last run status.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"botId": map[string]any{
-						"type":        "string",
-						"description": "Target bot ID (defaults to this bot).",
-					},
-				},
-			},
-		},
-		{
-			"name":        "upsert_routine",
-			"description": "Create or update a scheduled routine on a bot and arm it immediately without restarting bot-hub. Routines execute in isolated ephemeral turns.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"botId": map[string]any{
-						"type":        "string",
-						"description": "Target bot ID (defaults to this bot).",
-					},
-					"id": map[string]any{
-						"type":        "string",
-						"description": "Optional routine ID (letters, digits, - or _; auto-generated from name if omitted).",
-					},
-					"name": map[string]any{
-						"type":        "string",
-						"description": "Human-readable name for the routine.",
-					},
-					"everyMinutes": map[string]any{
-						"type":        "integer",
-						"description": "Run periodically every N minutes (set 0 when using dailyAt).",
-					},
-					"dailyAt": map[string]any{
-						"type":        "string",
-						"description": "Run daily at HH:MM local time (24h format).",
-					},
-					"prompt": map[string]any{
-						"type":        "string",
-						"description": "Task prompt sent to the isolated routine turn.",
-					},
-					"model": map[string]any{
-						"type":        "string",
-						"description": "Optional model override for this routine.",
-					},
-					"mainDelivery": map[string]any{
-						"type":        "string",
-						"enum":        []string{"receipt", "notify", "none"},
-						"description": "How non-empty findings reach the main session: 'receipt' (default: timeline card + auto-injected on user's next message), 'notify' (wake main session immediately), or 'none' (run log / Telegram only).",
-					},
-					"notifyTelegramChatId": map[string]any{
-						"type":        "string",
-						"description": "Optional Telegram chat/user ID (or ${VAR} reference) to push non-empty outputs.",
-					},
-					"enabled": map[string]any{
-						"type":        "boolean",
-						"description": "Whether the schedule is active (default true).",
-					},
-				},
-				"required": []string{"name", "prompt"},
-			},
-		},
-		{
-			"name":        "delete_routine",
-			"description": "Delete a scheduled routine from a bot and stop its timer immediately.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"botId": map[string]any{
-						"type":        "string",
-						"description": "Target bot ID (defaults to this bot).",
-					},
-					"routineId": map[string]any{
-						"type":        "string",
-						"description": "Routine ID to delete.",
-					},
-				},
-				"required": []string{"routineId"},
-			},
-		},
-		{
-			"name":        "run_routine",
-			"description": "Manually trigger a bot's scheduled routine immediately in an isolated ephemeral turn and return the run result.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"botId": map[string]any{
-						"type":        "string",
-						"description": "Target bot ID (defaults to this bot).",
-					},
-					"routineId": map[string]any{
-						"type":        "string",
-						"description": "Routine ID to execute.",
-					},
-				},
-				"required": []string{"routineId"},
-			},
-		},
 	}
 }
 
 func (s *Server) callTool(ctx context.Context, name string, rawArgs json.RawMessage) (string, bool) {
+	selfBotID := s.client.SelfBotID()
 	switch name {
-	case "list_bots":
-		body, err := s.doJSON(ctx, http.MethodGet, "/api/bots", nil)
-		if err != nil {
-			return err.Error(), true
-		}
-		return prettyJSON(body), false
-
-	case "get_bot":
-		var args struct {
-			BotID string `json:"botId"`
-		}
-		if err := json.Unmarshal(rawArgs, &args); err != nil || strings.TrimSpace(args.BotID) == "" {
-			return "botId is required", true
-		}
-		body, err := s.doJSON(ctx, http.MethodGet, "/api/bots/"+args.BotID, nil)
-		if err != nil {
-			return err.Error(), true
-		}
-		return prettyJSON(body), false
-
-	case "create_bot":
-		var args map[string]any
-		if err := json.Unmarshal(rawArgs, &args); err != nil {
-			return "invalid arguments", true
-		}
-		body, err := s.doJSON(ctx, http.MethodPost, "/api/bots", args)
-		if err != nil {
-			return err.Error(), true
-		}
-		return prettyJSON(body), false
-
 	case "message_bot":
 		var args struct {
 			BotID   string `json:"botId"`
@@ -579,10 +327,10 @@ func (s *Server) callTool(ctx context.Context, name string, rawArgs json.RawMess
 		hop, _ := strconv.Atoi(os.Getenv("BOT_HUB_HOP"))
 		payload := map[string]any{
 			"message":   args.Message,
-			"fromBotId": s.selfBotID,
+			"fromBotId": selfBotID,
 			"hop":       hop,
 		}
-		body, err := s.doJSON(ctx, http.MethodPost, "/api/bots/"+args.BotID+"/message", payload)
+		body, err := s.client.DoJSON(ctx, http.MethodPost, "/api/bots/"+url.PathEscape(args.BotID)+"/message", payload)
 		if err != nil {
 			return err.Error(), true
 		}
@@ -594,14 +342,7 @@ func (s *Server) callTool(ctx context.Context, name string, rawArgs json.RawMess
 		if err := json.Unmarshal(body, &resp); err == nil && resp.Text != "" {
 			return fmt.Sprintf("[Reply from bot:%s (session=%s)]\n%s", args.BotID, resp.SessionID, resp.Text), false
 		}
-		return prettyJSON(body), false
-
-	case "list_nodes":
-		body, err := s.doJSON(ctx, http.MethodGet, "/api/nodes", nil)
-		if err != nil {
-			return err.Error(), true
-		}
-		return prettyJSON(body), false
+		return PrettyJSON(body), false
 
 	case "node_exec":
 		var args struct {
@@ -613,7 +354,7 @@ func (s *Server) callTool(ctx context.Context, name string, rawArgs json.RawMess
 		if err := json.Unmarshal(rawArgs, &args); err != nil || strings.TrimSpace(args.Command) == "" {
 			return "command is required", true
 		}
-		return s.callNode(ctx, args.NodeID, "exec", map[string]any{
+		return s.client.CallNode(ctx, args.NodeID, "exec", map[string]any{
 			"command": args.Command,
 			"cwd":     args.Cwd,
 		}, args.TimeoutSec)
@@ -638,7 +379,7 @@ func (s *Server) callTool(ctx context.Context, name string, rawArgs json.RawMess
 		if action == "" {
 			return "op must be read, write, or list", true
 		}
-		return s.callNode(ctx, args.NodeID, action, map[string]any{
+		return s.client.CallNode(ctx, args.NodeID, action, map[string]any{
 			"path":    args.Path,
 			"content": args.Content,
 			"append":  args.Append,
@@ -648,7 +389,7 @@ func (s *Server) callTool(ctx context.Context, name string, rawArgs json.RawMess
 		if s.role == "computer_use" {
 			return "desktop_task cannot be called from inside a computer-use worker", true
 		}
-		if s.selfBotID == "" {
+		if selfBotID == "" {
 			return "caller bot ID is unknown", true
 		}
 		var args struct {
@@ -660,8 +401,8 @@ func (s *Server) callTool(ctx context.Context, name string, rawArgs json.RawMess
 		if err := json.Unmarshal(rawArgs, &args); err != nil || strings.TrimSpace(args.Goal) == "" {
 			return "goal is required", true
 		}
-		body, err := s.doJSON(ctx, http.MethodPost, "/api/desktop/task", map[string]any{
-			"botId":      s.selfBotID,
+		body, err := s.client.DoJSON(ctx, http.MethodPost, "/api/desktop/task", map[string]any{
+			"botId":      selfBotID,
 			"nodeId":     args.NodeID,
 			"goal":       args.Goal,
 			"app":        args.App,
@@ -676,7 +417,7 @@ func (s *Server) callTool(ctx context.Context, name string, rawArgs json.RawMess
 		if json.Unmarshal(body, &resp) == nil && resp.Text != "" {
 			return resp.Text, false
 		}
-		return prettyJSON(body), false
+		return PrettyJSON(body), false
 
 	case "request_takeover":
 		var args struct {
@@ -687,9 +428,9 @@ func (s *Server) callTool(ctx context.Context, name string, rawArgs json.RawMess
 		if err := json.Unmarshal(rawArgs, &args); err != nil || strings.TrimSpace(args.Reason) == "" {
 			return "reason is required", true
 		}
-		body, err := s.doJSON(ctx, http.MethodPost, "/api/desktop/takeover/request", map[string]any{
+		body, err := s.client.DoJSON(ctx, http.MethodPost, "/api/desktop/takeover/request", map[string]any{
 			"target": args.NodeID,
-			"botId":  s.selfBotID,
+			"botId":  selfBotID,
 			"reason": args.Reason,
 			"app":    args.App,
 		})
@@ -703,44 +444,6 @@ func (s *Server) callTool(ctx context.Context, name string, rawArgs json.RawMess
 			return resp.Note, false
 		}
 		return "人工接管已完成，可继续执行。", false
-
-	case "list_sessions":
-		var args struct {
-			BotID string `json:"botId"`
-			Query string `json:"query"`
-			Limit int    `json:"limit"`
-		}
-		if len(rawArgs) > 0 {
-			if err := json.Unmarshal(rawArgs, &args); err != nil {
-				return "invalid arguments", true
-			}
-		}
-		botID := strings.TrimSpace(args.BotID)
-		if botID == "" {
-			botID = s.selfBotID
-		}
-		q := url.Values{}
-		if botID != "" {
-			q.Set("botId", botID)
-		}
-		if s.selfBotID != "" {
-			q.Set("callerBotId", s.selfBotID)
-		}
-		if strings.TrimSpace(args.Query) != "" {
-			q.Set("query", strings.TrimSpace(args.Query))
-		}
-		if args.Limit > 0 {
-			q.Set("limit", strconv.Itoa(args.Limit))
-		}
-		path := "/api/sessions"
-		if enc := q.Encode(); enc != "" {
-			path += "?" + enc
-		}
-		body, err := s.doJSON(ctx, http.MethodGet, path, nil)
-		if err != nil {
-			return err.Error(), true
-		}
-		return prettyJSON(body), false
 
 	case "recall_session":
 		var args struct {
@@ -764,14 +467,14 @@ func (s *Server) callTool(ctx context.Context, name string, rawArgs json.RawMess
 		}
 		botID := strings.TrimSpace(args.BotID)
 		if botID == "" && sid == "previous" {
-			botID = s.selfBotID
+			botID = selfBotID
 		}
 		q := url.Values{}
 		if botID != "" {
 			q.Set("botId", botID)
 		}
-		if s.selfBotID != "" {
-			q.Set("callerBotId", s.selfBotID)
+		if selfBotID != "" {
+			q.Set("callerBotId", selfBotID)
 		}
 		if args.Tail > 0 {
 			q.Set("tail", strconv.Itoa(args.Tail))
@@ -795,255 +498,28 @@ func (s *Server) callTool(ctx context.Context, name string, rawArgs json.RawMess
 		if enc := q.Encode(); enc != "" {
 			path += "?" + enc
 		}
-		body, err := s.doJSON(ctx, http.MethodGet, path, nil)
+		body, err := s.client.DoJSON(ctx, http.MethodGet, path, nil)
 		if err != nil {
 			return err.Error(), true
 		}
-		return prettyJSON(body), false
-
-	case "rotate_session":
-		if s.selfBotID == "" {
-			return "caller bot ID is unknown", true
-		}
-		var args struct {
-			HandoffNote string `json:"handoffNote"`
-		}
-		if len(rawArgs) > 0 {
-			if err := json.Unmarshal(rawArgs, &args); err != nil {
-				return "invalid arguments", true
-			}
-		}
-		body, err := s.doJSON(ctx, http.MethodPost, "/api/bots/"+url.PathEscape(s.selfBotID)+"/rotate", map[string]any{
-			"handoffNote": args.HandoffNote,
-			"defer":       true,
-		})
-		if err != nil {
-			return err.Error(), true
-		}
-		return prettyJSON(body), false
-
-	case "list_routines":
-		var args struct {
-			BotID string `json:"botId"`
-		}
-		if len(rawArgs) > 0 {
-			if err := json.Unmarshal(rawArgs, &args); err != nil {
-				return "invalid arguments", true
-			}
-		}
-		botID := s.resolveBotID(args.BotID)
-		if botID == "" {
-			return "botId is required", true
-		}
-		body, err := s.doJSON(ctx, http.MethodGet, "/api/bots/"+url.PathEscape(botID)+"/routines", nil)
-		if err != nil {
-			return err.Error(), true
-		}
-		return prettyJSON(body), false
-
-	case "upsert_routine":
-		var args map[string]any
-		if err := json.Unmarshal(rawArgs, &args); err != nil {
-			return "invalid arguments", true
-		}
-		rawBotID, _ := args["botId"].(string)
-		botID := s.resolveBotID(rawBotID)
-		if botID == "" {
-			return "botId is required", true
-		}
-		delete(args, "botId")
-		body, err := s.doJSON(ctx, http.MethodPost, "/api/bots/"+url.PathEscape(botID)+"/routines?upsert=1", args)
-		if err != nil {
-			return err.Error(), true
-		}
-		return prettyJSON(body), false
-
-	case "delete_routine":
-		var args struct {
-			BotID     string `json:"botId"`
-			RoutineID string `json:"routineId"`
-		}
-		if err := json.Unmarshal(rawArgs, &args); err != nil || strings.TrimSpace(args.RoutineID) == "" {
-			return "routineId is required", true
-		}
-		botID := s.resolveBotID(args.BotID)
-		if botID == "" {
-			return "botId is required", true
-		}
-		body, err := s.doJSON(ctx, http.MethodDelete, "/api/bots/"+url.PathEscape(botID)+"/routines/"+url.PathEscape(strings.TrimSpace(args.RoutineID)), nil)
-		if err != nil {
-			return err.Error(), true
-		}
-		return prettyJSON(body), false
-
-	case "run_routine":
-		var args struct {
-			BotID     string `json:"botId"`
-			RoutineID string `json:"routineId"`
-		}
-		if err := json.Unmarshal(rawArgs, &args); err != nil || strings.TrimSpace(args.RoutineID) == "" {
-			return "routineId is required", true
-		}
-		botID := s.resolveBotID(args.BotID)
-		if botID == "" {
-			return "botId is required", true
-		}
-		body, err := s.doJSON(ctx, http.MethodPost, "/api/bots/"+url.PathEscape(botID)+"/routines/"+url.PathEscape(strings.TrimSpace(args.RoutineID))+"/run", nil)
-		if err != nil {
-			return err.Error(), true
-		}
-		return prettyJSON(body), false
+		return PrettyJSON(body), false
 
 	default:
 		return fmt.Sprintf("unknown tool %q", name), true
 	}
 }
 
-func (s *Server) resolveBotID(explicit string) string {
-	if id := strings.TrimSpace(explicit); id != "" {
-		return id
-	}
-	return strings.TrimSpace(s.selfBotID)
-}
-
 func (s *Server) visibleTools() []map[string]any {
 	all := toolDefinitions()
 	if s.role == "computer_use" {
-		out := make([]map[string]any, 0, 4)
+		out := make([]map[string]any, 0, 3)
 		for _, t := range all {
 			switch t["name"] {
-			case "list_nodes", "node_exec", "node_file", "request_takeover":
+			case "node_exec", "node_file", "request_takeover":
 				out = append(out, t)
 			}
 		}
 		return out
 	}
 	return all
-}
-
-func (s *Server) callNode(ctx context.Context, nodeID, action string, args any, timeoutSec int) (string, bool) {
-	targetID := strings.TrimSpace(nodeID)
-	if targetID == "" {
-		targetID = "_default"
-	}
-	payload := map[string]any{
-		"action":     action,
-		"args":       args,
-		"timeoutSec": timeoutSec,
-		"botId":      s.selfBotID,
-	}
-	body, err := s.doJSON(ctx, http.MethodPost, "/api/nodes/"+url.PathEscape(targetID)+"/call", payload)
-	if err != nil {
-		return err.Error(), true
-	}
-	var res node.Result
-	if err := json.Unmarshal(body, &res); err != nil {
-		return prettyJSON(body), false
-	}
-	return formatNodeResult(action, &res)
-}
-
-func formatNodeResult(action string, res *node.Result) (string, bool) {
-	if !res.OK {
-		msg := res.Error
-		if msg == "" {
-			msg = res.Output
-		}
-		if msg == "" {
-			msg = "node command failed"
-		}
-		return msg, true
-	}
-	if res.SavedPath != "" {
-		if res.Output != "" {
-			return fmt.Sprintf("[node:%s saved=%s]\n%s", res.NodeID, res.SavedPath, res.Output), false
-		}
-		return fmt.Sprintf("[node:%s saved=%s]", res.NodeID, res.SavedPath), false
-	}
-	if action == "exec" {
-		return fmt.Sprintf("[node:%s exit=%d]\n%s", res.NodeID, res.ExitCode, res.Output), false
-	}
-	if res.Output != "" {
-		return res.Output, false
-	}
-	return "ok", false
-}
-
-func (s *Server) token() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.cachedToken == "" && s.configPath != "" {
-		s.cachedToken = config.ReadAPIToken(s.configPath)
-	}
-	return s.cachedToken
-}
-
-func (s *Server) doJSON(ctx context.Context, method, path string, payload any) ([]byte, error) {
-	var rawBody []byte
-	if payload != nil {
-		var err error
-		rawBody, err = json.Marshal(payload)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	doOnce := func(tok string) (int, []byte, error) {
-		var bodyReader io.Reader
-		if rawBody != nil {
-			bodyReader = bytes.NewReader(rawBody)
-		}
-		req, err := http.NewRequestWithContext(ctx, method, s.hubURL+path, bodyReader)
-		if err != nil {
-			return 0, nil, err
-		}
-		if rawBody != nil {
-			req.Header.Set("Content-Type", "application/json")
-		}
-		if tok != "" {
-			req.Header.Set("Authorization", "Bearer "+tok)
-		}
-		resp, err := s.httpClient.Do(req)
-		if err != nil {
-			return 0, nil, fmt.Errorf("bot-hub API unreachable at %s (is `bot-hub serve` running?): %w", s.hubURL, err)
-		}
-		defer resp.Body.Close()
-		b, err := io.ReadAll(resp.Body)
-		return resp.StatusCode, b, err
-	}
-
-	tok := s.token()
-	code, b, err := doOnce(tok)
-	if err != nil {
-		return nil, err
-	}
-	if code == http.StatusUnauthorized && s.configPath != "" {
-		if fresh := config.ReadAPIToken(s.configPath); fresh != "" && fresh != tok {
-			s.mu.Lock()
-			s.cachedToken = fresh
-			s.mu.Unlock()
-			code, b, err = doOnce(fresh)
-			if err != nil {
-				return nil, err
-			}
-		}
-	}
-	if code >= 300 {
-		var errObj struct {
-			Error string `json:"error"`
-		}
-		if json.Unmarshal(b, &errObj) == nil && errObj.Error != "" {
-			return nil, fmt.Errorf("%s", errObj.Error)
-		}
-		return nil, fmt.Errorf("HTTP %d: %s", code, strings.TrimSpace(string(b)))
-	}
-	return b, nil
-}
-
-func prettyJSON(raw []byte) string {
-	var buf bytes.Buffer
-	if err := json.Indent(&buf, raw, "", "  "); err != nil {
-		return string(raw)
-	}
-	return buf.String()
 }

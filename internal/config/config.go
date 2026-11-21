@@ -508,22 +508,22 @@ func PlatformInstructionsText() string {
 		"- **Shared Context & Memory**:",
 		"  - Read `_shared/USER.md` for hub-wide user preferences.",
 		"  - When Magpie Memory tools (`memory_search` / `memory_save`) are available, store cross-project preferences with `scope=\"global\"` and this bot's durable notes with `scope=\"project\"` and tag `bot:<your-bot-id>` (and pass that tag when searching so sibling workspaces inside a git repo never mix). Otherwise store durable notes in `memory/`.",
-		"- **Teammates (`bot-hub` MCP)**: `list_bots`, `get_bot`, `create_bot`, `message_bot`.",
-		"- **Session Recall & Hygiene**:",
-		"  - On a new session after `/reset` or an error, or inside an isolated routine, use `list_sessions` and `recall_session` (pass `\"previous\"` for your prior archived session or `\"active\"` for the active main session; keep slices small and fetch single oversized messages by `messageId` to avoid re-polluting context).",
-		"  - If `list_sessions` returns a `magpieSession` (e.g. `opencode:...` or `claude:...`) and you need raw tool transcripts, pass it to `magpie-sessions__read_session`.",
-		"  - When context gets noisy or off-track, call `rotate_session(handoffNote)` to cleanly archive this session after the turn.",
-		"  - On harnesses without native `billion-context` incremental compression (e.g., `agy`, `dsh`), keep sessions bounded by saving durable facts to `memory/` or Magpie Memory and calling `rotate_session` regularly (using `recall_session` or `bili` tools if present).",
-		"- **Scheduled Routines (`bot-hub` MCP)**: `list_routines`, `upsert_routine`, `delete_routine`, `run_routine`. Routines run in isolated turns with `AGENTS.md` + `memory/` and deliver findings via `receipt` (queued for the next main turn), `notify` (immediate main turn), or `none`.",
-		"- **Devices & Automation**:",
-		"  - Computer-use worker (`bot-hub` MCP): delegate multi-step desktop or visible-browser GUI tasks to `desktop_task` so they run on the visible desktop (observable and take-over-ready) in an isolated lightweight worker.",
-		"  - Remote nodes (`bot-hub` MCP): `list_nodes`, `node_exec`, `node_file`.",
-		"  - Desktop GUI (`agent-desktop` CLI): operate apps via accessibility-tree `snapshot` + `@ref` instead of blind coordinates (run locally via shell, or remotely via `node_exec`).",
-		"  - Browser (`agent-browser` CLI, run locally or via `node_exec`):",
+		"- **MCP Core Tools (`bot-hub` MCP, 6 runtime primitives)**:",
+		"  - `message_bot(botId, message)`: collaborate with another bot.",
+		"  - `recall_session(...)`: read sliced messages from `previous` / `active` / `<sessionId>` (keep slices small; fetch single oversized messages by `messageId`). If `bot-hub session list` returns a `magpieSession`, pass it to `magpie-sessions__read_session` for raw tool transcripts.",
+		"  - `desktop_task(goal, ...)` & `request_takeover(reason, ...)`: delegate multi-step GUI tasks to the visible desktop worker, or pause for human QR/2FA/CAPTCHA/payment takeover.",
+		"  - `node_exec(command, ...)` & `node_file(op, path, ...)`: run shell commands or read/write/list files on connected remote nodes.",
+		"- **Full `bot-hub` CLI (auto-reads current bot context from env or workspace config)**:",
+		"  - **Bots & Self-Edit**: `bot-hub bot list | get [--id <id>] | create --id <id> --name <name> [--harness opencode|pi|dsh|claude|agy] | update [--id <id>] [--name ...] [--description ...] [--instructions-file AGENTS.md] | delete --id <id> | message <id> <msg>`.",
+		"  - **Sessions**: `bot-hub session list [--bot <id|*>] [--query ...] | recall [--id previous|active|<sid>] | rotate [--handoff \"...\"]` (rotate regularly on harnesses without native `billion-context` compression like `agy`, `dsh`).",
+		"  - **Routines**: `bot-hub routine list | upsert --name <n> --prompt <p> [--every-minutes N | --daily-at HH:MM] [--main-delivery receipt|notify|none] | delete --id <r> | run --id <r>` (isolated ephemeral turns with `AGENTS.md` + `memory/`).",
+		"  - **Nodes & Desktop**: `bot-hub node list | exec --command <cmd> | file --op read|write|list --path <p>` and `bot-hub desktop task --goal <g> | takeover --reason <r>`.",
+		"- **Local Desktop & Browser CLI (run locally or via `node_exec`)**:",
+		"  - Desktop GUI (`agent-desktop` CLI): operate apps via accessibility-tree `snapshot` + `@ref` instead of blind coordinates.",
+		"  - Browser (`agent-browser` CLI):",
 		"    1. Prefer `agent-browser --auto-connect --pin-tab` to attach to the running Chromium browser in an isolated tab (reuses logins without stealing mouse/focus).",
 		"    2. If attach fails, use default headless mode for background/read-only work, or `--headed --profile ~/.bot-hub/browser/<bot-id>` when login or human visual takeover is needed.",
 		"    3. Pass `--session <bot-id>` to isolate state across bots.",
-		"  - Human takeover (`bot-hub` MCP): call `request_takeover(reason, ...)` on QR login, 2FA, CAPTCHA, or payment steps; it pauses until the user finishes on the Remote Desktop view and resumes you.",
 		"",
 	}, "\n")
 }
@@ -600,7 +600,7 @@ func EnsureWorkspace(bot *BotConfig, cfg *HubConfig, customInstructions string) 
 
 // MCPCommand is the stdio command that exposes bot-hub's tools to a bot's agent.
 func MCPCommand(cfg *HubConfig, botID string) []string {
-	cmd := []string{resolveBotHubBinary(cfg.ProjectRoot), "mcp", "--hub-url", cfg.HTTP.BaseURL(), "--bot-id", botID}
+	cmd := []string{ResolveBotHubBinary(cfg.ProjectRoot), "mcp", "--hub-url", cfg.HTTP.BaseURL(), "--bot-id", botID}
 	if cfg.ConfigPath != "" {
 		cmd = append(cmd, "--config", cfg.ConfigPath)
 	}
@@ -730,7 +730,7 @@ func ensureOpenCodeMCPConfig(bot *BotConfig, cfg *HubConfig) error {
 	return os.Chmod(ocPath, 0o600) // WriteFile keeps the mode of an existing file
 }
 
-func resolveBotHubBinary(projectRoot string) string {
+func ResolveBotHubBinary(projectRoot string) string {
 	// Prefer compiled bin/bot-hub when running via `go run` so the path stays stable across restarts.
 	candidate := filepath.Join(projectRoot, "bin", "bot-hub")
 	if info, err := os.Stat(candidate); err == nil && !info.IsDir() {

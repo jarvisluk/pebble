@@ -18,6 +18,7 @@ app: desktop
 	cp build/darwin/Info.plist "$(APP)/Contents/"
 	cp -R build/darwin/*.lproj "$(APP)/Contents/Resources/"
 	cp bin/bot-hub-desktop "$(APP)/Contents/MacOS/"
+	ln -sf ../MacOS/bot-hub-desktop "$(RES_BIN)/bot-hub"
 	@set -e; \
 	for tool in agent-desktop agent-browser; do \
 		src=$$(command -v "$$tool" 2>/dev/null || true); \
@@ -61,7 +62,7 @@ app: desktop
 	fi; \
 	echo "Signing $(APP) with identity: $$IDENTITY"; \
 	for f in "$(RES_BIN)"/*; do \
-		[ -e "$$f" ] && codesign --force --sign "$$IDENTITY" "$$f"; \
+		[ -f "$$f" ] && [ ! -L "$$f" ] && codesign --force --sign "$$IDENTITY" "$$f"; \
 	done; \
 	codesign --force --sign "$$IDENTITY" "$(APP)"
 

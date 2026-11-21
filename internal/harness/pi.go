@@ -171,7 +171,8 @@ func (h *PiHarness) startProc(opts RunOptions, sessionID string, ephemeral bool)
 }
 
 // writePiMCPConfig exposes the bot-hub MCP server through the workspace's
-// .pi/mcp.json. It may hold the hub API token, so it is private.
+// .pi/mcp.json while preserving any user-configured servers. It may hold the
+// hub API token, so it is written with 0600 permissions.
 func (h *PiHarness) writePiMCPConfig(workspace string, opts RunOptions) error {
 	if len(opts.MCPCommand) == 0 {
 		return nil
@@ -183,13 +184,23 @@ func (h *PiHarness) writePiMCPConfig(workspace string, opts RunOptions) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
+	path := filepath.Join(dir, "mcp.json")
+	doc := map[string]any{}
+	if raw, err := os.ReadFile(path); err == nil && len(raw) > 0 {
+		_ = json.Unmarshal(raw, &doc)
+	}
+	servers, _ := doc["mcpServers"].(map[string]any)
+	if servers == nil {
+		servers = map[string]any{}
+	}
 	server := map[string]any{"command": opts.MCPCommand[0], "args": opts.MCPCommand[1:]}
 	if len(opts.MCPEnv) > 0 {
 		server["env"] = opts.MCPEnv
 	}
-	b, _ := json.MarshalIndent(map[string]any{"mcpServers": map[string]any{"bot-hub": server}}, "", "  ")
+	servers["bot-hub"] = server
+	doc["mcpServers"] = servers
+	b, _ := json.MarshalIndent(doc, "", "  ")
 	want := append(b, '\n')
-	path := filepath.Join(dir, "mcp.json")
 	if cur, err := os.ReadFile(path); err == nil && bytes.Equal(cur, want) {
 		return nil
 	}

@@ -59,32 +59,28 @@ Every bot automatically receives the built-in `bot-hub mcp` server (stdio JSON-R
 Bot-to-bot calls enforce `hop <= 4` loop protection and appear live in **both** bots' chat timelines. You can also delegate directly from any chat input with `/ask <bot> <message>`.
 
 <details>
-<summary><b>MCP tools:</b> native primitives wired into every bot (plus <code>agent-desktop</code> / <code>agent-browser</code> CLIs)</summary>
+<summary><b>MCP core tools &amp; full CLI:</b> 6 runtime MCP primitives + full <code>bot-hub</code> CLI</summary>
 
 <table>
   <tr>
-    <th align="left" width="160">Tool</th>
+    <th align="left" width="160">MCP Tool</th>
     <th align="left" width="540">What it does</th>
-  </tr>
-  <tr>
-    <td><code>list_bots</code></td>
-    <td>Lists every configured bot with its ID, name, description, workspace, active model, busy state, and session stats.</td>
-  </tr>
-  <tr>
-    <td><code>get_bot</code></td>
-    <td>Returns a bot's live status together with its full <code>AGENTS.md</code> instructions.</td>
-  </tr>
-  <tr>
-    <td><code>create_bot</code></td>
-    <td>Provisions and immediately starts a new persistent bot with its own workspace, <code>AGENTS.md</code>, model, and serial queue.</td>
   </tr>
   <tr>
     <td><code>message_bot</code></td>
     <td>Sends a task to another bot and returns its reply, recording the exchange in both timelines (capped at <code>hop &lt;= 4</code>).</td>
   </tr>
   <tr>
-    <td><code>list_nodes</code></td>
-    <td>Lists connected remote computer nodes and their granted scopes (<code>files</code>, <code>exec</code>, <code>desktop</code>).</td>
+    <td><code>recall_session</code></td>
+    <td>Fetches sliced messages from a prior or active session with per-message truncation and single-message full fetch.</td>
+  </tr>
+  <tr>
+    <td><code>desktop_task</code></td>
+    <td>Delegates multi-step desktop GUI or visible-browser tasks to an isolated computer-use worker on the visible desktop.</td>
+  </tr>
+  <tr>
+    <td><code>request_takeover</code></td>
+    <td>Pauses automation and asks the user to complete QR login, 2FA, CAPTCHA, or payment in the Remote Desktop view until resumed.</td>
   </tr>
   <tr>
     <td><code>node_exec</code></td>
@@ -94,23 +90,9 @@ Bot-to-bot calls enforce `hop <= 4` loop protection and appear live in **both** 
     <td><code>node_file</code></td>
     <td>Reads, writes, or lists files on a connected remote node.</td>
   </tr>
-  <tr>
-    <td><code>request_takeover</code></td>
-    <td>Pauses automation and asks the user to complete QR login, 2FA, CAPTCHA, or payment in the Remote Desktop view until resumed.</td>
-  </tr>
-  <tr>
-    <td><code>list_sessions</code></td>
-    <td>Lists or searches active and archived sessions across accessible bots (includes <code>magpieSession</code> references).</td>
-  </tr>
-  <tr>
-    <td><code>recall_session</code></td>
-    <td>Fetches sliced messages from a prior or active session with per-message truncation and single-message full fetch.</td>
-  </tr>
-  <tr>
-    <td><code>rotate_session</code></td>
-    <td>Schedules archiving the current session after the turn finishes (with an optional <code>handoffNote</code>).</td>
-  </tr>
 </table>
+
+<p><b>Full <code>bot-hub</code> CLI</b> (auto-detects current bot context from env or workspace MCP config, outputs JSON): <code>bot-hub bot list|get|create|update|delete|message</code>, <code>bot-hub session list|recall|rotate</code>, <code>bot-hub routine list|upsert|delete|run</code>, <code>bot-hub node list|exec|file</code>, <code>bot-hub desktop task|takeover</code>.</p>
 
 <p>For GUI and web automation, bots call <code>agent-desktop</code> and <code>agent-browser</code> directly via shell (or via <code>node_exec</code> on remote nodes), preferring <code>agent-browser --auto-connect --pin-tab</code> to attach to the running Chromium browser before falling back to headless or headed isolated profiles.</p>
 

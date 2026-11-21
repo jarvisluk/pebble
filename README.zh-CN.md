@@ -59,32 +59,28 @@ bot-hub/
 跨 Bot 调用自带 `hop <= 4` 防死循环保护，且双方的聊天时间线都会实时展示协作记录；你也可以在对话框里直接用 `/ask <bot> <消息>` 点名协作。
 
 <details>
-<summary><b>MCP 工具清单：</b>自动暴露给每个 Bot 的原生工具（配合 <code>agent-desktop</code> / <code>agent-browser</code> CLI）</summary>
+<summary><b>MCP 核心工具与全量 CLI：</b>6 个运行时 MCP 原语 + 全量 <code>bot-hub</code> CLI</summary>
 
 <table>
   <tr>
-    <th align="left" width="160">工具名</th>
+    <th align="left" width="160">MCP 工具</th>
     <th align="left" width="540">用途</th>
-  </tr>
-  <tr>
-    <td><code>list_bots</code></td>
-    <td>列出所有已注册 Bot 的 ID、名称、职责简介、工作区、当前模型、忙闲状态与会话统计。</td>
-  </tr>
-  <tr>
-    <td><code>get_bot</code></td>
-    <td>读取指定 Bot 的详细状态与完整 <code>AGENTS.md</code> 指令全文。</td>
-  </tr>
-  <tr>
-    <td><code>create_bot</code></td>
-    <td>热创建并立即上线一个新持久 Bot（自动初始化独立工作区、写入 <code>AGENTS.md</code> 并拉起串行队列）。</td>
   </tr>
   <tr>
     <td><code>message_bot</code></td>
     <td>向目标 Bot 发送任务并同步获取回复，双方聊天记录同步留痕（最大跳数 <code>hop &lt;= 4</code>）。</td>
   </tr>
   <tr>
-    <td><code>list_nodes</code></td>
-    <td>列出已连接的远端设备节点及其授权范围（<code>files</code>、<code>exec</code>、<code>desktop</code>）。</td>
+    <td><code>recall_session</code></td>
+    <td>按切片和单条长度保护读取历史会话（支持 <code>previous</code>、分页与单条全文提取）。</td>
+  </tr>
+  <tr>
+    <td><code>desktop_task</code></td>
+    <td>将多步桌面 GUI 或可见浏览器任务委派给运行在可见桌面的隔离 computer-use worker。</td>
+  </tr>
+  <tr>
+    <td><code>request_takeover</code></td>
+    <td>遇到扫码登录、2FA、验证码或支付确认时暂停自动化，通知用户到远程桌面页面处理并恢复。</td>
   </tr>
   <tr>
     <td><code>node_exec</code></td>
@@ -94,23 +90,9 @@ bot-hub/
     <td><code>node_file</code></td>
     <td>在远端节点读取、写入或列举文件。</td>
   </tr>
-  <tr>
-    <td><code>request_takeover</code></td>
-    <td>遇到扫码登录、2FA、验证码或支付确认时暂停自动化，通知用户到远程桌面页面处理并恢复。</td>
-  </tr>
-  <tr>
-    <td><code>list_sessions</code></td>
-    <td>列举或检索当前/其他可访问 Bot 的历史与活跃会话（附带 <code>magpieSession</code> 引用）。</td>
-  </tr>
-  <tr>
-    <td><code>recall_session</code></td>
-    <td>按切片和单条长度保护读取历史会话（支持 <code>previous</code>、分页与单条全文提取）。</td>
-  </tr>
-  <tr>
-    <td><code>rotate_session</code></td>
-    <td>预约本轮结束后平滑归档当前会话并附带 <code>handoffNote</code> 交接摘要。</td>
-  </tr>
 </table>
+
+<p><b>全量 <code>bot-hub</code> CLI</b>（自动从环境变量或工作区 MCP 配置识别当前 Bot 上下文，输出 JSON）：<code>bot-hub bot list|get|create|update|delete|message</code>、<code>bot-hub session list|recall|rotate</code>、<code>bot-hub routine list|upsert|delete|run</code>、<code>bot-hub node list|exec|file</code>、<code>bot-hub desktop task|takeover</code>。</p>
 
 <p>桌面与网页自动化直接复用 <code>agent-desktop</code> 与 <code>agent-browser</code> CLI（远端设备经 <code>node_exec</code> 调用）：浏览器优先用 <code>agent-browser --auto-connect --pin-tab</code> 接管正在运行的 Chromium 标签页，连不上时按需回退到无头模式或 <code>--headed --profile ~/.bot-hub/browser/&lt;bot-id&gt;</code>。</p>
 
