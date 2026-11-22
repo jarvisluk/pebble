@@ -120,6 +120,8 @@ func NewHTTPServer(h *hub.Hub, cfg config.HTTPConfig) *HTTPServer {
 	mux.HandleFunc("POST /api/desktop/input", s.handleDesktopInput)
 	mux.HandleFunc("POST /api/desktop/stream/offer", s.handleDesktopStreamOffer)
 	mux.HandleFunc("POST /api/desktop/stream/close", s.handleDesktopStreamClose)
+	mux.HandleFunc("POST /api/desktop/setup", s.handleDesktopSetup)
+	mux.HandleFunc("POST /api/desktop/power", s.handleDesktopPower)
 	mux.HandleFunc("GET /api/desktop/takeovers", s.handleDesktopTakeovers)
 	mux.HandleFunc("POST /api/desktop/takeover/request", s.handleDesktopTakeoverRequest)
 	mux.HandleFunc("POST /api/desktop/takeover/resolve", s.handleDesktopTakeoverResolve)

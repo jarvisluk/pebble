@@ -486,7 +486,8 @@ func (a *Agent) execute(ctx context.Context, cmd Command) Result {
 		return a.openTarget(ctx, cmd.Args)
 	case "desktop_status", "desktop_windows", "desktop_focus",
 		"desktop_frame", "desktop_input", "desktop_stream_offer",
-		"desktop_stream_close", "desktop_stream_set_input":
+		"desktop_stream_close", "desktop_stream_set_input",
+		"desktop_setup", "desktop_power":
 		return a.execDesktop(ctx, cmd.Action, cmd.Args)
 	default:
 		return Result{OK: false, Error: fmt.Sprintf("unsupported action %q", cmd.Action)}
@@ -575,6 +576,16 @@ func (a *Agent) execDesktop(ctx context.Context, action string, raw json.RawMess
 			return Result{OK: false, Error: err.Error()}
 		}
 		return Result{OK: true, Output: `{"ok":true}`}
+	case "desktop_setup":
+		res, err := eng.Setup(ctx)
+		return jsonOut(res, err)
+	case "desktop_power":
+		var args struct {
+			Action string `json:"action"`
+		}
+		_ = json.Unmarshal(raw, &args)
+		st, err := eng.Power(ctx, args.Action)
+		return jsonOut(st, err)
 	default:
 		return Result{OK: false, Error: "unknown desktop action"}
 	}
@@ -603,6 +614,11 @@ func (a *Agent) execShell(ctx context.Context, raw json.RawMessage) Result {
 	}
 	if cwd := expandHome(args.Cwd, a.homeDir); cwd != "" {
 		c.Dir = cwd
+	}
+	if runtime.GOOS == "linux" {
+		if envs := a.desktopEngine().Env(); len(envs) > 0 {
+			c.Env = append(os.Environ(), envs...)
+		}
 	}
 	buf := &limitedBuffer{limit: maxExecOutputBytes}
 	c.Stdout = buf
@@ -836,8 +852,20 @@ $bmp.Dispose()
 			Output:     fmt.Sprintf("captured %d bytes (image/jpeg)", len(data)),
 		}
 
+	case "linux":
+		fr, err := a.desktopEngine().Frame(ctx, "", maxWidth, 80)
+		if err != nil {
+			return Result{OK: false, Error: fmt.Sprintf("linux screenshot failed: %v", err)}
+		}
+		return Result{
+			OK:         true,
+			MimeType:   "image/jpeg",
+			DataBase64: fr.JPEGBase64,
+			Output:     fmt.Sprintf("captured %dx%d (image/jpeg)", fr.ImageWidth, fr.ImageHeight),
+		}
+
 	default:
-		return Result{OK: false, Error: "screenshot is supported on macOS and Windows nodes"}
+		return Result{OK: false, Error: "screenshot is supported on macOS, Windows, and Linux nodes"}
 	}
 }
 
@@ -926,8 +954,14 @@ func OpenTarget(ctx context.Context, target, app, homeDir string) error {
 			cmdArgs = append(cmdArgs, target)
 		}
 		c = exec.CommandContext(ctx, "cmd", cmdArgs...)
+	case "linux":
+		if target != "" {
+			c = exec.CommandContext(ctx, "xdg-open", target)
+		} else {
+			c = exec.CommandContext(ctx, app)
+		}
 	default:
-		return errors.New("open is supported on macOS and Windows")
+		return errors.New("open is supported on macOS, Windows, and Linux")
 	}
 
 	if out, err := c.CombinedOutput(); err != nil {

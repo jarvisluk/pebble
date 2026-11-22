@@ -68,7 +68,7 @@ func (s *HTTPServer) handleDesktopTargets(w http.ResponseWriter, r *http.Request
 	coord := s.desktopCoord()
 
 	localSt, _ := s.localDesk().Status(ctx)
-	targets := []map[string]any{{
+	localEntry := map[string]any{
 		"id":              "local",
 		"name":            "本机桌面",
 		"local":           true,
@@ -76,7 +76,19 @@ func (s *HTTPServer) handleDesktopTargets(w http.ResponseWriter, r *http.Request
 		"webrtcAvailable": localSt != nil && localSt.WebRTCAvailable,
 		"backend":         localSt.Backend,
 		"screen":          coord.ScreenState("local"),
-	}}
+	}
+	if localSt != nil {
+		if localSt.Virtual {
+			localEntry["virtual"] = true
+		}
+		if localSt.PowerState != "" {
+			localEntry["powerState"] = localSt.PowerState
+		}
+		if localSt.Installable {
+			localEntry["installable"] = true
+		}
+	}
+	targets := []map[string]any{localEntry}
 
 	for _, n := range s.nodes().List() {
 		if !n.Connected {
@@ -327,6 +339,76 @@ func (s *HTTPServer) handleDesktopStreamClose(w http.ResponseWriter, r *http.Req
 		_, _, _ = s.nodes().Call(ctx, target, "desktop_stream_close", map[string]any{"session": body.Session}, 5*time.Second)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (s *HTTPServer) handleDesktopSetup(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Target string `json:"target"`
+	}
+	_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body)
+	target := s.resolveDesktopTarget(r, body.Target)
+
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
+	defer cancel()
+
+	var res desktop.SetupResult
+	if target == "local" {
+		rp, err := s.localDesk().Setup(ctx)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
+		if rp != nil {
+			res = *rp
+		}
+	} else {
+		if err := s.callRemoteDesktop(ctx, target, "desktop_setup", map[string]any{}, 5*time.Minute, &res); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
+	}
+	if !res.OK {
+		writeJSON(w, http.StatusBadRequest, res)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+func (s *HTTPServer) handleDesktopPower(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Target string `json:"target"`
+		Action string `json:"action"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body); err != nil || strings.TrimSpace(body.Action) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "action is required"})
+		return
+	}
+	target := s.resolveDesktopTarget(r, body.Target)
+
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+
+	var st desktop.HostStatus
+	if target == "local" {
+		sp, err := s.localDesk().Power(ctx, body.Action)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
+		if sp != nil {
+			st = *sp
+		}
+	} else {
+		if err := s.callRemoteDesktop(ctx, target, "desktop_power", map[string]any{"action": body.Action}, 12*time.Second, &st); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":     true,
+		"target": target,
+		"status": st,
+	})
 }
 
 func (s *HTTPServer) handleDesktopTakeovers(w http.ResponseWriter, _ *http.Request) {

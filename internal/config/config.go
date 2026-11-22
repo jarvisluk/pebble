@@ -215,6 +215,56 @@ func (h HTTPConfig) BaseURL() string {
 	return fmt.Sprintf("http://%s:%d", host, port)
 }
 
+type DesktopConfig struct {
+	Mode                  string `json:"mode,omitempty"`                  // "auto" (default) | "native" | "virtual"
+	AutoInstall           bool   `json:"autoInstall,omitempty"`           // auto install headless deps on startup
+	Resolution            string `json:"resolution,omitempty"`            // default "1440x900"
+	IdleFreezeMinutes     int    `json:"idleFreezeMinutes,omitempty"`     // default 5; <0 disables auto-freeze
+	IdleStopMinutes       int    `json:"idleStopMinutes,omitempty"`       // default 30; <0 disables auto-stop
+	StopOnlyWhenNoWindows *bool  `json:"stopOnlyWhenNoWindows,omitempty"` // default true
+}
+
+func (d DesktopConfig) EffectiveMode() string {
+	switch strings.ToLower(strings.TrimSpace(d.Mode)) {
+	case "native", "virtual":
+		return strings.ToLower(strings.TrimSpace(d.Mode))
+	default:
+		return "auto"
+	}
+}
+
+func (d DesktopConfig) EffectiveResolution() string {
+	res := strings.TrimSpace(d.Resolution)
+	if res == "" {
+		return "1440x900"
+	}
+	return res
+}
+
+func (d DesktopConfig) EffectiveIdleFreezeMinutes() int {
+	if d.IdleFreezeMinutes < 0 {
+		return 0
+	}
+	if d.IdleFreezeMinutes == 0 {
+		return 5
+	}
+	return d.IdleFreezeMinutes
+}
+
+func (d DesktopConfig) EffectiveIdleStopMinutes() int {
+	if d.IdleStopMinutes < 0 {
+		return 0
+	}
+	if d.IdleStopMinutes == 0 {
+		return 30
+	}
+	return d.IdleStopMinutes
+}
+
+func (d DesktopConfig) ShouldStopOnlyWhenNoWindows() bool {
+	return d.StopOnlyWhenNoWindows == nil || *d.StopOnlyWhenNoWindows
+}
+
 type HubConfig struct {
 	ProjectRoot string `json:"-"`
 	ConfigPath  string `json:"-"`
@@ -225,6 +275,7 @@ type HubConfig struct {
 	OnboardingCompleted bool              `json:"onboardingCompleted,omitempty"`
 	DesktopHarness      string            `json:"desktopHarness,omitempty"`
 	DesktopModel        string            `json:"desktopModel,omitempty"`
+	Desktop             DesktopConfig     `json:"desktop,omitempty"`
 	// MagpieWebURL is where `magpie web` is reachable from other devices;
 	// clients away from the host open it instead of the local app.
 	MagpieWebURL      string      `json:"magpieWebUrl,omitempty"`

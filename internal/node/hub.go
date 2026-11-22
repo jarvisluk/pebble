@@ -65,7 +65,8 @@ func RequiredPerm(action string) (string, error) {
 	case "screenshot", "osascript", "open",
 		"desktop_status", "desktop_windows", "desktop_focus",
 		"desktop_frame", "desktop_input", "desktop_stream_offer",
-		"desktop_stream_close", "desktop_stream_set_input":
+		"desktop_stream_close", "desktop_stream_set_input",
+		"desktop_setup", "desktop_power":
 		return PermDesktop, nil
 	default:
 		return "", fmt.Errorf("unsupported node action %q", action)
