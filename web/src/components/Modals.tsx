@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import type { BotStatus, ConfirmOptions, ResolvedLang, SettingsData } from '../types';
 import { api } from '../lib/api';
 import { translate } from '../lib/i18n';
+import { BotAppearancePicker } from './BotAppearancePicker';
 import { BotAvatar } from './BotAvatar';
 
 interface CreateBotModalProps {
@@ -30,6 +31,8 @@ export const CreateBotModal: React.FC<CreateBotModalProps> = ({
   const [id, setId] = useState('');
   const [idTouched, setIdTouched] = useState(false);
   const [desc, setDesc] = useState('');
+  const [avatar, setAvatar] = useState('');
+  const [color, setColor] = useState('');
   const [harness, setHarness] = useState('opencode');
   const [model, setModel] = useState('');
   const [inst, setInst] = useState('');
@@ -43,6 +46,8 @@ export const CreateBotModal: React.FC<CreateBotModalProps> = ({
     setId('');
     setIdTouched(false);
     setDesc('');
+    setAvatar('');
+    setColor('');
     setHarness('opencode');
     setModel('');
     setInst('');
@@ -65,6 +70,8 @@ export const CreateBotModal: React.FC<CreateBotModalProps> = ({
           id: id.trim(),
           name: name.trim(),
           description: desc.trim(),
+          avatar,
+          color,
           harness,
           model: model.trim(),
           instructions: inst.trim(),
@@ -90,7 +97,7 @@ export const CreateBotModal: React.FC<CreateBotModalProps> = ({
       <form id="createForm" className="dlg" autoComplete="off" onSubmit={handleSubmit}>
         <div className="dlg-h">
           <div id="cAv">
-            <BotAvatar id={id || 'new'} bots={bots} />
+            <BotAvatar id={id || 'new'} bots={bots} avatar={avatar} color={color} />
           </div>
           <div>
             <h3>{t('newBot')}</h3>
@@ -144,6 +151,15 @@ export const CreateBotModal: React.FC<CreateBotModalProps> = ({
             <label dangerouslySetInnerHTML={{ __html: t('descOptional') }} />
             <input id="fDesc" placeholder={t('descPh')} value={desc} onChange={(e) => setDesc(e.target.value)} />
           </div>
+          <BotAppearancePicker
+            botId={id || 'new'}
+            bots={bots}
+            avatar={avatar}
+            color={color}
+            lang={lang}
+            onAvatarChange={setAvatar}
+            onColorChange={setColor}
+          />
           <div className="two">
             <div className="fld">
               <label>Harness</label>

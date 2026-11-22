@@ -905,3 +905,82 @@ func TestRunDesktopTaskOverrideGuardAndInterrupt(t *testing.T) {
 	}
 }
 
+func TestBotAvatarAndColorCreateUpdatePersist(t *testing.T) {
+	tmp := t.TempDir()
+	cfgDir := filepath.Join(tmp, "config")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfgPath := filepath.Join(cfgDir, "bots.json")
+	if err := os.WriteFile(cfgPath, []byte(`{"bots":[{"id":"alpha","name":"Alpha"}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _, err := config.Load(tmp, cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := state.NewStore(filepath.Join(tmp, "sessions.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := harness.NewRegistry()
+	reg.Register(&desktopWorkerFakeHarness{kind: "opencode"})
+	h := New(cfg, store, nil, reg)
+	defer h.Close()
+
+	st, err := h.CreateBot(CreateBotRequest{
+		ID:     "beta",
+		Name:   "Beta",
+		Avatar: "Cat",
+		Color:  "#3B82F6",
+	})
+	if err != nil {
+		t.Fatalf("CreateBot failed: %v", err)
+	}
+	if st.Avatar != "cat" || st.Color != "#3b82f6" {
+		t.Fatalf("unexpected created avatar/color: %+v", st)
+	}
+
+	if _, err := h.CreateBot(CreateBotRequest{ID: "bad", Name: "Bad", Avatar: "alien"}); err == nil {
+		t.Fatal("expected invalid avatar on CreateBot to fail")
+	}
+	if _, err := h.UpdateBot("beta", BotUpdate{Color: ptr("not-hex")}); err == nil {
+		t.Fatal("expected invalid color on UpdateBot to fail")
+	}
+
+	upd, err := h.UpdateBot("beta", BotUpdate{Avatar: ptr("sprout"), Color: ptr("#10B981")})
+	if err != nil {
+		t.Fatalf("UpdateBot failed: %v", err)
+	}
+	if upd.Avatar != "sprout" || upd.Color != "#10b981" {
+		t.Fatalf("unexpected updated avatar/color: %+v", upd)
+	}
+
+	// Reload from disk to verify persistence.
+	reloaded, _, err := config.Load(tmp, cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found *config.BotConfig
+	for i := range reloaded.Bots {
+		if reloaded.Bots[i].ID == "beta" {
+			found = &reloaded.Bots[i]
+			break
+		}
+	}
+	if found == nil || found.Avatar != "sprout" || found.Color != "#10b981" {
+		t.Fatalf("expected persisted avatar/color in bots.json, got %+v", found)
+	}
+
+	// Resetting to empty restores default.
+	cleared, err := h.UpdateBot("beta", BotUpdate{Avatar: ptr(""), Color: ptr("")})
+	if err != nil {
+		t.Fatalf("UpdateBot clear failed: %v", err)
+	}
+	if cleared.Avatar != "" || cleared.Color != "" {
+		t.Fatalf("expected empty avatar/color after reset, got %+v", cleared)
+	}
+}
+
+func ptr(s string) *string { return &s }
+

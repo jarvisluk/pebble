@@ -636,7 +636,7 @@ export default function SettingsScreen() {
                   return (
                     <View key={b.id} style={[styles.botItem, { backgroundColor: theme.s1 }]}>
                       <View style={styles.botHead}>
-                        <BotAvatar id={b.id} size={36} index={index} ringColor={theme.s1} />
+                        <BotAvatar id={b.id} size={36} index={index} avatar={b.avatar} color={b.color} ringColor={theme.s1} />
                         <View style={styles.botHeadTxt}>
                           <Text style={[styles.botName, { color: theme.text }]}>{b.name}</Text>
                           <Text style={[styles.botId, { color: theme.mute, fontFamily: MONO_FONT }]}>

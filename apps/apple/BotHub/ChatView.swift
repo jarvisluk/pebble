@@ -37,7 +37,7 @@ struct ChatView: View {
     private var showStop: Bool { (bot?.isBusy ?? false) && input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
     var body: some View {
-        let pal = p.bot(botId, index)
+        let pal = p.bot(botId, index, custom: bot?.color)
         thread(pal)
             .safeAreaInset(edge: .top, spacing: 0) {
                 if let to = hub.takeovers.first {
@@ -87,7 +87,7 @@ struct ChatView: View {
 
     private var titleView: some View {
         HStack(spacing: 8) {
-            BotAvatar(id: botId, size: 28, index: index, busy: bot?.isBusy ?? false)
+            BotAvatar(id: botId, size: 28, index: index, avatar: bot?.avatar, color: bot?.color, busy: bot?.isBusy ?? false)
             Text(name).font(.system(size: 17, weight: .bold)).lineLimit(1)
         }
     }
@@ -107,7 +107,7 @@ struct ChatView: View {
                     }
                     if bot?.isBusy == true {
                         HStack(spacing: 8) {
-                            BotAvatar(id: botId, size: 24, index: index, busy: true)
+                            BotAvatar(id: botId, size: 24, index: index, avatar: bot?.avatar, color: bot?.color, busy: true)
                             Text(hub.tools[botId].map { $0.isEmpty ? hub.t("thinking") : hub.t("callingTool", ["tool": $0]) } ?? hub.t("thinking"))
                                 .font(.system(size: 15)).foregroundStyle(p.busy)
                         }
@@ -142,7 +142,7 @@ struct ChatView: View {
             (hub.t("sugListTitle"), "/bots", pal.soft, pal.accent, { send("/bots") }),
         ]
         return VStack(spacing: 10) {
-            BotAvatar(id: botId, size: 72, index: index)
+            BotAvatar(id: botId, size: 72, index: index, avatar: bot?.avatar, color: bot?.color)
             Text(name).font(.system(size: 22, weight: .bold))
             Text((bot?.description ?? "").isEmpty ? hub.t("emptyChatHint") : bot!.description!)
                 .font(.system(size: 15)).foregroundStyle(p.text2).multilineTextAlignment(.center)

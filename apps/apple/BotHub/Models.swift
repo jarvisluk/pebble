@@ -12,6 +12,8 @@ struct BotStatus: Codable, Identifiable, Hashable {
     var id: String
     var name: String?
     var description: String?
+    var avatar: String?
+    var color: String?
     var workspace: String?
     var harness: String?
     var model: String?

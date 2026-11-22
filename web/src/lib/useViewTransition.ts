@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 export type ViewState = 'active' | 'leaving' | 'hidden';
 export type ViewDir = 'forward' | 'back';
@@ -19,12 +19,14 @@ export function useViewTransition<T extends string>(
   durationMs = 220
 ): ViewTransitionResult<T> {
   const prevRef = useRef<T>(active);
+  const orderRef = useRef(order);
+  orderRef.current = order;
   const timerRef = useRef<number | null>(null);
   const [dir, setDir] = useState<ViewDir>('forward');
   const [leaving, setLeaving] = useState<T | null>(null);
   const [animating, setAnimating] = useState(false);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const prev = prevRef.current;
     if (prev === active) return;
     prevRef.current = active;
@@ -34,8 +36,9 @@ export function useViewTransition<T extends string>(
       timerRef.current = null;
     }
 
-    const prevIdx = order.indexOf(prev);
-    const nextIdx = order.indexOf(active);
+    const ord = orderRef.current;
+    const prevIdx = ord.indexOf(prev);
+    const nextIdx = ord.indexOf(active);
     const nextDir: ViewDir = nextIdx >= prevIdx ? 'forward' : 'back';
     setDir(nextDir);
 
@@ -56,8 +59,8 @@ export function useViewTransition<T extends string>(
       timerRef.current = null;
       setLeaving(null);
       setAnimating(false);
-    }, durationMs);
-  }, [active, durationMs, order]);
+    }, durationMs + 60);
+  }, [active, durationMs]);
 
   useEffect(() => {
     return () => {

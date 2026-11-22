@@ -13,6 +13,8 @@ export interface BotStatus {
   id: string;
   name: string;
   description?: string;
+  avatar?: string;
+  color?: string;
   harness?: string;
   model?: string;
   modelInherited?: boolean;

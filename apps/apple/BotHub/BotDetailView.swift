@@ -14,6 +14,9 @@ struct BotDetailView: View {
     @State private var techOpen = false
     @State private var editName = ""
     @State private var editDesc = ""
+    @State private var editAvatar = ""
+    @State private var editColor = ""
+    @State private var appearOpen = false
     @State private var editInst = ""
     @State private var editPrivate = false
     @State private var saving = false
@@ -32,11 +35,12 @@ struct BotDetailView: View {
     private var dirty: Bool {
         guard let a = active else { return false }
         return editName != (a.name ?? botId) || editDesc != (a.description ?? "")
+            || editAvatar != (a.avatar ?? "") || editColor != (a.color ?? "")
             || editPrivate != (a.privateSessions ?? false) || editInst != (detail?.instructions ?? "")
     }
 
     var body: some View {
-        let pal = p.bot(botId, index)
+        let pal = p.bot(botId, index, custom: editColor.isEmpty ? active?.color : editColor)
         Form { Group {
             if !err.isEmpty { Section { StatusText(text: err) } }
             if inline && dirty {
@@ -52,13 +56,16 @@ struct BotDetailView: View {
             }
             Section {
                 HStack(spacing: 14) {
-                    BotAvatar(id: botId, size: 56, index: index)
+                    BotAvatar(id: botId, size: 56, index: index, avatar: editAvatar, color: editColor)
                     VStack(alignment: .leading, spacing: 4) {
                         TextField(hub.t("botNamePh"), text: $editName).font(.system(size: 16, weight: .semibold))
                         Text("@\(botId)").font(.system(size: 13, design: .monospaced)).foregroundStyle(.secondary)
                     }
                 }
                 TextField(hub.t("descPh"), text: $editDesc, axis: .vertical)
+                DisclosureGroup(hub.t("appearance"), isExpanded: $appearOpen) {
+                    BotAppearancePicker(botId: botId, index: index, avatar: $editAvatar, color: $editColor, accent: pal.accent)
+                }
                 LabeledContent(hub.t("statTurns"), value: "\(active?.session?.turnCount ?? 0)")
                 LabeledContent(hub.t("statCost"), value: String(format: "$%.4f", active?.session?.totalCostUsd ?? 0))
             }
@@ -137,6 +144,8 @@ struct BotDetailView: View {
         let src = detail ?? bot
         editName = src?.name ?? botId
         editDesc = src?.description ?? ""
+        editAvatar = src?.avatar ?? ""
+        editColor = src?.color ?? ""
         editInst = detail?.instructions ?? ""
         editPrivate = src?.privateSessions ?? false
         loading = true
@@ -150,6 +159,8 @@ struct BotDetailView: View {
         detail = d
         editName = d.name ?? botId
         editDesc = d.description ?? ""
+        editAvatar = d.avatar ?? ""
+        editColor = d.color ?? ""
         editInst = d.instructions ?? ""
         editPrivate = d.privateSessions ?? false
     }
@@ -162,6 +173,7 @@ struct BotDetailView: View {
         Task {
             do {
                 try await hub.updateBot(botId, ["name": n, "description": editDesc.trimmingCharacters(in: .whitespaces),
+                                                "avatar": editAvatar, "color": editColor,
                                                 "instructions": editInst, "privateSessions": editPrivate])
                 apply(try await hub.botDetail(botId))
             } catch { err = errText(error, hub.t("saveFailed")) }

@@ -9,6 +9,8 @@ struct CreateBotView: View {
     @State private var botId = ""
     @State private var idTouched = false
     @State private var desc = ""
+    @State private var avatar = ""
+    @State private var color = ""
     @State private var harness = "opencode"
     @State private var model = ""
     @State private var instructions = ""
@@ -32,7 +34,7 @@ struct CreateBotView: View {
             Section {
                 HStack {
                     Spacer()
-                    BotAvatar(id: botId.isEmpty ? (name.isEmpty ? "new" : name) : botId, size: 68)
+                    BotAvatar(id: botId.isEmpty ? (name.isEmpty ? "new" : name) : botId, size: 68, avatar: avatar, color: color)
                     Spacer()
                 }
                 .listRowBackground(Color.clear)
@@ -45,6 +47,13 @@ struct CreateBotView: View {
                 TextField("ID", text: Binding(get: { botId }, set: { idTouched = true; botId = $0 }), prompt: Text(hub.t("botIdPh")))
                     .monoInput()
                 TextField(hub.t("descOptional"), text: $desc, prompt: Text(hub.t("botDescCreatePh")))
+            }
+            Section(hub.t("appearance")) {
+                BotAppearancePicker(
+                    botId: botId.isEmpty ? (name.isEmpty ? "new" : name) : botId,
+                    avatar: $avatar,
+                    color: $color
+                )
             }
             Section {
                 Picker(hub.t("harnessBackend"), selection: $harness) {
@@ -76,6 +85,8 @@ struct CreateBotView: View {
         let d = desc.trimmingCharacters(in: .whitespaces), m = model.trimmingCharacters(in: .whitespaces)
         let ins = instructions.trimmingCharacters(in: .whitespacesAndNewlines)
         if !d.isEmpty { body["description"] = d }
+        if !avatar.isEmpty { body["avatar"] = avatar }
+        if !color.isEmpty { body["color"] = color }
         if !m.isEmpty { body["model"] = m }
         if !ins.isEmpty { body["instructions"] = ins }
         submitting = true

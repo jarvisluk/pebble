@@ -180,7 +180,7 @@ struct BotRow: View {
             return (bot.description ?? bot.harness ?? "", p.mute)
         }()
         HStack(spacing: 12) {
-            BotAvatar(id: bot.id, size: 40, index: index, busy: bot.isBusy)
+            BotAvatar(id: bot.id, size: 40, index: index, avatar: bot.avatar, color: bot.color, busy: bot.isBusy)
             VStack(alignment: .leading, spacing: 2) {
                 HStack {
                     Text(bot.displayName).font(.system(size: 16, weight: .semibold)).lineLimit(1)

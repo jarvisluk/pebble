@@ -83,6 +83,8 @@ type BotStatus struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
+	Avatar      string `json:"avatar,omitempty"`
+	Color       string `json:"color,omitempty"`
 	Workspace   string `json:"workspace"`
 	Harness     string `json:"harness"`
 	Model       string `json:"model,omitempty"`
@@ -104,6 +106,8 @@ type CreateBotRequest struct {
 	ID              string `json:"id"`
 	Name            string `json:"name"`
 	Description     string `json:"description,omitempty"`
+	Avatar          string `json:"avatar,omitempty"`
+	Color           string `json:"color,omitempty"`
 	Harness         string `json:"harness,omitempty"`
 	Model           string `json:"model,omitempty"`
 	Instructions    string `json:"instructions,omitempty"`
@@ -115,6 +119,8 @@ type CreateBotRequest struct {
 type BotUpdate struct {
 	Name            *string `json:"name,omitempty"`
 	Description     *string `json:"description,omitempty"`
+	Avatar          *string `json:"avatar,omitempty"`
+	Color           *string `json:"color,omitempty"`
 	Harness         *string `json:"harness,omitempty"`
 	Model           *string `json:"model,omitempty"`
 	Instructions    *string `json:"instructions,omitempty"`
@@ -485,6 +491,8 @@ func (h *Hub) statusOfLocked(lane *botLane) BotStatus {
 		ID:               lane.bot.ID,
 		Name:             lane.bot.Name,
 		Description:      lane.bot.Description,
+		Avatar:           lane.bot.Avatar,
+		Color:            lane.bot.Color,
 		Workspace:        lane.bot.Workspace,
 		Harness:          lane.bot.Harness,
 		Model:            lane.bot.Model,
@@ -516,6 +524,16 @@ func (h *Hub) CreateBot(req CreateBotRequest) (*BotStatus, error) {
 	req.ID = strings.TrimSpace(req.ID)
 	req.Name = strings.TrimSpace(req.Name)
 	req.Description = strings.TrimSpace(req.Description)
+	avatar, err := config.NormalizeBotAvatar(req.Avatar)
+	if err != nil {
+		return nil, err
+	}
+	req.Avatar = avatar
+	color, err := config.NormalizeBotColor(req.Color)
+	if err != nil {
+		return nil, err
+	}
+	req.Color = color
 	req.Model = strings.TrimSpace(req.Model)
 	req.Harness = strings.TrimSpace(req.Harness)
 	if req.Harness == "" {
@@ -541,6 +559,8 @@ func (h *Hub) CreateBot(req CreateBotRequest) (*BotStatus, error) {
 		ID:              req.ID,
 		Name:            req.Name,
 		Description:     req.Description,
+		Avatar:          req.Avatar,
+		Color:           req.Color,
 		Model:           req.Model,
 		Harness:         req.Harness,
 		PrivateSessions: req.PrivateSessions,
@@ -1523,6 +1543,20 @@ func (h *Hub) UpdateBot(botID string, upd BotUpdate) (*BotStatus, error) {
 	if upd.Name != nil && strings.TrimSpace(*upd.Name) == "" {
 		return nil, errors.New("名称不能为空")
 	}
+	if upd.Avatar != nil {
+		avatar, err := config.NormalizeBotAvatar(*upd.Avatar)
+		if err != nil {
+			return nil, err
+		}
+		*upd.Avatar = avatar
+	}
+	if upd.Color != nil {
+		color, err := config.NormalizeBotColor(*upd.Color)
+		if err != nil {
+			return nil, err
+		}
+		*upd.Color = color
+	}
 	h.lanesMu.Lock()
 	lane, ok := h.lanes[botID]
 	if !ok {
@@ -1536,6 +1570,12 @@ func (h *Hub) UpdateBot(botID string, upd BotUpdate) (*BotStatus, error) {
 	}
 	if upd.Description != nil {
 		bot.Description = strings.TrimSpace(*upd.Description)
+	}
+	if upd.Avatar != nil {
+		bot.Avatar = *upd.Avatar
+	}
+	if upd.Color != nil {
+		bot.Color = *upd.Color
 	}
 	if upd.Harness != nil {
 		bot.Harness = *upd.Harness
@@ -1559,6 +1599,7 @@ func (h *Hub) UpdateBot(botID string, upd BotUpdate) (*BotStatus, error) {
 					continue
 				}
 				rb.Name, rb.Description, rb.Harness = bot.Name, bot.Description, bot.Harness
+				rb.Avatar, rb.Color = bot.Avatar, bot.Color
 				rb.PrivateSessions = bot.PrivateSessions
 				if upd.Model != nil || harnessChanged {
 					rb.Model = ""

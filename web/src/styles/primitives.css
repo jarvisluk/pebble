@@ -103,8 +103,8 @@ button.mp:hover { background: var(--s2); color: var(--text); }
 /* ---------- overlays: shade, panel, dialog, toast ---------- */
 .shade { position: fixed; inset: 0; background: var(--shade); opacity: 0; pointer-events: none; transition: opacity .2s; z-index: var(--z-shade); }
 .shade.open { opacity: 1; pointer-events: auto; }
-.panel { position: fixed; top: var(--edge-t); right: var(--edge-r); bottom: var(--edge-b); width: min(380px, calc(100vw - var(--edge-l) - var(--edge-r))); background: var(--card); border-radius: var(--r-card); padding: 4px var(--pad) var(--pad); z-index: var(--z-panel); display: flex; flex-direction: column; box-shadow: 0 24px 60px rgba(0, 0, 0, .18); transform: translateX(calc(100% + var(--edge-r))); visibility: hidden; transition: transform var(--dur-panel) ease, visibility var(--dur-panel); }
-.panel.open { transform: none; visibility: visible; }
+.panel { position: fixed; top: var(--edge-t); right: var(--edge-r); bottom: var(--edge-b); width: min(380px, calc(100vw - var(--edge-l) - var(--edge-r))); background: var(--card); border-radius: var(--r-card); padding: 4px var(--pad) var(--pad); z-index: var(--z-panel); display: flex; flex-direction: column; box-shadow: 0 24px 60px rgba(0, 0, 0, 0); transform: translateX(calc(100% + var(--edge-r) + 16px)); visibility: hidden; transition: transform var(--dur-panel) var(--ease-out), box-shadow var(--dur-panel) var(--ease-out), visibility 0s linear var(--dur-panel); will-change: transform; }
+.panel.open { transform: none; box-shadow: 0 24px 60px rgba(0, 0, 0, .18); visibility: visible; transition: transform var(--dur-panel) var(--ease-out), box-shadow var(--dur-panel) var(--ease-out), visibility 0s linear 0s; }
 
 .dlg-wrap { position: fixed; inset: 0; z-index: var(--z-modal); display: grid; place-items: center; padding: calc(16px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right)) calc(16px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left)); background: var(--shade); opacity: 0; pointer-events: none; transition: opacity var(--dur-fast); }
 .dlg-wrap.open { opacity: 1; pointer-events: auto; }
@@ -128,7 +128,8 @@ button.mp:hover { background: var(--s2); color: var(--text); }
 .view-pane { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .view-pane[data-view-state="hidden"] { display: none !important; }
 .view-pane[data-view-state="active"] { position: relative; z-index: 2; }
-.view-pane[data-view-state="leaving"] { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
+.view-pane[data-view-state="active"][data-view-anim="1"] { will-change: transform, opacity; }
+.view-pane[data-view-state="leaving"] { position: absolute; inset: 0; z-index: 1; pointer-events: none; will-change: transform, opacity; }
 
 .view-pane[data-view-state="active"][data-view-anim="1"][data-view-dir="forward"] {
   animation: viewInForward var(--dur-view) var(--ease-out) both;

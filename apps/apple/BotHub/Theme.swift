@@ -37,8 +37,27 @@ func fnv1a(_ s: String) -> UInt32 {
 }
 
 let botColors = ["#f08a2c", "#8a7ad8", "#86a33a", "#b85a4a", "#7a7465", "#e0685a"]
+let botAvatars = ["blob", "squircle", "cat", "bear", "cloud", "ghost", "star", "sprout"]
 
-func botColorHex(_ id: String, _ index: Int = -1) -> String {
+func normalizeBotHex(_ s: String?) -> String? {
+    let clean = (s ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    guard clean.count == 7, clean.hasPrefix("#") else { return nil }
+    let hexDigits = CharacterSet(charactersIn: "0123456789abcdef")
+    guard clean.dropFirst().unicodeScalars.allSatisfy({ hexDigits.contains($0) }) else { return nil }
+    return clean
+}
+
+func colorToHex(_ c: Color) -> String? {
+    var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+    guard UIColor(c).getRed(&r, green: &g, blue: &b, alpha: &a) else { return nil }
+    let ri = max(0, min(255, Int((r * 255).rounded())))
+    let gi = max(0, min(255, Int((g * 255).rounded())))
+    let bi = max(0, min(255, Int((b * 255).rounded())))
+    return String(format: "#%02x%02x%02x", ri, gi, bi)
+}
+
+func botColorHex(_ id: String, _ index: Int = -1, custom: String? = nil) -> String {
+    if let c = normalizeBotHex(custom) { return c }
     let h = fnv1a(id.isEmpty ? "?" : id)
     return botColors[index >= 0 ? index % botColors.count : Int(h % UInt32(botColors.count))]
 }
@@ -78,8 +97,8 @@ struct Palette {
     }
 
     /// 当前 Bot 局部强调色（仅 Bot 下属页面使用）。
-    func bot(_ id: String, _ index: Int) -> (accent: Color, text: Color, soft: Color) {
-        let hex = botColorHex(id, index)
+    func bot(_ id: String, _ index: Int, custom: String? = nil) -> (accent: Color, text: Color, soft: Color) {
+        let hex = botColorHex(id, index, custom: custom)
         return (Color(hex: hex), contrastText(hex), Color(hex: dark ? "#2a2a2a" : mixHex(hex, "#ffffff", 0.16)))
     }
 }
@@ -102,34 +121,158 @@ struct BotAvatar: View {
     var id: String
     var size: CGFloat
     var index: Int = -1
+    var avatar: String? = nil
+    var color: String? = nil
     var busy = false
     @State private var pulse = false
 
     var body: some View {
+        let shape = (avatar ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let kind = shape.isEmpty ? "blob" : shape
         let h = fnv1a(id.isEmpty ? "?" : id)
         let tilt = Double(Int((h >> 4) % 25) - 12)
         let gx = CGFloat(Int((h >> 9) % 7) - 3)
         let gy = CGFloat(Int((h >> 12) % 5) - 2)
         let lean = (h >> 15) % 2 == 1 ? -14.0 : 12.0
-        let blob = Color(hex: botColorHex(id, index))
+        let blob = Color(hex: botColorHex(id, index, custom: color))
         Canvas { ctx, sz in
             let k = sz.width / 100
-            ctx.translateBy(x: 50 * k, y: 50 * k)
-            ctx.rotate(by: .degrees(tilt))
-            ctx.translateBy(x: -50 * k, y: -50 * k)
-            var path = Path()
-            path.move(to: CGPoint(x: 52 * k, y: 9 * k))
-            path.addCurve(to: CGPoint(x: 93 * k, y: 55 * k), control1: CGPoint(x: 80 * k, y: 9 * k), control2: CGPoint(x: 95 * k, y: 28 * k))
-            path.addCurve(to: CGPoint(x: 47 * k, y: 91 * k), control1: CGPoint(x: 91 * k, y: 81 * k), control2: CGPoint(x: 72 * k, y: 93 * k))
-            path.addCurve(to: CGPoint(x: 7 * k, y: 46 * k), control1: CGPoint(x: 21 * k, y: 89 * k), control2: CGPoint(x: 5 * k, y: 72 * k))
-            path.addCurve(to: CGPoint(x: 52 * k, y: 9 * k), control1: CGPoint(x: 9 * k, y: 22 * k), control2: CGPoint(x: 26 * k, y: 9 * k))
-            path.closeSubpath()
-            ctx.fill(path, with: .color(blob))
-            for (cx, cy) in [(39 + gx, 45 + gy), (62 + gx, 43 + gy)] {
+            func drawEye(cx: CGFloat, cy: CGFloat, rx: CGFloat, ry: CGFloat, rot: Double = 0) {
                 var e = ctx
                 e.translateBy(x: cx * k, y: cy * k)
-                e.rotate(by: .degrees(lean))
-                e.fill(Path(ellipseIn: CGRect(x: -6 * k, y: -10.5 * k, width: 12 * k, height: 21 * k)), with: .color(p.eye))
+                if rot != 0 { e.rotate(by: .degrees(rot)) }
+                e.fill(Path(ellipseIn: CGRect(x: -rx * k, y: -ry * k, width: rx * 2 * k, height: ry * 2 * k)), with: .color(p.eye))
+            }
+            func pt(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: x * k, y: y * k) }
+
+            switch kind {
+            case "squircle":
+                var path = Path()
+                path.move(to: pt(50, 10))
+                path.addCurve(to: pt(90, 50), control1: pt(78, 10), control2: pt(90, 22))
+                path.addCurve(to: pt(50, 90), control1: pt(90, 78), control2: pt(78, 90))
+                path.addCurve(to: pt(10, 50), control1: pt(22, 90), control2: pt(10, 78))
+                path.addCurve(to: pt(50, 10), control1: pt(10, 22), control2: pt(22, 10))
+                path.closeSubpath()
+                ctx.fill(path, with: .color(blob))
+                drawEye(cx: 38, cy: 48, rx: 5.5, ry: 9.5)
+                drawEye(cx: 62, cy: 48, rx: 5.5, ry: 9.5)
+            case "cat":
+                var path = Path()
+                path.move(to: pt(20, 34))
+                path.addCurve(to: pt(38, 22), control1: pt(18, 16), control2: pt(24, 10))
+                path.addCurve(to: pt(62, 22), control1: pt(46, 19), control2: pt(54, 19))
+                path.addCurve(to: pt(80, 34), control1: pt(76, 10), control2: pt(82, 16))
+                path.addCurve(to: pt(86, 70), control1: pt(88, 44), control2: pt(90, 58))
+                path.addCurve(to: pt(50, 91), control1: pt(80, 86), control2: pt(66, 91))
+                path.addCurve(to: pt(14, 70), control1: pt(34, 91), control2: pt(20, 86))
+                path.addCurve(to: pt(20, 34), control1: pt(10, 58), control2: pt(12, 44))
+                path.closeSubpath()
+                ctx.fill(path, with: .color(blob))
+                drawEye(cx: 38, cy: 55, rx: 5.5, ry: 9)
+                drawEye(cx: 62, cy: 55, rx: 5.5, ry: 9)
+            case "bear":
+                var path = Path()
+                path.move(to: pt(26, 35))
+                path.addCurve(to: pt(19, 14), control1: pt(15, 33), control2: pt(11, 21))
+                path.addCurve(to: pt(39, 23), control1: pt(27, 7), control2: pt(38, 14))
+                path.addCurve(to: pt(61, 23), control1: pt(46, 21), control2: pt(54, 21))
+                path.addCurve(to: pt(81, 14), control1: pt(62, 14), control2: pt(73, 7))
+                path.addCurve(to: pt(74, 35), control1: pt(89, 21), control2: pt(85, 33))
+                path.addCurve(to: pt(84, 73), control1: pt(85, 45), control2: pt(89, 60))
+                path.addCurve(to: pt(50, 91), control1: pt(77, 86), control2: pt(64, 91))
+                path.addCurve(to: pt(16, 73), control1: pt(36, 91), control2: pt(23, 86))
+                path.addCurve(to: pt(26, 35), control1: pt(11, 60), control2: pt(15, 45))
+                path.closeSubpath()
+                ctx.fill(path, with: .color(blob))
+                drawEye(cx: 38, cy: 55, rx: 5.5, ry: 9)
+                drawEye(cx: 62, cy: 55, rx: 5.5, ry: 9)
+            case "cloud":
+                var path = Path()
+                path.move(to: pt(28, 80))
+                path.addCurve(to: pt(9, 58), control1: pt(15, 80), control2: pt(8, 70))
+                path.addCurve(to: pt(26, 39), control1: pt(10, 47), control2: pt(18, 40))
+                path.addCurve(to: pt(54, 15), control1: pt(27, 24), control2: pt(39, 14))
+                path.addCurve(to: pt(78, 38), control1: pt(67, 16), control2: pt(77, 25))
+                path.addCurve(to: pt(92, 60), control1: pt(87, 40), control2: pt(93, 49))
+                path.addCurve(to: pt(69, 80), control1: pt(91, 72), control2: pt(82, 80))
+                path.closeSubpath()
+                ctx.fill(path, with: .color(blob))
+                drawEye(cx: 39, cy: 53, rx: 5.2, ry: 8.5)
+                drawEye(cx: 61, cy: 53, rx: 5.2, ry: 8.5)
+            case "ghost":
+                var path = Path()
+                path.move(to: pt(50, 10))
+                path.addCurve(to: pt(88, 52), control1: pt(74, 10), control2: pt(88, 26))
+                path.addLine(to: pt(88, 84))
+                path.addCurve(to: pt(78, 87), control1: pt(88, 89), control2: pt(82, 91))
+                path.addCurve(to: pt(63, 87), control1: pt(73, 82), control2: pt(68, 82))
+                path.addCurve(to: pt(50, 87), control1: pt(58, 92), control2: pt(53, 92))
+                path.addCurve(to: pt(37, 87), control1: pt(47, 92), control2: pt(42, 92))
+                path.addCurve(to: pt(22, 87), control1: pt(32, 82), control2: pt(27, 82))
+                path.addCurve(to: pt(12, 84), control1: pt(18, 91), control2: pt(12, 89))
+                path.addLine(to: pt(12, 52))
+                path.addCurve(to: pt(50, 10), control1: pt(12, 26), control2: pt(26, 10))
+                path.closeSubpath()
+                ctx.fill(path, with: .color(blob))
+                drawEye(cx: 38, cy: 46, rx: 5.5, ry: 9.5)
+                drawEye(cx: 62, cy: 46, rx: 5.5, ry: 9.5)
+            case "star":
+                var path = Path()
+                path.move(to: pt(50, 8))
+                path.addCurve(to: pt(64, 27), control1: pt(55, 8), control2: pt(59, 23))
+                path.addCurve(to: pt(90, 34), control1: pt(69, 31), control2: pt(87, 28))
+                path.addCurve(to: pt(77, 57), control1: pt(93, 40), control2: pt(78, 51))
+                path.addCurve(to: pt(79, 85), control1: pt(76, 63), control2: pt(85, 80))
+                path.addCurve(to: pt(50, 79), control1: pt(73, 90), control2: pt(58, 79))
+                path.addCurve(to: pt(21, 85), control1: pt(42, 79), control2: pt(27, 90))
+                path.addCurve(to: pt(23, 57), control1: pt(15, 80), control2: pt(24, 63))
+                path.addCurve(to: pt(10, 34), control1: pt(22, 51), control2: pt(7, 40))
+                path.addCurve(to: pt(36, 27), control1: pt(13, 28), control2: pt(31, 31))
+                path.addCurve(to: pt(50, 8), control1: pt(41, 23), control2: pt(45, 8))
+                path.closeSubpath()
+                ctx.fill(path, with: .color(blob))
+                drawEye(cx: 40, cy: 49, rx: 5, ry: 8.5)
+                drawEye(cx: 60, cy: 49, rx: 5, ry: 8.5)
+            case "sprout":
+                var l1 = Path()
+                l1.move(to: pt(50, 28))
+                l1.addCurve(to: pt(25, 13), control1: pt(48, 16), control2: pt(36, 9))
+                l1.addCurve(to: pt(50, 28), control1: pt(26, 23), control2: pt(37, 29))
+                l1.closeSubpath()
+                ctx.fill(l1, with: .color(blob))
+
+                var l2 = Path()
+                l2.move(to: pt(50, 28))
+                l2.addCurve(to: pt(76, 12), control1: pt(53, 15), control2: pt(65, 8))
+                l2.addCurve(to: pt(50, 28), control1: pt(75, 23), control2: pt(63, 29))
+                l2.closeSubpath()
+                ctx.fill(l2, with: .color(blob))
+
+                var body = Path()
+                body.move(to: pt(50, 28))
+                body.addCurve(to: pt(84, 62), control1: pt(66, 28), control2: pt(84, 40))
+                body.addCurve(to: pt(50, 92), control1: pt(84, 82), control2: pt(69, 92))
+                body.addCurve(to: pt(16, 62), control1: pt(31, 92), control2: pt(16, 82))
+                body.addCurve(to: pt(50, 28), control1: pt(16, 40), control2: pt(34, 28))
+                body.closeSubpath()
+                ctx.fill(body, with: .color(blob))
+                drawEye(cx: 39, cy: 59, rx: 5.2, ry: 8.8)
+                drawEye(cx: 61, cy: 59, rx: 5.2, ry: 8.8)
+            default:
+                ctx.translateBy(x: 50 * k, y: 50 * k)
+                ctx.rotate(by: .degrees(tilt))
+                ctx.translateBy(x: -50 * k, y: -50 * k)
+                var path = Path()
+                path.move(to: pt(52, 9))
+                path.addCurve(to: pt(93, 55), control1: pt(80, 9), control2: pt(95, 28))
+                path.addCurve(to: pt(47, 91), control1: pt(91, 81), control2: pt(72, 93))
+                path.addCurve(to: pt(7, 46), control1: pt(21, 89), control2: pt(5, 72))
+                path.addCurve(to: pt(52, 9), control1: pt(9, 22), control2: pt(26, 9))
+                path.closeSubpath()
+                ctx.fill(path, with: .color(blob))
+                drawEye(cx: 39 + gx, cy: 45 + gy, rx: 6, ry: 10.5, rot: lean)
+                drawEye(cx: 62 + gx, cy: 43 + gy, rx: 6, ry: 10.5, rot: lean)
             }
         }
         .frame(width: size, height: size)
@@ -226,6 +369,87 @@ struct FlowLayout: Layout {
 
 func copyToClipboard(_ s: String) {
     UIPasteboard.general.string = s
+}
+
+struct BotAppearancePicker: View {
+    @Environment(HubStore.self) private var hub
+    @Environment(\.palette) private var p
+    var botId: String
+    var index: Int = -1
+    @Binding var avatar: String
+    @Binding var color: String
+    var accent: Color? = nil
+
+    private var effectiveAvatar: String {
+        let s = avatar.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return s.isEmpty ? "blob" : s
+    }
+
+    private var effectiveHex: String {
+        botColorHex(botId, index, custom: color)
+    }
+
+    private var hasCustom: Bool {
+        effectiveAvatar != "blob" || normalizeBotHex(color) != nil
+    }
+
+    var body: some View {
+        let ring = accent ?? p.accent
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text(hub.t("avatarShape")).font(.system(size: 13)).foregroundStyle(.secondary)
+                Spacer()
+                if hasCustom {
+                    Button(hub.t("resetDefault")) {
+                        avatar = ""
+                        color = ""
+                    }
+                    .font(.system(size: 13))
+                    .buttonStyle(.borderless)
+                }
+            }
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4), spacing: 8) {
+                ForEach(botAvatars, id: \.self) { kind in
+                    let active = effectiveAvatar == kind
+                    Button {
+                        avatar = kind == "blob" ? "" : kind
+                    } label: {
+                        BotAvatar(id: botId, size: 32, index: index, avatar: kind, color: effectiveHex)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 6)
+                            .background(p.s1, in: RoundedRectangle(cornerRadius: 10))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .stroke(active ? ring : .clear, lineWidth: 2)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            Text(hub.t("botColorLabel")).font(.system(size: 13)).foregroundStyle(.secondary)
+            HStack(spacing: 12) {
+                ForEach(botColors, id: \.self) { hex in
+                    let active = normalizeBotHex(color) == hex
+                    Button { color = hex } label: {
+                        Circle().fill(Color(hex: hex)).frame(width: 26, height: 26)
+                            .overlay {
+                                if active {
+                                    Image(systemName: "checkmark").font(.system(size: 12, weight: .bold)).foregroundStyle(.white)
+                                }
+                            }
+                    }
+                    .buttonStyle(.plain)
+                }
+                Spacer()
+                ColorPicker("", selection: Binding(
+                    get: { Color(hex: effectiveHex) },
+                    set: { if let h = colorToHex($0) { color = h } }
+                ), supportsOpacity: false)
+                .labelsHidden()
+            }
+        }
+        .padding(.vertical, 4)
+    }
 }
 
 struct HubSurface: ViewModifier {
