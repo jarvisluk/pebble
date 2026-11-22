@@ -1,3 +1,4 @@
+import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -44,6 +45,7 @@ export default function BotChatScreen() {
   const { t, lang } = useI18n();
   const insets = useSafeAreaInsets();
   const {
+    baseURL,
     bots,
     msgs,
     tools,
@@ -109,10 +111,17 @@ export default function BotChatScreen() {
   const [rtShowForm, setRtShowForm] = useState(false);
   const [rtEditId, setRtEditId] = useState('');
   const [rtName, setRtName] = useState('');
-  const [rtMode, setRtMode] = useState<'interval' | 'daily'>('interval');
+  const [rtMode, setRtMode] = useState<'interval' | 'daily' | 'cron' | 'webhook'>('interval');
   const [rtEvery, setRtEvery] = useState('60');
   const [rtDaily, setRtDaily] = useState('09:00');
+  const [rtCron, setRtCron] = useState('0 9 * * 1-5');
+  const [rtWebhookTrigger, setRtWebhookTrigger] = useState(false);
+  const [rtWebhookSecret, setRtWebhookSecret] = useState('');
+  const [rtWebhookSecretSet, setRtWebhookSecretSet] = useState(false);
+  const [rtClearSecret, setRtClearSecret] = useState(false);
+  const [rtWebhookUrl, setRtWebhookUrl] = useState('');
   const [rtDelivery, setRtDelivery] = useState<RoutineDelivery>('receipt');
+  const [rtCopiedId, setRtCopiedId] = useState('');
   const [rtPrompt, setRtPrompt] = useState('');
   const [rtEnabled, setRtEnabled] = useState(true);
   const [rtSaving, setRtSaving] = useState(false);
@@ -174,10 +183,22 @@ export default function BotChatScreen() {
     setRtErr('');
     setRtEditId(rt?.id || '');
     setRtName(rt?.name || '');
-    const isDaily = !!rt?.dailyAt && !(rt?.everyMinutes && rt.everyMinutes > 0);
-    setRtMode(isDaily ? 'daily' : 'interval');
-    setRtEvery(rt?.everyMinutes && rt.everyMinutes > 0 ? String(rt.everyMinutes) : '60');
+    const hasEvery = (rt?.everyMinutes || 0) > 0;
+    const hasDaily = !!rt?.dailyAt;
+    const hasCron = !!rt?.cron;
+    let mode: 'interval' | 'daily' | 'cron' | 'webhook' = 'interval';
+    if (hasCron) mode = 'cron';
+    else if (hasDaily && !hasEvery) mode = 'daily';
+    else if (!hasEvery && !hasDaily && rt?.webhookTrigger) mode = 'webhook';
+    setRtMode(mode);
+    setRtEvery(hasEvery ? String(rt?.everyMinutes) : '60');
     setRtDaily(rt?.dailyAt || '09:00');
+    setRtCron(rt?.cron || '0 9 * * 1-5');
+    setRtWebhookTrigger(!!rt?.webhookTrigger || mode === 'webhook');
+    setRtWebhookSecret('');
+    setRtWebhookSecretSet(!!rt?.webhookSecretSet);
+    setRtClearSecret(false);
+    setRtWebhookUrl(rt?.webhookUrl || '');
     setRtDelivery(rt?.mainDelivery || 'receipt');
     setRtPrompt(rt?.prompt || '');
     setRtEnabled(rt ? rt.enabled : true);
@@ -195,32 +216,45 @@ export default function BotChatScreen() {
       setRtErr(t('rtPromptRequired'));
       return;
     }
-    const isDaily = rtMode === 'daily';
-    const everyMinutes = isDaily ? 0 : parseInt(rtEvery, 10);
-    const dailyAt = isDaily ? rtDaily.trim() : '';
-    if (!isDaily && !(everyMinutes > 0)) {
+    const everyMinutes = rtMode === 'interval' ? parseInt(rtEvery, 10) : 0;
+    const dailyAt = rtMode === 'daily' ? rtDaily.trim() : '';
+    const cronExpr = rtMode === 'cron' ? rtCron.trim() : '';
+    const webhookTrigger = rtMode === 'webhook' ? true : rtWebhookTrigger;
+    if (rtMode === 'interval' && !(everyMinutes > 0)) {
       setRtErr(t('rtEveryPositive'));
       return;
     }
-    if (isDaily && !/^\d{2}:\d{2}$/.test(dailyAt)) {
+    if (rtMode === 'daily' && !/^\d{2}:\d{2}$/.test(dailyAt)) {
       setRtErr(t('rtTimeFormatErr'));
+      return;
+    }
+    if (rtMode === 'cron' && !cronExpr) {
+      setRtErr(t('rtCronRequired'));
       return;
     }
     setRtErr('');
     setRtSaving(true);
     try {
-      const payload = {
+      const payload: Record<string, unknown> = {
         name,
         everyMinutes,
         dailyAt,
+        cron: cronExpr,
+        webhookTrigger,
+        webhookUrl: rtWebhookUrl.trim(),
         prompt,
         mainDelivery: rtDelivery,
         enabled: rtEnabled,
       };
+      if (rtClearSecret) {
+        payload.clearWebhookSecret = true;
+      } else if (rtWebhookSecret.trim()) {
+        payload.webhookSecret = rtWebhookSecret.trim();
+      }
       if (rtEditId) {
-        await updateRoutine(botId, rtEditId, payload);
+        await updateRoutine(botId, rtEditId, payload as any);
       } else {
-        await createRoutine(botId, payload);
+        await createRoutine(botId, payload as any);
       }
       setRtShowForm(false);
     } catch (err: any) {
@@ -938,11 +972,14 @@ export default function BotChatScreen() {
                         placeholderTextColor={theme.mute}
                         style={[styles.editInput, { backgroundColor: theme.card, color: theme.text }]}
                       />
-                      <View style={{ flexDirection: 'row', gap: 8 }}>
-                        {(['interval', 'daily'] as const).map((m) => (
+                      <View style={{ flexDirection: 'row', gap: 6 }}>
+                        {(['interval', 'daily', 'cron', 'webhook'] as const).map((m) => (
                           <Pressable
                             key={m}
-                            onPress={() => setRtMode(m)}
+                            onPress={() => {
+                              setRtMode(m);
+                              if (m === 'webhook') setRtWebhookTrigger(true);
+                            }}
                             style={{
                               flex: 1,
                               borderRadius: 999,
@@ -951,8 +988,14 @@ export default function BotChatScreen() {
                               backgroundColor: rtMode === m ? theme.accent : theme.card,
                             }}
                           >
-                            <Text style={{ fontSize: 12.5, fontWeight: '700', color: rtMode === m ? theme.accentText : theme.text2 }}>
-                              {m === 'interval' ? t('rtModeInterval') : t('rtModeDaily')}
+                            <Text style={{ fontSize: 12, fontWeight: '700', color: rtMode === m ? theme.accentText : theme.text2 }}>
+                              {m === 'interval'
+                                ? t('rtModeInterval')
+                                : m === 'daily'
+                                  ? t('rtModeDaily')
+                                  : m === 'cron'
+                                    ? t('rtModeCron')
+                                    : t('rtModeWebhook')}
                             </Text>
                           </Pressable>
                         ))}
@@ -966,7 +1009,7 @@ export default function BotChatScreen() {
                           placeholderTextColor={theme.mute}
                           style={[styles.editInput, { backgroundColor: theme.card, color: theme.text, fontFamily: MONO_FONT }]}
                         />
-                      ) : (
+                      ) : rtMode === 'daily' ? (
                         <TextInput
                           value={rtDaily}
                           onChangeText={setRtDaily}
@@ -974,7 +1017,62 @@ export default function BotChatScreen() {
                           placeholderTextColor={theme.mute}
                           style={[styles.editInput, { backgroundColor: theme.card, color: theme.text, fontFamily: MONO_FONT }]}
                         />
+                      ) : rtMode === 'cron' ? (
+                        <TextInput
+                          value={rtCron}
+                          onChangeText={setRtCron}
+                          placeholder={t('rtCronPh')}
+                          placeholderTextColor={theme.mute}
+                          autoCapitalize="none"
+                          style={[styles.editInput, { backgroundColor: theme.card, color: theme.text, fontFamily: MONO_FONT }]}
+                        />
+                      ) : null}
+                      {rtMode !== 'webhook' && (
+                        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                          <Text style={{ fontSize: 13, color: theme.text }}>{t('rtAllowWebhook')}</Text>
+                          <Switch
+                            value={rtWebhookTrigger}
+                            onValueChange={setRtWebhookTrigger}
+                            trackColor={{ false: theme.s2, true: theme.accent }}
+                          />
+                        </View>
                       )}
+                      {(rtMode === 'webhook' || rtWebhookTrigger) && (
+                        <>
+                          <TextInput
+                            value={rtWebhookSecret}
+                            onChangeText={setRtWebhookSecret}
+                            placeholder={rtWebhookSecretSet && !rtClearSecret ? t('rtWebhookSecretSetPh') : t('rtWebhookSecretPh')}
+                            placeholderTextColor={theme.mute}
+                            secureTextEntry
+                            editable={!rtClearSecret}
+                            autoCapitalize="none"
+                            style={[styles.editInput, { backgroundColor: theme.card, color: theme.text, fontFamily: MONO_FONT }]}
+                          />
+                          {rtWebhookSecretSet && (
+                            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                              <Text style={{ fontSize: 12.5, color: theme.text2 }}>{t('rtWebhookClearSecret')}</Text>
+                              <Switch
+                                value={rtClearSecret}
+                                onValueChange={(v) => {
+                                  setRtClearSecret(v);
+                                  if (v) setRtWebhookSecret('');
+                                }}
+                                trackColor={{ false: theme.s2, true: theme.danger }}
+                              />
+                            </View>
+                          )}
+                        </>
+                      )}
+                      <TextInput
+                        value={rtWebhookUrl}
+                        onChangeText={setRtWebhookUrl}
+                        placeholder={t('rtWebhookUrlPh')}
+                        placeholderTextColor={theme.mute}
+                        autoCapitalize="none"
+                        keyboardType="url"
+                        style={[styles.editInput, { backgroundColor: theme.card, color: theme.text, fontFamily: MONO_FONT }]}
+                      />
                       <View style={{ flexDirection: 'row', gap: 6 }}>
                         {(
                           [
@@ -1054,6 +1152,8 @@ export default function BotChatScreen() {
                         const trig = [
                           rt.everyMinutes && rt.everyMinutes > 0 ? t('rtEveryShort', { n: rt.everyMinutes }) : '',
                           rt.dailyAt ? t('rtDailyShort', { time: rt.dailyAt }) : '',
+                          rt.cron ? `Cron ${rt.cron}` : '',
+                          rt.webhookTrigger ? t('rtWebhookTag') : '',
                         ]
                           .filter(Boolean)
                           .join(' · ');
@@ -1104,7 +1204,7 @@ export default function BotChatScreen() {
                               />
                             </View>
                             <Text style={{ fontSize: 12, color: theme.mute }}>
-                              {[trig, delivLbl, rt.model].filter(Boolean).join(' · ')}
+                              {[trig, delivLbl, rt.webhookUrl ? t('rtWebhookPushTag') : '', rt.model].filter(Boolean).join(' · ')}
                             </Text>
                             <Text selectable style={[styles.instructionsTxt, { color: theme.text }]}>
                               {rt.prompt}
@@ -1148,6 +1248,22 @@ export default function BotChatScreen() {
                               >
                                 <Text style={{ fontSize: 12, fontWeight: '700', color: theme.text2 }}>{t('edit')}</Text>
                               </Pressable>
+                              {rt.webhookTrigger && rt.webhookPath ? (
+                                <Pressable
+                                  onPress={() => {
+                                    const full = `${baseURL.replace(/\/$/, '')}${rt.webhookPath}`;
+                                    void Clipboard.setStringAsync(full).then(() => {
+                                      setRtCopiedId(rt.id);
+                                      setTimeout(() => setRtCopiedId((cur) => (cur === rt.id ? '' : cur)), 1500);
+                                    });
+                                  }}
+                                  style={{ borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4, backgroundColor: theme.card }}
+                                >
+                                  <Text style={{ fontSize: 12, fontWeight: '700', color: theme.accent }}>
+                                    {rtCopiedId === rt.id ? t('rtWebhookCopied') : t('rtCopyWebhook')}
+                                  </Text>
+                                </Pressable>
+                              ) : null}
                               <Pressable
                                 onPress={() => {
                                   confirmAction(

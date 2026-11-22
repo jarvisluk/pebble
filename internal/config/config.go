@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/robfig/cron/v3"
 )
 
 const (
@@ -18,15 +21,34 @@ const (
 	RoutineDeliveryNone    = "none"
 )
 
+var cronParser = cron.NewParser(
+	cron.SecondOptional |
+		cron.Minute |
+		cron.Hour |
+		cron.Dom |
+		cron.Month |
+		cron.Dow |
+		cron.Descriptor,
+)
+
+// ParseCron parses a 5-field standard cron expression, 6-field second-level cron expression, or @every/@daily descriptor.
+func ParseCron(expr string) (cron.Schedule, error) {
+	return cronParser.Parse(strings.TrimSpace(expr))
+}
+
 type ScheduleConfig struct {
-	ID           string `json:"id,omitempty"`
-	Name         string `json:"name"`
-	EveryMinutes int    `json:"everyMinutes,omitempty"`
-	DailyAt      string `json:"dailyAt,omitempty"` // "HH:MM" local time
-	Prompt       string `json:"prompt"`
-	Model        string `json:"model,omitempty"`
-	MainDelivery string `json:"mainDelivery,omitempty"` // "receipt" (default) | "notify" | "none"
-	Enabled      *bool  `json:"enabled,omitempty"`
+	ID             string `json:"id,omitempty"`
+	Name           string `json:"name"`
+	EveryMinutes   int    `json:"everyMinutes,omitempty"`
+	DailyAt        string `json:"dailyAt,omitempty"` // "HH:MM" local time
+	Cron           string `json:"cron,omitempty"`    // 5-field, 6-field (with seconds), or @every/@daily
+	WebhookTrigger bool   `json:"webhookTrigger,omitempty"`
+	WebhookSecret  string `json:"webhookSecret,omitempty"`
+	WebhookURL     string `json:"webhookUrl,omitempty"`
+	Prompt         string `json:"prompt"`
+	Model          string `json:"model,omitempty"`
+	MainDelivery   string `json:"mainDelivery,omitempty"` // "receipt" (default) | "notify" | "none"
+	Enabled        *bool  `json:"enabled,omitempty"`
 }
 
 func (s ScheduleConfig) IsEnabled() bool {
@@ -75,8 +97,20 @@ func (s ScheduleConfig) Validate() error {
 			return fmt.Errorf("invalid dailyAt %q (expected HH:MM)", s.DailyAt)
 		}
 	}
-	if s.EveryMinutes == 0 && daily == "" {
-		return errors.New("either everyMinutes > 0 or dailyAt is required")
+	cronExpr := strings.TrimSpace(s.Cron)
+	if cronExpr != "" {
+		if _, err := ParseCron(cronExpr); err != nil {
+			return fmt.Errorf("invalid cron %q: %w", s.Cron, err)
+		}
+	}
+	if wurl := strings.TrimSpace(s.WebhookURL); wurl != "" && !ContainsEnvRef(wurl) {
+		u, err := url.ParseRequestURI(wurl)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return fmt.Errorf("invalid webhookUrl %q (expected http:// or https:// URL)", s.WebhookURL)
+		}
+	}
+	if s.EveryMinutes == 0 && daily == "" && cronExpr == "" && !s.WebhookTrigger {
+		return errors.New("at least one trigger (everyMinutes, dailyAt, cron, or webhookTrigger) is required")
 	}
 	switch strings.ToLower(strings.TrimSpace(s.MainDelivery)) {
 	case "", RoutineDeliveryReceipt, RoutineDeliveryNotify, RoutineDeliveryNone:
@@ -423,6 +457,9 @@ func NormalizeSchedules(in []ScheduleConfig) []ScheduleConfig {
 	for j, sc := range in {
 		sc.Name = strings.TrimSpace(sc.Name)
 		sc.DailyAt = strings.TrimSpace(sc.DailyAt)
+		sc.Cron = strings.TrimSpace(sc.Cron)
+		sc.WebhookSecret = strings.TrimSpace(expandEnv(sc.WebhookSecret))
+		sc.WebhookURL = strings.TrimSpace(expandEnv(sc.WebhookURL))
 		sc.Model = strings.TrimSpace(expandEnv(sc.Model))
 		sc.MainDelivery = sc.EffectiveMainDelivery()
 		baseID := sc.EffectiveID()

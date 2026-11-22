@@ -154,6 +154,11 @@ export interface RoutineItem {
   name: string;
   everyMinutes?: number;
   dailyAt?: string;
+  cron?: string;
+  webhookTrigger?: boolean;
+  webhookPath?: string;
+  webhookSecretSet?: boolean;
+  webhookUrl?: string;
   prompt: string;
   model?: string;
   mainDelivery: 'receipt' | 'notify' | 'none' | string;

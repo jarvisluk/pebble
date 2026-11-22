@@ -77,9 +77,15 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
   const [rtFormOpen, setRtFormOpen] = useState(false);
   const [rtEditId, setRtEditId] = useState('');
   const [rtName, setRtName] = useState('');
-  const [rtMode, setRtMode] = useState<'interval' | 'daily'>('interval');
+  const [rtMode, setRtMode] = useState<'interval' | 'daily' | 'cron' | 'webhook'>('interval');
   const [rtEvery, setRtEvery] = useState('60');
   const [rtDaily, setRtDaily] = useState('09:00');
+  const [rtCron, setRtCron] = useState('0 9 * * 1-5');
+  const [rtWebhookTrigger, setRtWebhookTrigger] = useState(false);
+  const [rtWebhookSecret, setRtWebhookSecret] = useState('');
+  const [rtWebhookSecretSet, setRtWebhookSecretSet] = useState(false);
+  const [rtClearSecret, setRtClearSecret] = useState(false);
+  const [rtWebhookUrl, setRtWebhookUrl] = useState('');
   const [rtDelivery, setRtDelivery] = useState('receipt');
   const [rtPrompt, setRtPrompt] = useState('');
   const [rtEnabled, setRtEnabled] = useState(true);
@@ -193,10 +199,22 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
     setRtErr('');
     setRtEditId(rt?.id || '');
     setRtName(rt?.name || '');
-    const isDaily = Boolean(rt?.dailyAt) && !((rt?.everyMinutes || 0) > 0);
-    setRtMode(isDaily ? 'daily' : 'interval');
-    setRtEvery((rt?.everyMinutes || 0) > 0 ? String(rt?.everyMinutes) : '60');
+    const hasEvery = (rt?.everyMinutes || 0) > 0;
+    const hasDaily = Boolean(rt?.dailyAt);
+    const hasCron = Boolean(rt?.cron);
+    let mode: 'interval' | 'daily' | 'cron' | 'webhook' = 'interval';
+    if (hasCron) mode = 'cron';
+    else if (hasDaily && !hasEvery) mode = 'daily';
+    else if (!hasEvery && !hasDaily && rt?.webhookTrigger) mode = 'webhook';
+    setRtMode(mode);
+    setRtEvery(hasEvery ? String(rt?.everyMinutes) : '60');
     setRtDaily(rt?.dailyAt || '09:00');
+    setRtCron(rt?.cron || '0 9 * * 1-5');
+    setRtWebhookTrigger(Boolean(rt?.webhookTrigger) || mode === 'webhook');
+    setRtWebhookSecret('');
+    setRtWebhookSecretSet(Boolean(rt?.webhookSecretSet));
+    setRtClearSecret(false);
+    setRtWebhookUrl(rt?.webhookUrl || '');
     setRtDelivery(rt?.mainDelivery || 'receipt');
     setRtPrompt(rt?.prompt || '');
     setRtEnabled(rt ? rt.enabled !== false : true);
@@ -215,28 +233,41 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
       setRtErr(t('rtPromptRequired'));
       return;
     }
-    const daily = rtMode === 'daily';
-    const everyMinutes = daily ? 0 : parseInt(rtEvery, 10);
-    const dailyAt = daily ? rtDaily.trim() : '';
-    if (!daily && !(everyMinutes > 0)) {
+    const everyMinutes = rtMode === 'interval' ? parseInt(rtEvery, 10) : 0;
+    const dailyAt = rtMode === 'daily' ? rtDaily.trim() : '';
+    const cronExpr = rtMode === 'cron' ? rtCron.trim() : '';
+    const webhookTrigger = rtMode === 'webhook' ? true : rtWebhookTrigger;
+    if (rtMode === 'interval' && !(everyMinutes > 0)) {
       setRtErr(t('rtEveryPositive'));
       return;
     }
-    if (daily && !/^\d{2}:\d{2}$/.test(dailyAt)) {
+    if (rtMode === 'daily' && !/^\d{2}:\d{2}$/.test(dailyAt)) {
       setRtErr(t('rtTimeFormatErr'));
+      return;
+    }
+    if (rtMode === 'cron' && !cronExpr) {
+      setRtErr(t('rtCronRequired'));
       return;
     }
 
     setRtSaving(true);
     setRtErr('');
-    const body = {
+    const body: Record<string, unknown> = {
       name,
       everyMinutes,
       dailyAt,
+      cron: cronExpr,
+      webhookTrigger,
+      webhookUrl: rtWebhookUrl.trim(),
       prompt,
       mainDelivery: rtDelivery,
       enabled: rtEnabled,
     };
+    if (rtClearSecret) {
+      body.clearWebhookSecret = true;
+    } else if (rtWebhookSecret.trim()) {
+      body.webhookSecret = rtWebhookSecret.trim();
+    }
     try {
       if (rtEditId) {
         await api(`/api/bots/${encodeURIComponent(detail.id)}/routines/${encodeURIComponent(rtEditId)}`, {
@@ -481,10 +512,16 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
                     <select
                       id="pRtMode"
                       value={rtMode}
-                      onChange={(e) => setRtMode(e.target.value as 'interval' | 'daily')}
+                      onChange={(e) => {
+                        const next = e.target.value as 'interval' | 'daily' | 'cron' | 'webhook';
+                        setRtMode(next);
+                        if (next === 'webhook') setRtWebhookTrigger(true);
+                      }}
                     >
                       <option value="interval">{t('rtModeInterval')}</option>
                       <option value="daily">{t('rtModeDaily')}</option>
+                      <option value="cron">{t('rtModeCron')}</option>
+                      <option value="webhook">{t('rtModeWebhook')}</option>
                     </select>
                   </div>
                   {rtMode === 'interval' ? (
@@ -499,7 +536,7 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
                         onChange={(e) => setRtEvery(e.target.value)}
                       />
                     </div>
-                  ) : (
+                  ) : rtMode === 'daily' ? (
                     <div className="fld" id="pRtDailyWrap">
                       <label>
                         {t('rtTime')} <em>HH:MM</em>
@@ -512,7 +549,73 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
                         onChange={(e) => setRtDaily(e.target.value)}
                       />
                     </div>
+                  ) : rtMode === 'cron' ? (
+                    <div className="fld" id="pRtCronWrap">
+                      <label>{t('rtCronExpr')}</label>
+                      <input
+                        id="pRtCron"
+                        className="mono"
+                        placeholder={t('rtCronPh')}
+                        value={rtCron}
+                        onChange={(e) => setRtCron(e.target.value)}
+                      />
+                      <div className="set-card-desc" style={{ marginTop: 4 }}>{t('rtCronHint')}</div>
+                    </div>
+                  ) : (
+                    <div className="fld" />
                   )}
+                </div>
+                {rtMode !== 'webhook' && (
+                  <label className="perm" style={{ background: 'var(--card)', marginBottom: 6 }}>
+                    <input
+                      type="checkbox"
+                      id="pRtWebhookTrigger"
+                      checked={rtWebhookTrigger}
+                      onChange={(e) => setRtWebhookTrigger(e.target.checked)}
+                    />
+                    {t('rtAllowWebhook')}
+                  </label>
+                )}
+                {(rtMode === 'webhook' || rtWebhookTrigger) && (
+                  <div className="fld">
+                    <label>
+                      {t('rtWebhookSecret')} <em>{t('rtOptional')}</em>
+                    </label>
+                    <input
+                      id="pRtWebhookSecret"
+                      type="password"
+                      className="mono"
+                      placeholder={rtWebhookSecretSet && !rtClearSecret ? t('rtWebhookSecretSetPh') : t('rtWebhookSecretPh')}
+                      value={rtWebhookSecret}
+                      disabled={rtClearSecret}
+                      onChange={(e) => setRtWebhookSecret(e.target.value)}
+                    />
+                    {rtWebhookSecretSet && (
+                      <label className="perm" style={{ background: 'var(--card)', marginTop: 4 }}>
+                        <input
+                          type="checkbox"
+                          checked={rtClearSecret}
+                          onChange={(e) => {
+                            setRtClearSecret(e.target.checked);
+                            if (e.target.checked) setRtWebhookSecret('');
+                          }}
+                        />
+                        {t('rtWebhookClearSecret')}
+                      </label>
+                    )}
+                  </div>
+                )}
+                <div className="fld">
+                  <label>
+                    {t('rtWebhookUrl')} <em>{t('rtOptional')}</em>
+                  </label>
+                  <input
+                    id="pRtWebhookUrl"
+                    className="mono"
+                    placeholder={t('rtWebhookUrlPh')}
+                    value={rtWebhookUrl}
+                    onChange={(e) => setRtWebhookUrl(e.target.value)}
+                  />
                 </div>
                 <div className="fld">
                   <label>{t('rtMainDelivery')}</label>
@@ -579,6 +682,8 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
                   const trig = [
                     (rt.everyMinutes || 0) > 0 ? t('rtEveryShort', { n: rt.everyMinutes || 0 }) : '',
                     rt.dailyAt ? t('rtDailyShort', { time: rt.dailyAt }) : '',
+                    rt.cron ? `Cron ${rt.cron}` : '',
+                    rt.webhookTrigger ? t('rtWebhookTag') : '',
                   ]
                     .filter(Boolean)
                     .join(' · ');
@@ -594,6 +699,7 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
                           time: new Date(rt.nextRunAt).toLocaleTimeString(lang === 'en' ? 'en-US' : 'zh-CN', {
                             hour: '2-digit',
                             minute: '2-digit',
+                            second: rt.cron ? '2-digit' : undefined,
                           }),
                         })
                       : rt.enabled
@@ -602,7 +708,9 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
                   const lastTxt = rt.lastRun
                     ? `${formatStamp(rt.lastRun.finishedAt, lang)} · ${(rt.lastRun.durationMs / 1000).toFixed(1)}s`
                     : '';
-                  const meta = [trig, delivLbl, rt.model, nextTxt, lastTxt].filter(Boolean).join(' · ');
+                  const meta = [trig, delivLbl, rt.webhookUrl ? t('rtWebhookPushTag') : '', rt.model, nextTxt, lastTxt]
+                    .filter(Boolean)
+                    .join(' · ');
                   const runsOpen = runsOpenId === rt.id;
                   const runs = runsMap[rt.id] || [];
 
@@ -682,6 +790,18 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
                           <button type="button" className="mp" onClick={() => openRoutineForm(rt)}>
                             {t('rtEditBtn')}
                           </button>
+                          {rt.webhookTrigger && rt.webhookPath && (
+                            <button
+                              type="button"
+                              className="mp"
+                              onClick={() => {
+                                const fullUrl = `${window.location.origin}${rt.webhookPath}`;
+                                void navigator.clipboard?.writeText(fullUrl).then(() => onToast(t('rtWebhookCopied')));
+                              }}
+                            >
+                              {t('rtCopyWebhook')}
+                            </button>
+                          )}
                           <button
                             type="button"
                             className="mp bad"

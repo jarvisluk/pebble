@@ -194,6 +194,11 @@ export interface RoutineItem {
   name: string;
   everyMinutes?: number;
   dailyAt?: string;
+  cron?: string;
+  webhookTrigger?: boolean;
+  webhookPath?: string;
+  webhookSecretSet?: boolean;
+  webhookUrl?: string;
   prompt: string;
   model?: string;
   mainDelivery: RoutineDelivery;
@@ -208,6 +213,11 @@ export interface RoutineUpsertInput {
   name: string;
   everyMinutes?: number;
   dailyAt?: string;
+  cron?: string;
+  webhookTrigger?: boolean;
+  webhookSecret?: string;
+  clearWebhookSecret?: boolean;
+  webhookUrl?: string;
   prompt: string;
   model?: string;
   mainDelivery?: RoutineDelivery;

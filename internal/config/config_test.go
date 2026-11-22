@@ -229,11 +229,25 @@ func TestScheduleConfigNormalizationAndValidation(t *testing.T) {
 		{ID: "bad id!", Name: "a", EveryMinutes: 10, Prompt: "x"},
 		{Name: "a", Prompt: "x"},
 		{Name: "a", DailyAt: "25:00", Prompt: "x"},
+		{Name: "a", Cron: "not a cron", Prompt: "x"},
+		{Name: "a", WebhookTrigger: true, WebhookURL: "ftp://bad.example/hook", Prompt: "x"},
 		{Name: "a", EveryMinutes: 5, MainDelivery: "bogus", Prompt: "x"},
 	}
 	for i, s := range invalid {
 		if err := s.Validate(); err == nil {
 			t.Fatalf("invalid case %d (%+v) should have failed Validate", i, s)
+		}
+	}
+
+	validCronAndWebhook := []ScheduleConfig{
+		{Name: "five", Cron: "0 9 * * 1-5", Prompt: "x"},
+		{Name: "six-sec", Cron: "*/15 * * * * *", Prompt: "x"},
+		{Name: "every-sec", Cron: "@every 30s", Prompt: "x"},
+		{Name: "hook-only", WebhookTrigger: true, WebhookURL: "https://hooks.example.com/notify", Prompt: "x"},
+	}
+	for i, s := range validCronAndWebhook {
+		if err := s.Validate(); err != nil {
+			t.Fatalf("valid case %d (%+v) unexpectedly failed: %v", i, s, err)
 		}
 	}
 }

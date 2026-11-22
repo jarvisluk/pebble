@@ -1,11 +1,13 @@
 package channel
 
 import (
+	"bytes"
 	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"log"
 	"net"
@@ -30,6 +32,7 @@ import (
 type RoutineScheduler interface {
 	Status(botID string) map[string]scheduler.RoutineRuntimeStatus
 	RunNow(ctx context.Context, botID, routineID string) (*state.RoutineRun, error)
+	TriggerWebhook(ctx context.Context, botID, routineID, payload string) (*state.RoutineRun, error)
 }
 
 type HTTPServer struct {
@@ -135,6 +138,7 @@ func NewHTTPServer(h *hub.Hub, cfg config.HTTPConfig) *HTTPServer {
 
 	// External Webhooks
 	mux.HandleFunc("POST /hooks/{id}", s.handleWebhook)
+	mux.HandleFunc("POST /hooks/{id}/routines/{routineId}", s.handleRoutineWebhook)
 
 	s.srv = &http.Server{
 		Addr:              fmt.Sprintf("%s:%d", cfg.Host, cfg.Port),
@@ -837,30 +841,42 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 }
 
 type routineDTO struct {
-	ID           string            `json:"id"`
-	Name         string            `json:"name"`
-	EveryMinutes int               `json:"everyMinutes,omitempty"`
-	DailyAt      string            `json:"dailyAt,omitempty"`
-	Prompt       string            `json:"prompt"`
-	Model        string            `json:"model,omitempty"`
-	MainDelivery string            `json:"mainDelivery"`
-	Enabled      bool              `json:"enabled"`
-	Running      bool              `json:"running"`
-	NextRunAt    string            `json:"nextRunAt,omitempty"`
-	LastRun      *state.RoutineRun `json:"lastRun,omitempty"`
+	ID               string            `json:"id"`
+	Name             string            `json:"name"`
+	EveryMinutes     int               `json:"everyMinutes,omitempty"`
+	DailyAt          string            `json:"dailyAt,omitempty"`
+	Cron             string            `json:"cron,omitempty"`
+	WebhookTrigger   bool              `json:"webhookTrigger,omitempty"`
+	WebhookPath      string            `json:"webhookPath,omitempty"`
+	WebhookSecretSet bool              `json:"webhookSecretSet,omitempty"`
+	WebhookURL       string            `json:"webhookUrl,omitempty"`
+	Prompt           string            `json:"prompt"`
+	Model            string            `json:"model,omitempty"`
+	MainDelivery     string            `json:"mainDelivery"`
+	Enabled          bool              `json:"enabled"`
+	Running          bool              `json:"running"`
+	NextRunAt        string            `json:"nextRunAt,omitempty"`
+	LastRun          *state.RoutineRun `json:"lastRun,omitempty"`
 }
 
 func (s *HTTPServer) buildRoutineDTO(botID string, sc config.ScheduleConfig, rt map[string]scheduler.RoutineRuntimeStatus) routineDTO {
 	rid := sc.EffectiveID()
 	dto := routineDTO{
-		ID:           rid,
-		Name:         sc.Name,
-		EveryMinutes: sc.EveryMinutes,
-		DailyAt:      sc.DailyAt,
-		Prompt:       sc.Prompt,
-		Model:        sc.Model,
-		MainDelivery: sc.EffectiveMainDelivery(),
-		Enabled:      sc.IsEnabled(),
+		ID:               rid,
+		Name:             sc.Name,
+		EveryMinutes:     sc.EveryMinutes,
+		DailyAt:          sc.DailyAt,
+		Cron:             sc.Cron,
+		WebhookTrigger:   sc.WebhookTrigger,
+		WebhookSecretSet: strings.TrimSpace(sc.WebhookSecret) != "",
+		WebhookURL:       sc.WebhookURL,
+		Prompt:           sc.Prompt,
+		Model:            sc.Model,
+		MainDelivery:     sc.EffectiveMainDelivery(),
+		Enabled:          sc.IsEnabled(),
+	}
+	if sc.WebhookTrigger {
+		dto.WebhookPath = fmt.Sprintf("/hooks/%s/routines/%s", botID, rid)
 	}
 	if st, ok := rt[rid]; ok {
 		dto.Running = st.Running
@@ -1023,4 +1039,93 @@ func (s *HTTPServer) handleListRoutineRuns(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"runs": runs})
+}
+
+func (s *HTTPServer) handleRoutineWebhook(w http.ResponseWriter, r *http.Request) {
+	sched := s.scheduler()
+	if sched == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "scheduler is not running"})
+		return
+	}
+	botID := r.PathValue("id")
+	routineID := r.PathValue("routineId")
+
+	list, err := s.hub.ListRoutines(botID)
+	if err != nil {
+		writeHubErr(w, err)
+		return
+	}
+	var target *config.ScheduleConfig
+	for i := range list {
+		if list[i].EffectiveID() == routineID {
+			sc := list[i]
+			target = &sc
+			break
+		}
+	}
+	if target == nil {
+		writeHubErr(w, fmt.Errorf("routine %q not found: %w", routineID, hub.ErrRoutineNotFound))
+		return
+	}
+	if !target.IsEnabled() {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "routine is disabled"})
+		return
+	}
+	if !target.WebhookTrigger {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "webhook trigger is not enabled for this routine"})
+		return
+	}
+
+	expectedSecret := strings.TrimSpace(target.WebhookSecret)
+	if expectedSecret == "" {
+		expectedSecret = s.cfg.WebhookSecret
+	}
+	if expectedSecret != "" {
+		got := r.Header.Get("X-Webhook-Secret")
+		if got == "" {
+			got = strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		}
+		if subtle.ConstantTimeCompare([]byte(got), []byte(expectedSecret)) != 1 {
+			writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "invalid webhook secret"})
+			return
+		}
+	}
+
+	rawBody, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "failed to read webhook payload"})
+		return
+	}
+	payloadText := ""
+	if trimmed := bytes.TrimSpace(rawBody); len(trimmed) > 0 {
+		var formatted bytes.Buffer
+		if json.Indent(&formatted, trimmed, "", "  ") == nil {
+			payloadText = "```json\n" + formatted.String() + "\n```"
+		} else {
+			payloadText = string(trimmed)
+		}
+	}
+
+	if r.URL.Query().Get("async") == "1" {
+		if rt := sched.Status(botID); rt[routineID].Running {
+			writeHubErr(w, scheduler.ErrRoutineAlreadyRunning)
+			return
+		}
+		go func() {
+			_, _ = sched.TriggerWebhook(context.Background(), botID, routineID, payloadText)
+		}()
+		writeJSON(w, http.StatusAccepted, map[string]any{"started": true, "botId": botID, "routineId": routineID})
+		return
+	}
+
+	run, err := sched.TriggerWebhook(r.Context(), botID, routineID, payloadText)
+	if err != nil {
+		if errors.Is(err, hub.ErrBotNotFound) || errors.Is(err, hub.ErrRoutineNotFound) || errors.Is(err, scheduler.ErrRoutineAlreadyRunning) {
+			writeHubErr(w, err)
+			return
+		}
+		writeJSON(w, http.StatusBadGateway, map[string]any{"error": err.Error(), "run": run})
+		return
+	}
+	writeJSON(w, http.StatusOK, run)
 }

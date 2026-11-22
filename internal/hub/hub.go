@@ -63,13 +63,18 @@ type DesktopTaskRequest struct {
 }
 
 type RoutinePatch struct {
-	Name         *string `json:"name,omitempty"`
-	EveryMinutes *int    `json:"everyMinutes,omitempty"`
-	DailyAt      *string `json:"dailyAt,omitempty"`
-	Prompt       *string `json:"prompt,omitempty"`
-	Model        *string `json:"model,omitempty"`
-	MainDelivery *string `json:"mainDelivery,omitempty"`
-	Enabled      *bool   `json:"enabled,omitempty"`
+	Name               *string `json:"name,omitempty"`
+	EveryMinutes       *int    `json:"everyMinutes,omitempty"`
+	DailyAt            *string `json:"dailyAt,omitempty"`
+	Cron               *string `json:"cron,omitempty"`
+	WebhookTrigger     *bool   `json:"webhookTrigger,omitempty"`
+	WebhookSecret      *string `json:"webhookSecret,omitempty"`
+	ClearWebhookSecret *bool   `json:"clearWebhookSecret,omitempty"`
+	WebhookURL         *string `json:"webhookUrl,omitempty"`
+	Prompt             *string `json:"prompt,omitempty"`
+	Model              *string `json:"model,omitempty"`
+	MainDelivery       *string `json:"mainDelivery,omitempty"`
+	Enabled            *bool   `json:"enabled,omitempty"`
 }
 
 type BotStatus struct {
@@ -2118,6 +2123,20 @@ func (h *Hub) UpdateRoutine(botID, routineID string, patch RoutinePatch) (config
 	if patch.DailyAt != nil {
 		base.DailyAt = strings.TrimSpace(*patch.DailyAt)
 	}
+	if patch.Cron != nil {
+		base.Cron = strings.TrimSpace(*patch.Cron)
+	}
+	if patch.WebhookTrigger != nil {
+		base.WebhookTrigger = *patch.WebhookTrigger
+	}
+	if patch.ClearWebhookSecret != nil && *patch.ClearWebhookSecret {
+		base.WebhookSecret = ""
+	} else if patch.WebhookSecret != nil && strings.TrimSpace(*patch.WebhookSecret) != "" {
+		base.WebhookSecret = strings.TrimSpace(*patch.WebhookSecret)
+	}
+	if patch.WebhookURL != nil {
+		base.WebhookURL = strings.TrimSpace(*patch.WebhookURL)
+	}
 	if patch.Prompt != nil {
 		base.Prompt = strings.TrimSpace(*patch.Prompt)
 	}
@@ -2335,6 +2354,9 @@ func cleanScheduleInput(raw config.ScheduleConfig) config.ScheduleConfig {
 	raw.ID = strings.TrimSpace(raw.ID)
 	raw.Name = strings.TrimSpace(raw.Name)
 	raw.DailyAt = strings.TrimSpace(raw.DailyAt)
+	raw.Cron = strings.TrimSpace(raw.Cron)
+	raw.WebhookSecret = strings.TrimSpace(raw.WebhookSecret)
+	raw.WebhookURL = strings.TrimSpace(raw.WebhookURL)
 	raw.Prompt = strings.TrimSpace(raw.Prompt)
 	raw.Model = strings.TrimSpace(raw.Model)
 	raw.MainDelivery = raw.EffectiveMainDelivery()
@@ -2348,6 +2370,12 @@ func cleanScheduleInput(raw config.ScheduleConfig) config.ScheduleConfig {
 func preserveRoutineEnvRefs(next, curDisk, curExpanded config.ScheduleConfig) config.ScheduleConfig {
 	if next.Model == curExpanded.Model && config.ContainsEnvRef(curDisk.Model) {
 		next.Model = curDisk.Model
+	}
+	if next.WebhookSecret == curExpanded.WebhookSecret && config.ContainsEnvRef(curDisk.WebhookSecret) {
+		next.WebhookSecret = curDisk.WebhookSecret
+	}
+	if next.WebhookURL == curExpanded.WebhookURL && config.ContainsEnvRef(curDisk.WebhookURL) {
+		next.WebhookURL = curDisk.WebhookURL
 	}
 	return next
 }

@@ -1,10 +1,15 @@
 package scheduler
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
+	"net/url"
 	"reflect"
 	"strconv"
 	"strings"
@@ -14,6 +19,7 @@ import (
 	"bot-hub/internal/config"
 	"bot-hub/internal/hub"
 	"bot-hub/internal/state"
+	"github.com/robfig/cron/v3"
 )
 
 var (
@@ -100,7 +106,13 @@ func (s *Scheduler) Sync() {
 			}
 			hasInterval := sched.EveryMinutes > 0
 			hasDaily := parseDailyAt(sched.DailyAt)
-			if !hasInterval && !hasDaily {
+			hasCron := false
+			if strings.TrimSpace(sched.Cron) != "" {
+				if _, err := config.ParseCron(sched.Cron); err == nil {
+					hasCron = true
+				}
+			}
+			if !hasInterval && !hasDaily && !hasCron {
 				continue
 			}
 			key := jobKey(bot.ID, sched.EffectiveID())
@@ -127,7 +139,7 @@ func (s *Scheduler) Sync() {
 			continue
 		}
 		jctx, cancel := context.WithCancel(s.ctx)
-		initInterval, initDaily, initNext := s.computeNext(want.bot.ID, want.spec, time.Now())
+		initInterval, initDaily, initCron, initNext := s.computeNext(want.bot.ID, want.spec, time.Now())
 		job := &scheduledJob{
 			key:    key,
 			botID:  want.bot.ID,
@@ -137,7 +149,7 @@ func (s *Scheduler) Sync() {
 		}
 		s.jobs[key] = job
 		s.wg.Add(1)
-		go s.runJob(jctx, job, initInterval, initDaily, initNext)
+		go s.runJob(jctx, job, initInterval, initDaily, initCron, initNext)
 		started++
 		log.Printf("[scheduler] armed %s (%s)", key, describeSchedule(want.spec))
 	}
@@ -189,6 +201,15 @@ func (s *Scheduler) Status(botID string) map[string]RoutineRuntimeStatus {
 
 // RunNow triggers a routine immediately in an isolated turn.
 func (s *Scheduler) RunNow(ctx context.Context, botID, routineID string) (*state.RoutineRun, error) {
+	return s.trigger(ctx, botID, routineID, "manual", "")
+}
+
+// TriggerWebhook triggers a routine via an inbound webhook with an optional payload.
+func (s *Scheduler) TriggerWebhook(ctx context.Context, botID, routineID, payload string) (*state.RoutineRun, error) {
+	return s.trigger(ctx, botID, routineID, "webhook", payload)
+}
+
+func (s *Scheduler) trigger(ctx context.Context, botID, routineID, triggerName, webhookPayload string) (*state.RoutineRun, error) {
 	bot, ok := s.hub.GetBot(botID)
 	if !ok {
 		return nil, fmt.Errorf("bot %q not found: %w", botID, hub.ErrBotNotFound)
@@ -204,10 +225,10 @@ func (s *Scheduler) RunNow(ctx context.Context, botID, routineID string) (*state
 	if target == nil {
 		return nil, fmt.Errorf("routine %q not found: %w", routineID, hub.ErrRoutineNotFound)
 	}
-	return s.execute(ctx, botID, *target, "manual")
+	return s.execute(ctx, botID, *target, triggerName, webhookPayload)
 }
 
-func (s *Scheduler) computeNext(botID string, spec config.ScheduleConfig, now time.Time) (intervalNext, dailyNext, next time.Time) {
+func (s *Scheduler) computeNext(botID string, spec config.ScheduleConfig, now time.Time) (intervalNext, dailyNext, cronNext, next time.Time) {
 	if spec.EveryMinutes > 0 {
 		intervalNext = now.Add(time.Duration(spec.EveryMinutes) * time.Minute)
 	}
@@ -215,10 +236,15 @@ func (s *Scheduler) computeNext(botID string, spec config.ScheduleConfig, now ti
 		ranToday := s.hub.HasDailyRunOnDate(botID, spec.EffectiveID(), now.In(time.Local).Format("2006-01-02"))
 		dailyNext = nextDailyTime(now, spec.DailyAt, ranToday)
 	}
-	return intervalNext, dailyNext, earliestNonZero(intervalNext, dailyNext)
+	if strings.TrimSpace(spec.Cron) != "" {
+		if cs, err := config.ParseCron(spec.Cron); err == nil {
+			cronNext = cs.Next(now.In(time.Local))
+		}
+	}
+	return intervalNext, dailyNext, cronNext, earliestNonZero(intervalNext, dailyNext, cronNext)
 }
 
-func (s *Scheduler) runJob(ctx context.Context, job *scheduledJob, intervalNext, dailyNext, next time.Time) {
+func (s *Scheduler) runJob(ctx context.Context, job *scheduledJob, intervalNext, dailyNext, cronNext, next time.Time) {
 	defer s.wg.Done()
 
 	hasDaily := parseDailyAt(job.spec.DailyAt)
@@ -227,6 +253,12 @@ func (s *Scheduler) runJob(ctx context.Context, job *scheduledJob, intervalNext,
 		today := time.Now().In(time.Local).Format("2006-01-02")
 		if s.hub.HasDailyRunOnDate(job.botID, job.spec.EffectiveID(), today) {
 			lastDailyDate = today
+		}
+	}
+	var cronSched cron.Schedule
+	if strings.TrimSpace(job.spec.Cron) != "" {
+		if cs, err := config.ParseCron(job.spec.Cron); err == nil {
+			cronSched = cs
 		}
 	}
 
@@ -252,11 +284,14 @@ func (s *Scheduler) runJob(ctx context.Context, job *scheduledJob, intervalNext,
 			if !dailyNext.IsZero() && !firedAt.Before(dailyNext) {
 				lastDailyDate = firedAt.In(time.Local).Format("2006-01-02")
 			}
+			if cronSched != nil && !cronNext.IsZero() && !firedAt.Before(cronNext) {
+				cronNext = cronSched.Next(firedAt.In(time.Local))
+			}
 			// Run asynchronously so a slow LLM turn never delays the timer loop.
 			s.wg.Add(1)
 			go func(spec config.ScheduleConfig) {
 				defer s.wg.Done()
-				if _, err := s.execute(ctx, job.botID, spec, "schedule"); err != nil && !errors.Is(err, ErrRoutineAlreadyRunning) && ctx.Err() == nil {
+				if _, err := s.execute(ctx, job.botID, spec, "schedule", ""); err != nil && !errors.Is(err, ErrRoutineAlreadyRunning) && ctx.Err() == nil {
 					log.Printf("[scheduler] failed %s/%s: %v", job.botID, spec.EffectiveID(), err)
 				}
 			}(job.spec)
@@ -271,7 +306,7 @@ func (s *Scheduler) runJob(ctx context.Context, job *scheduledJob, intervalNext,
 				}
 				dailyNext = nextDailyTime(now, job.spec.DailyAt, ranToday)
 			}
-			next = earliestNonZero(intervalNext, dailyNext)
+			next = earliestNonZero(intervalNext, dailyNext, cronNext)
 		}
 	}
 }
@@ -292,7 +327,7 @@ func (s *Scheduler) finishRun(key string) {
 	s.mu.Unlock()
 }
 
-func (s *Scheduler) execute(ctx context.Context, botID string, sched config.ScheduleConfig, trigger string) (*state.RoutineRun, error) {
+func (s *Scheduler) execute(ctx context.Context, botID string, sched config.ScheduleConfig, trigger, webhookPayload string) (*state.RoutineRun, error) {
 	rid := sched.EffectiveID()
 	key := jobKey(botID, rid)
 	if !s.tryStartRun(key) {
@@ -314,6 +349,9 @@ func (s *Scheduler) execute(ctx context.Context, botID string, sched config.Sche
 			"- Otherwise write a concise, actionable update.\n\n%s",
 		sched.Name, sched.Prompt,
 	)
+	if strings.TrimSpace(webhookPayload) != "" {
+		prompt += "\n\n[Webhook Payload]\n" + strings.TrimSpace(webhookPayload)
+	}
 
 	started := time.Now()
 	res, err := s.hub.RunIsolated(ctx, botID, prompt, hub.IsolatedOptions{
@@ -397,6 +435,12 @@ func (s *Scheduler) execute(ctx context.Context, botID string, sched config.Sche
 
 	s.hub.BroadcastRoutineRun(run)
 	log.Printf("[scheduler] done %s/%s in %dms (delivery=%s)", botID, rid, run.DurationMs, delivery)
+
+	if strings.TrimSpace(sched.WebhookURL) != "" {
+		if werr := postWebhook(ctx, bot, sched, run); werr != nil {
+			log.Printf("[scheduler] webhook post failed %s/%s: %v", botID, rid, werr)
+		}
+	}
 	return &run, nil
 }
 
@@ -432,14 +476,17 @@ func nextDailyTime(now time.Time, hhmm string, ranToday bool) time.Time {
 	return todayTarget.AddDate(0, 0, 1)
 }
 
-func earliestNonZero(a, b time.Time) time.Time {
-	if a.IsZero() {
-		return b
+func earliestNonZero(times ...time.Time) time.Time {
+	var earliest time.Time
+	for _, t := range times {
+		if t.IsZero() {
+			continue
+		}
+		if earliest.IsZero() || t.Before(earliest) {
+			earliest = t
+		}
 	}
-	if b.IsZero() || a.Before(b) {
-		return a
-	}
-	return b
+	return earliest
 }
 
 func describeSchedule(spec config.ScheduleConfig) string {
@@ -450,5 +497,58 @@ func describeSchedule(spec config.ScheduleConfig) string {
 	if spec.DailyAt != "" {
 		parts = append(parts, "daily at "+spec.DailyAt)
 	}
+	if strings.TrimSpace(spec.Cron) != "" {
+		parts = append(parts, "cron "+strings.TrimSpace(spec.Cron))
+	}
+	if spec.WebhookTrigger {
+		parts = append(parts, "webhook")
+	}
 	return strings.Join(parts, ", ")
+}
+
+var webhookHTTPClient = &http.Client{Timeout: 15 * time.Second}
+
+func postWebhook(ctx context.Context, bot config.BotConfig, sched config.ScheduleConfig, run state.RoutineRun) error {
+	rawURL := strings.TrimSpace(sched.WebhookURL)
+	if rawURL == "" {
+		return nil
+	}
+	parsed, err := url.Parse(rawURL)
+	host := rawURL
+	if err == nil && parsed.Host != "" {
+		host = parsed.Host
+	}
+
+	payload := map[string]any{
+		"event":       "routine.completed",
+		"botId":       bot.ID,
+		"botName":     bot.Name,
+		"routineId":   sched.EffectiveID(),
+		"routineName": sched.Name,
+		"trigger":     run.Trigger,
+		"output":      run.Output,
+		"text":        fmt.Sprintf("[%s]\n%s", sched.Name, run.Output),
+		"durationMs":  run.DurationMs,
+		"finishedAt":  run.FinishedAt,
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, rawURL, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("build request to %s: %w", host, err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := webhookHTTPClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("post to %s: %w", host, err)
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("host %s returned HTTP %d", host, resp.StatusCode)
+	}
+	return nil
 }

@@ -572,6 +572,10 @@ func runRoutineCmd(ctx context.Context, args []string, cwd string, stdout, stder
 		name := fs.String("name", "", "routine name")
 		everyMin := fs.Int("every-minutes", 0, "run every N minutes")
 		dailyAt := fs.String("daily-at", "", "run daily at HH:MM")
+		cronExpr := fs.String("cron", "", "cron expression (5-field, 6-field with seconds, or @every)")
+		webhookTrigger := fs.Bool("webhook-trigger", false, "allow inbound webhook trigger")
+		webhookSecret := fs.String("webhook-secret", "", "optional webhook secret")
+		webhookURL := fs.String("webhook-url", "", "optional outbound webhook URL")
 		prompt := fs.String("prompt", "", "task prompt")
 		model := fs.String("model", "", "optional model override")
 		delivery := fs.String("main-delivery", "", "receipt|notify|none")
@@ -601,6 +605,18 @@ func runRoutineCmd(ctx context.Context, args []string, cwd string, stdout, stder
 		}
 		if visited["daily-at"] {
 			payload["dailyAt"] = strings.TrimSpace(*dailyAt)
+		}
+		if visited["cron"] {
+			payload["cron"] = strings.TrimSpace(*cronExpr)
+		}
+		if visited["webhook-trigger"] {
+			payload["webhookTrigger"] = *webhookTrigger
+		}
+		if visited["webhook-secret"] {
+			payload["webhookSecret"] = strings.TrimSpace(*webhookSecret)
+		}
+		if visited["webhook-url"] {
+			payload["webhookUrl"] = strings.TrimSpace(*webhookURL)
 		}
 		if visited["model"] {
 			payload["model"] = strings.TrimSpace(*model)

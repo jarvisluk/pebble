@@ -512,3 +512,93 @@ func TestDesktopTaskAndSettingsRoutes(t *testing.T) {
 		t.Fatalf("POST /api/desktop/task failed: %d %s", taskRec.Code, taskRec.Body.String())
 	}
 }
+
+func TestRoutineWebhookEndpointAndSecretRedaction(t *testing.T) {
+	tmp := t.TempDir()
+	store, err := state.NewStore(filepath.Join(tmp, "sessions.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := harness.NewRegistry()
+	reg.Register(&blockingDesktopHarness{})
+
+	cfg := &config.HubConfig{
+		ProjectRoot: tmp,
+		SharedDir:   filepath.Join(tmp, "workspaces", "_shared"),
+		StateFile:   filepath.Join(tmp, "sessions.json"),
+		Bots: []config.BotConfig{
+			{ID: "ops", Name: "Ops", Workspace: filepath.Join(tmp, "workspaces", "ops"), Harness: "opencode"},
+		},
+	}
+	h := hub.New(cfg, store, nil, reg)
+	defer h.Close()
+
+	sched := scheduler.New(h)
+	h.SetOnSchedulesChanged(sched.Sync)
+	sctx, scancel := context.WithCancel(context.Background())
+	defer func() {
+		scancel()
+		sched.Wait()
+	}()
+	sched.Start(sctx)
+
+	s := NewHTTPServer(h, config.HTTPConfig{Host: "127.0.0.1"})
+	s.SetScheduler(sched)
+	defer s.Shutdown(t.Context())
+	mux := s.srv.Handler
+
+	// Create cron-only routine -> webhook trigger must return 403.
+	if _, err := h.CreateRoutine("ops", config.ScheduleConfig{
+		ID:     "cron-only",
+		Name:   "Cron Only",
+		Cron:   "*/5 * * * *",
+		Prompt: "check",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	req403 := httptest.NewRequest(http.MethodPost, "/hooks/ops/routines/cron-only", bytes.NewBufferString(`{}`))
+	req403.Host = "127.0.0.1:3789"
+	rec403 := httptest.NewRecorder()
+	mux.ServeHTTP(rec403, req403)
+	if rec403.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for routine without webhookTrigger, got %d %s", rec403.Code, rec403.Body.String())
+	}
+
+	// Create webhook routine with secret -> GET list must NOT leak secret.
+	if _, err := h.CreateRoutine("ops", config.ScheduleConfig{
+		ID:             "deploy-hook",
+		Name:           "Deploy Hook",
+		WebhookTrigger: true,
+		WebhookSecret:  "super-secret-123",
+		Prompt:         "process deploy",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	listReq := httptest.NewRequest(http.MethodGet, "/api/bots/ops/routines", nil)
+	listReq.Host = "127.0.0.1:3789"
+	listRec := httptest.NewRecorder()
+	mux.ServeHTTP(listRec, listReq)
+	if listRec.Code != http.StatusOK || strings.Contains(listRec.Body.String(), "super-secret-123") || !strings.Contains(listRec.Body.String(), `"webhookSecretSet":true`) {
+		t.Fatalf("unexpected routine list response (secret leak or missing flag): %d %s", listRec.Code, listRec.Body.String())
+	}
+
+	// Wrong secret -> 401.
+	req401 := httptest.NewRequest(http.MethodPost, "/hooks/ops/routines/deploy-hook", bytes.NewBufferString(`{"ref":"main"}`))
+	req401.Host = "127.0.0.1:3789"
+	req401.Header.Set("X-Webhook-Secret", "wrong")
+	rec401 := httptest.NewRecorder()
+	mux.ServeHTTP(rec401, req401)
+	if rec401.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for wrong secret, got %d %s", rec401.Code, rec401.Body.String())
+	}
+
+	// Valid secret -> 200.
+	req200 := httptest.NewRequest(http.MethodPost, "/hooks/ops/routines/deploy-hook", bytes.NewBufferString(`{"ref":"main"}`))
+	req200.Host = "127.0.0.1:3789"
+	req200.Header.Set("X-Webhook-Secret", "super-secret-123")
+	rec200 := httptest.NewRecorder()
+	mux.ServeHTTP(rec200, req200)
+	if rec200.Code != http.StatusOK || !strings.Contains(rec200.Body.String(), `"trigger":"webhook"`) {
+		t.Fatalf("expected 200 webhook run, got %d %s", rec200.Code, rec200.Body.String())
+	}
+}

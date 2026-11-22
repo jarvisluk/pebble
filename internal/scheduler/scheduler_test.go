@@ -2,7 +2,11 @@ package scheduler
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -239,3 +243,83 @@ func TestNextDailyTimeAndDuplicateProtection(t *testing.T) {
 func strPtr(s string) *string { return &s }
 
 var _ = atomic.Bool{}
+
+func TestSchedulerCronSecondsAndWebhooks(t *testing.T) {
+	var received []map[string]any
+	var recMu sync.Mutex
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		recMu.Lock()
+		received = append(received, body)
+		recMu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	fh := &fakeRoutineHarness{reply: "NO_REPLY"}
+	h, _ := newTestSchedulerHub(t, fh)
+	s := New(h)
+	h.SetOnSchedulesChanged(s.Sync)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer func() {
+		cancel()
+		s.Wait()
+	}()
+	s.Start(ctx)
+
+	// Webhook-only routine with outbound webhookUrl: NO_REPLY must NOT push outbound webhook.
+	if _, err := h.CreateRoutine("ops", config.ScheduleConfig{
+		ID:             "hook-job",
+		Name:           "Hook Job",
+		WebhookTrigger: true,
+		WebhookURL:     srv.URL,
+		Prompt:         "handle event",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	res, err := s.TriggerWebhook(ctx, "ops", "hook-job", `{"ok":true}`)
+	if err != nil || res.Status != "silent" {
+		t.Fatalf("expected silent webhook run, got %+v err=%v", res, err)
+	}
+	recMu.Lock()
+	if len(received) != 0 {
+		t.Fatalf("expected 0 outbound webhooks on NO_REPLY, got %d", len(received))
+	}
+	recMu.Unlock()
+
+	// Real output -> pushes outbound webhook and injects payload in prompt.
+	fh.mu.Lock()
+	fh.reply = "alert handled"
+	fh.mu.Unlock()
+	res, err = s.TriggerWebhook(ctx, "ops", "hook-job", `{"event":"deploy"}`)
+	if err != nil || res.Status != "ok" {
+		t.Fatalf("expected ok webhook run, got %+v err=%v", res, err)
+	}
+	fh.mu.Lock()
+	lastCall := fh.calls[len(fh.calls)-1]
+	fh.mu.Unlock()
+	if !strings.Contains(lastCall.Prompt, "[Webhook Payload]") || !strings.Contains(lastCall.Prompt, `{"event":"deploy"}`) {
+		t.Fatalf("expected webhook payload in prompt, got:\n%s", lastCall.Prompt)
+	}
+	recMu.Lock()
+	if len(received) != 1 || received[0]["event"] != "routine.completed" || received[0]["output"] != "alert handled" {
+		t.Fatalf("unexpected outbound webhook payload: %+v", received)
+	}
+	recMu.Unlock()
+
+	// Second-level cron (@every 1s) arms and computes NextRunAt.
+	if _, err := h.CreateRoutine("ops", config.ScheduleConfig{
+		ID:     "sec-cron",
+		Name:   "Sec Cron",
+		Cron:   "@every 1s",
+		Prompt: "ping",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	st := s.Status("ops")["sec-cron"]
+	if st.NextRunAt == "" {
+		t.Fatalf("expected NextRunAt for second-level cron, got %+v", st)
+	}
+}
