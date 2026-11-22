@@ -80,6 +80,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   // Magpie
   const [harnessModelsDraft, setHarnessModelsDraft] = useState<Record<string, string>>({});
   const [magpieModels, setMagpieModels] = useState<Record<string, string[]>>({});
+  const [connectingHarnessId, setConnectingHarnessId] = useState('');
   const [magpieBusyId, setMagpieBusyId] = useState('');
   const [copiedKey, setCopiedKey] = useState('');
 
@@ -307,21 +308,37 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   }, [hidden, tab]);
 
   useEffect(() => {
-    if (hidden || tab !== 'models' || !settings?.magpie?.installed) return;
-    let cancelled = false;
-    for (const h of settings.harnesses || []) {
-      if (h.magpie?.connected || magpieModels[h.id]) continue;
-      api<{ models?: string[] }>(`/api/models?harness=${encodeURIComponent(h.id)}&source=magpie`)
-        .then((d) => {
-          if (cancelled) return;
-          setMagpieModels((prev) => ({ ...prev, [h.id]: d.models || [] }));
-        })
-        .catch(() => {});
+    if (hidden || tab !== 'models') return;
+    for (const h of settings?.harnesses || []) {
+      if (models[h.id] === undefined) {
+        void onLoadModels(h.id);
+      }
     }
+  }, [hidden, tab, settings?.harnesses, models, onLoadModels]);
+
+  useEffect(() => {
+    if (hidden || tab !== 'models' || !settings?.magpie?.installed || !connectingHarnessId) return;
+    if (magpieModels[connectingHarnessId]) return;
+    let cancelled = false;
+    api<{ models?: string[] }>(`/api/models?harness=${encodeURIComponent(connectingHarnessId)}&source=magpie`)
+      .then((d) => {
+        if (cancelled) return;
+        setMagpieModels((prev) => ({ ...prev, [connectingHarnessId]: d.models || [] }));
+      })
+      .catch(() => {});
     return () => {
       cancelled = true;
     };
-  }, [hidden, tab, settings?.magpie?.installed, settings?.harnesses, magpieModels]);
+  }, [hidden, tab, settings?.magpie?.installed, connectingHarnessId, magpieModels]);
+
+  const connectedHarnesses = useMemo(
+    () => (settings?.harnesses || []).filter((h) => Boolean(h.magpie?.connected)),
+    [settings?.harnesses]
+  );
+  const nativeHarnesses = useMemo(
+    () => (settings?.harnesses || []).filter((h) => !h.magpie?.connected),
+    [settings?.harnesses]
+  );
 
   const globalModels = useMemo(() => {
     const seen = new Set<string>();
@@ -423,6 +440,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         return copy;
       });
       onSettingsUpdated(next);
+      setConnectingHarnessId('');
       onResetModels();
       void onLoadModels(hId, true);
       onToast(t('mpConnectedToast', { label: hLabel }));
@@ -533,64 +551,20 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 <div id="sMagpieBox" className="set-stack">
                   <p className="set-card-desc">{t('magpieIntro')}</p>
                   <div id="sMagpieHarnesses" className="stack6">
-                    {(settings?.harnesses || []).map((h) => {
-                      const conn = Boolean(h.magpie?.connected);
-                      const activeModel = (h.magpie?.model || '').trim();
-                      const fallbackVal = conn
-                        ? activeModel
-                        : defaultModel.trim() || h.defaultModel || '';
-                      const curVal = harnessModelsDraft[h.id] ?? fallbackVal;
-                      const isBusy = magpieBusyId === h.id;
-                      return (
-                        <div key={h.id} className="mp-hrow">
-                          <div className="mp-hname">
-                            <span>{h.label}</span>
-                            {conn ? (
+                    {connectedHarnesses.length === 0 ? (
+                      <div className="sub">{t('mpNoConnected')}</div>
+                    ) : (
+                      connectedHarnesses.map((h) => {
+                        const activeModel = (h.magpie?.model || '').trim();
+                        const isBusy = magpieBusyId === h.id;
+                        return (
+                          <div key={h.id} className="mp-hrow">
+                            <div className="mp-hname">
+                              <span>{h.label}</span>
                               <small className="text-sage">{t('mpConnected')}</small>
-                            ) : (
-                              <small>
-                                {t('mpNative')}
-                                {h.magpie?.nativeModel ? ` · ${h.magpie.nativeModel}` : ''}
-                              </small>
-                            )}
-                          </div>
-                          {conn ? (
+                            </div>
                             <span className="mp-hmodel">{activeModel}</span>
-                          ) : (
-                          <input
-                            className="mono"
-                            list={`models-magpie-${h.id}`}
-                            placeholder={t('mpModelPh')}
-                            spellCheck={false}
-                            disabled={isBusy}
-                            value={curVal}
-                            onChange={(e) => {
-                              const nextVal = e.target.value;
-                              setHarnessModelsDraft((prev) => ({ ...prev, [h.id]: nextVal }));
-                            }}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
-                                e.preventDefault();
-                                void applyHarnessMagpie(h.id, h.label, curVal);
-                              }
-                            }}
-                          />
-                          )}
-                          <div className="mp-hacts">
-                            {!conn && (
-                              <button
-                                type="button"
-                                className="mp go"
-                                disabled={isBusy}
-                                onClick={() => {
-                                  const model = curVal.trim() || defaultModel.trim();
-                                  void applyHarnessMagpie(h.id, h.label, model);
-                                }}
-                              >
-                                {t('mpConnect')}
-                              </button>
-                            )}
-                            {conn && (
+                            <div className="mp-hacts">
                               <button
                                 type="button"
                                 className="mp"
@@ -616,11 +590,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                               >
                                 {t('mpRestoreNative')}
                               </button>
-                            )}
+                            </div>
                           </div>
-                        </div>
-                      );
-                    })}
+                        );
+                      })
+                    )}
                   </div>
 
                   <div className="mp-open">
@@ -682,6 +656,91 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 </div>
               )}
             </section>
+
+            {nativeHarnesses.length > 0 && (
+              <section id="sNativeClisCard" className="set-card">
+                <div className="set-card-hd">
+                  <h2>{t('nativeClisTitle')}</h2>
+                </div>
+                <p className="set-card-desc">{t('nativeClisIntro')}</p>
+                <div id="sNativeHarnesses" className="stack6">
+                  {nativeHarnesses.map((h) => {
+                    const isBusy = magpieBusyId === h.id;
+                    const isConnecting = connectingHarnessId === h.id;
+                    const draftMagpie = harnessModelsDraft[h.id] ?? '';
+                    return (
+                      <div key={h.id} className="mp-native-item">
+                        <div className="mp-hrow">
+                          <div className="mp-hname">
+                            <span>{h.label}</span>
+                            <small>
+                              {t('mpNative')}
+                              {h.magpie?.nativeModel ? ` · ${h.magpie.nativeModel}` : ''}
+                            </small>
+                          </div>
+                          <input
+                            className="mono"
+                            list={`models-${h.id}`}
+                            placeholder={t('nativeModelPh')}
+                            spellCheck={false}
+                            disabled={isBusy}
+                            value={defaultModelsDraft[h.id] || ''}
+                            onFocus={() => void onLoadModels(h.id)}
+                            onChange={(e) =>
+                              setDefaultModelsDraft((prev) => ({ ...prev, [h.id]: e.target.value }))
+                            }
+                          />
+                          <div className="mp-hacts">
+                            {mp?.installed && (
+                              <button
+                                type="button"
+                                className="mp"
+                                disabled={isBusy}
+                                onClick={() =>
+                                  setConnectingHarnessId((prev) => (prev === h.id ? '' : h.id))
+                                }
+                              >
+                                {isConnecting ? t('mpConnectCancel') : t('mpConnectAction')}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                        {mp?.installed && isConnecting && (
+                          <div className="mp-connect-drawer">
+                            <input
+                              className="mono"
+                              list={`models-magpie-${h.id}`}
+                              placeholder={t('mpModelPh')}
+                              spellCheck={false}
+                              disabled={isBusy}
+                              value={draftMagpie}
+                              onChange={(e) => {
+                                const nextVal = e.target.value;
+                                setHarnessModelsDraft((prev) => ({ ...prev, [h.id]: nextVal }));
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  void applyHarnessMagpie(h.id, h.label, draftMagpie);
+                                }
+                              }}
+                            />
+                            <button
+                              type="button"
+                              className="mp go"
+                              disabled={isBusy}
+                              onClick={() => void applyHarnessMagpie(h.id, h.label, draftMagpie)}
+                            >
+                              {t('mpConnect')}
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
+            )}
 
             <section className="set-card">
               <div className="set-card-hd">

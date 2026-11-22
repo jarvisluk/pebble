@@ -180,6 +180,16 @@ export default function SettingsScreen() {
 
   const primaryHarness = harnessOptions[0]?.id || 'opencode';
 
+  const connectedHarnesses = useMemo(
+    () => harnessOptions.filter((h) => Boolean(h.magpie?.connected)),
+    [harnessOptions]
+  );
+
+  const nativeHarnesses = useMemo(
+    () => harnessOptions.filter((h) => !h.magpie?.connected),
+    [harnessOptions]
+  );
+
   const botUpdates = useMemo(() => {
     const out: { id: string; harness: string; model: string }[] = [];
     for (const b of bots) {
@@ -389,43 +399,30 @@ export default function SettingsScreen() {
               <Text style={[styles.noteTxt, { color: theme.text2 }]}>
                 {t('hostNoMagpieGlobal')}
               </Text>
+            ) : connectedHarnesses.length === 0 ? (
+              <Text style={[styles.noteTxt, { color: theme.mute }]}>
+                {t('mpNoConnected')}
+              </Text>
             ) : (
               <View style={styles.magpieList}>
-                {harnessOptions.map((h) => {
+                {connectedHarnesses.map((h) => {
                   return (
                     <View key={h.id} style={[styles.magpieRow, { flexDirection: 'column', alignItems: 'stretch' }]}>
                       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
                         <View style={styles.magpieInfo}>
                           <Text style={[styles.magpieName, { color: theme.text }]}>{h.label || h.id}</Text>
                           <Text numberOfLines={1} style={[styles.magpieSub, { color: theme.mute, fontFamily: MONO_FONT }]}>
-                            {h.magpie.connected
-                              ? `Magpie · ${h.magpie.model || t('mpConnected')}`
-                              : `${t('mpNative')}${h.magpie.nativeModel ? ` · ${h.magpie.nativeModel}` : ''}`}
+                            {`Magpie · ${h.magpie.model || t('mpConnected')}`}
                           </Text>
                         </View>
                         <View style={styles.magpieActs}>
-                          {!h.magpie.connected && (
-                            <Pressable
-                              disabled={busyAction === `magpie:${h.id}`}
-                              onPress={() => onConnectMagpie(h.id)}
-                              style={[styles.magpieBtn, { backgroundColor: theme.accent }]}
-                            >
-                              {busyAction === `magpie:${h.id}` ? (
-                                <ActivityIndicator size="small" color={theme.accentText} />
-                              ) : (
-                                <Text style={[styles.magpieBtnTxt, { color: theme.accentText }]}>{t('mpConnect')}</Text>
-                              )}
-                            </Pressable>
-                          )}
-                          {h.magpie.connected && (
-                            <Pressable
-                              disabled={busyAction === `magpie:${h.id}`}
-                              onPress={() => onDisconnectMagpie(h.id)}
-                              style={[styles.magpieBtn, { backgroundColor: theme.card }]}
-                            >
-                              <Text style={[styles.magpieBtnTxt, { color: theme.danger }]}>{t('mpRestore')}</Text>
-                            </Pressable>
-                          )}
+                          <Pressable
+                            disabled={busyAction === `magpie:${h.id}`}
+                            onPress={() => onDisconnectMagpie(h.id)}
+                            style={[styles.magpieBtn, { backgroundColor: theme.card }]}
+                          >
+                            <Text style={[styles.magpieBtnTxt, { color: theme.danger }]}>{t('mpRestore')}</Text>
+                          </Pressable>
                         </View>
                       </View>
                     </View>
@@ -443,6 +440,95 @@ export default function SettingsScreen() {
               </View>
             )}
           </View>
+
+          {nativeHarnesses.length > 0 && (
+            <View style={[styles.card, { backgroundColor: theme.card }]}>
+              <Text style={[styles.sectionTitle, { color: theme.text }]}>{t('nativeClisTitle')}</Text>
+              <Text style={[styles.noteTxt, { color: theme.mute }]}>{t('nativeClisIntro')}</Text>
+              <View style={styles.magpieList}>
+                {nativeHarnesses.map((h) => {
+                  const nativeCands = models[h.id] || [];
+                  const curVal = defaultModelsDraft[h.id] || '';
+                  return (
+                    <View key={h.id} style={[styles.magpieRow, { flexDirection: 'column', alignItems: 'stretch', gap: 8 }]}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                        <View style={styles.magpieInfo}>
+                          <Text style={[styles.magpieName, { color: theme.text }]}>{h.label || h.id}</Text>
+                          <Text numberOfLines={1} style={[styles.magpieSub, { color: theme.mute, fontFamily: MONO_FONT }]}>
+                            {`${t('mpNative')}${h.magpie?.nativeModel ? ` · ${h.magpie.nativeModel}` : ''}`}
+                          </Text>
+                        </View>
+                        <View style={styles.magpieActs}>
+                          <Pressable
+                            disabled={loadingModelsFor === h.id}
+                            onPress={() => void onLoadModels(h.id)}
+                            style={[styles.smallBtn, { backgroundColor: theme.card }]}
+                          >
+                            <Text style={[styles.smallBtnTxt, { color: theme.text2 }]}>
+                              {loadingModelsFor === h.id ? t('loading') : t('optionalModels')}
+                            </Text>
+                          </Pressable>
+                          {mp?.installed && (
+                            <Pressable
+                              disabled={busyAction === `magpie:${h.id}`}
+                              onPress={() => onConnectMagpie(h.id)}
+                              style={[styles.smallBtn, { backgroundColor: theme.card }]}
+                            >
+                              {busyAction === `magpie:${h.id}` ? (
+                                <ActivityIndicator size="small" color={theme.accent} />
+                              ) : (
+                                <Text style={[styles.smallBtnTxt, { color: theme.accent }]}>{t('mpConnectAction')}</Text>
+                              )}
+                            </Pressable>
+                          )}
+                        </View>
+                      </View>
+                      <TextInput
+                        value={curVal}
+                        onChangeText={(val) => {
+                          setDefaultModelsTouched(true);
+                          setSavedMsg('');
+                          setDefaultModelsDraft((prev) => ({ ...prev, [h.id]: val }));
+                        }}
+                        placeholder={t('nativeModelPh')}
+                        placeholderTextColor={theme.mute}
+                        autoCapitalize="none"
+                        autoCorrect={false}
+                        style={[styles.input, { backgroundColor: theme.card, color: theme.text, fontFamily: MONO_FONT }]}
+                      />
+                      {nativeCands.length > 0 && (
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.pillRow}>
+                          {nativeCands.slice(0, 16).map((m) => (
+                            <Pressable
+                              key={m}
+                              onPress={() => {
+                                setDefaultModelsTouched(true);
+                                setSavedMsg('');
+                                setDefaultModelsDraft((prev) => ({ ...prev, [h.id]: m }));
+                              }}
+                              style={[
+                                styles.pill,
+                                { backgroundColor: curVal.trim() === m ? theme.accentSoft : theme.card },
+                              ]}
+                            >
+                              <Text
+                                style={[
+                                  styles.modelChipTxt,
+                                  { color: curVal.trim() === m ? theme.accent : theme.text2, fontFamily: MONO_FONT },
+                                ]}
+                              >
+                                {m}
+                              </Text>
+                            </Pressable>
+                          ))}
+                        </ScrollView>
+                      )}
+                    </View>
+                  );
+                })}
+              </View>
+            </View>
+          )}
 
           <View style={[styles.card, { backgroundColor: theme.card }]}>
             <Text style={[styles.sectionTitle, { color: theme.text }]}>{t('appearance')}</Text>

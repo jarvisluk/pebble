@@ -61,6 +61,19 @@ func TestParseAgentStatusLine(t *testing.T) {
 			wantConn:   false,
 			wantNative: "sonnet",
 		},
+		{
+			name:     "agy native status placeholder",
+			prefix:   "magpie/",
+			raw:      "  Antigravity CLI  status  ·  effort —  ~/.gemini/antigravity-cli/settings.json",
+			wantConn: false,
+		},
+		{
+			name:       "grok native model",
+			prefix:     "magpie/",
+			raw:        "  Grok Build  grok-4.7  ·  effort high  ~/.grok/config.toml",
+			wantConn:   false,
+			wantNative: "grok-4.7",
+		},
 	}
 
 	for _, tc := range cases {

@@ -301,7 +301,8 @@ func parseAgentStatusLine(prefix, raw string, catalog []string) (connected bool,
 	if connected {
 		return true, val, ""
 	}
-	if val != "" && val != "—" && val != "-" && !strings.HasPrefix(val, "·") {
+	if val != "" && val != "—" && val != "-" && !strings.HasPrefix(val, "·") &&
+		!strings.EqualFold(val, "status") && !strings.Contains(val, " ") {
 		return false, "", val
 	}
 	return false, "", ""

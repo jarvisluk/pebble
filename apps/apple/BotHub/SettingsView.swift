@@ -71,6 +71,7 @@ struct SettingsView: View {
             if !saved.isEmpty { Section { StatusText(text: saved, error: false) } }
             hostSection
             magpieSection
+            nativeCLISection
             appearanceSection
             defaultModelSection
             botModelsSection
@@ -190,6 +191,14 @@ struct SettingsView: View {
 
     // MARK: Magpie
 
+    private var connectedHarnesses: [HarnessInfo] {
+        harnesses.filter { $0.magpie?.connected == true }
+    }
+
+    private var nativeHarnesses: [HarnessInfo] {
+        harnesses.filter { $0.magpie?.connected != true }
+    }
+
     private var magpieSection: some View {
         let mp = hub.settings?.magpie
         let installed = mp?.installed == true
@@ -197,8 +206,10 @@ struct SettingsView: View {
             Section {
                 if !installed {
                     Text(hub.t("hostNoMagpieGlobal")).foregroundStyle(.secondary)
+                } else if connectedHarnesses.isEmpty {
+                    Text(hub.t("mpNoConnected")).foregroundStyle(.secondary)
                 } else {
-                    ForEach(harnesses) { h in harnessRow(h) }
+                    ForEach(connectedHarnesses) { h in harnessRow(h) }
                 }
             } header: {
                 HStack {
@@ -270,6 +281,68 @@ struct SettingsView: View {
                 return hub.t("connectedMagpie", ["label": h.id])
             }
         }
+    }
+
+    private var nativeCLISection: some View {
+        let installed = hub.settings?.magpie?.installed == true
+        return Group {
+            if !nativeHarnesses.isEmpty {
+                Section {
+                    ForEach(nativeHarnesses) { h in nativeHarnessRow(h, magpieInstalled: installed) }
+                } header: {
+                    Text(hub.t("nativeClisTitle"))
+                } footer: {
+                    Text(hub.t("nativeClisIntro"))
+                }
+            }
+        }
+    }
+
+    private func nativeHarnessRow(_ h: HarnessInfo, magpieInstalled: Bool) -> some View {
+        let cands = hub.models[h.id] ?? []
+        let key = "magpie:\(h.id)"
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(h.title).font(.system(size: 16, weight: .semibold))
+                    Text(hub.t("mpNative") + ((h.magpie?.nativeModel ?? "").isEmpty ? "" : " · \(h.magpie!.nativeModel!)"))
+                        .font(.system(size: 13)).foregroundStyle(.secondary).lineLimit(1)
+                }
+                Spacer()
+                if busy == key { ProgressView().controlSize(.small) }
+                if magpieInstalled {
+                    Button(hub.t("mpConnectAction")) { connectMagpie(h) }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(busy == key)
+                }
+            }
+            HStack {
+                TextField(h.title, text: Binding(
+                    get: { perHarness[h.id] ?? "" },
+                    set: { perHarness[h.id] = $0; perTouched = true; saved = "" }
+                ), prompt: Text(hub.t("nativeModelPh")))
+                    .monoInput()
+                    .labelsHidden()
+                Menu {
+                    if cands.isEmpty {
+                        Button(loadingModelsFor == h.id ? hub.t("loading") : hub.t("optionalModels")) {
+                            loadCands(for: h.id)
+                        }
+                    } else {
+                        ForEach(Array(cands.prefix(40)), id: \.self) { m in
+                            Button(m) { perHarness[h.id] = m; perTouched = true; saved = "" }
+                        }
+                    }
+                } label: {
+                    Label(hub.t("optionalModels"), systemImage: "list.bullet").labelStyle(.iconOnly)
+                }
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .onAppear { if cands.isEmpty, hub.isConnected { loadCands(for: h.id) } }
+            }
+        }
+        .padding(.vertical, 2)
     }
 
     // MARK: 外观
@@ -351,11 +424,12 @@ struct SettingsView: View {
         }
     }
 
-    private func loadCands() {
+    private func loadCands(for harness: String? = nil) {
+        let target = harness ?? primaryHarness
         guard loadingModelsFor.isEmpty else { return }
-        loadingModelsFor = primaryHarness
+        loadingModelsFor = target
         Task {
-            do { try await hub.loadModels(primaryHarness) } catch { self.error = errText(error, hub.t("loadModelsFailed")) }
+            do { _ = try await hub.loadModels(target) } catch { self.error = errText(error, hub.t("loadModelsFailed")) }
             loadingModelsFor = ""
         }
     }
