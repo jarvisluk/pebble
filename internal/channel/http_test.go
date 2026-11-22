@@ -636,3 +636,88 @@ func TestDesktopSetupAndPowerRoutes(t *testing.T) {
 		t.Fatalf("unexpected setup status %d: %s", setupRec.Code, setupRec.Body.String())
 	}
 }
+
+func TestQuestionsHTTPAPI(t *testing.T) {
+	tmp := t.TempDir()
+	store, _ := state.NewStore(filepath.Join(tmp, "sessions.json"))
+	msgStore, _ := state.NewMessageStore(filepath.Join(tmp, "messages"))
+	reg := harness.NewRegistry()
+	reg.Register(noopHarness{kind: "opencode"})
+	cfg := &config.HubConfig{
+		ProjectRoot: tmp,
+		SharedDir:   filepath.Join(tmp, "workspaces", "_shared"),
+		StateFile:   filepath.Join(tmp, "sessions.json"),
+		MessagesDir: filepath.Join(tmp, "messages"),
+		Bots: []config.BotConfig{
+			{ID: "ops", Name: "Ops", Workspace: filepath.Join(tmp, "ops"), Harness: "opencode"},
+		},
+	}
+	h := hub.New(cfg, store, msgStore, reg)
+	defer h.Close()
+
+	s := NewHTTPServer(h, config.HTTPConfig{Host: "127.0.0.1"})
+	defer s.Shutdown(t.Context())
+	mux := s.srv.Handler
+
+	type askOut struct {
+		resp harness.QuestionResponse
+		err  error
+	}
+	askDone := make(chan askOut, 1)
+	go func() {
+		resp, err := h.AskQuestion(context.Background(), cfg.Bots[0], harness.QuestionRequest{
+			ID:    "frm_http",
+			Title: "Pick",
+			Fields: []harness.QuestionField{
+				{Key: "q0", Title: "Drink", Type: "string"},
+			},
+		})
+		askDone <- askOut{resp, err}
+	}()
+
+	var qID string
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		listReq := httptest.NewRequest(http.MethodGet, "/api/questions?botId=ops", nil)
+		listReq.Host = "127.0.0.1:3789"
+		listRec := httptest.NewRecorder()
+		mux.ServeHTTP(listRec, listReq)
+		if listRec.Code != http.StatusOK {
+			t.Fatalf("GET /api/questions failed: %d", listRec.Code)
+		}
+		var body struct {
+			Items []hub.PendingQuestion `json:"items"`
+		}
+		_ = json.Unmarshal(listRec.Body.Bytes(), &body)
+		if len(body.Items) == 1 {
+			qID = body.Items[0].ID
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if qID == "" {
+		t.Fatalf("expected 1 pending question via GET /api/questions")
+	}
+
+	replyReq := httptest.NewRequest(http.MethodPost, "/api/questions/"+qID+"/reply", bytes.NewBufferString(`{"answers":{"q0":"coffee"}}`))
+	replyReq.Host = "127.0.0.1:3789"
+	replyRec := httptest.NewRecorder()
+	mux.ServeHTTP(replyRec, replyReq)
+	if replyRec.Code != http.StatusOK {
+		t.Fatalf("POST /api/questions/{id}/reply failed: %d %s", replyRec.Code, replyRec.Body.String())
+	}
+
+	out := <-askDone
+	if out.err != nil || out.resp.Cancelled || out.resp.Answers["q0"] != "coffee" {
+		t.Fatalf("unexpected AskQuestion result: %+v err=%v", out.resp, out.err)
+	}
+
+	// Missing ID -> 404.
+	missingReq := httptest.NewRequest(http.MethodPost, "/api/questions/"+qID+"/reply", bytes.NewBufferString(`{"cancelled":true}`))
+	missingReq.Host = "127.0.0.1:3789"
+	missingRec := httptest.NewRecorder()
+	mux.ServeHTTP(missingRec, missingReq)
+	if missingRec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for settled question, got %d", missingRec.Code)
+	}
+}

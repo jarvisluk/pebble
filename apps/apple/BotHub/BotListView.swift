@@ -168,6 +168,9 @@ struct BotRow: View {
         let lastMsg = hub.last[bot.id]
         let unread = hub.unread[bot.id] ?? 0
         let (sub, subColor): (String, Color) = {
+            if hub.questions.contains(where: { $0.botId == bot.id }) {
+                return (hub.t("questionWaitingBadge"), p.busy)
+            }
             if bot.isBusy {
                 if let tool = hub.tools[bot.id], !tool.isEmpty { return (hub.t("callingTool", ["tool": tool]), p.busy) }
                 return (hub.t("thinking"), p.busy)

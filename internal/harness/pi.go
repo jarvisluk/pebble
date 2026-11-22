@@ -41,27 +41,33 @@ type piEvent struct {
 	Data    struct {
 		Disposition string `json:"disposition"`
 	} `json:"data"`
-	Method   string `json:"method"`
-	ToolName string `json:"toolName"`
-	Aborted  bool   `json:"aborted"`
-	Message  *struct {
-		Role    string          `json:"role"`
-		Content json.RawMessage `json:"content"`
-		Stop    string          `json:"stopReason"`
-		ErrMsg  string          `json:"errorMessage"`
-		Usage   *struct {
-			Input     int `json:"input"`
-			Output    int `json:"output"`
-			CacheRead int `json:"cacheRead"`
-			Cost      struct {
-				Total float64 `json:"total"`
-			} `json:"cost"`
-		} `json:"usage"`
-	} `json:"message"`
-	AME *struct {
+	Method      string          `json:"method"`
+	Title       string          `json:"title"`
+	Options     []string        `json:"options"`
+	Placeholder string          `json:"placeholder"`
+	Prefill     string          `json:"prefill"`
+	ToolName    string          `json:"toolName"`
+	Aborted     bool            `json:"aborted"`
+	Message     json.RawMessage `json:"message"`
+	AME         *struct {
 		Type  string `json:"type"`
 		Delta string `json:"delta"`
 	} `json:"assistantMessageEvent"`
+}
+
+type piEventMessage struct {
+	Role    string          `json:"role"`
+	Content json.RawMessage `json:"content"`
+	Stop    string          `json:"stopReason"`
+	ErrMsg  string          `json:"errorMessage"`
+	Usage   *struct {
+		Input     int `json:"input"`
+		Output    int `json:"output"`
+		CacheRead int `json:"cacheRead"`
+		Cost      struct {
+			Total float64 `json:"total"`
+		} `json:"cost"`
+	} `json:"usage"`
 }
 
 func NewPiHarness() *PiHarness {
@@ -270,10 +276,23 @@ func (h *PiHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnResult, 
 	var lastErr string
 	interrupted := false
 	var abortDeadline <-chan time.Time
+	var formMu sync.Mutex
+	activeForms := make(map[string]context.CancelFunc)
+	cancelAllForms := func() {
+		formMu.Lock()
+		for id, cancel := range activeForms {
+			cancel()
+			delete(activeForms, id)
+		}
+		formMu.Unlock()
+	}
+	defer cancelAllForms()
+
 	for {
 		select {
 		case <-ctxDone(ctx, interrupted):
 			interrupted = true
+			cancelAllForms()
 			_ = p.send(map[string]any{"type": "abort"})
 			abortDeadline = time.After(10 * time.Second)
 		case <-abortDeadline:
@@ -300,8 +319,8 @@ func (h *PiHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnResult, 
 					opts.OnToolUse(evt.ToolName)
 				}
 			case "message_end":
-				m := evt.Message
-				if m == nil || m.Role != "assistant" {
+				var m piEventMessage
+				if len(evt.Message) == 0 || json.Unmarshal(evt.Message, &m) != nil || m.Role != "assistant" {
 					continue
 				}
 				if t := strings.TrimSpace(piText(m.Content)); t != "" {
@@ -319,10 +338,52 @@ func (h *PiHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnResult, 
 					usage.CostUSD += u.Cost.Total
 				}
 			case "extension_ui_request":
-				// No UI here: dismiss dialogs so extensions never block a turn.
 				switch evt.Method {
 				case "select", "confirm", "input", "editor":
-					_ = p.send(map[string]any{"type": "extension_ui_response", "id": evt.ID, "cancelled": true})
+					if opts.OnQuestion == nil {
+						_ = p.send(map[string]any{"type": "extension_ui_response", "id": evt.ID, "cancelled": true})
+						continue
+					}
+					req, ok := piQuestionRequest(evt)
+					if !ok {
+						_ = p.send(map[string]any{"type": "extension_ui_response", "id": evt.ID, "cancelled": true})
+						continue
+					}
+					qCtx, qCancel := context.WithCancel(ctx)
+					reqID := evt.ID
+					method := evt.Method
+					formMu.Lock()
+					if prev, exists := activeForms[reqID]; exists {
+						prev()
+					}
+					activeForms[reqID] = qCancel
+					formMu.Unlock()
+					go func() {
+						defer qCancel()
+						resp, err := opts.OnQuestion(qCtx, req)
+						formMu.Lock()
+						delete(activeForms, reqID)
+						formMu.Unlock()
+						if qCtx.Err() != nil && ctx.Err() != nil {
+							_ = p.send(map[string]any{"type": "extension_ui_response", "id": reqID, "cancelled": true})
+							return
+						}
+						if err != nil || resp.Cancelled {
+							_ = p.send(map[string]any{"type": "extension_ui_response", "id": reqID, "cancelled": true})
+							return
+						}
+						val := resp.Answers["value"]
+						if method == "confirm" {
+							b, _ := val.(bool)
+							_ = p.send(map[string]any{"type": "extension_ui_response", "id": reqID, "confirmed": b})
+							return
+						}
+						s := ""
+						if val != nil {
+							s = fmt.Sprint(val)
+						}
+						_ = p.send(map[string]any{"type": "extension_ui_response", "id": reqID, "value": s})
+					}()
 				}
 			case "agent_settled":
 				partial.Usage = usage
@@ -397,4 +458,42 @@ func piText(raw json.RawMessage) string {
 		}
 	}
 	return strings.Join(parts, "")
+}
+
+func piQuestionRequest(evt piEvent) (QuestionRequest, bool) {
+	if evt.ID == "" {
+		return QuestionRequest{}, false
+	}
+	var msg string
+	if len(evt.Message) > 0 {
+		_ = json.Unmarshal(evt.Message, &msg)
+	}
+	field := QuestionField{
+		Key:         "value",
+		Title:       evt.Title,
+		Description: msg,
+		Required:    true,
+	}
+	switch evt.Method {
+	case "select":
+		field.Type = "string"
+		for _, opt := range evt.Options {
+			field.Options = append(field.Options, QuestionOption{Value: opt, Label: opt})
+		}
+	case "confirm":
+		field.Type = "boolean"
+	case "input", "editor":
+		field.Type = "string"
+		field.Placeholder = evt.Placeholder
+		if evt.Prefill != "" {
+			field.Default = evt.Prefill
+		}
+	default:
+		return QuestionRequest{}, false
+	}
+	return QuestionRequest{
+		ID:     evt.ID,
+		Title:  evt.Title,
+		Fields: []QuestionField{field},
+	}, true
 }

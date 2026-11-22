@@ -56,6 +56,9 @@ var ocEventTypes = []string{
 	"session.execution.failed",
 	"session.execution.interrupted",
 	"permission.asked",
+	"form.created",
+	"form.replied",
+	"form.cancelled",
 }
 
 func NewOpenCodeHarness(externalURL string) *OpenCodeHarness {
@@ -215,12 +218,22 @@ func (h *OpenCodeHarness) eventLoop(ctx context.Context, base, pw string, ready 
 func (h *OpenCodeHarness) dispatch(evt ocEvent) {
 	var d struct {
 		SessionID string `json:"sessionID"`
+		Form      *struct {
+			SessionID string `json:"sessionID"`
+		} `json:"form"`
 	}
-	if json.Unmarshal(evt.Data, &d) != nil || d.SessionID == "" {
+	if json.Unmarshal(evt.Data, &d) != nil {
+		return
+	}
+	sid := d.SessionID
+	if sid == "" && d.Form != nil {
+		sid = d.Form.SessionID
+	}
+	if sid == "" {
 		return
 	}
 	h.subsMu.Lock()
-	ch := h.subs[d.SessionID]
+	ch := h.subs[sid]
 	h.subsMu.Unlock()
 	if ch == nil {
 		return
@@ -228,7 +241,7 @@ func (h *OpenCodeHarness) dispatch(evt ocEvent) {
 	select {
 	case ch <- evt:
 	default:
-		log.Printf("[opencode] dropped %s for %s (consumer lagging)", evt.Type, d.SessionID)
+		log.Printf("[opencode] dropped %s for %s (consumer lagging)", evt.Type, sid)
 	}
 }
 
@@ -320,10 +333,33 @@ func (h *OpenCodeHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnRe
 
 	var texts []string
 	var usage Usage
+	var formMu sync.Mutex
+	activeForms := make(map[string]context.CancelFunc)
+	cancelAllForms := func() {
+		formMu.Lock()
+		for id, cancel := range activeForms {
+			cancel()
+			delete(activeForms, id)
+		}
+		formMu.Unlock()
+	}
+	defer cancelAllForms()
+
+	cancelForm := func(formID, msg string) {
+		path := "/api/session/" + sid + "/form/" + url.PathEscape(formID)
+		if msg != "" {
+			path += "?message=" + url.QueryEscape(msg)
+		}
+		cctx, ccancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer ccancel()
+		_, _ = api.do(cctx, http.MethodDelete, path, nil, nil)
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
 			// Stop the running execution so the session is free for the next turn.
+			cancelAllForms()
 			partial.Text = strings.Join(texts, "\n")
 			ictx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			_, _ = api.do(ictx, http.MethodPost, "/api/session/"+sid+"/interrupt", nil, nil)
@@ -350,6 +386,22 @@ func (h *OpenCodeHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnRe
 				Error *struct {
 					Message string `json:"message"`
 				} `json:"error"`
+				Form *struct {
+					ID     string `json:"id"`
+					Title  string `json:"title"`
+					Fields []struct {
+						Key         string           `json:"key"`
+						Title       string           `json:"title"`
+						Description string           `json:"description"`
+						Type        string           `json:"type"`
+						Required    bool             `json:"required"`
+						Hidden      bool             `json:"hidden"`
+						Placeholder string           `json:"placeholder"`
+						Default     any              `json:"default"`
+						Options     []QuestionOption `json:"options"`
+						Custom      bool             `json:"custom"`
+					} `json:"fields"`
+				} `json:"form"`
 			}
 			_ = json.Unmarshal(evt.Data, &d)
 			switch evt.Type {
@@ -378,6 +430,71 @@ func (h *OpenCodeHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnRe
 					decision = "once"
 				}
 				_, _ = api.do(ctx, http.MethodPost, "/api/session/"+sid+"/permission/"+d.ID+"/reply", map[string]any{"decision": decision}, nil)
+			case "form.created":
+				if d.Form == nil || d.Form.ID == "" {
+					continue
+				}
+				fields := make([]QuestionField, 0, len(d.Form.Fields))
+				for _, f := range d.Form.Fields {
+					if f.Hidden || f.Type == "external" {
+						continue
+					}
+					fields = append(fields, QuestionField{
+						Key:         f.Key,
+						Title:       f.Title,
+						Description: f.Description,
+						Type:        f.Type,
+						Required:    f.Required,
+						Placeholder: f.Placeholder,
+						Default:     f.Default,
+						Options:     f.Options,
+						Custom:      f.Custom,
+					})
+				}
+				if opts.OnQuestion == nil || len(fields) == 0 {
+					go cancelForm(d.Form.ID, "non-interactive")
+					continue
+				}
+				qCtx, qCancel := context.WithCancel(ctx)
+				formID := d.Form.ID
+				formTitle := d.Form.Title
+				formMu.Lock()
+				if prev, ok := activeForms[formID]; ok {
+					prev()
+				}
+				activeForms[formID] = qCancel
+				formMu.Unlock()
+				go func() {
+					defer qCancel()
+					resp, err := opts.OnQuestion(qCtx, QuestionRequest{
+						ID:     formID,
+						Title:  formTitle,
+						Fields: fields,
+					})
+					formMu.Lock()
+					delete(activeForms, formID)
+					formMu.Unlock()
+					if qCtx.Err() != nil {
+						if ctx.Err() != nil {
+							cancelForm(formID, "interrupted")
+						}
+						return
+					}
+					if err != nil || resp.Cancelled {
+						cancelForm(formID, resp.Message)
+						return
+					}
+					_, _ = api.do(ctx, http.MethodPost, "/api/session/"+sid+"/form/"+url.PathEscape(formID)+"/reply", map[string]any{"answer": resp.Answers}, nil)
+				}()
+			case "form.replied", "form.cancelled":
+				if d.ID != "" {
+					formMu.Lock()
+					if cancel, ok := activeForms[d.ID]; ok {
+						cancel()
+						delete(activeForms, d.ID)
+					}
+					formMu.Unlock()
+				}
 			case "session.execution.failed":
 				partial.Text = strings.Join(texts, "\n")
 				msg := "unknown error"

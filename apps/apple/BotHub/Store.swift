@@ -97,6 +97,7 @@ final class HubStore {
     var nodes: [NodeInfo] = []
     var tailcat: TailcatStatus?
     var takeovers: [TakeoverRequest] = []
+    var questions: [PendingQuestion] = []
     var desktopTargets: [DesktopTarget] = []
     var routines: [String: [RoutineItem]] = [:]
 
@@ -195,6 +196,8 @@ final class HubStore {
             if let arr = p["nodes"], let list = decodeAny(arr, as: [NodeInfo].self) { nodes = list }
         case "takeover":
             if let arr = p["items"], let list = decodeAny(arr, as: [TakeoverRequest].self) { takeovers = list }
+        case "questions":
+            if let arr = p["items"], let list = decodeAny(arr, as: [PendingQuestion].self) { questions = list }
         case "routine_updated", "routine_run":
             if let bid = p["botId"] as? String {
                 Task {
@@ -257,6 +260,7 @@ final class HubStore {
             Task { if let n: NodesResp = try? await client.call("/api/nodes"), seq == connSeq { nodes = n.nodes ?? [] } }
             Task { if let t: TailcatStatus = try? await client.call("/api/tailcat"), seq == connSeq { tailcat = t } }
             Task { if let t: TakeoversResp = try? await client.call("/api/desktop/takeovers"), seq == connSeq { takeovers = t.items ?? [] } }
+            Task { if let q: QuestionsResp = try? await client.call("/api/questions"), seq == connSeq { questions = q.items ?? [] } }
             startStream(url, tok)
         } catch {
             guard seq == connSeq else { return }
@@ -542,5 +546,11 @@ final class HubStore {
         let r: TakeoversResp = try await api.call("/api/desktop/takeover/resolve", method: "POST",
                                                   body: ["id": id, "note": L.t("takeoverResolvedNote")])
         takeovers = r.items ?? []
+    }
+
+    func replyQuestion(id: String, answers: [String: Any], cancelled: Bool) async throws {
+        let r: QuestionsResp = try await api.call("/api/questions/\(enc(id))/reply", method: "POST",
+                                                  body: ["answers": answers, "cancelled": cancelled])
+        questions = r.items ?? []
     }
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -983,4 +984,125 @@ func TestBotAvatarAndColorCreateUpdatePersist(t *testing.T) {
 }
 
 func ptr(s string) *string { return &s }
+
+type questionTestHarness struct {
+	run func(ctx context.Context, opts harness.RunOptions) (*harness.TurnResult, error)
+}
+
+func (q *questionTestHarness) Kind() string                             { return "opencode" }
+func (q *questionTestHarness) Label() string                            { return "OpenCode" }
+func (q *questionTestHarness) Models(context.Context) ([]string, error) { return nil, nil }
+func (q *questionTestHarness) Close()                                   {}
+func (q *questionTestHarness) RunTurn(ctx context.Context, opts harness.RunOptions) (*harness.TurnResult, error) {
+	return q.run(ctx, opts)
+}
+
+func TestHubQuestionLifecycleAndUnattendedBypass(t *testing.T) {
+	tmp := t.TempDir()
+	store, _ := state.NewStore(filepath.Join(tmp, "sessions.json"))
+	msgStore, _ := state.NewMessageStore(filepath.Join(tmp, "messages"))
+
+	var mu sync.Mutex
+	var sawOnQuestion []bool
+	reg := harness.NewRegistry()
+	reg.Register(&questionTestHarness{
+		run: func(ctx context.Context, opts harness.RunOptions) (*harness.TurnResult, error) {
+			mu.Lock()
+			sawOnQuestion = append(sawOnQuestion, opts.OnQuestion != nil)
+			mu.Unlock()
+			if opts.OnQuestion != nil {
+				resp, err := opts.OnQuestion(ctx, harness.QuestionRequest{
+					ID:    "frm_1",
+					Title: "Confirm",
+					Fields: []harness.QuestionField{
+						{Key: "q0", Title: "Drink", Type: "string"},
+					},
+				})
+				if err != nil {
+					return nil, err
+				}
+				return &harness.TurnResult{Text: fmt.Sprint(resp.Answers["q0"])}, nil
+			}
+			return &harness.TurnResult{Text: "unattended"}, nil
+		},
+	})
+
+	cfg := &config.HubConfig{
+		ProjectRoot: tmp,
+		SharedDir:   filepath.Join(tmp, "_shared"),
+		Bots: []config.BotConfig{
+			{ID: "ops", Name: "Ops", Workspace: filepath.Join(tmp, "ops"), Harness: "opencode"},
+		},
+	}
+	h := New(cfg, store, msgStore, reg)
+	defer h.Close()
+
+	subID, evCh := h.Subscribe()
+	defer h.Unsubscribe(subID)
+
+	type out struct {
+		res *harness.TurnResult
+		err error
+	}
+	done := make(chan out, 1)
+	go func() {
+		r, err := h.Send(context.Background(), "ops", "choose", SendOptions{Source: "user"})
+		done <- out{r, err}
+	}()
+
+	var qID string
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		items := h.ListQuestions("ops")
+		if len(items) == 1 {
+			qID = items[0].ID
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if qID == "" {
+		t.Fatalf("expected pending question in hub")
+	}
+
+	items, err := h.AnswerQuestion(qID, map[string]any{"q0": "tea"}, false, "")
+	if err != nil || len(items) != 0 {
+		t.Fatalf("AnswerQuestion failed: items=%+v err=%v", items, err)
+	}
+	if _, err := h.AnswerQuestion(qID, nil, false, ""); !errors.Is(err, ErrQuestionNotFound) {
+		t.Fatalf("expected ErrQuestionNotFound on second answer, got %v", err)
+	}
+
+	res := <-done
+	if res.err != nil || res.res.Text != "tea" {
+		t.Fatalf("unexpected interactive turn result: %+v err=%v", res.res, res.err)
+	}
+
+	sawQuestionsEvent := false
+	drainDeadline := time.After(500 * time.Millisecond)
+drain:
+	for {
+		select {
+		case ev := <-evCh:
+			if ev.Type == "questions" {
+				sawQuestionsEvent = true
+			}
+		case <-drainDeadline:
+			break drain
+		}
+	}
+	if !sawQuestionsEvent {
+		t.Fatalf("expected questions SSE event to be broadcast")
+	}
+
+	// Non-user sources (e.g. routine) must not receive OnQuestion.
+	res2, err := h.Send(context.Background(), "ops", "cron", SendOptions{Source: "routine:morning"})
+	if err != nil || res2.Text != "unattended" {
+		t.Fatalf("unexpected unattended turn result: %+v err=%v", res2, err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(sawOnQuestion) != 2 || !sawOnQuestion[0] || sawOnQuestion[1] {
+		t.Fatalf("expected OnQuestion=[true, false], got %v", sawOnQuestion)
+	}
+}
 
