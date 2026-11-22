@@ -45,3 +45,34 @@ func Java_bothub_tunnel_BothubTunnelModule_nativeStartTunnel(env *C.JNIEnv, obj 
 func Java_bothub_tunnel_BothubTunnelModule_nativeStopTunnel(env *C.JNIEnv, obj C.jobject) {
 	stopTunnelInternal()
 }
+
+func jniStr(env *C.JNIEnv, js C.jstring) string {
+	cs := C.jstrToCStr(env, js)
+	if cs == nil {
+		return ""
+	}
+	s := C.GoString(cs)
+	C.releaseJStr(env, js, cs)
+	return s
+}
+
+func retJniStr(env *C.JNIEnv, s string) C.jstring {
+	cs := C.CString(s)
+	defer C.free(unsafe.Pointer(cs))
+	return C.cStrToJStr(env, cs)
+}
+
+//export Java_bothub_tunnel_BothubTunnelModule_nativeTailscaleStart
+func Java_bothub_tunnel_BothubTunnelModule_nativeTailscaleStart(env *C.JNIEnv, obj C.jobject, jStateDir, jHostname, jControlURL, jAuthKey C.jstring) C.jstring {
+	return retJniStr(env, tailscaleStartJSON(jniStr(env, jStateDir), jniStr(env, jHostname), jniStr(env, jControlURL), jniStr(env, jAuthKey)))
+}
+
+//export Java_bothub_tunnel_BothubTunnelModule_nativeTailscaleStatus
+func Java_bothub_tunnel_BothubTunnelModule_nativeTailscaleStatus(env *C.JNIEnv, obj C.jobject, includePeers C.jboolean) C.jstring {
+	return retJniStr(env, tailscaleStatusJSON(includePeers != 0))
+}
+
+//export Java_bothub_tunnel_BothubTunnelModule_nativeTailscaleLogout
+func Java_bothub_tunnel_BothubTunnelModule_nativeTailscaleLogout(env *C.JNIEnv, obj C.jobject) C.jstring {
+	return retJniStr(env, tailscaleLogoutJSON(""))
+}

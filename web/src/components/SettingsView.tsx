@@ -10,6 +10,7 @@ import type {
   SettingsData,
   SettingsTab,
   TailcatStatus,
+  TailscaleStatus,
   ThemePref,
 } from '../types';
 import { api } from '../lib/api';
@@ -87,6 +88,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [localNodeName, setLocalNodeName] = useState('');
   const [nodes, setNodes] = useState<NodeInfo[]>([]);
   const [tailcat, setTailcat] = useState<TailcatStatus | null>(null);
+  const [tailscale, setTailscale] = useState<TailscaleStatus | null>(null);
+  const [tsQrBust, setTsQrBust] = useState(() => Date.now());
+  const [tsHostnameIn, setTsHostnameIn] = useState('');
+  const [tsControlUrlIn, setTsControlUrlIn] = useState('');
+  const [tsAuthKeyIn, setTsAuthKeyIn] = useState('');
+  const [tsBusy, setTsBusy] = useState(false);
+  const [tsErr, setTsErr] = useState('');
   const [qrBust, setQrBust] = useState(() => Date.now());
   const [remoteTokenIn, setRemoteTokenIn] = useState('');
   const [remoteTokenVal, setRemoteTokenVal] = useState('');
@@ -113,6 +121,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [memErr, setMemErr] = useState('');
 
   const remoteTimerRef = useRef<number | null>(null);
+  const tsTimerRef = useRef<number | null>(null);
   const localNodeTimerRef = useRef<number | null>(null);
 
   const baseline = useMemo(() => {
@@ -211,8 +220,26 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     }
   };
 
+  const applyTailscaleState = (ts: TailscaleStatus) => {
+    setTailscale(ts);
+    if (ts.state === 'running') setTsQrBust(Date.now());
+    if (ts.hostname !== undefined) setTsHostnameIn((prev) => prev || ts.hostname || '');
+    if (ts.controlUrl !== undefined) setTsControlUrlIn((prev) => prev || ts.controlUrl || '');
+    if (ts.apiToken) setRemoteTokenVal(ts.apiToken);
+    else if (!ts.hasToken || ts.tokenEnvRef) setRemoteTokenVal('');
+    if (tsTimerRef.current) window.clearTimeout(tsTimerRef.current);
+    if ((ts.state === 'starting' || ts.state === 'needs_login') && !hidden && tab === 'remote') {
+      tsTimerRef.current = window.setTimeout(async () => {
+        try {
+          applyTailscaleState(await api<TailscaleStatus>('/api/tailscale'));
+        } catch {}
+      }, 2000);
+    }
+  };
+
   const refreshRemoteTab = () => {
     setRemoteErr('');
+    setTsErr('');
     setRemoteTokenIn('');
     void loadLocalNode();
     api<{ nodes?: NodeInfo[] }>('/api/nodes')
@@ -221,6 +248,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     api<TailcatStatus>('/api/tailcat')
       .then(applyTailcatState)
       .catch((err) => applyTailcatState({ state: 'error', error: err instanceof Error ? err.message : '' }));
+    api<TailscaleStatus>('/api/tailscale')
+      .then(applyTailscaleState)
+      .catch((err) => applyTailscaleState({ state: 'error', error: err instanceof Error ? err.message : '' }));
     api<{ status?: { webrtcAvailable?: boolean; supported?: boolean } }>('/api/desktop/state?target=local')
       .then((st) => {
         setLocalDeskEngine(st?.status?.webrtcAvailable ? 'bot-host (WebRTC H.264)' : t('jpegStream'));
@@ -1100,6 +1130,214 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   )}
                 </div>
               )}
+            </section>
+
+            <section className="set-card" id="tailscaleBox">
+              <div className="set-card-hd">
+                <h2>
+                  <span>{t('tsTitle')}</span>{' '}
+                  <em>
+                    ·{' '}
+                    <span id="tsState">
+                      {tailscale
+                        ? {
+                            disabled: t('disabled'),
+                            starting: t('tsStarting'),
+                            needs_login: t('tsNeedsLogin'),
+                            running: t('tsRunning'),
+                            error: t('remoteError'),
+                          }[tailscale.state] || tailscale.state
+                        : t('unreadState')}
+                    </span>
+                  </em>
+                </h2>
+                <button
+                  type="button"
+                  id="tsToggle"
+                  className={`mp ${!tailscale || tailscale.state === 'disabled' || tailscale.state === 'error' ? 'go' : 'bad'}`}
+                  disabled={tsBusy}
+                  onClick={async () => {
+                    const enable = !tailscale || tailscale.state === 'disabled' || tailscale.state === 'error';
+                    setTsBusy(true);
+                    setTsErr('');
+                    try {
+                      const body: Record<string, unknown> = { enabled: enable };
+                      if (enable) {
+                        if (tsHostnameIn.trim()) body.hostname = tsHostnameIn.trim();
+                        if (tsControlUrlIn.trim()) body.controlUrl = tsControlUrlIn.trim();
+                        if (tsAuthKeyIn.trim()) body.authKey = tsAuthKeyIn.trim();
+                        if (remoteTokenIn.trim()) body.apiToken = remoteTokenIn.trim();
+                      }
+                      const res = await api<TailscaleStatus>('/api/tailscale', { method: 'POST', body });
+                      setTsAuthKeyIn('');
+                      applyTailscaleState(res);
+                      onToast(enable ? t('tsEnabledToast') : t('tsDisabledToast'));
+                    } catch (e) {
+                      if (e instanceof Error && e.message !== 'unauthorized') setTsErr(e.message);
+                    } finally {
+                      setTsBusy(false);
+                    }
+                  }}
+                >
+                  {!tailscale || tailscale.state === 'disabled' || tailscale.state === 'error'
+                    ? tailscale?.state === 'error'
+                      ? t('remoteRetry')
+                      : t('tsBind')
+                    : t('tsDisable')}
+                </button>
+              </div>
+
+              {tailscale?.state === 'needs_login' && tailscale.authUrl && (
+                <div className="note">
+                  <div className="row-inline-sm" style={{ flexWrap: 'wrap' }}>
+                    <a
+                      href={tailscale.authUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mp go"
+                      id="tsOpenLogin"
+                    >
+                      {t('tsOpenLogin')}
+                    </a>
+                    <button
+                      type="button"
+                      className="mp"
+                      onClick={async () => {
+                        try {
+                          await navigator.clipboard.writeText(tailscale.authUrl || '');
+                          onToast(t('tsLoginUrlCopied'));
+                        } catch {
+                          onToast(t('copyFailed'));
+                        }
+                      }}
+                    >
+                      {t('tsCopyLoginUrl')}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {tailscale?.state === 'running' && (
+                <>
+                  <img
+                    id="tsQR"
+                    alt=""
+                    src={`/api/tailscale/qr.png?t=${tsQrBust}`}
+                    className="qr-box"
+                  />
+                  {(tailscale.dnsName || tailscale.ip) && (
+                    <p className="set-card-desc">
+                      <code className="mono">{tailscale.dnsName || tailscale.ip}</code>
+                      {tailscale.dnsName && tailscale.ip ? ` (${tailscale.ip})` : ''}
+                    </p>
+                  )}
+                  <div className="fld">
+                    <textarea
+                      id="tsLink"
+                      className="mono ta-sm"
+                      readOnly
+                      value={tailscale.link || ''}
+                    />
+                  </div>
+                  <div className="row-end" style={{ gap: '8px' }}>
+                    <button
+                      type="button"
+                      className="mp bad"
+                      disabled={tsBusy}
+                      onClick={() =>
+                        onConfirm({
+                          title: t('tsLogoutTitle'),
+                          text: t('tsLogoutDesc'),
+                          okText: t('tsConfirmLogout'),
+                          onOk: async () => {
+                            setTsBusy(true);
+                            try {
+                              const res = await api<TailscaleStatus>('/api/tailscale', {
+                                method: 'POST',
+                                body: { logout: true },
+                              });
+                              applyTailscaleState(res);
+                              onToast(t('tsLoggedOutToast'));
+                            } finally {
+                              setTsBusy(false);
+                            }
+                          },
+                        })
+                      }
+                    >
+                      {t('tsLogout')}
+                    </button>
+                    <button
+                      type="button"
+                      className="mp go"
+                      onClick={async () => {
+                        try {
+                          await navigator.clipboard.writeText(tailscale.link || '');
+                          onToast(t('tsAddressCopied'));
+                        } catch {
+                          onToast(t('copyFailed'));
+                        }
+                      }}
+                    >
+                      {t('tsCopyLink')}
+                    </button>
+                  </div>
+                </>
+              )}
+
+              <p className="set-card-desc">
+                {tailscale?.state === 'running'
+                  ? t('tsHelpReady', { tailnet: tailscale.tailnet || 'Tailscale' })
+                  : tailscale?.state === 'needs_login'
+                    ? t('tsHelpLogin')
+                    : tailscale?.state === 'starting'
+                      ? t('tsHelpStarting')
+                      : tailscale?.error || tsErr || t('tsHelpOff')}
+              </p>
+
+              <details style={{ marginTop: '8px' }}>
+                <summary className="set-card-desc" style={{ cursor: 'pointer' }}>
+                  {t('tsAdvanced')}
+                </summary>
+                <div style={{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <div className="fld">
+                    <label>{t('tsHostname')}</label>
+                    <input
+                      className="mono"
+                      placeholder="bothub-mac"
+                      value={tsHostnameIn}
+                      onChange={(e) => setTsHostnameIn(e.target.value)}
+                    />
+                  </div>
+                  <div className="fld">
+                    <label>{t('tsAuthKey')}</label>
+                    {tailscale?.authKeyEnvRef ? (
+                      <div className="set-card-desc">
+                        {t('tsAuthKeyEnvHint', { ref: tailscale.authKeyEnvRef })}
+                      </div>
+                    ) : (
+                      <input
+                        type="password"
+                        className="mono"
+                        placeholder={t('tsAuthKeyPh')}
+                        autoComplete="off"
+                        value={tsAuthKeyIn}
+                        onChange={(e) => setTsAuthKeyIn(e.target.value)}
+                      />
+                    )}
+                  </div>
+                  <div className="fld">
+                    <label>{t('tsControlUrl')}</label>
+                    <input
+                      className="mono"
+                      placeholder={t('tsControlUrlPh')}
+                      autoComplete="off"
+                      value={tsControlUrlIn}
+                      onChange={(e) => setTsControlUrlIn(e.target.value)}
+                    />
+                  </div>
+                </div>
+              </details>
             </section>
 
             <section className="set-card" id="localDeskBox">

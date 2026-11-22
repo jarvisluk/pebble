@@ -19,22 +19,29 @@ export default function DevicesScreen() {
     activeServer,
     connState,
     isTailcat,
+    isTailscale,
     online,
     nodes,
     tailcat,
+    mobileTailscale,
+    hostTailscale,
     refreshNodes,
     refreshTailcat,
+    refreshHostTailscale,
+    refreshMobileTailscale,
   } = useHub();
 
   const [refreshing, setRefreshing] = useState(false);
 
   const loadAll = useCallback(async () => {
+    await refreshMobileTailscale(false).catch(() => {});
     if (connState !== 'connected') return;
     await Promise.all([
       refreshNodes().catch(() => {}),
       refreshTailcat().catch(() => {}),
+      refreshHostTailscale().catch(() => {}),
     ]);
-  }, [connState, refreshNodes, refreshTailcat]);
+  }, [connState, refreshHostTailscale, refreshMobileTailscale, refreshNodes, refreshTailcat]);
 
   useEffect(() => {
     void loadAll();
@@ -65,6 +72,23 @@ export default function DevicesScreen() {
     return tailcat.error || t('tailcatErr');
   })();
 
+  const hostTsText = (() => {
+    if (!hostTailscale) return t('tailcatUnknown');
+    if (hostTailscale.state === 'running') return hostTailscale.tailnet || t('tailcatReady');
+    if (hostTailscale.state === 'starting') return t('tsBinding');
+    if (hostTailscale.state === 'needs_login') return t('tsNeedsLogin');
+    if (hostTailscale.state === 'disabled') return t('tailcatDisabled');
+    return hostTailscale.error || t('tailcatErr');
+  })();
+
+  const mobileTsText = (() => {
+    if (!mobileTailscale || mobileTailscale.state === 'disabled') return t('tsNotBound');
+    if (mobileTailscale.state === 'running') return mobileTailscale.tailnet || t('tailcatReady');
+    if (mobileTailscale.state === 'starting') return t('tsBinding');
+    if (mobileTailscale.state === 'needs_login') return t('tsNeedsLogin');
+    return mobileTailscale.error || t('tailcatErr');
+  })();
+
   return (
     <View style={[styles.root, { backgroundColor: theme.page }]}>
       <ModalHeader title={t('devicesTunnel')} onClose={closeSheet} />
@@ -83,9 +107,9 @@ export default function DevicesScreen() {
                 {activeServer.address}
               </Text>
               <View style={styles.badgeRow}>
-                <View style={[styles.badge, { backgroundColor: isTailcat ? theme.lilac : theme.s1 }]}>
-                  <Text style={[styles.badgeTxt, { color: isTailcat ? theme.lilacInk : theme.text2 }]}>
-                    {isTailcat ? t('tailcatE2E') : t('httpLan')}
+                <View style={[styles.badge, { backgroundColor: isTailscale || isTailcat ? theme.lilac : theme.s1 }]}>
+                  <Text style={[styles.badgeTxt, { color: isTailscale || isTailcat ? theme.lilacInk : theme.text2 }]}>
+                    {isTailscale ? t('tailscaleE2E') : isTailcat ? t('tailcatE2E') : t('httpLan')}
                   </Text>
                 </View>
                 <View style={[styles.badge, { backgroundColor: online ? theme.sage : theme.s1 }]}>
@@ -98,6 +122,12 @@ export default function DevicesScreen() {
           ) : (
             <Text style={[styles.emptyTxt, { color: theme.mute }]}>{t('notConnectedHost')}</Text>
           )}
+          <View style={styles.rowBetween}>
+            <Text style={[styles.lbl, { color: theme.text2 }]}>{t('tsMobileStatus')}</Text>
+            <Text style={[styles.val, { color: mobileTailscale?.state === 'running' ? theme.sageInk : theme.mute }]}>
+              {mobileTsText}
+            </Text>
+          </View>
           <Pressable
             onPress={() => router.push('/connect')}
             style={[styles.manageBtn, { backgroundColor: theme.s1 }]}
@@ -132,6 +162,24 @@ export default function DevicesScreen() {
               ]}
             >
               {tailcatStateText}
+            </Text>
+          </View>
+          <View style={styles.rowBetween}>
+            <Text style={[styles.lbl, { color: theme.text2 }]}>{t('tsHostStatus')}</Text>
+            <Text
+              style={[
+                styles.val,
+                {
+                  color:
+                    hostTailscale?.state === 'running'
+                      ? theme.sageInk
+                      : hostTailscale?.state === 'error'
+                        ? theme.danger
+                        : theme.text,
+                },
+              ]}
+            >
+              {hostTsText}
             </Text>
           </View>
           <View style={styles.rowBetween}>

@@ -1,6 +1,11 @@
 import Foundation
 import Observation
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
 
 enum L {
     /// "zh-CN" 或 "en"，由 HubStore 根据偏好同步。
@@ -75,6 +80,8 @@ final class HubStore {
     var themePref: String { didSet { UserDefaults.standard.set(themePref, forKey: "bothub.theme") } }
     var langPref: String { didSet { UserDefaults.standard.set(langPref, forKey: "bothub.lang"); L.lang = lang } }
     var accentHex: String { didSet { UserDefaults.standard.set(accentHex, forKey: "bothub.accent") } }
+    var tsBound: Bool { didSet { UserDefaults.standard.set(tsBound, forKey: "bothub.tsBound") } }
+    var tsControlUrl: String { didSet { UserDefaults.standard.set(tsControlUrl, forKey: "bothub.tsControlUrl") } }
 
     // 连接
     var servers: [ServerProfile] = []
@@ -84,6 +91,7 @@ final class HubStore {
     var baseURL = ""
     var authToken = ""
     var isTailcat = false
+    var isTailscale = false
     var online = false
 
     // 数据
@@ -96,6 +104,9 @@ final class HubStore {
     var models: [String: [String]] = [:]
     var nodes: [NodeInfo] = []
     var tailcat: TailcatStatus?
+    var mobileTailscale: MobileTailscaleStatus?
+    var hostTailscale: HostTailscaleStatus?
+    var tsBinding = false
     var takeovers: [TakeoverRequest] = []
     var questions: [PendingQuestion] = []
     var desktopTargets: [DesktopTarget] = []
@@ -110,6 +121,8 @@ final class HubStore {
         themePref = d.string(forKey: "bothub.theme") ?? "system"
         langPref = d.string(forKey: "bothub.lang") ?? "system"
         accentHex = d.string(forKey: "bothub.accent") ?? Palette.defaultAccent
+        tsBound = d.bool(forKey: "bothub.tsBound")
+        tsControlUrl = d.string(forKey: "bothub.tsControlUrl") ?? ""
         L.lang = lang
         if let data = SecureStore.read("servers"), let list = try? JSONDecoder().decode([ServerProfile].self, from: data) {
             servers = list
@@ -117,6 +130,12 @@ final class HubStore {
         let savedActive = UserDefaults.standard.string(forKey: "bothub.active")
         let target = servers.first { $0.id == savedActive } ?? servers.first
         activeServerId = target?.id
+        if tsBound {
+            Task {
+                _ = await Tunnel.tailscaleStart(controlUrl: tsControlUrl)
+                await refreshMobileTailscale(includePeers: true)
+            }
+        }
         if let target { Task { await connectProfile(target) } }
     }
 
@@ -222,7 +241,19 @@ final class HubStore {
         var tok = profile.token.isEmpty ? norm.token : profile.token
         var url = norm.cleanAddress
         do {
-            if norm.isTailcat {
+            if norm.isTailscale {
+                if mobileTailscale?.state != "running" {
+                    let st = await Tunnel.tailscaleStart(controlUrl: tsControlUrl)
+                    mobileTailscale = st
+                    if st.state == "needs_login", let auth = st.authUrl, let u = URL(string: auth) {
+                        openExternalURL(u)
+                    }
+                }
+                let r = try await Tunnel.start(link: norm.cleanAddress, token: tok)
+                guard seq == connSeq else { return }
+                url = r.url
+                if tok.isEmpty, !r.token.isEmpty { tok = r.token }
+            } else if norm.isTailcat {
                 let r = try await Tunnel.start(link: norm.cleanAddress, token: tok)
                 guard seq == connSeq else { return }
                 url = r.url
@@ -238,6 +269,7 @@ final class HubStore {
                 persistServers()
             }
             isTailcat = norm.isTailcat
+            isTailscale = norm.isTailscale
             baseURL = url
             authToken = tok
 
@@ -259,6 +291,7 @@ final class HubStore {
             Task { if let s: SettingsData = try? await client.call("/api/settings"), seq == connSeq { settings = s } }
             Task { if let n: NodesResp = try? await client.call("/api/nodes"), seq == connSeq { nodes = n.nodes ?? [] } }
             Task { if let t: TailcatStatus = try? await client.call("/api/tailcat"), seq == connSeq { tailcat = t } }
+            Task { if let ts: HostTailscaleStatus = try? await client.call("/api/tailscale"), seq == connSeq { hostTailscale = ts } }
             Task { if let t: TakeoversResp = try? await client.call("/api/desktop/takeovers"), seq == connSeq { takeovers = t.items ?? [] } }
             Task { if let q: QuestionsResp = try? await client.call("/api/questions"), seq == connSeq { questions = q.items ?? [] } }
             startStream(url, tok)
@@ -267,6 +300,7 @@ final class HubStore {
             baseURL = url
             authToken = tok
             isTailcat = norm.isTailcat
+            isTailscale = norm.isTailscale
             if let e = error as? HubError, e.unauthorized {
                 connState = .unauthorized
                 connError = e.message
@@ -520,6 +554,64 @@ final class HubStore {
         tailcat = try await api.call("/api/tailcat")
     }
 
+    func refreshHostTailscale() async throws {
+        hostTailscale = try await api.call("/api/tailscale")
+    }
+
+    func refreshMobileTailscale(includePeers: Bool = true) async {
+        let st = await Tunnel.tailscaleStatus(includePeers: includePeers)
+        mobileTailscale = st
+        if st.state == "running" {
+            tsBound = true
+        }
+    }
+
+    func bindTailscale(authKey: String = "", controlUrl: String = "") async {
+        tsBinding = true
+        defer { tsBinding = false }
+        let ctrl = controlUrl.trimmingCharacters(in: .whitespacesAndNewlines)
+        let key = authKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        var st = await Tunnel.tailscaleStart(controlUrl: ctrl, authKey: key)
+        mobileTailscale = st
+        var openedAuth = ""
+        if st.state == "needs_login", let auth = st.authUrl, !auth.isEmpty, let u = URL(string: auth) {
+            openedAuth = auth
+            openExternalURL(u)
+        }
+        let deadline = Date().addingTimeInterval(180)
+        while (st.state == "starting" || st.state == "needs_login") && Date() < deadline {
+            try? await Task.sleep(for: .milliseconds(1500))
+            st = await Tunnel.tailscaleStatus(includePeers: true)
+            mobileTailscale = st
+            if st.state == "needs_login", let auth = st.authUrl, !auth.isEmpty, auth != openedAuth, let u = URL(string: auth) {
+                openedAuth = auth
+                openExternalURL(u)
+            }
+        }
+        if st.state == "running" {
+            tsBound = true
+            tsControlUrl = ctrl
+            if (st.peers ?? []).isEmpty {
+                await refreshMobileTailscale(includePeers: true)
+            }
+        }
+    }
+
+    func logoutTailscale() async {
+        _ = await Tunnel.tailscaleLogout()
+        tsBound = false
+        tsControlUrl = ""
+        mobileTailscale = nil
+    }
+
+    private func openExternalURL(_ url: URL) {
+        #if canImport(UIKit)
+        UIApplication.shared.open(url)
+        #elseif canImport(AppKit)
+        NSWorkspace.shared.open(url)
+        #endif
+    }
+
     @discardableResult
     func refreshDesktopTargets() async throws -> [DesktopTarget] {
         let d: TargetsResp = try await api.call("/api/desktop/targets")
@@ -536,6 +628,22 @@ final class HubStore {
 
     func fetchDesktopFrame(_ target: String) async throws -> DesktopFrame {
         try await api.call("/api/desktop/frame?target=\(enc(target))&windowId=&maxDim=1280&quality=72")
+    }
+
+    func makeDesktopWSRequest(target: String, preset: String) -> URLRequest? {
+        guard var comps = URLComponents(string: baseURL) else { return nil }
+        comps.scheme = (comps.scheme?.lowercased() == "https") ? "wss" : "ws"
+        comps.path = "/api/desktop/stream/ws"
+        comps.queryItems = [
+            URLQueryItem(name: "target", value: target),
+            URLQueryItem(name: "preset", value: preset),
+        ]
+        guard let url = comps.url else { return nil }
+        var req = URLRequest(url: url)
+        if !authToken.isEmpty {
+            req.setValue("Bearer \(authToken)", forHTTPHeaderField: "Authorization")
+        }
+        return req
     }
 
     func sendDesktopInput(_ body: [String: Any]) async throws {

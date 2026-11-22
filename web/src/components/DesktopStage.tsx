@@ -38,7 +38,7 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
 }) => {
   const t = (k: string, vars?: Record<string, string | number>) => translate(lang, k, vars);
 
-  const [mode, setMode] = useState<'idle' | 'connecting' | 'webrtc' | 'jpeg' | 'error' | 'sleeping'>('idle');
+  const [mode, setMode] = useState<'idle' | 'connecting' | 'webrtc' | 'ws-h264' | 'error' | 'sleeping'>('idle');
   const [centerText, setCenterText] = useState('');
   const [showRetry, setShowRetry] = useState(false);
   const [showCenterMsg, setShowCenterMsg] = useState(false);
@@ -52,7 +52,9 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
   const [fps, setFps] = useState(0);
   const [rtt, setRtt] = useState(0);
   const [resLabel, setResLabel] = useState('—');
-  const [jpegSrc, setJpegSrc] = useState('');
+  const [preset, setPreset] = useState<'auto' | 'high' | 'medium' | 'low'>('auto');
+  const [activePreset, setActivePreset] = useState('');
+  const [bitrateKbps, setBitrateKbps] = useState(0);
   const [screen, setScreen] = useState<ScreenState>({ target: 'local', owner: 'idle' });
   const [hostStatus, setHostStatus] = useState<DesktopHostStatus | null>(null);
   const [setupBusy, setSetupBusy] = useState(false);
@@ -60,19 +62,21 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
 
   const stageRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
-  const imgRef = useRef<HTMLImageElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   const typeInRef = useRef<HTMLInputElement>(null);
 
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const dcRef = useRef<RTCDataChannel | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+  const decoderRef = useRef<VideoDecoder | null>(null);
   const sessionRef = useRef('');
   const statsTimerRef = useRef<number | null>(null);
-  const jpegStopRef = useRef<(() => void) | null>(null);
   const hostStatusRef = useRef<DesktopHostStatus | null>(null);
   const frameRef = useRef<DesktopFrame | null>(null);
   const modeRef = useRef(mode);
   const openRef = useRef(open);
   const targetRef = useRef(target);
+  const presetRef = useRef(preset);
   const selectedWindowIdRef = useRef(selectedWindowId);
   const windowsRef = useRef(windows);
   const lastMoveRef = useRef(0);
@@ -82,6 +86,7 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
   modeRef.current = mode;
   openRef.current = open;
   targetRef.current = target;
+  presetRef.current = preset;
   selectedWindowIdRef.current = selectedWindowId;
   windowsRef.current = windows;
 
@@ -96,9 +101,20 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
       window.clearInterval(statsTimerRef.current);
       statsTimerRef.current = null;
     }
-    if (jpegStopRef.current) {
-      jpegStopRef.current();
-      jpegStopRef.current = null;
+    if (wsRef.current) {
+      try {
+        wsRef.current.onclose = null;
+        wsRef.current.onerror = null;
+        wsRef.current.onmessage = null;
+        wsRef.current.close();
+      } catch {}
+      wsRef.current = null;
+    }
+    if (decoderRef.current) {
+      try {
+        if (decoderRef.current.state !== 'closed') decoderRef.current.close();
+      } catch {}
+      decoderRef.current = null;
     }
     if (dcRef.current) {
       try {
@@ -123,7 +139,6 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
     if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
-    setJpegSrc('');
   }, []);
 
   const refreshTargets = useCallback(async () => {
@@ -149,58 +164,163 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
     }
   }, []);
 
-  const startJpegFallback = useCallback(async () => {
+  const startWsH264Stream = useCallback(() => {
     if (!openRef.current) return;
     stopStreams();
-    setMode('jpeg');
-    setShowCenterMsg(false);
+    if (typeof VideoDecoder === 'undefined') {
+      setMode('error');
+      setCenterText(t('deskNoWebCodecs'));
+      setShowRetry(false);
+      setShowCenterMsg(true);
+      return;
+    }
 
-    let alive = true;
-    let lastAt = 0;
-    jpegStopRef.current = () => {
-      alive = false;
+    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsURL = `${proto}//${window.location.host}/api/desktop/stream/ws?target=${encodeURIComponent(
+      targetRef.current
+    )}&preset=${encodeURIComponent(presetRef.current)}`;
+
+    const ws = new WebSocket(wsURL);
+    ws.binaryType = 'arraybuffer';
+    wsRef.current = ws;
+
+    let needKeyframe = true;
+    let frameCount = 0;
+    let tsCounter = 0;
+    let hadFrame = false;
+
+    const ensureDecoder = (width: number, height: number) => {
+      if (decoderRef.current && decoderRef.current.state !== 'closed') {
+        try {
+          decoderRef.current.close();
+        } catch {}
+      }
+      const dec = new VideoDecoder({
+        output: (vf) => {
+          const canvas = canvasRef.current;
+          if (canvas) {
+            if (canvas.width !== vf.displayWidth || canvas.height !== vf.displayHeight) {
+              canvas.width = vf.displayWidth;
+              canvas.height = vf.displayHeight;
+            }
+            const ctx = canvas.getContext('2d');
+            ctx?.drawImage(vf, 0, 0, canvas.width, canvas.height);
+          }
+          vf.close();
+          frameCount++;
+          if (!hadFrame) {
+            hadFrame = true;
+            setMode('ws-h264');
+            setShowCenterMsg(false);
+          }
+        },
+        error: () => {
+          needKeyframe = true;
+        },
+      });
+      dec.configure({
+        codec: 'avc1.42E01F',
+        codedWidth: width,
+        codedHeight: height,
+        optimizeForLatency: true,
+      });
+      decoderRef.current = dec;
+      needKeyframe = true;
     };
 
-    while (alive && openRef.current) {
-      if (document.visibilityState === 'hidden') {
-        await new Promise((r) => setTimeout(r, 800));
-        continue;
+    statsTimerRef.current = window.setInterval(() => {
+      if (wsRef.current !== ws) return;
+      setFps(frameCount);
+      frameCount = 0;
+    }, 1000);
+
+    ws.onmessage = (ev) => {
+      if (wsRef.current !== ws || !openRef.current) return;
+      if (typeof ev.data === 'string') {
+        try {
+          const msg = JSON.parse(ev.data) as {
+            type?: string;
+            preset?: string;
+            bitrateKbps?: number;
+            imageWidth?: number;
+            imageHeight?: number;
+            logicalX?: number;
+            logicalY?: number;
+            logicalWidth?: number;
+            logicalHeight?: number;
+            backend?: string;
+            code?: string;
+            error?: string;
+          };
+          if (msg.type === 'meta') {
+            frameRef.current = {
+              jpegBase64: '',
+              imageWidth: msg.imageWidth || 1280,
+              imageHeight: msg.imageHeight || 720,
+              logicalX: msg.logicalX || 0,
+              logicalY: msg.logicalY || 0,
+              logicalWidth: msg.logicalWidth || 1440,
+              logicalHeight: msg.logicalHeight || 900,
+            };
+            setResLabel(`${msg.imageWidth || 0}×${msg.imageHeight || 0}`);
+            setActivePreset(msg.preset || '');
+            setBitrateKbps(msg.bitrateKbps || 0);
+            setMode('ws-h264');
+            ensureDecoder(msg.imageWidth || 1280, msg.imageHeight || 720);
+          } else if (msg.type === 'error') {
+            setMode('error');
+            setCenterText(msg.error || t('deskConnectFailed'));
+            setShowRetry(msg.code !== 'screen_recording_denied');
+            setShowCenterMsg(true);
+          }
+        } catch {}
+        return;
       }
-      const t0 = performance.now();
-      try {
-        const f = await api<DesktopFrame>(
-          `/api/desktop/frame?target=${encodeURIComponent(targetRef.current)}&windowId=${encodeURIComponent(selectedWindowIdRef.current)}&maxDim=1280&quality=75`
-        );
-        if (!alive || !openRef.current) break;
-        const now = performance.now();
-        if (lastAt) setFps(Math.round(10000 / Math.max(16, now - lastAt)) / 10);
-        lastAt = now;
-        setRtt(Math.round(now - t0));
-        frameRef.current = f;
-        setResLabel(`${f.imageWidth}×${f.imageHeight}`);
-        setJpegSrc(`data:image/jpeg;base64,${f.jpegBase64}`);
-        setShowCenterMsg(false);
-      } catch (err) {
-        if (!alive) break;
-        const msg = err instanceof Error ? err.message : '';
-        const status = err instanceof APIError ? err.status : 0;
+
+      if (ev.data instanceof ArrayBuffer) {
+        const bytes = new Uint8Array(ev.data);
+        if (bytes.length < 2) return;
+        const kind = bytes[0];
+        if (kind !== 0x02 && kind !== 0x03) return;
+        const isKey = kind === 0x02;
+        if (needKeyframe && !isKey) return;
+        const dec = decoderRef.current;
+        if (!dec || dec.state !== 'configured') return;
+        needKeyframe = false;
+        tsCounter += 33333;
+        try {
+          dec.decode(
+            new EncodedVideoChunk({
+              type: isKey ? 'key' : 'delta',
+              timestamp: tsCounter,
+              data: bytes.subarray(1),
+            })
+          );
+        } catch {
+          needKeyframe = true;
+        }
+      }
+    };
+
+    ws.onerror = () => {
+      if (wsRef.current !== ws || !openRef.current) return;
+      if (modeRef.current !== 'error') {
         setMode('error');
-        setCenterText(msg || t('deskConnectFailed'));
+        setCenterText(t('deskConnectFailed'));
         setShowRetry(true);
         setShowCenterMsg(true);
-        if (
-          status === 403 ||
-          msg.includes('屏幕录制') ||
-          msg.includes('Screen Recording') ||
-          msg.includes('screen_recording_denied')
-        ) {
-          break;
-        }
-        await new Promise((r) => setTimeout(r, 1800));
-        continue;
       }
-      await new Promise((r) => setTimeout(r, 40));
-    }
+    };
+
+    ws.onclose = () => {
+      if (wsRef.current !== ws || !openRef.current) return;
+      if (modeRef.current !== 'error') {
+        setMode('error');
+        setCenterText(t('deskConnectFailed'));
+        setShowRetry(true);
+        setShowCenterMsg(true);
+      }
+    };
   }, [stopStreams, t]);
 
   const startStream = useCallback(async () => {
@@ -251,7 +371,7 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
     }
 
     if (!hostStatusRef.current?.webrtcAvailable || typeof RTCPeerConnection === 'undefined') {
-      void startJpegFallback();
+      startWsH264Stream();
       return;
     }
 
@@ -264,7 +384,7 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
 
       const timer = window.setTimeout(() => {
         if (pcRef.current === pc && modeRef.current !== 'webrtc') {
-          void startJpegFallback();
+          startWsH264Stream();
         }
       }, 2500);
 
@@ -285,7 +405,7 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
           setShowCenterMsg(false);
         } else if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
           window.clearTimeout(timer);
-          void startJpegFallback();
+          startWsH264Stream();
         }
       };
 
@@ -309,7 +429,7 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
       const offerSdp = pc.localDescription?.sdp || '';
       if (!/^a=candidate:/m.test(offerSdp)) {
         window.clearTimeout(timer);
-        void startJpegFallback();
+        startWsH264Stream();
         return;
       }
 
@@ -344,9 +464,9 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
         });
       }, 1000);
     } catch {
-      void startJpegFallback();
+      startWsH264Stream();
     }
-  }, [onTakeoversChange, refreshWindows, startJpegFallback, stopStreams, t]);
+  }, [onTakeoversChange, refreshWindows, startWsH264Stream, stopStreams, t]);
 
   useEffect(() => {
     if (!open) {
@@ -372,8 +492,19 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
       dc.send(JSON.stringify(dcMsg));
       return;
     }
-    if (ephemeral) return;
+    const ws = wsRef.current;
     const winApp = windowsRef.current.find((w) => w.id === selectedWindowIdRef.current)?.app || '';
+    if (modeRef.current === 'ws-h264' && ws && ws.readyState === WebSocket.OPEN) {
+      if (ephemeral && ws.bufferedAmount > 65536) return;
+      ws.send(
+        JSON.stringify({
+          type: 'input',
+          event: { windowId: selectedWindowIdRef.current, app: winApp, ...ev },
+        })
+      );
+      return;
+    }
+    if (ephemeral) return;
     api('/api/desktop/input', {
       method: 'POST',
       body: { target: targetRef.current, windowId: selectedWindowIdRef.current, app: winApp, ...ev },
@@ -381,16 +512,16 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
   }, []);
 
   const mapCoords = (e: React.MouseEvent<HTMLElement>): { x: number; y: number } | null => {
-    const el = mode === 'webrtc' ? videoRef.current : imgRef.current;
+    const el = mode === 'webrtc' ? videoRef.current : canvasRef.current;
     if (!el) return null;
     const mw =
       el instanceof HTMLVideoElement
         ? el.videoWidth
-        : frameRef.current?.imageWidth || (el as HTMLImageElement).naturalWidth;
+        : frameRef.current?.imageWidth || (el as HTMLCanvasElement).width;
     const mh =
       el instanceof HTMLVideoElement
         ? el.videoHeight
-        : frameRef.current?.imageHeight || (el as HTMLImageElement).naturalHeight;
+        : frameRef.current?.imageHeight || (el as HTMLCanvasElement).height;
     if (!mw || !mh) return null;
     const r = el.getBoundingClientRect();
     if (!r.width || !r.height) return null;
@@ -530,12 +661,12 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
 
   const activeTakeover = takeovers.find((to) => to.target === target) || takeovers[0] || null;
   const dotClass =
-    mode === 'webrtc' ? 'd-dot ok' : mode === 'jpeg' ? 'd-dot warn' : mode === 'error' ? 'd-dot err' : 'd-dot';
+    mode === 'webrtc' || mode === 'ws-h264' ? 'd-dot ok' : mode === 'error' ? 'd-dot err' : 'd-dot';
   const statusLabel =
     mode === 'webrtc'
       ? `WebRTC · ${fps || 0} fps`
-      : mode === 'jpeg'
-        ? t('deskJpegLabel', { fps: fps || 0, rtt: rtt || 0 })
+      : mode === 'ws-h264'
+        ? t('deskWsH264Label', { fps: fps || 0 })
         : mode === 'sleeping'
           ? t('deskSleeping')
           : mode === 'error'
@@ -564,16 +695,13 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
             hidden={mode !== 'webrtc'}
             {...mediaHandlers}
           />
-          <img
-            ref={imgRef}
-            id="deskImg"
+          <canvas
+            ref={canvasRef}
+            id="deskCanvas"
             className="desk-media"
-            alt={t('remoteDesktop')}
-            src={jpegSrc || undefined}
-            draggable={false}
             tabIndex={0}
             data-desk-stage=""
-            hidden={mode !== 'jpeg' || !jpegSrc}
+            hidden={mode !== 'ws-h264'}
             {...mediaHandlers}
           />
         </div>
@@ -668,10 +796,35 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
                   </option>
                 ))}
               </select>
+              {mode === 'ws-h264' && (
+                <select
+                  id="deskPreset"
+                  className="d-sel"
+                  value={preset}
+                  onChange={(e) => {
+                    const next = e.target.value as 'auto' | 'high' | 'medium' | 'low';
+                    setPreset(next);
+                    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+                      wsRef.current.send(JSON.stringify({ type: 'profile', preset: next }));
+                    }
+                  }}
+                >
+                  <option value="auto">{t('deskPresetAuto')}</option>
+                  <option value="high">{t('deskPresetHigh')}</option>
+                  <option value="medium">{t('deskPresetMedium')}</option>
+                  <option value="low">{t('deskPresetLow')}</option>
+                </select>
+              )}
             </div>
             <dl id="deskDetails" className="d-details" hidden={!detailsOpen}>
               <dt>{t('deskMode')}</dt>
-              <dd id="ddMode">{mode === 'webrtc' ? 'WebRTC H.264' : mode === 'jpeg' ? t('deskJpegMode') : mode}</dd>
+              <dd id="ddMode">
+                {mode === 'webrtc'
+                  ? 'WebRTC H.264'
+                  : mode === 'ws-h264'
+                    ? `${t('deskWsH264Mode')}${activePreset ? ` (${activePreset}${bitrateKbps ? ` · ${bitrateKbps}k` : ''})` : ''}`
+                    : mode}
+              </dd>
               <dt>{t('deskLatency')}</dt>
               <dd id="ddRtt">{rtt ? `${rtt} ms` : '—'}</dd>
               <dt>{t('deskResolution')}</dt>

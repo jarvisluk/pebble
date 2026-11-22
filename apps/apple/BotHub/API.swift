@@ -34,9 +34,10 @@ struct NormalizedAddress {
     var cleanAddress: String
     var token: String
     var isTailcat: Bool
+    var isTailscale: Bool
 }
 
-/// 拆出 `#token=`，tailcat:// 原样保留，其余补 http:// 并去掉末尾斜杠。
+/// 拆出 `#token=`，tailcat:// 与 tailscale:// 原样保留，其余补 http:// 并去掉末尾斜杠。
 func normalizeAddress(_ raw: String) -> NormalizedAddress {
     let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
     var base = trimmed
@@ -55,13 +56,17 @@ func normalizeAddress(_ raw: String) -> NormalizedAddress {
         }
     }
     let s = base.trimmingCharacters(in: .whitespacesAndNewlines)
-    if s.lowercased().hasPrefix("tailcat://") {
-        return NormalizedAddress(cleanAddress: s, token: token, isTailcat: true)
+    let lower = s.lowercased()
+    if lower.hasPrefix("tailcat://") {
+        return NormalizedAddress(cleanAddress: s, token: token, isTailcat: true, isTailscale: false)
     }
-    if s.isEmpty { return NormalizedAddress(cleanAddress: "", token: token, isTailcat: false) }
+    if lower.hasPrefix("tailscale://") {
+        return NormalizedAddress(cleanAddress: s, token: token, isTailcat: false, isTailscale: true)
+    }
+    if s.isEmpty { return NormalizedAddress(cleanAddress: "", token: token, isTailcat: false, isTailscale: false) }
     var withProto = s.range(of: "^https?://", options: [.regularExpression, .caseInsensitive]) != nil ? s : "http://\(s)"
     while withProto.hasSuffix("/") { withProto.removeLast() }
-    return NormalizedAddress(cleanAddress: withProto, token: token, isTailcat: false)
+    return NormalizedAddress(cleanAddress: withProto, token: token, isTailcat: false, isTailscale: false)
 }
 
 struct APIClient {
@@ -186,6 +191,49 @@ enum Tunnel {
 
     static func stop() async {
         await Task.detached { BothubStopTunnel() }.value
+    }
+
+    private static var defaultTailscaleDir: String {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        return base.appendingPathComponent("tsnet", isDirectory: true).path
+    }
+
+    static func tailscaleStart(hostname: String = "", controlUrl: String = "", authKey: String = "") async -> MobileTailscaleStatus {
+        var probe = URLRequest(url: URL(string: "https://captive.apple.com/hotspot-detect.html")!)
+        probe.httpMethod = "HEAD"
+        probe.timeoutInterval = 5
+        _ = try? await URLSession.shared.data(for: probe)
+        let dir = defaultTailscaleDir
+        let json: String = await Task.detached {
+            let d = strdup(dir), h = strdup(hostname), c = strdup(controlUrl), k = strdup(authKey)
+            defer { free(d); free(h); free(c); free(k) }
+            guard let r = BothubTailscaleStart(d, h, c, k) else { return "{\"state\":\"error\",\"error\":\"null\"}" }
+            defer { BothubFreeString(r) }
+            return String(cString: r)
+        }.value
+        return (try? JSONDecoder().decode(MobileTailscaleStatus.self, from: Data(json.utf8)))
+            ?? MobileTailscaleStatus(state: "error", error: "decode failed")
+    }
+
+    static func tailscaleStatus(includePeers: Bool = false) async -> MobileTailscaleStatus {
+        let json: String = await Task.detached {
+            guard let r = BothubTailscaleStatus(includePeers ? 1 : 0) else { return "{\"state\":\"disabled\"}" }
+            defer { BothubFreeString(r) }
+            return String(cString: r)
+        }.value
+        return (try? JSONDecoder().decode(MobileTailscaleStatus.self, from: Data(json.utf8)))
+            ?? MobileTailscaleStatus(state: "disabled")
+    }
+
+    static func tailscaleLogout() async -> MobileTailscaleStatus {
+        let json: String = await Task.detached {
+            guard let r = BothubTailscaleLogout() else { return "{\"state\":\"disabled\"}" }
+            defer { BothubFreeString(r) }
+            return String(cString: r)
+        }.value
+        return (try? JSONDecoder().decode(MobileTailscaleStatus.self, from: Data(json.utf8)))
+            ?? MobileTailscaleStatus(state: "disabled")
     }
 }
 

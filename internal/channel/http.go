@@ -44,6 +44,7 @@ type HTTPServer struct {
 	sched   RoutineScheduler
 
 	tailcat        tailcatServe
+	tailscale      tailscaleServe
 	nodesOnce      sync.Once
 	fallbackNodes  *node.Registry
 	deskOnce       sync.Once
@@ -122,6 +123,7 @@ func NewHTTPServer(h *hub.Hub, cfg config.HTTPConfig) *HTTPServer {
 	mux.HandleFunc("POST /api/desktop/input", s.handleDesktopInput)
 	mux.HandleFunc("POST /api/desktop/stream/offer", s.handleDesktopStreamOffer)
 	mux.HandleFunc("POST /api/desktop/stream/close", s.handleDesktopStreamClose)
+	mux.HandleFunc("GET /api/desktop/stream/ws", s.handleDesktopStreamWS)
 	mux.HandleFunc("POST /api/desktop/setup", s.handleDesktopSetup)
 	mux.HandleFunc("POST /api/desktop/power", s.handleDesktopPower)
 	mux.HandleFunc("GET /api/desktop/takeovers", s.handleDesktopTakeovers)
@@ -133,6 +135,9 @@ func NewHTTPServer(h *hub.Hub, cfg config.HTTPConfig) *HTTPServer {
 	mux.HandleFunc("GET /api/tailcat", s.handleTailcat)
 	mux.HandleFunc("POST /api/tailcat", s.handleSetTailcat)
 	mux.HandleFunc("GET /api/tailcat/qr.png", s.handleTailcatQR)
+	mux.HandleFunc("GET /api/tailscale", s.handleTailscale)
+	mux.HandleFunc("POST /api/tailscale", s.handleSetTailscale)
+	mux.HandleFunc("GET /api/tailscale/qr.png", s.handleTailscaleQR)
 
 	mux.HandleFunc("GET /api/nodes", s.handleNodes)
 	mux.HandleFunc("GET /api/local-node", s.handleLocalNodeStub)
@@ -160,7 +165,11 @@ func (s *HTTPServer) Start() error {
 	if s.cfg.TailcatEnabled() && s.cfg.APIToken == "" {
 		return errors.New("refusing to enable http.tailcat without http.apiToken (bots run tools with autoApprove)")
 	}
+	if s.cfg.TailscaleEnabled() && s.cfg.APIToken == "" {
+		return errors.New("refusing to enable http.tailscale without http.apiToken (bots run tools with autoApprove)")
+	}
 	s.startTailcat(s.srv.Handler)
+	s.startTailscale(s.srv.Handler)
 	if s.hub != nil {
 		kinds := s.hub.HarnessKinds()
 		go func() {
@@ -179,6 +188,7 @@ func (s *HTTPServer) Start() error {
 
 func (s *HTTPServer) Shutdown(ctx context.Context) error {
 	s.tailcat.shutdown(ctx)
+	s.tailscale.shutdown(ctx)
 	if s.fallbackEngine != nil {
 		s.fallbackEngine.Close()
 	}
@@ -203,7 +213,7 @@ func (s *HTTPServer) guard(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		tunneled := viaTailcat(r)
+		tunneled := viaTailcat(r) || viaTailscale(r)
 		// DNS-rebinding protection: a loopback server only answers loopback host names.
 		// Tunneled requests carry the client's own Host and always need the token below.
 		if s.cfg.IsLoopback() && !tunneled {

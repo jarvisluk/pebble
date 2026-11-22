@@ -116,6 +116,44 @@ struct TailcatStatus: Codable {
     var tokenEnvRef: String?
 }
 
+struct TailscalePeer: Codable, Identifiable, Hashable {
+    var id: String
+    var hostname: String
+    var dnsName: String?
+    var ip: String?
+    var os: String?
+    var address: String
+    var online: Bool
+    var isBotHub: Bool
+}
+
+struct MobileTailscaleStatus: Codable {
+    var state: String
+    var authUrl: String?
+    var hostname: String?
+    var dnsName: String?
+    var ip: String?
+    var tailnet: String?
+    var link: String?
+    var error: String?
+    var peers: [TailscalePeer]?
+}
+
+struct HostTailscaleStatus: Codable {
+    var enabled: Bool?
+    var state: String?
+    var authUrl: String?
+    var hostname: String?
+    var dnsName: String?
+    var ip: String?
+    var tailnet: String?
+    var link: String?
+    var controlUrl: String?
+    var error: String?
+    var hasToken: Bool?
+    var tokenEnvRef: String?
+}
+
 struct NodeInfo: Codable, Identifiable, Hashable {
     var id: String
     var name: String?

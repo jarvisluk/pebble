@@ -32,14 +32,23 @@ export function extractTokenFromLink(raw: string): { cleanAddress: string; token
   return { cleanAddress: base, token };
 }
 
-export function normalizeAddress(raw: string): { cleanAddress: string; token: string; isTailcat: boolean } {
+export function normalizeAddress(raw: string): {
+  cleanAddress: string;
+  token: string;
+  isTailcat: boolean;
+  isTailscale: boolean;
+} {
   const { cleanAddress, token } = extractTokenFromLink(raw);
   const s = cleanAddress.trim();
-  if (s.toLowerCase().startsWith('tailcat://')) {
-    return { cleanAddress: s, token, isTailcat: true };
+  const lower = s.toLowerCase();
+  if (lower.startsWith('tailcat://')) {
+    return { cleanAddress: s, token, isTailcat: true, isTailscale: false };
+  }
+  if (lower.startsWith('tailscale://')) {
+    return { cleanAddress: s, token, isTailcat: false, isTailscale: true };
   }
   const withProto = /^https?:\/\//i.test(s) ? s : `http://${s}`;
-  return { cleanAddress: withProto.replace(/\/+$/, ''), token, isTailcat: false };
+  return { cleanAddress: withProto.replace(/\/+$/, ''), token, isTailcat: false, isTailscale: false };
 }
 
 export async function apiRequest<T>(

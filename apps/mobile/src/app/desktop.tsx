@@ -2,7 +2,6 @@ import { router, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Image,
   KeyboardAvoidingView,
   LayoutChangeEvent,
   Platform,
@@ -14,22 +13,28 @@ import {
   View,
 } from 'react-native';
 
+import {
+  BothubH264View,
+  type BothubH264ViewRef,
+  type H264MetaEvent,
+} from '../../modules/bothub-tunnel';
 import { ModalHeader } from '../components/ModalHeader';
 import { useI18n } from '../i18n';
 import { useHub } from '../store';
 import { MONO_FONT, useTheme } from '../theme';
-import type { DesktopFrame, DesktopTarget, ScreenState } from '../types';
+import type { DesktopTarget, ScreenState } from '../types';
 
 export default function DesktopScreen() {
   const { target: initialTarget } = useLocalSearchParams<{ target?: string }>();
   const theme = useTheme();
   const { t } = useI18n();
   const {
+    baseURL,
+    authToken,
     desktopTargets,
     takeovers,
     refreshDesktopTargets,
     fetchDesktopState,
-    fetchDesktopFrame,
     sendDesktopInput,
     resolveTakeover,
   } = useHub();
@@ -37,7 +42,10 @@ export default function DesktopScreen() {
   const [selectedTarget, setSelectedTarget] = useState(
     typeof initialTarget === 'string' && initialTarget ? initialTarget : 'local'
   );
-  const [frame, setFrame] = useState<DesktopFrame | null>(null);
+  const [preset, setPreset] = useState<'auto' | 'high' | 'medium' | 'low'>('auto');
+  const [meta, setMeta] = useState<H264MetaEvent | null>(null);
+  const [connected, setConnected] = useState(false);
+  const [fps, setFps] = useState(0);
   const [screen, setScreen] = useState<ScreenState>({ target: 'local', owner: 'idle' });
   const [streaming, setStreaming] = useState(true);
   const [error, setError] = useState('');
@@ -46,6 +54,7 @@ export default function DesktopScreen() {
   const [showTextBar, setShowTextBar] = useState(false);
 
   const mountedRef = useRef(true);
+  const h264Ref = useRef<BothubH264ViewRef | null>(null);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -76,34 +85,11 @@ export default function DesktopScreen() {
     };
   }, [fetchDesktopState, selectedTarget]);
 
-  useEffect(() => {
-    if (!streaming) return;
-    let cancelled = false;
-    const loop = async () => {
-      while (!cancelled && mountedRef.current) {
-        try {
-          const next = await fetchDesktopFrame(selectedTarget);
-          if (cancelled) break;
-          setFrame(next);
-          setError('');
-        } catch (err: any) {
-          if (cancelled) break;
-          const msg = String(err?.message || '');
-          setError(msg || t('captureFailed'));
-          if (err?.status === 403 || msg.includes('屏幕录制') || msg.includes('Screen Recording') || msg.includes('screen_recording_denied')) {
-            setStreaming(false);
-            break;
-          }
-          await new Promise((r) => setTimeout(r, 1500));
-        }
-        await new Promise((r) => setTimeout(r, 140));
-      }
-    };
-    void loop();
-    return () => {
-      cancelled = true;
-    };
-  }, [fetchDesktopFrame, selectedTarget, streaming, t]);
+  const wsURL = useMemo(() => {
+    if (!baseURL) return '';
+    const wsBase = baseURL.replace(/^https:\/\//i, 'wss://').replace(/^http:\/\//i, 'ws://');
+    return `${wsBase}/api/desktop/stream/ws?target=${encodeURIComponent(selectedTarget)}&preset=${encodeURIComponent(preset)}`;
+  }, [baseURL, preset, selectedTarget]);
 
   const activeTakeover = useMemo(
     () => takeovers.find((item) => item.target === selectedTarget) || takeovers[0] || null,
@@ -122,34 +108,38 @@ export default function DesktopScreen() {
 
   const mapTouchToLogical = useCallback(
     (locX: number, locY: number): { x: number; y: number } | null => {
-      if (!frame || !boxSize.width || !boxSize.height || !frame.imageWidth || !frame.imageHeight) {
+      if (!meta || !boxSize.width || !boxSize.height || !meta.imageWidth || !meta.imageHeight) {
         return null;
       }
-      const scale = Math.min(boxSize.width / frame.imageWidth, boxSize.height / frame.imageHeight);
-      const drawW = frame.imageWidth * scale;
-      const drawH = frame.imageHeight * scale;
+      const scale = Math.min(boxSize.width / meta.imageWidth, boxSize.height / meta.imageHeight);
+      const drawW = meta.imageWidth * scale;
+      const drawH = meta.imageHeight * scale;
       const offX = (boxSize.width - drawW) / 2;
       const offY = (boxSize.height - drawH) / 2;
       const rx = (locX - offX) / drawW;
       const ry = (locY - offY) / drawH;
       if (rx < 0 || rx > 1 || ry < 0 || ry > 1) return null;
       return {
-        x: (frame.logicalX || 0) + rx * frame.logicalWidth,
-        y: (frame.logicalY || 0) + ry * frame.logicalHeight,
+        x: (meta.logicalX || 0) + rx * meta.logicalWidth,
+        y: (meta.logicalY || 0) + ry * meta.logicalHeight,
       };
     },
-    [boxSize.height, boxSize.width, frame]
+    [boxSize.height, boxSize.width, meta]
   );
 
   const sendInput = useCallback(
     async (payload: Record<string, unknown>) => {
       try {
+        if (connected && h264Ref.current?.sendInput) {
+          await h264Ref.current.sendInput(JSON.stringify(payload));
+          return;
+        }
         await sendDesktopInput({ target: selectedTarget, ...payload });
       } catch (err: any) {
         setError(err?.message || t('opFailed'));
       }
     },
-    [selectedTarget, sendDesktopInput, t]
+    [connected, selectedTarget, sendDesktopInput, t]
   );
 
   const onTapScreen = (locX: number, locY: number, kind: 'click' | 'right_click') => {
@@ -193,7 +183,8 @@ export default function DesktopScreen() {
                   key={item.id}
                   onPress={() => {
                     setSelectedTarget(item.id);
-                    setFrame(null);
+                    setMeta(null);
+                    setConnected(false);
                   }}
                   style={[
                     styles.targetPill,
@@ -206,6 +197,32 @@ export default function DesktopScreen() {
                 </Pressable>
               );
             })}
+            {(
+              [
+                { id: 'auto', label: t('deskPresetAuto') },
+                { id: 'high', label: t('deskPresetHigh') },
+                { id: 'medium', label: t('deskPresetMedium') },
+                { id: 'low', label: t('deskPresetLow') },
+              ] as const
+            ).map((p) => {
+              const on = preset === p.id;
+              return (
+                <Pressable
+                  key={p.id}
+                  onPress={() => setPreset(p.id)}
+                  style={[styles.targetPill, { backgroundColor: on ? theme.sage : theme.card }]}
+                >
+                  <Text style={[styles.targetTxt, { color: on ? theme.sageInk : theme.text2 }]}>{p.label}</Text>
+                </Pressable>
+              );
+            })}
+            {connected && (
+              <View style={[styles.targetPill, { backgroundColor: theme.card }]}>
+                <Text style={[styles.targetTxt, { color: theme.text2, fontFamily: MONO_FONT }]}>
+                  {`H.264 · ${fps} fps`}
+                </Text>
+              </View>
+            )}
           </ScrollView>
         </View>
 
@@ -224,25 +241,49 @@ export default function DesktopScreen() {
         ) : null}
 
         <View style={styles.stageWrap} onLayout={onStageLayout}>
-          {frame?.jpegBase64 ? (
+          {Platform.OS !== 'web' && wsURL ? (
             <Pressable
               style={styles.touchLayer}
               onPress={(e) => onTapScreen(e.nativeEvent.locationX, e.nativeEvent.locationY, 'click')}
               onLongPress={(e) => onTapScreen(e.nativeEvent.locationX, e.nativeEvent.locationY, 'right_click')}
             >
-              <Image
-                source={{ uri: `data:image/jpeg;base64,${frame.jpegBase64}` }}
+              <BothubH264View
+                ref={h264Ref as any}
                 style={styles.stageImage}
-                resizeMode="contain"
+                url={wsURL}
+                token={authToken}
+                preset={preset}
+                active={streaming}
+                onMeta={(ev) => {
+                  setMeta(ev.nativeEvent);
+                  setError('');
+                }}
+                onStatus={(ev) => {
+                  setConnected(ev.nativeEvent.connected);
+                  setFps(ev.nativeEvent.fps);
+                }}
+                onStreamError={(ev) => {
+                  const msg = ev.nativeEvent.error || t('captureFailed');
+                  setError(msg);
+                  if (ev.nativeEvent.code === 'screen_recording_denied') {
+                    setStreaming(false);
+                  }
+                }}
               />
             </Pressable>
           ) : (
             <View style={styles.centerBox}>
               <ActivityIndicator size="small" color={theme.accent} />
-              <Text style={styles.waitTxt}>{error || t('fetchingDesktop')}</Text>
+              <Text style={styles.waitTxt}>{error || t('deskH264Connecting')}</Text>
             </View>
           )}
-          {frame && error ? (
+          {!connected && Platform.OS !== 'web' && (
+            <View style={[styles.centerBox, StyleSheet.absoluteFill]} pointerEvents="none">
+              <ActivityIndicator size="small" color={theme.accent} />
+              <Text style={styles.waitTxt}>{error || t('deskH264Connecting')}</Text>
+            </View>
+          )}
+          {connected && error ? (
             <View style={styles.errFloat}>
               <Text style={styles.errFloatTxt}>{error}</Text>
             </View>
