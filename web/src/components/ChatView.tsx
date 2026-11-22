@@ -3,10 +3,14 @@ import type { BotStatus, ChatMessage, ResolvedLang, TakeoverRequest } from '../t
 import { translate } from '../lib/i18n';
 import { renderMarkdownHtml } from '../lib/markdown';
 import { botColor, contrastText, formatStamp } from '../lib/theme';
+import type { ViewDir, ViewState } from '../lib/useViewTransition';
 import { BotAvatar } from './BotAvatar';
 
 interface ChatViewProps {
   hidden: boolean;
+  viewState: ViewState;
+  viewDir: ViewDir;
+  viewAnim: boolean;
   bots: BotStatus[];
   activeBot: BotStatus | undefined;
   messages: ChatMessage[];
@@ -29,6 +33,9 @@ interface ChatViewProps {
 
 export const ChatView: React.FC<ChatViewProps> = ({
   hidden,
+  viewState,
+  viewDir,
+  viewAnim,
   bots,
   activeBot,
   messages,
@@ -133,7 +140,16 @@ export const ChatView: React.FC<ChatViewProps> = ({
   let lastTs = 0;
 
   return (
-    <div id="chatView" className="main-pane" hidden={hidden} style={botAccentStyle}>
+    <div
+      id="chatView"
+      className="main-pane view-pane"
+      hidden={hidden}
+      aria-hidden={viewState !== 'active'}
+      data-view-state={viewState}
+      data-view-dir={viewDir}
+      data-view-anim={viewAnim ? '1' : '0'}
+      style={botAccentStyle}
+    >
       <div className="chat-hd">
         <button
           id="menuBtn"

@@ -1,6 +1,8 @@
 # bot-hub Web UI 设计规范
 
-适用于 `internal/web/index.html`（Web 界面与桌面 App 共用）。改 UI 前先读这里；规范与代码不一致时，以本文件为准，或先改本文件再改代码。
+适用于 `web/`（Web 界面与桌面 App 共用）。改 UI 前先读这里；规范与代码不一致时，以本文件为准，或先改本文件再改代码。
+
+样式按职责分为 4 层（`web/src/styles/`，打包为单份 CSS）：`tokens.css`（设计 Token）→ `primitives.css`（Reset、通用控件、弹性行原语、浮层、通用视图切换 `.view-deck` / `.view-pane`）→ `layout.css`（双栏骨架、响应式、`mac-app` 壳层适配）→ `features.css`（头像、列表、聊天流、远程桌面、详情、设置、开箱向导）。组件内禁止新增静态布局/间距/字号内联 `style={{}}`，仅允许数据驱动的 CSS 变量或色板背景。
 
 ## 1. 方向
 
@@ -105,6 +107,8 @@
 
 - 不用描边分区，用「底色差」分区（页面 `--page` 与卡片 `--card` 的对比）。
 - 阴影只用于浮层（弹出菜单、详情面板、对话框、toast）。
+- **层级（`z-index`）**：统一使用 `:root` Token，禁止随意写魔数：`--z-resizer: 5` · `--z-desk: 20` · `--z-shade: 28` · `--z-panel: 30` · `--z-drawer: 32` · `--z-modal: 40` · `--z-toast: 60`。
+- **通用行/切页原语**：行布局优先复用 `.row-between` / `.row-inline` / `.row-inline-sm` / `.row-end` / `.row-wrap`；页面与同级分组切换统一复用 `.view-deck` + `.view-pane` + `useViewTransition`。
 
 ## 5. 布局（桌面优先）
 
@@ -149,10 +153,14 @@
 - **面板 / 设置卡片 / 对话框**：`--card` 底，圆角 `--r-card`。全窗口设置页将表单拆分为独立 `--card` 卡片区块，卡片内只有一层：列表行（Harness 接管、Provider、远端节点、记忆条目）不再套 `--s1` 底块，而是直接铺在卡片上、行间用 1px `--s2` 分隔线，行内输入框与按钮保持 `--s1`；`--s1` 底块只留给说明/命令提示（`.note`）与展开的新增表单；Magpie 卡片只负责「接管 / 恢复原生」：已接管的 Harness 只读显示当前模型，模型切换与模型源（Provider）管理不在本应用内做，卡片底部提供「打开 Magpie」按钮与可选的「Magpie 网页地址」（`magpieWebUrl`，未填时回退环境变量 `MAGPIE_WEB_URL`）：客户端不在主机本机且配置了网页地址时直接打开该地址，否则调用 `POST /api/magpie/open` 在主机上打开 Magpie（移动端此时文案为「在主机上打开 Magpie」）；「远程与设备」分组在主端展示已连接的远端设备节点状态与独立桌面操控子进程（Computer Use Worker）的 Harness/轻量视觉模型设置，在远端桌面客户端额外展示「本机节点」开关、名称修改与权限范围（`文件读写` / `执行命令` / `桌面与自动化`）。
 - **焦点**：`outline: 2px solid var(--accent)`；输入字段获得焦点时边框变 `--accent`。
 
-## 7. 动效（沿用原版，不再新增）
+## 7. 动效
+
+统一使用 `:root` 动效 Token：`--ease-out: cubic-bezier(.22, 1, .36, 1)`、`--dur-fast: 150ms`、`--dur-view: 220ms`、`--dur-panel: 250ms`。全局遵循 `@media (prefers-reduced-motion: reduce)`，在系统开启减弱动态效果时自动关闭位移与过渡。
 
 | 场景 | 动效 |
 |---|---|
+| 层级推进（主页 ↔ 设置页） | 外层双栏卡片壳稳固不动，左栏与右栏内容同步进退同帧（`220ms var(--ease-out)`）：前进时旧内容左移 `10px` 淡出、新内容从右侧 `14px` 淡入；返回时方向对称。保持组件挂载，不丢滚动位置与草稿 |
+| 同级切换（设置页内分组） | `.tab-pane` 轻浮淡入（`translateY(6px) → 0`，`180ms var(--ease-out)`） |
 | 新消息、toast | `rise` 0.22s：上移 6px 并淡入 |
 | 工作中圆点 | `pulse` 1.2s 循环 |
 | 正在调用 / 思考 | `shine` 1.8s 文字流光 |

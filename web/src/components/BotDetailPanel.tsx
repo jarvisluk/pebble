@@ -385,7 +385,7 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
               </div>
             </div>
 
-            <div className="sec" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+            <div className="sec row-between">
               <span>{t('botMemory')}</span>
               <button
                 type="button"
@@ -397,7 +397,7 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
               </button>
             </div>
             {memAddOpen && (
-              <div id="pMemAddBox" className="add-prov mem-add" style={{ marginBottom: 8 }}>
+              <div id="pMemAddBox" className="add-prov mem-add mb-8">
                 <div className="fld">
                   <label>{t('memType')}</label>
                   <select id="pMemKind" value={memKind} onChange={(e) => setMemKind(e.target.value)}>
@@ -413,13 +413,13 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
                   <textarea
                     id="pMemText"
                     rows={3}
-                    style={{ minHeight: 66, fontFamily: 'var(--font)' }}
+                    className="ta-sm ta-font"
                     placeholder={t('botMemPh')}
                     value={memText}
                     onChange={(e) => setMemText(e.target.value)}
                   />
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
+                <div className="row-end-sm">
                   <button
                     type="button"
                     id="pMemAddCancel"
@@ -486,7 +486,7 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
               {memErr}
             </div>
 
-            <div className="sec" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+            <div className="sec row-between">
               <span>{t('routines')}</span>
               <button
                 type="button"
@@ -501,7 +501,7 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
               </button>
             </div>
             {rtFormOpen && (
-              <div id="pRtFormBox" className="add-prov mem-add" style={{ marginBottom: 8 }}>
+              <div id="pRtFormBox" className="add-prov mem-add mb-8">
                 <div className="fld">
                   <label>{t('name')}</label>
                   <input id="pRtName" placeholder={t('rtNamePh')} value={rtName} onChange={(e) => setRtName(e.target.value)} />
@@ -559,14 +559,14 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
                         value={rtCron}
                         onChange={(e) => setRtCron(e.target.value)}
                       />
-                      <div className="set-card-desc" style={{ marginTop: 4 }}>{t('rtCronHint')}</div>
+                      <div className="set-card-desc mt-4">{t('rtCronHint')}</div>
                     </div>
                   ) : (
                     <div className="fld" />
                   )}
                 </div>
                 {rtMode !== 'webhook' && (
-                  <label className="perm" style={{ background: 'var(--card)', marginBottom: 6 }}>
+                  <label className="perm perm-card mb-6">
                     <input
                       type="checkbox"
                       id="pRtWebhookTrigger"
@@ -591,7 +591,7 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
                       onChange={(e) => setRtWebhookSecret(e.target.value)}
                     />
                     {rtWebhookSecretSet && (
-                      <label className="perm" style={{ background: 'var(--card)', marginTop: 4 }}>
+                      <label className="perm perm-card mt-4">
                         <input
                           type="checkbox"
                           checked={rtClearSecret}
@@ -630,14 +630,14 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
                   <textarea
                     id="pRtPrompt"
                     rows={3}
-                    style={{ minHeight: 66, fontFamily: 'var(--font)' }}
+                    className="ta-sm ta-font"
                     placeholder={t('rtPromptPh')}
                     value={rtPrompt}
                     onChange={(e) => setRtPrompt(e.target.value)}
                   />
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
-                  <label className="perm" style={{ background: 'var(--card)' }}>
+                <div className="row-between row-wrap">
+                  <label className="perm perm-card">
                     <input
                       type="checkbox"
                       id="pRtEnabled"
@@ -646,7 +646,7 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
                     />
                     {t('rtEnabled')}
                   </label>
-                  <div style={{ display: 'flex', gap: 6 }}>
+                  <div className="row-inline-sm">
                     <button
                       type="button"
                       id="pRtCancel"
@@ -921,7 +921,7 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
                     <dd id="pWs">{detail.workspace}</dd>
                   </div>
                 </dl>
-                <label className="perm" style={{ alignSelf: 'flex-start', marginTop: 10 }}>
+                <label className="perm self-start mt-10">
                   <input
                     type="checkbox"
                     id="pePrivate"
@@ -947,7 +947,7 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
       </div>
 
       {editErr && (
-        <div id="peErr" className="msg-err" style={{ marginTop: 6 }}>
+        <div id="peErr" className="msg-err mt-6">
           {editErr}
         </div>
       )}

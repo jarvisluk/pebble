@@ -2,11 +2,16 @@ import React from 'react';
 import type { BotStatus, ChatMessage, ResolvedLang, SettingsTab } from '../types';
 import { translate } from '../lib/i18n';
 import { formatShortTime, plainPreviewText } from '../lib/theme';
+import type { ViewDir, ViewState } from '../lib/useViewTransition';
 import { BotAvatar } from './BotAvatar';
 
 interface SidebarProps {
   open: boolean;
   view: 'chat' | 'settings';
+  chatViewState: ViewState;
+  settingsViewState: ViewState;
+  viewDir: ViewDir;
+  viewAnim: boolean;
   settingsTab: SettingsTab;
   bots: BotStatus[];
   activeBotId: string | null;
@@ -28,6 +33,10 @@ interface SidebarProps {
 export const Sidebar: React.FC<SidebarProps> = ({
   open,
   view,
+  chatViewState,
+  settingsViewState,
+  viewDir,
+  viewAnim,
   settingsTab,
   bots,
   activeBotId,
@@ -53,7 +62,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   return (
     <aside id="side" className={`side${open ? ' open' : ''}`}>
-      <div id="sideChat" className="side-pane" hidden={view === 'settings'}>
+      <div className="view-deck">
+        <div
+          id="sideChat"
+          className="side-pane view-pane"
+          hidden={chatViewState === 'hidden'}
+          aria-hidden={chatViewState !== 'active'}
+          data-view-state={chatViewState}
+          data-view-dir={viewDir}
+          data-view-anim={viewAnim ? '1' : '0'}
+        >
         <div className="side-hd">
           <h2>
             Bots<span id="botCount">{bots.length || ''}</span>
@@ -180,7 +198,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </nav>
       </div>
 
-      <div id="sideSettings" className="side-pane" hidden={view !== 'settings'}>
+      <div
+        id="sideSettings"
+        className="side-pane view-pane"
+        hidden={settingsViewState === 'hidden'}
+        aria-hidden={settingsViewState !== 'active'}
+        data-view-state={settingsViewState}
+        data-view-dir={viewDir}
+        data-view-anim={viewAnim ? '1' : '0'}
+      >
         <div className="side-hd">
           <h2>{t('settings')}</h2>
         </div>
@@ -263,6 +289,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <span>{t('tabGeneral')}</span>
           </button>
         </nav>
+      </div>
       </div>
 
       <div className="side-ft">

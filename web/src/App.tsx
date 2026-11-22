@@ -16,6 +16,7 @@ import { api, setUnauthorizedHandler } from './lib/api';
 import { getLangPref, resolveLang, setLangPref, translate } from './lib/i18n';
 import { installMacWindowDragBridge } from './lib/macShell';
 import { applyAccentPref, getAccentPref } from './lib/theme';
+import { useViewTransition } from './lib/useViewTransition';
 import { Sidebar } from './components/Sidebar';
 import { ChatView } from './components/ChatView';
 import { DesktopStage } from './components/DesktopStage';
@@ -47,6 +48,7 @@ export default function App() {
   const [screenSeq, setScreenSeq] = useState(0);
 
   const [view, setView] = useState<'chat' | 'settings'>('chat');
+  const viewTx = useViewTransition(view, ['chat', 'settings'] as const);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>('models');
   const [sideCollapsed, setSideCollapsed] = useState<boolean>(() => {
     try {
@@ -509,6 +511,10 @@ export default function App() {
         <Sidebar
           open={mobileSideOpen}
           view={view}
+          chatViewState={viewTx.stateOf('chat')}
+          settingsViewState={viewTx.stateOf('settings')}
+          viewDir={viewTx.dir}
+          viewAnim={viewTx.animating}
           settingsTab={settingsTab}
           bots={bots}
           activeBotId={activeBotId}
@@ -558,9 +564,13 @@ export default function App() {
         />
 
         <main className="main">
-          <ChatView
-            hidden={view === 'settings'}
-            bots={bots}
+          <div className="view-deck">
+            <ChatView
+              hidden={viewTx.stateOf('chat') === 'hidden'}
+              viewState={viewTx.stateOf('chat')}
+              viewDir={viewTx.dir}
+              viewAnim={viewTx.animating}
+              bots={bots}
             activeBot={activeBot}
             messages={activeBotId ? msgsMap[activeBotId] || [] : []}
             seenIds={seenIdsRef.current}
@@ -647,7 +657,10 @@ export default function App() {
           </ChatView>
 
           <SettingsView
-            hidden={view !== 'settings'}
+            hidden={viewTx.stateOf('settings') === 'hidden'}
+            viewState={viewTx.stateOf('settings')}
+            viewDir={viewTx.dir}
+            viewAnim={viewTx.animating}
             tab={settingsTab}
             bots={bots}
             settings={settings}
@@ -677,6 +690,7 @@ export default function App() {
               setUnboxOpen(true);
             }}
           />
+          </div>
         </main>
       </div>
 

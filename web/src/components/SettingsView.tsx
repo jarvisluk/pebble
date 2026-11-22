@@ -15,10 +15,14 @@ import type {
 import { api } from '../lib/api';
 import { translate } from '../lib/i18n';
 import { ACCENT_PRESETS, DEFAULT_ACCENT, applyAccentPref, applyThemePref, getAccentPref, getThemePref } from '../lib/theme';
+import type { ViewDir, ViewState } from '../lib/useViewTransition';
 import { BotAvatar } from './BotAvatar';
 
 interface SettingsViewProps {
   hidden: boolean;
+  viewState: ViewState;
+  viewDir: ViewDir;
+  viewAnim: boolean;
   tab: SettingsTab;
   bots: BotStatus[];
   settings: SettingsData | null;
@@ -40,6 +44,9 @@ interface SettingsViewProps {
 
 export const SettingsView: React.FC<SettingsViewProps> = ({
   hidden,
+  viewState,
+  viewDir,
+  viewAnim,
   tab,
   bots,
   settings,
@@ -334,6 +341,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     }
   };
 
+  const prevTabRef = useRef<SettingsTab>(tab);
+  const [tabAnim, setTabAnim] = useState(false);
+  useEffect(() => {
+    if (prevTabRef.current === tab) return;
+    prevTabRef.current = tab;
+    if (viewState !== 'active') return;
+    setTabAnim(true);
+    const id = window.setTimeout(() => setTabAnim(false), 200);
+    return () => window.clearTimeout(id);
+  }, [tab, viewState]);
+
   const titleKey = tab === 'remote' ? 'tabRemote' : tab === 'general' ? 'tabGeneral' : 'tabModels';
   const mp = settings?.magpie;
   const onlineNodeCount = nodes.filter((n) => n.connected).length;
@@ -367,7 +385,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   };
 
   return (
-    <section id="settingsView" className="main-pane" aria-label={t('settings')} hidden={hidden}>
+    <section
+      id="settingsView"
+      className="main-pane view-pane"
+      aria-label={t('settings')}
+      hidden={hidden}
+      aria-hidden={viewState !== 'active'}
+      data-view-state={viewState}
+      data-view-dir={viewDir}
+      data-view-anim={viewAnim ? '1' : '0'}
+    >
       <div className="set-hd">
         <button
           type="button"
@@ -412,7 +439,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       <div className="scroll">
         <form id="settingsForm" className="set-body" autoComplete="off" onSubmit={handleSaveSettings}>
           {/* Tab 1: Models & Bots */}
-          <div id="sTabModels" className="tab-pane" hidden={tab !== 'models'}>
+          <div id="sTabModels" className={`tab-pane${tab === 'models' && tabAnim ? ' tab-anim' : ''}`} hidden={tab !== 'models'}>
             <section className="set-card">
               <div className="set-card-hd">
                 <h2>{t('magpieUnified')}</h2>
@@ -463,7 +490,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                           <div className="mp-hname">
                             <span>{h.label}</span>
                             {conn ? (
-                              <small style={{ color: 'var(--sage-ink)' }}>{t('mpConnected')}</small>
+                              <small className="text-sage">{t('mpConnected')}</small>
                             ) : (
                               <small>
                                 {t('mpNative')}
@@ -704,7 +731,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
 
           {/* Tab 2: Remote & Devices */}
-          <div id="sTabRemote" className="tab-pane" hidden={tab !== 'remote'}>
+          <div id="sTabRemote" className={`tab-pane${tab === 'remote' && tabAnim ? ' tab-anim' : ''}`} hidden={tab !== 'remote'}>
             {localNode && (
               <section className="set-card" id="localNodeBox">
                 <div className="set-card-hd">
@@ -712,7 +739,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     <span>{t('localNode')}</span>{' '}
                     <em id="localNodeId">{localNode.name ? `(${localNode.name})` : ''}</em>
                   </h2>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <div className="row-inline-sm">
                     <span id="localNodeState" className={`mp${localNode.connected ? ' ok' : ''}`}>
                       {({
                         disabled: t('disabled'),
@@ -768,7 +795,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     </button>
                   </div>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div className="row-inline">
                   <input
                     id="localNodeNameIn"
                     className="note-in"
@@ -910,14 +937,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     id="remoteQR"
                     alt=""
                     src={`/api/tailcat/qr.png?t=${qrBust}`}
-                    style={{ width: 190, alignSelf: 'center', borderRadius: 12, background: '#fff', padding: 8 }}
+                    className="qr-box"
                   />
                   <div className="fld" id="remoteLinkFld">
                     <textarea
                       id="remoteLink"
-                      className="mono"
+                      className="mono ta-sm"
                       readOnly
-                      style={{ minHeight: 66 }}
                       value={tailcat.link || ''}
                     />
                   </div>
@@ -964,12 +990,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               </p>
               {tailcat?.hasToken && (
                 <div className="note" id="remoteTokBox">
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                  <div className="row-between">
                     <span id="remoteTokTitle">
                       {tailcat.tokenEnvRef ? t('accessTokenEnv') : t('accessTokenReusable')}
                     </span>
                     {!tailcat.tokenEnvRef && (
-                      <div id="remoteTokActs" style={{ display: 'flex', gap: 6 }}>
+                      <div id="remoteTokActs" className="row-inline-sm">
                         <button
                           type="button"
                           className="mp"
@@ -1081,14 +1107,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   <label>
                     {t('deskWorkerModel')} <em>{t('deskWorkerModelHint')}</em>
                   </label>
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <div className="row-inline">
                     <input
                       id="sDeskModel"
-                      className="mono"
+                      className="mono flex-1"
                       list={deskHarness ? `models-${deskHarness}` : 'models-global'}
                       placeholder={t('rtModelPh')}
                       spellCheck={false}
-                      style={{ flex: 1, minWidth: 0 }}
                       value={deskModel}
                       onChange={(e) => setDeskModel(e.target.value)}
                     />
@@ -1149,7 +1174,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                           <div className="nm">{n.name || n.id}</div>
                           <div className="meta">{meta}</div>
                         </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <div className="row-inline-sm">
                           {canDesk && (
                             <button type="button" className="mp" onClick={() => onOpenDesktopTarget(n.id)}>
                               {t('openDesktop')}
@@ -1171,7 +1196,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
 
           {/* Tab 3: General */}
-          <div id="sTabGeneral" className="tab-pane" hidden={tab !== 'general'}>
+          <div id="sTabGeneral" className={`tab-pane${tab === 'general' && tabAnim ? ' tab-anim' : ''}`} hidden={tab !== 'general'}>
             <section className="set-card">
               <div className="set-card-hd">
                 <h2>{t('appearance')}</h2>
@@ -1261,7 +1286,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 <textarea
                   id="sUserMd"
                   rows={8}
-                  style={{ minHeight: 160 }}
+                  className="ta-lg"
                   spellCheck={false}
                   placeholder={t('userMdPh')}
                   value={sharedUserMd}
@@ -1273,7 +1298,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             <section className="set-card" id="sMemCard">
               <div className="set-card-hd">
                 <h2>{t('magpieGlobalMem')}</h2>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                <div className="row-inline-sm row-wrap">
                   <span id="sMemStatus" className={`mp ${memStatusClass}`}>
                     {memStatus || t('notLoaded')}
                   </span>
@@ -1321,13 +1346,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     <textarea
                       id="sMemText"
                       rows={3}
-                      style={{ minHeight: 72, fontFamily: 'var(--font)' }}
+                      className="ta-md ta-font"
                       placeholder={t('globalMemPh')}
                       value={memText}
                       onChange={(e) => setMemText(e.target.value)}
                     />
                   </div>
-                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
+                  <div className="row-end-sm">
                     <button
                       type="button"
                       id="sMemAddCancel"

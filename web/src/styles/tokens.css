@@ -1,0 +1,122 @@
+/* Design tokens: see DESIGN.md §2–4, §7 */
+:root {
+  --page: #efece8;
+  --card: #ffffff;
+  --s1: #f5f3f0;
+  --s2: #e9e5e0;
+  --s3: #dcd7d0;
+  --text: #1d1b19;
+  --text-2: #57524d;
+  --mute: #9b958f;
+  --accent: #d9774b;
+  --accent-text: #ffffff;
+  --accent-soft: color-mix(in srgb, var(--accent) 16%, var(--card));
+  --sel: color-mix(in srgb, var(--accent) 10%, var(--card));
+  --bot-accent: var(--accent);
+  --bot-accent-text: var(--accent-text);
+  --bot-accent-soft: color-mix(in srgb, var(--bot-accent) 16%, var(--card));
+  --pink: #f7d9d3;
+  --pink-ink: #b2443a;
+  --lilac: #e0dbfb;
+  --lilac-ink: #6a55c9;
+  --sage: #e2e9cc;
+  --sage-ink: #6b8a2a;
+  --busy: #f08a2c;
+  --danger: #d9483b;
+  --stage: #111110;
+  --stage-pill: #1f1d1b;
+  --stage-text: #f3f1ee;
+  --stage-mute: #a6a09a;
+  --shade: rgba(29, 27, 25, .28);
+  --eye: rgba(28, 20, 14, .88);
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Segoe UI", "Microsoft YaHei", sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --fs-xl: 20px;
+  --fs-lg: 17px;
+  --fs-md: 15px;
+  --fs-base: 14px;
+  --fs-sm: 13px;
+  --fs-xs: 12px;
+  --gap: 8px;
+  --pad: 12px;
+  --bar: 36px;
+  --side-w: 300px;
+  --r-card: 24px;
+  --r-row: 12px;
+  --r-bubble: 20px;
+  --pop-shadow: 0 12px 32px rgba(0, 0, 0, .16);
+  --edge-t: calc(var(--gap) + env(safe-area-inset-top));
+  --edge-r: calc(var(--gap) + env(safe-area-inset-right));
+  --edge-b: calc(var(--gap) + env(safe-area-inset-bottom));
+  --edge-l: calc(var(--gap) + env(safe-area-inset-left));
+
+  /* Motion & layering */
+  --ease-out: cubic-bezier(.22, 1, .36, 1);
+  --dur-fast: 150ms;
+  --dur-view: 220ms;
+  --dur-panel: 250ms;
+  --z-resizer: 5;
+  --z-desk: 20;
+  --z-shade: 28;
+  --z-panel: 30;
+  --z-drawer: 32;
+  --z-modal: 40;
+  --z-toast: 60;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --page: #000000;
+    --card: #171717;
+    --s1: #232323;
+    --s2: #303030;
+    --s3: #404040;
+    --text: #f3f1ee;
+    --text-2: #ccc7c1;
+    --mute: #948e88;
+    --accent-soft: #2a2a2a;
+    --bot-accent-soft: #2a2a2a;
+    --sel: #262626;
+    --pink: #171717;
+    --pink-ink: #f0a59b;
+    --lilac: #24203a;
+    --lilac-ink: #b7aaf5;
+    --sage: #171717;
+    --sage-ink: #a9c46a;
+    --danger: #f0605a;
+    --stage: #050505;
+    --stage-pill: #232323;
+    --stage-text: #f3f1ee;
+    --stage-mute: #9b958f;
+    --shade: rgba(0, 0, 0, .6);
+    color-scheme: dark;
+  }
+}
+
+html[data-theme="dark"] {
+  --page: #000000;
+  --card: #171717;
+  --s1: #232323;
+  --s2: #303030;
+  --s3: #404040;
+  --text: #f3f1ee;
+  --text-2: #ccc7c1;
+  --mute: #948e88;
+  --accent-soft: #2a2a2a;
+  --bot-accent-soft: #2a2a2a;
+  --sel: #262626;
+  --pink: #171717;
+  --pink-ink: #f0a59b;
+  --lilac: #24203a;
+  --lilac-ink: #b7aaf5;
+  --sage: #171717;
+  --sage-ink: #a9c46a;
+  --danger: #f0605a;
+  --stage: #050505;
+  --stage-pill: #232323;
+  --stage-text: #f3f1ee;
+  --stage-mute: #9b958f;
+  --shade: rgba(0, 0, 0, .6);
+  color-scheme: dark;
+}

@@ -192,7 +192,7 @@ export const CreateBotModal: React.FC<CreateBotModalProps> = ({
               onChange={(e) => setInst(e.target.value)}
             />
           </div>
-          <label className="perm" style={{ alignSelf: 'flex-start' }}>
+          <label className="perm self-start">
             <input type="checkbox" id="fPrivate" checked={priv} onChange={(e) => setPriv(e.target.checked)} />
             <span>{t('privateSessionsLabel')}</span>
           </label>
