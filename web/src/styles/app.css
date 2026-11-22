@@ -632,28 +632,25 @@
 
   .mp-hrow {
     display: grid;
-    grid-template-columns: 126px minmax(0, 1fr) auto;
+    grid-template-columns: 168px minmax(0, 1fr) auto;
     gap: 8px;
     align-items: center;
-    background: var(--s1);
-    padding: 8px 10px;
-    border-radius: var(--r-row);
+    padding: 4px 0;
   }
   .mp-hname { font-weight: 600; font-size: var(--fs-base); color: var(--text); display: flex; flex-direction: column; gap: 2px; }
   .mp-hname small { font-weight: 400; font-size: var(--fs-xs); color: var(--mute); }
   .mp-hacts { display: flex; align-items: center; gap: 5px; }
-  .mp-hrow input { background-color: var(--card); }
-  .mp-hrow button.mp:not(.go):not(.ok):not(.bad), .prov-row button.mp:not(.go):not(.ok):not(.bad), .add-prov button.mp:not(.go):not(.ok):not(.bad), .node-row button.mp:not(.go):not(.ok):not(.bad) { background: var(--card); }
-  .mp-hrow button.mp:not(.go):not(.ok):not(.bad):hover, .prov-row button.mp:not(.go):not(.ok):not(.bad):hover, .add-prov button.mp:not(.go):not(.ok):not(.bad):hover, .node-row button.mp:not(.go):not(.ok):not(.bad):hover { background: var(--s2); }
+  .add-prov button.mp:not(.go):not(.ok):not(.bad) { background: var(--card); }
+  .add-prov button.mp:not(.go):not(.ok):not(.bad):hover { background: var(--s2); }
+  /* card list rows sit flat on the card, split by hairlines */
+  .mp-hrow + .mp-hrow, .prov-row + .prov-row, .node-row + .node-row, .mem-row + .mem-row { border-top: 1px solid var(--s2); padding-top: 12px; }
 
   .prov-row {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    padding: 8px 10px;
-    border-radius: 10px;
-    background: var(--s1);
+    padding: 4px 0;
   }
   .prov-meta { min-width: 0; flex: 1; }
   .prov-meta .nm { font-weight: 600; font-size: var(--fs-base); color: var(--text); }
@@ -664,17 +661,17 @@
   .add-prov[hidden] { display: none; }
   .mem-bar { display: flex; gap: 8px; align-items: center; }
   .mem-bar input { flex: 1; min-width: 0; }
-  .mem-row { background: var(--s1); border-radius: var(--r-row); padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+  .mem-row { padding: 4px 0; display: flex; flex-direction: column; gap: 6px; }
   .mem-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
   .mem-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
   .mem-time { font-size: var(--fs-xs); color: var(--mute); }
   .mem-txt { font-size: var(--fs-sm); color: var(--text); white-space: pre-wrap; word-break: break-word; line-height: 1.55; }
-  .mem-row .mp:not(.go):not(.ok):not(.bad), .mem-add .mp:not(.go):not(.ok):not(.bad) { background: var(--card); }
-  .mem-row .mp:not(.go):not(.ok):not(.bad):hover, .mem-add .mp:not(.go):not(.ok):not(.bad):hover { background: var(--s2); }
+  .mem-add .mp:not(.go):not(.ok):not(.bad) { background: var(--card); }
+  .mem-add .mp:not(.go):not(.ok):not(.bad):hover { background: var(--s2); }
   .rt-title { font-size: var(--fs-base); font-weight: 600; color: var(--text); }
   .rt-runs { display: flex; flex-direction: column; gap: 4px; padding-top: 4px; border-top: 1px solid var(--s2); }
   .rt-runs[hidden] { display: none; }
-  .rt-run { display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-xs); color: var(--text-2); padding: 4px 8px; border-radius: 8px; background: var(--card); }
+  .rt-run { display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-xs); color: var(--text-2); padding: 4px 8px; border-radius: 8px; background: var(--s1); }
   .rt-run-hd { display: flex; align-items: center; justify-content: space-between; gap: 6px; color: var(--mute); }
   .rt-run-err { color: var(--danger); word-break: break-word; }
 
@@ -682,10 +679,9 @@
   .perm { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px 0 10px; border-radius: 999px; background: var(--s1); color: var(--text-2); font-size: var(--fs-sm); cursor: pointer; transition: background .15s, color .15s; user-select: none; }
   .perm:hover { background: var(--s2); color: var(--text); }
   .perm input { accent-color: var(--accent); margin: 0; cursor: pointer; }
-  .node-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 12px; border-radius: 10px; background: var(--s1); }
-  .node-row .mp:not(.ok):not(.go):not(.bad) { background: var(--card); }
-  .note .perm, .note .node-row { background: var(--card); }
-  .note .node-row .mp:not(.ok):not(.go):not(.bad) { background: var(--s1); }
+  .node-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 4px 0; }
+  .note .perm { background: var(--card); }
+  .note .node-row + .node-row { border-top-color: var(--s3); }
   .note .perm:hover { background: var(--s2); }
   .node-row .nm { font-weight: 600; color: var(--text); font-size: var(--fs-base); }
   .node-row .meta { font-size: var(--fs-xs); color: var(--mute); }
