@@ -78,6 +78,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   // Magpie
   const [harnessModelsDraft, setHarnessModelsDraft] = useState<Record<string, string>>({});
+  const [magpieModels, setMagpieModels] = useState<Record<string, string[]>>({});
   const [magpieBusyId, setMagpieBusyId] = useState('');
   const [copiedKey, setCopiedKey] = useState('');
 
@@ -275,6 +276,23 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     };
   }, [hidden, tab]);
 
+  useEffect(() => {
+    if (hidden || tab !== 'models' || !settings?.magpie?.installed) return;
+    let cancelled = false;
+    for (const h of settings.harnesses || []) {
+      if (h.magpie?.connected || magpieModels[h.id]) continue;
+      api<{ models?: string[] }>(`/api/models?harness=${encodeURIComponent(h.id)}&source=magpie`)
+        .then((d) => {
+          if (cancelled) return;
+          setMagpieModels((prev) => ({ ...prev, [h.id]: d.models || [] }));
+        })
+        .catch(() => {});
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [hidden, tab, settings?.magpie?.installed, settings?.harnesses, magpieModels]);
+
   const globalModels = useMemo(() => {
     const seen = new Set<string>();
     for (const h of settings?.harnesses || []) {
@@ -376,6 +394,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       });
       onSettingsUpdated(next);
       onResetModels();
+      void onLoadModels(hId, true);
       onToast(t('mpConnectedToast', { label: hLabel }));
     } catch (e) {
       if (e instanceof Error && e.message !== 'unauthorized') setSettingsErr(e.message);
@@ -429,11 +448,18 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         ))}
       </datalist>
       {(settings?.harnesses || []).map((h) => (
-        <datalist key={h.id} id={`models-${h.id}`}>
-          {(models[h.id] || []).map((m) => (
-            <option key={m} value={m} />
-          ))}
-        </datalist>
+        <React.Fragment key={h.id}>
+          <datalist id={`models-${h.id}`}>
+            {(models[h.id] || []).map((m) => (
+              <option key={m} value={m} />
+            ))}
+          </datalist>
+          <datalist id={`models-magpie-${h.id}`}>
+            {(magpieModels[h.id] || []).map((m) => (
+              <option key={m} value={m} />
+            ))}
+          </datalist>
+        </React.Fragment>
       ))}
 
       <div className="scroll">
@@ -503,7 +529,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                           ) : (
                           <input
                             className="mono"
-                            list={`models-${h.id}`}
+                            list={`models-magpie-${h.id}`}
                             placeholder={t('mpModelPh')}
                             spellCheck={false}
                             disabled={isBusy}
@@ -552,6 +578,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                                       );
                                       onSettingsUpdated(next);
                                       onResetModels();
+                                      void onLoadModels(h.id, true);
                                       onToast(t('mpRestoredToast', { label: h.label }));
                                     },
                                   })

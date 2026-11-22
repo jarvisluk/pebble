@@ -1438,28 +1438,30 @@ func (h *Hub) Harnesses(ctx context.Context) []HarnessInfo {
 // Models lists the models a harness offers: magpie's catalog (when installed)
 // merged with the harness's own models.
 func (h *Hub) Models(ctx context.Context, kind string) ([]string, error) {
+	return h.ModelsWithSource(ctx, kind, "")
+}
+
+// ModelsWithSource returns the available models for kind.
+// When source == "magpie", it returns Magpie gateway models for wiring that harness.
+// Otherwise it returns Magpie models only when kind is connected to Magpie, and
+// native CLI models when kind is running in native mode.
+func (h *Hub) ModelsWithSource(ctx context.Context, kind, source string) ([]string, error) {
 	r, err := h.registry.Get(kind)
 	if err != nil {
 		return nil, err
 	}
-	var models []string
-	if harness.MagpieInstalled() {
-		models = harness.MagpieModels(ctx, kind)
+	if strings.EqualFold(strings.TrimSpace(source), "magpie") {
+		if !harness.MagpieInstalled() {
+			return []string{}, nil
+		}
+		return harness.MagpieModels(ctx, kind), nil
 	}
-	native, err := r.Models(ctx)
-	if err != nil && len(models) == 0 {
-		return nil, err
-	}
-	seen := make(map[string]bool, len(models))
-	for _, m := range models {
-		seen[m] = true
-	}
-	for _, m := range native {
-		if !seen[m] {
-			models = append(models, m)
+	if harness.MagpieInstalled() && harness.GetMagpieStatus(ctx, kind).Connected {
+		if models := harness.MagpieModels(ctx, kind); len(models) > 0 {
+			return models, nil
 		}
 	}
-	return models, nil
+	return r.Models(ctx)
 }
 
 // MagpieConnect asks magpie to point a harness's CLI at its gateway, using

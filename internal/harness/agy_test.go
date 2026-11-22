@@ -130,3 +130,22 @@ done
 		t.Fatalf("unexpected rule file:\n%s", ruleRaw)
 	}
 }
+
+func TestAgyModelsStripsSpinner(t *testing.T) {
+	tmp := t.TempDir()
+	fakeAgy := filepath.Join(tmp, "agy")
+	script := "#!/bin/sh\n" +
+		"printf '\\r⠋ Fetching available models...\\r⠙ Fetching available models...\\rgemini-4-neon-high             Gemini 4 Neon (High)\\n'\n" +
+		"printf 'claude-opus-5-5-high           Claude Opus 5.5 (High)\\n'\n"
+	if err := os.WriteFile(fakeAgy, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	h := &AgyHarness{binary: fakeAgy, procs: make(map[string]*agyProc)}
+	models, err := h.Models(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(models) != 2 || models[0] != "gemini-4-neon-high" || models[1] != "claude-opus-5-5-high" {
+		t.Fatalf("unexpected parsed agy models: %#v", models)
+	}
+}
