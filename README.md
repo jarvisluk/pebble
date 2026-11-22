@@ -293,6 +293,10 @@ To reach a `bot-hub` running at home or in the office from your laptop:
     <td>Visual design system, color tokens, spacing, and motion rules for the Web &amp; desktop UI.</td>
   </tr>
   <tr>
+    <td><a href="apps/apple/README.md"><code>apps/apple</code></a></td>
+    <td>Native SwiftUI client for iPhone, iPad and Mac.</td>
+  </tr>
+  <tr>
     <td><a href="config/bots.example.json"><code>config/bots.example.json</code></a></td>
     <td>Starter configuration with multiple bots and scheduled routines.</td>
   </tr>

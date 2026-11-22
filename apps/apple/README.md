@@ -1,16 +1,34 @@
-# BotHubApp (macOS + iOS 共用 Swift 壳)
+# Bot Hub Apple 客户端（iOS / iPadOS / macOS）
 
-多平台 SwiftUI + `WKWebView` 壳，直接打开本地或远端的 Bot Hub 页面：
-- macOS：隐藏系统标题栏并保留红绿灯，注入 `BotHubMac` UA 触发 `internal/web/index.html` 的顶部避让。
-- iOS：全屏铺满并通过 `viewport-fit=cover` + `env(safe-area-inset-*)` 避让刘海/灵动岛与底部指示条。
-- 支持 Safari Web Inspector（Debug 模式已开启 `isInspectable = true`）。
+原生 SwiftUI 客户端，一个 Xcode 工程同时出 iPhone、iPad 与 Mac 三端，功能与 `apps/mobile` 对齐：多主机连接（HTTP / Tailcat 隧道）、扫码配对、Bot 列表与对话（SSE 实时流）、Bot 详情与记忆、定时任务、设置（Magpie 接管、模型、USER.md、全局记忆）、设备与远程桌面接管。
 
-## 快速调试（和 Wails 同时开）
+- 结构与控件用系统原生组件（`NavigationSplitView` / `NavigationStack`、`Form`、`List`、`Picker`、`Toggle`、系统工具栏与 sheet），视觉沿用 `DESIGN.md` Token，详见 `DESIGN.md` 第 9 节。
+- iPhone 为单栏导航；iPad 与 Mac 为侧栏 + 会话 + 详情 inspector 三栏。
+- 连接凭据：iOS 存 Keychain；macOS 存 `~/Library/Application Support/BotHubClient`（文件权限 0600，避免 ad-hoc 签名重签后反复弹钥匙串授权）。
+- 支持 `bothub://connect?link=<地址>` 链接一键连接，地址可带 `#token=...`。
 
-1. 先用 Wails（或 `make serve`）启动本机服务，监听 `http://127.0.0.1:3789`。
-2. 直接用 Xcode 打开本目录：
-   ```bash
-   open apps/apple/Package.swift
-   ```
-3. 在 Xcode 顶部 Scheme 选择 **BotHubApp**，目标设备选 **My Mac** 或 **iPhone Simulator**，按 `⌘R` 运行即可与 Wails 同屏调试。
-4. 按 `⌘,` 可切换服务端地址，按 `⌘R`（应用内）刷新页面。
+## 构建
+
+先在仓库根目录构建 Tailcat 隧道 XCFramework（含 iOS 真机、模拟器与 macOS 三个切片）：
+
+```bash
+make ios-tunnel
+```
+
+产物在 `build/mobile/ios/BotHubTunnel.xcframework`，工程通过相对路径链接。然后用 Xcode 打开 `apps/apple/BotHub.xcodeproj`，Scheme 选 **BotHub**，目标选 iPhone / iPad 模拟器、真机或 **My Mac**，`⌘R` 运行。
+
+命令行构建：
+
+```bash
+cd apps/apple
+xcodebuild -project BotHub.xcodeproj -scheme BotHub -destination 'platform=macOS' build
+xcodebuild -project BotHub.xcodeproj -scheme BotHub -destination 'generic/platform=iOS Simulator' build
+```
+
+## 联调
+
+按 `AGENTS.md` 在临时目录用独立配置与非默认端口启动服务（例如 `3801`），再在 App 里填 `http://127.0.0.1:3801` 与令牌，或在模拟器里打开：
+
+```bash
+xcrun simctl openurl booted "bothub://connect?link=http%3A%2F%2F127.0.0.1%3A3801%23token%3D<令牌>"
+```

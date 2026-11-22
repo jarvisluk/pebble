@@ -1,0 +1,95 @@
+import SwiftUI
+
+struct CreateBotView: View {
+    @Environment(HubStore.self) private var hub
+    @Environment(Router.self) private var router
+    @Environment(\.palette) private var p
+
+    @State private var name = ""
+    @State private var botId = ""
+    @State private var idTouched = false
+    @State private var desc = ""
+    @State private var harness = "opencode"
+    @State private var model = ""
+    @State private var instructions = ""
+    @State private var submitting = false
+    @State private var err = ""
+
+    private var harnesses: [HarnessInfo] {
+        if let h = hub.settings?.harnesses, !h.isEmpty { return h }
+        return ["opencode", "claude", "pi"].map { HarnessInfo(id: $0, label: $0) }
+    }
+
+    private func slug(_ s: String) -> String {
+        s.lowercased()
+            .replacingOccurrences(of: "[^a-z0-9_-]+", with: "-", options: .regularExpression)
+            .replacingOccurrences(of: "^-+|-+$", with: "", options: .regularExpression)
+    }
+
+    var body: some View {
+        let ph = resolveDefaultModel(hub.settings?.defaultModel ?? "", harness)
+        Form {
+            Section {
+                HStack {
+                    Spacer()
+                    BotAvatar(id: botId.isEmpty ? (name.isEmpty ? "new" : name) : botId, size: 68)
+                    Spacer()
+                }
+                .listRowBackground(Color.clear)
+            }
+            Section {
+                TextField(hub.t("botName"), text: Binding(get: { name }, set: {
+                    name = $0
+                    if !idTouched { botId = slug($0) }
+                }), prompt: Text(hub.t("botNameExamplePh")))
+                TextField("ID", text: Binding(get: { botId }, set: { idTouched = true; botId = $0 }), prompt: Text(hub.t("botIdPh")))
+                    .monoInput()
+                TextField(hub.t("descOptional"), text: $desc, prompt: Text(hub.t("botDescCreatePh")))
+            }
+            Section {
+                Picker(hub.t("harnessBackend"), selection: $harness) {
+                    ForEach(harnesses) { Text($0.title).tag($0.id) }
+                }
+                TextField(hub.t("modelOptional"), text: $model, prompt: Text(ph.isEmpty ? hub.t("inheritDefaultPh") : ph)).monoInput()
+            }
+            Section(hub.t("agentsCreateLbl")) {
+                TextField(hub.t("agentsCreateLbl"), text: $instructions, prompt: Text(hub.t("agentsCreatePh")), axis: .vertical)
+                    .lineLimit(4...16)
+                    .labelsHidden()
+            }
+            if !err.isEmpty { Section { StatusText(text: err) } }
+        }
+        .hubForm()
+        .navigationTitle(hub.t("newBot"))
+        #if os(iOS)
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
+        .toolbar { SheetToolbar(actionTitle: hub.t("create"), loading: submitting) { create() } }
+        .task { if hub.settings == nil { _ = try? await hub.loadSettings() } }
+    }
+
+    private func create() {
+        err = ""
+        let n = name.trimmingCharacters(in: .whitespaces)
+        let id = botId.trimmingCharacters(in: .whitespaces)
+        if n.isEmpty { err = hub.t("fillBotName"); return }
+        if id.range(of: "^[a-zA-Z0-9][a-zA-Z0-9_-]*$", options: .regularExpression) == nil { err = hub.t("idInvalid"); return }
+        var body: [String: Any] = ["id": id, "name": n, "harness": harness]
+        let d = desc.trimmingCharacters(in: .whitespaces), m = model.trimmingCharacters(in: .whitespaces)
+        let ins = instructions.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !d.isEmpty { body["description"] = d }
+        if !m.isEmpty { body["model"] = m }
+        if !ins.isEmpty { body["instructions"] = ins }
+        submitting = true
+        Task {
+            do {
+                let st = try await hub.createBot(body)
+                router.sheet = nil
+                router.openBot(st.id)
+            } catch {
+                err = errText(error, hub.t("createFailed"))
+                submitting = false
+            }
+        }
+    }
+}
