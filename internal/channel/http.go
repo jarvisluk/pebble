@@ -649,7 +649,8 @@ func (s *HTTPServer) handleMagpieProvider(w http.ResponseWriter, r *http.Request
 func (s *HTTPServer) handleModels(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
-	models, err := s.hub.Models(ctx, r.URL.Query().Get("harness"))
+	q := r.URL.Query()
+	models, err := s.hub.ModelsWithSource(ctx, q.Get("harness"), q.Get("source"))
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
 		return

@@ -88,6 +88,9 @@ func (h *AgyHarness) Models(ctx context.Context) ([]string, error) {
 			return
 		}
 		for _, line := range strings.Split(string(out), "\n") {
+			if i := strings.LastIndexByte(line, '\r'); i >= 0 {
+				line = line[i+1:]
+			}
 			trimmed := strings.TrimSpace(line)
 			if trimmed == "" || strings.HasPrefix(trimmed, "Fetching ") {
 				continue
