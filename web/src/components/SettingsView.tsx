@@ -73,6 +73,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [provsExpanded, setProvsExpanded] = useState(false);
   const [addProvOpen, setAddProvOpen] = useState(false);
   const [harnessModelsDraft, setHarnessModelsDraft] = useState<Record<string, string>>({});
+  const [magpieBusyId, setMagpieBusyId] = useState('');
   const [apKind, setApKind] = useState<'preset' | 'custom'>('preset');
   const [apPreset, setApPreset] = useState('');
   const [apProtocol, setApProtocol] = useState('openai');
@@ -348,6 +349,34 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const provs = mp?.providers || [];
   const onlineNodeCount = nodes.filter((n) => n.connected).length;
 
+  const applyHarnessMagpie = async (hId: string, hLabel: string, model: string) => {
+    const trimmed = model.trim();
+    if (!trimmed) {
+      setSettingsErr(t('mpPickModelErr', { label: hLabel }));
+      return;
+    }
+    setSettingsErr('');
+    setMagpieBusyId(hId);
+    try {
+      const next = await api<SettingsData>(
+        `/api/harnesses/${encodeURIComponent(hId)}/magpie`,
+        { method: 'POST', body: { action: 'connect', model: trimmed } }
+      );
+      setHarnessModelsDraft((prev) => {
+        const copy = { ...prev };
+        delete copy[hId];
+        return copy;
+      });
+      onSettingsUpdated(next);
+      onResetModels();
+      onToast(t('mpConnectedToast', { label: hLabel }));
+    } catch (e) {
+      if (e instanceof Error && e.message !== 'unauthorized') setSettingsErr(e.message);
+    } finally {
+      setMagpieBusyId('');
+    }
+  };
+
   return (
     <section id="settingsView" className="main-pane" aria-label={t('settings')} hidden={hidden}>
       <div className="set-hd">
@@ -434,10 +463,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   <div id="sMagpieHarnesses" className="stack6">
                     {(settings?.harnesses || []).map((h) => {
                       const conn = Boolean(h.magpie?.connected);
+                      const activeModel = (h.magpie?.model || '').trim();
                       const fallbackVal = conn
-                        ? h.magpie?.model || ''
+                        ? activeModel
                         : defaultModel.trim() || h.defaultModel || '';
                       const curVal = harnessModelsDraft[h.id] ?? fallbackVal;
+                      const knownModels = models[h.id] || [];
+                      const isDirty = conn && curVal.trim() !== '' && curVal.trim() !== activeModel;
+                      const isBusy = magpieBusyId === h.id;
                       return (
                         <div key={h.id} className="mp-hrow">
                           <div className="mp-hname">
@@ -456,41 +489,42 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                             list={`models-${h.id}`}
                             placeholder={t('mpModelPh')}
                             spellCheck={false}
+                            disabled={isBusy}
                             value={curVal}
-                            onChange={(e) =>
-                              setHarnessModelsDraft((prev) => ({ ...prev, [h.id]: e.target.value }))
-                            }
+                            onChange={(e) => {
+                              const nextVal = e.target.value;
+                              setHarnessModelsDraft((prev) => ({ ...prev, [h.id]: nextVal }));
+                              const trimmed = nextVal.trim();
+                              if (conn && trimmed && trimmed !== activeModel && knownModels.includes(trimmed)) {
+                                void applyHarnessMagpie(h.id, h.label, trimmed);
+                              }
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' && isDirty) {
+                                e.preventDefault();
+                                void applyHarnessMagpie(h.id, h.label, curVal);
+                              }
+                            }}
                           />
                           <div className="mp-hacts">
-                            <button
-                              type="button"
-                              className={`mp ${conn ? '' : 'go'}`}
-                              onClick={async () => {
-                                const model = curVal.trim() || defaultModel.trim();
-                                if (!model) {
-                                  setSettingsErr(t('mpPickModelErr', { label: h.label }));
-                                  return;
-                                }
-                                setSettingsErr('');
-                                try {
-                                  const next = await api<SettingsData>(
-                                    `/api/harnesses/${encodeURIComponent(h.id)}/magpie`,
-                                    { method: 'POST', body: { action: 'connect', model } }
-                                  );
-                                  onSettingsUpdated(next);
-                                  onResetModels();
-                                  onToast(t('mpConnectedToast', { label: h.label }));
-                                } catch (e) {
-                                  if (e instanceof Error && e.message !== 'unauthorized') setSettingsErr(e.message);
-                                }
-                              }}
-                            >
-                              {conn ? t('mpSwitch') : t('mpConnect')}
-                            </button>
+                            {(!conn || isDirty) && (
+                              <button
+                                type="button"
+                                className={`mp ${conn ? '' : 'go'}`}
+                                disabled={isBusy}
+                                onClick={() => {
+                                  const model = curVal.trim() || defaultModel.trim();
+                                  void applyHarnessMagpie(h.id, h.label, model);
+                                }}
+                              >
+                                {conn ? t('mpSwitch') : t('mpConnect')}
+                              </button>
+                            )}
                             {conn && (
                               <button
                                 type="button"
                                 className="mp"
+                                disabled={isBusy}
                                 onClick={() =>
                                   onConfirm({
                                     title: t('mpRestoreTitle', { label: h.label }),
