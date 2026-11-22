@@ -4,6 +4,7 @@ struct SettingsView: View {
     @Environment(HubStore.self) private var hub
     @Environment(Router.self) private var router
     @Environment(\.palette) private var p
+    @Environment(\.openURL) private var openURL
 
     struct BotDraft: Equatable { var harness: String; var model: String }
 
@@ -172,8 +173,14 @@ struct SettingsView: View {
             }
             if installed {
                 Section {
-                    Button(hub.t("mpOpenApp")) {
-                        run("magpie:open", "opFailed") { try await hub.openMagpie(); return nil }
+                    let addr = hub.activeServer?.address ?? ""
+                    let local = ["localhost", "127.0.0.1", "[::1]"].contains { addr.contains($0) }
+                    if let web = mp?.webUrl, !web.isEmpty, !local, let url = URL(string: web) {
+                        Button(hub.t("mpOpenWeb")) { openURL(url) }
+                    } else {
+                        Button(hub.t("mpOpenApp")) {
+                            run("magpie:open", "opFailed") { try await hub.openMagpie(); return nil }
+                        }
                     }
                 } footer: {
                     Text(hub.t("mpManageInApp"))

@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
+  Linking,
   Platform,
   Pressable,
   ScrollView,
@@ -258,7 +259,9 @@ export default function SettingsScreen() {
   const onOpenMagpie = async () => {
     setError('');
     try {
-      await openMagpie();
+      const webUrl = settings?.magpie?.webUrl;
+      if (webUrl) await Linking.openURL(webUrl);
+      else await openMagpie();
     } catch (err: any) {
       setError(err?.message || t('opFailed'));
     }
@@ -390,7 +393,7 @@ export default function SettingsScreen() {
               <View style={styles.rowBetween}>
                 <Text style={[styles.noteTxt, { color: theme.mute, flex: 1 }]}>{t('mpManageInApp')}</Text>
                 <Pressable onPress={() => void onOpenMagpie()} style={[styles.magpieBtn, { backgroundColor: theme.accent }]}>
-                  <Text style={[styles.magpieBtnTxt, { color: theme.accentText }]}>{t('mpOpenApp')}</Text>
+                  <Text style={[styles.magpieBtnTxt, { color: theme.accentText }]}>{mp?.webUrl ? t('mpOpenWeb') : t('mpOpenApp')}</Text>
                 </Pressable>
               </View>
             )}

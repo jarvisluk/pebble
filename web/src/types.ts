@@ -77,6 +77,7 @@ export interface SettingsData {
     healthy?: boolean;
     providers?: MagpieProvider[];
     presets?: MagpiePreset[];
+    webUrl?: string;
     install?: {
       script?: string;
       brew?: string;

@@ -470,6 +470,7 @@ type settingsBody struct {
 	DesktopHarness      *string           `json:"desktopHarness,omitempty"`
 	DesktopModel        *string           `json:"desktopModel,omitempty"`
 	SharedUserMD        *string           `json:"sharedUserMd,omitempty"`
+	MagpieWebURL        *string           `json:"magpieWebUrl,omitempty"`
 	OnboardingCompleted *bool             `json:"onboardingCompleted,omitempty"`
 }
 
@@ -519,6 +520,7 @@ func (s *HTTPServer) handleSettings(w http.ResponseWriter, r *http.Request) {
 			"install":   harness.MagpieInstall,
 			"providers": providers,
 			"presets":   presets,
+			"webUrl":    s.hub.MagpieWebURL(),
 		},
 		"desktopHarness": deskHarness,
 		"desktopModel":   deskModel,
@@ -568,6 +570,12 @@ func (s *HTTPServer) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.SharedUserMD != nil {
 		if err := s.hub.SetSharedUserMD(*body.SharedUserMD); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
+	}
+	if body.MagpieWebURL != nil {
+		if err := s.hub.SetMagpieWebURL(*body.MagpieWebURL); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
 			return
 		}

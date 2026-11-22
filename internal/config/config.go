@@ -225,6 +225,9 @@ type HubConfig struct {
 	OnboardingCompleted bool              `json:"onboardingCompleted,omitempty"`
 	DesktopHarness      string            `json:"desktopHarness,omitempty"`
 	DesktopModel        string            `json:"desktopModel,omitempty"`
+	// MagpieWebURL is where `magpie web` is reachable from other devices;
+	// clients away from the host open it instead of the local app.
+	MagpieWebURL      string      `json:"magpieWebUrl,omitempty"`
 	OpenCodeServerURL   string            `json:"opencodeServerUrl,omitempty"`
 	SharedDir         string            `json:"sharedDir,omitempty"`
 	StateFile         string            `json:"stateFile,omitempty"`
@@ -370,6 +373,7 @@ func Load(projectRoot, explicitPath string) (*HubConfig, string, error) {
 	cfg.DefaultModel = expandEnv(cfg.DefaultModel)
 	cfg.DesktopHarness = strings.TrimSpace(cfg.DesktopHarness)
 	cfg.DesktopModel = strings.TrimSpace(expandEnv(cfg.DesktopModel))
+	cfg.MagpieWebURL = strings.TrimSpace(expandEnv(cfg.MagpieWebURL))
 	cfg.OpenCodeServerURL = expandEnv(cfg.OpenCodeServerURL)
 	cfg.HTTP.WebhookSecret = expandEnv(cfg.HTTP.WebhookSecret)
 	cfg.HTTP.APIToken = expandEnv(cfg.HTTP.APIToken)

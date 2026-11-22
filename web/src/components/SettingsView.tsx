@@ -87,6 +87,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [localDeskSupported, setLocalDeskSupported] = useState(false);
   const [deskHarness, setDeskHarness] = useState('');
   const [deskModel, setDeskModel] = useState('');
+  const [mpWebUrl, setMpWebUrl] = useState('');
   const [remoteErr, setRemoteErr] = useState('');
   const [remoteBusy, setRemoteBusy] = useState(false);
 
@@ -161,6 +162,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     }
     setDeskHarness(settings.desktopHarness || '');
     setDeskModel(settings.desktopModel || '');
+    setMpWebUrl(settings.magpie?.webUrl || '');
     settings.harnesses.forEach((h) => {
       void onLoadModels(h.id);
     });
@@ -544,6 +546,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       className="mp go"
                       onClick={async () => {
                         setSettingsErr('');
+                        const local = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
+                        if (mp.webUrl && !local) {
+                          window.open(mp.webUrl, '_blank', 'noopener');
+                          return;
+                        }
                         try {
                           await api('/api/magpie/open', { method: 'POST' });
                         } catch (e) {
@@ -553,6 +560,40 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     >
                       {t('mpOpenApp')}
                     </button>
+                  </div>
+                  <div className="fld">
+                    <label>
+                      {t('mpWebUrl')}
+                      <em>{t('mpWebUrlHint')}</em>
+                    </label>
+                    <input
+                      className="mono"
+                      placeholder="https://magpie.example.com"
+                      spellCheck={false}
+                      value={mpWebUrl}
+                      onChange={(e) => setMpWebUrl(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          e.currentTarget.blur();
+                        }
+                      }}
+                      onBlur={async () => {
+                        const next = mpWebUrl.trim();
+                        if (next === (mp.webUrl || '')) return;
+                        setSettingsErr('');
+                        try {
+                          const fresh = await api<SettingsData>('/api/settings', {
+                            method: 'PUT',
+                            body: { magpieWebUrl: next },
+                          });
+                          onSettingsUpdated(fresh);
+                          onToast(t('mpWebUrlSaved'));
+                        } catch (e) {
+                          if (e instanceof Error && e.message !== 'unauthorized') setSettingsErr(e.message);
+                        }
+                      }}
+                    />
                   </div>
                 </div>
               )}

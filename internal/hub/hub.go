@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -2498,6 +2499,41 @@ func (h *Hub) SetDesktopWorker(harnessKind, model string) error {
 	}
 	h.cfg.DesktopHarness = harnessKind
 	h.cfg.DesktopModel = model
+	return nil
+}
+
+// MagpieWebURL returns the configured Magpie web address, falling back to
+// MAGPIE_WEB_URL, the variable `magpie web` itself reads.
+func (h *Hub) MagpieWebURL() string {
+	h.lanesMu.RLock()
+	u := h.cfg.MagpieWebURL
+	h.lanesMu.RUnlock()
+	if u == "" {
+		u = strings.TrimSpace(os.Getenv("MAGPIE_WEB_URL"))
+	}
+	return u
+}
+
+// SetMagpieWebURL persists the Magpie web address; empty clears it.
+func (h *Hub) SetMagpieWebURL(raw string) error {
+	u := strings.TrimSpace(raw)
+	if u != "" {
+		parsed, err := url.Parse(u)
+		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+			return fmt.Errorf("Magpie 网页地址需以 http:// 或 https:// 开头")
+		}
+	}
+	h.lanesMu.Lock()
+	defer h.lanesMu.Unlock()
+	if h.cfg.ConfigPath != "" {
+		if err := config.UpdateRaw(h.cfg, func(c *config.HubConfig) error {
+			c.MagpieWebURL = u
+			return nil
+		}); err != nil {
+			return fmt.Errorf("save config: %w", err)
+		}
+	}
+	h.cfg.MagpieWebURL = u
 	return nil
 }
 

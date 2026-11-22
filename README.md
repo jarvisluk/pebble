@@ -270,7 +270,7 @@ To reach a `bot-hub` running at home or in the office from your laptop:
 - `GET  /api/sessions`, `GET /api/bots/{id}/sessions` — List or search archived and active sessions (`?query=&limit=`)
 - `GET  /api/sessions/{sessionId}`, `GET /api/bots/{id}/sessions/{sessionId}` — Sliced session transcript recall (`previous` supported)
 - `GET  /api/memory`, `POST /api/memory`, `DELETE /api/memory/{id}` — Magpie Memory pass-through (global & bot-scoped)
-- `GET  /api/settings`, `PUT /api/settings` — Read or update `modelAccess` (`magpie` / `self`) and default models
+- `GET  /api/settings`, `PUT /api/settings` — Read or update `modelAccess` (`magpie` / `self`), default models, and `magpieWebUrl` (where remote clients open `magpie web`; falls back to `MAGPIE_WEB_URL`)
 - `GET  /api/models` — List available model IDs for `?harness=`
 - `POST /api/harnesses/{id}/magpie` — Connect a harness CLI to Magpie with a chosen model
 - `POST /api/magpie/open` — Open the Magpie app on the host to manage providers and models

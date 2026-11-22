@@ -93,6 +93,7 @@ struct MagpieInfo: Codable {
     var healthy: Bool?
     var providers: [MagpieProvider]?
     var presets: [MagpiePreset]?
+    var webUrl: String?
 }
 
 struct SettingsData: Codable {
