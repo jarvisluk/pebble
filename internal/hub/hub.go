@@ -2,12 +2,15 @@ package hub
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -37,6 +40,24 @@ var ErrLocalDesktopDisabled = errors.New("本机桌面操控已在「设置 › 
 
 // ErrForbidden indicates the caller is not permitted to access another bot's private sessions.
 var ErrForbidden = errors.New("forbidden")
+
+// ErrQuestionNotFound indicates that the requested pending question does not exist or has already been settled.
+var ErrQuestionNotFound = errors.New("question not found")
+
+// PendingQuestion describes an interactive question card awaiting user input.
+type PendingQuestion struct {
+	ID        string                  `json:"id"`
+	BotID     string                  `json:"botId"`
+	BotName   string                  `json:"botName,omitempty"`
+	Title     string                  `json:"title,omitempty"`
+	Fields    []harness.QuestionField `json:"fields"`
+	CreatedAt string                  `json:"createdAt"`
+}
+
+type pendingQuestionEntry struct {
+	item PendingQuestion
+	ch   chan harness.QuestionResponse
+}
 
 type SendOptions struct {
 	Source    string
@@ -222,6 +243,9 @@ type Hub struct {
 	// so the hub derives the hop of outgoing bot messages from here.
 	hopsMu sync.Mutex
 	hops   map[string]int
+
+	questionsMu sync.Mutex
+	questions   map[string]*pendingQuestionEntry
 }
 
 var askCmdRe = regexp.MustCompile(`(?s)^/ask\s+([a-zA-Z0-9_-]+)\s+(.+)$`)
@@ -244,6 +268,7 @@ func New(cfg *config.HubConfig, store *state.Store, messages *state.MessageStore
 		activeDesktopTasks: make(map[string]string),
 		subs:               make(map[uint64]chan Event),
 		hops:               make(map[string]int),
+		questions:          make(map[string]*pendingQuestionEntry),
 	}
 	h.nodes = node.NewRegistry(func() {
 		h.broadcast(Event{
@@ -1126,6 +1151,13 @@ func (h *Hub) executeTurn(ctx context.Context, lane *botLane, bot config.BotConf
 		var toolOrder []string
 		toolCounts := make(map[string]int)
 
+		var onQuestion func(context.Context, harness.QuestionRequest) (harness.QuestionResponse, error)
+		if isInteractiveQuestionSource(opts) {
+			onQuestion = func(qCtx context.Context, req harness.QuestionRequest) (harness.QuestionResponse, error) {
+				return h.AskQuestion(qCtx, bot, req)
+			}
+		}
+
 		res, err := runner.RunTurn(ctx, harness.RunOptions{
 			Bot:                      bot,
 			Prompt:                   effectivePrompt,
@@ -1135,6 +1167,7 @@ func (h *Hub) executeTurn(ctx context.Context, lane *botLane, bot config.BotConf
 			MCPEnv:                   mcpEnv,
 			ExtraEnv:                 extraEnv,
 			OnText:                   opts.OnText,
+			OnQuestion:               onQuestion,
 			OnToolUse: func(toolName string) {
 				if toolName != "" {
 					toolMu.Lock()
@@ -2645,4 +2678,119 @@ func (h *Hub) RunDesktopTask(ctx context.Context, req DesktopTaskRequest) (*harn
 			})
 		},
 	})
+}
+
+func isInteractiveQuestionSource(opts SendOptions) bool {
+	if opts.FromBotID != "" {
+		return false
+	}
+	src := strings.TrimSpace(opts.Source)
+	if src == "webhook" || src == "desktop_task" || src == "cli" ||
+		strings.HasPrefix(src, "routine:") ||
+		strings.HasPrefix(src, "schedule:") ||
+		strings.HasPrefix(src, "bot:") {
+		return false
+	}
+	return true
+}
+
+func newQuestionID() string {
+	b := make([]byte, 8)
+	_, _ = rand.Read(b)
+	return "q_" + hex.EncodeToString(b)
+}
+
+func (h *Hub) listQuestionsLocked(botID string) []PendingQuestion {
+	items := make([]PendingQuestion, 0, len(h.questions))
+	for _, entry := range h.questions {
+		if botID != "" && entry.item.BotID != botID {
+			continue
+		}
+		items = append(items, entry.item)
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].CreatedAt != items[j].CreatedAt {
+			return items[i].CreatedAt < items[j].CreatedAt
+		}
+		return items[i].ID < items[j].ID
+	})
+	return items
+}
+
+// ListQuestions returns all pending interactive question cards, optionally filtered by botID.
+func (h *Hub) ListQuestions(botID string) []PendingQuestion {
+	h.questionsMu.Lock()
+	defer h.questionsMu.Unlock()
+	return h.listQuestionsLocked(botID)
+}
+
+func (h *Hub) broadcastQuestions(items []PendingQuestion) {
+	h.broadcast(Event{
+		Type:    "questions",
+		Payload: map[string]any{"items": items},
+	})
+}
+
+// AskQuestion publishes a pending question card to connected clients and blocks until answered or cancelled.
+func (h *Hub) AskQuestion(ctx context.Context, bot config.BotConfig, req harness.QuestionRequest) (harness.QuestionResponse, error) {
+	id := newQuestionID()
+	fields := make([]harness.QuestionField, len(req.Fields))
+	copy(fields, req.Fields)
+	entry := &pendingQuestionEntry{
+		item: PendingQuestion{
+			ID:        id,
+			BotID:     bot.ID,
+			BotName:   bot.Name,
+			Title:     req.Title,
+			Fields:    fields,
+			CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		},
+		ch: make(chan harness.QuestionResponse, 1),
+	}
+
+	h.questionsMu.Lock()
+	h.questions[id] = entry
+	items := h.listQuestionsLocked("")
+	h.questionsMu.Unlock()
+	h.broadcastQuestions(items)
+
+	defer func() {
+		h.questionsMu.Lock()
+		_, existed := h.questions[id]
+		if existed {
+			delete(h.questions, id)
+			items := h.listQuestionsLocked("")
+			h.questionsMu.Unlock()
+			h.broadcastQuestions(items)
+		} else {
+			h.questionsMu.Unlock()
+		}
+	}()
+
+	select {
+	case resp := <-entry.ch:
+		return resp, nil
+	case <-ctx.Done():
+		return harness.QuestionResponse{Cancelled: true}, ctx.Err()
+	}
+}
+
+// AnswerQuestion delivers a user's response (or cancellation) to a pending question card.
+func (h *Hub) AnswerQuestion(id string, answers map[string]any, cancelled bool, message string) ([]PendingQuestion, error) {
+	h.questionsMu.Lock()
+	entry, ok := h.questions[id]
+	if !ok {
+		h.questionsMu.Unlock()
+		return nil, ErrQuestionNotFound
+	}
+	delete(h.questions, id)
+	items := h.listQuestionsLocked("")
+	h.questionsMu.Unlock()
+
+	select {
+	case entry.ch <- harness.QuestionResponse{Answers: answers, Cancelled: cancelled, Message: message}:
+	default:
+	}
+	h.broadcastQuestions(items)
+	return items, nil
 }

@@ -236,3 +236,30 @@ export interface SettingsDraft {
   sharedUserMd: string;
   bots: Record<string, { harness: string; model: string }>;
 }
+
+export interface QuestionOption {
+  value: string;
+  label: string;
+  description?: string;
+}
+
+export interface QuestionField {
+  key: string;
+  title?: string;
+  description?: string;
+  type: 'string' | 'multiselect' | 'boolean' | 'number' | 'integer' | string;
+  required?: boolean;
+  placeholder?: string;
+  default?: unknown;
+  options?: QuestionOption[];
+  custom?: boolean;
+}
+
+export interface PendingQuestion {
+  id: string;
+  botId: string;
+  botName?: string;
+  title?: string;
+  fields: QuestionField[];
+  createdAt: string;
+}

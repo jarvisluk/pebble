@@ -34,6 +34,7 @@ export default function BotsScreen() {
     unread,
     tools,
     takeovers,
+    questions,
     refreshBots,
     reconnect,
     resolveTakeover,
@@ -84,10 +85,14 @@ export default function BotsScreen() {
     const lastMsg = last[item.id];
     const unreadCount = unread[item.id] || 0;
     const toolName = tools[item.id];
+    const hasQuestion = questions.some((q) => q.botId === item.id);
 
     let subtitleText = item.description || item.harness;
     let subtitleColor = theme.mute;
-    if (item.busy) {
+    if (hasQuestion) {
+      subtitleText = t('questionWaitingBadge');
+      subtitleColor = theme.busy;
+    } else if (item.busy) {
       subtitleText = toolName ? t('callingTool', { tool: toolName }) : t('thinking');
       subtitleColor = theme.busy;
     } else if (lastMsg) {

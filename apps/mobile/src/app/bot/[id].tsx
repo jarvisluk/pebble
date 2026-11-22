@@ -22,6 +22,7 @@ import { BotAvatar } from '../../components/BotAvatar';
 import { ChevronLeftIcon, DocIcon, MonitorIcon, SendIcon, StopIcon } from '../../components/Icons';
 import { MarkdownText } from '../../components/MarkdownText';
 import { ModalHeader } from '../../components/ModalHeader';
+import { QuestionCard } from '../../components/QuestionCard';
 import { confirmAction } from '../../confirm';
 import { useI18n } from '../../i18n';
 import { formatStamp, useHub } from '../../store';
@@ -50,6 +51,7 @@ export default function BotChatScreen() {
     msgs,
     tools,
     takeovers,
+    questions,
     setActiveChatBot,
     loadMessages,
     sendMessage,
@@ -59,6 +61,7 @@ export default function BotChatScreen() {
     updateBot,
     deleteBot,
     resolveTakeover,
+    replyQuestion,
     fetchMemories,
     saveMemory,
     deleteMemory,
@@ -75,6 +78,7 @@ export default function BotChatScreen() {
   const bot = botIndex >= 0 ? bots[botIndex] : undefined;
   const botPal = useMemo(() => getBotPalette(botId, botIndex, theme.dark), [botId, botIndex, theme.dark]);
   const chatList = msgs[botId] || [];
+  const botQuestions = useMemo(() => questions.filter((q) => q.botId === botId), [questions, botId]);
 
   const slashCommands = useMemo(
     () => [
@@ -644,12 +648,26 @@ export default function BotChatScreen() {
             </View>
           }
           ListFooterComponent={
-            bot?.busy ? (
-              <View style={[styles.busyFoot, { backgroundColor: theme.s1 }]}>
-                <ActivityIndicator size="small" color={theme.busy} />
-                <Text style={[styles.busyFootTxt, { color: theme.busy }]}>
-                  {tools[botId] ? t('callingTool', { tool: tools[botId] }) : t('thinking')}
-                </Text>
+            bot?.busy || botQuestions.length > 0 ? (
+              <View>
+                {bot?.busy ? (
+                  <View style={[styles.busyFoot, { backgroundColor: theme.s1 }]}>
+                    <ActivityIndicator size="small" color={theme.busy} />
+                    <Text style={[styles.busyFootTxt, { color: theme.busy }]}>
+                      {tools[botId] ? t('callingTool', { tool: tools[botId] }) : t('thinking')}
+                    </Text>
+                  </View>
+                ) : null}
+                {botQuestions.map((q) => (
+                  <QuestionCard
+                    key={q.id}
+                    question={q}
+                    accent={botPal.accent}
+                    accentText={botPal.text}
+                    accentSoft={botPal.soft}
+                    onReply={replyQuestion}
+                  />
+                ))}
               </View>
             ) : undefined
           }

@@ -13,6 +13,7 @@ import type {
   DesktopTarget,
   MagpieMemoryList,
   NodeInfo,
+  PendingQuestion,
   RoutineItem,
   RoutineRun,
   RoutineUpsertInput,
@@ -87,6 +88,7 @@ interface HubContextValue {
   nodes: NodeInfo[];
   tailcat: TailcatStatus | null;
   takeovers: TakeoverRequest[];
+  questions: PendingQuestion[];
   desktopTargets: DesktopTarget[];
   setActiveChatBot: (botId: string | null) => void;
   addAndConnectServer: (input: { label?: string; address: string; token?: string }) => Promise<boolean>;
@@ -137,6 +139,7 @@ interface HubContextValue {
   fetchDesktopFrame: (target: string, windowId?: string) => Promise<DesktopFrame>;
   sendDesktopInput: (body: Record<string, unknown>) => Promise<void>;
   resolveTakeover: (id: string, note?: string) => Promise<void>;
+  replyQuestion: (id: string, answers: Record<string, unknown>, cancelled: boolean) => Promise<void>;
 }
 
 const HubContext = createContext<HubContextValue | null>(null);
@@ -162,6 +165,7 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
   const [nodes, setNodes] = useState<NodeInfo[]>([]);
   const [tailcat, setTailcat] = useState<TailcatStatus | null>(null);
   const [takeovers, setTakeovers] = useState<TakeoverRequest[]>([]);
+  const [questions, setQuestions] = useState<PendingQuestion[]>([]);
   const [desktopTargets, setDesktopTargets] = useState<DesktopTarget[]>([]);
   const [routines, setRoutines] = useState<Record<string, RoutineItem[]>>({});
 
@@ -275,6 +279,8 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
             setNodes(payload.nodes);
           } else if (type === 'takeover' && Array.isArray(payload?.items)) {
             setTakeovers(payload.items);
+          } else if (type === 'questions' && Array.isArray(payload?.items)) {
+            setQuestions(payload.items);
           } else if ((type === 'routine_updated' || type === 'routine_run') && payload?.botId) {
             const rbid = String(payload.botId);
             apiRequest<{ routines: RoutineItem[] }>(url, tok, `/api/bots/${encodeURIComponent(rbid)}/routines`)
@@ -371,6 +377,9 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
           .catch(() => {});
         apiRequest<{ items: TakeoverRequest[] }>(resolvedURL, resolvedToken, '/api/desktop/takeovers')
           .then((t) => seq === connSeqRef.current && setTakeovers(t.items || []))
+          .catch(() => {});
+        apiRequest<{ items: PendingQuestion[] }>(resolvedURL, resolvedToken, '/api/questions')
+          .then((q) => seq === connSeqRef.current && setQuestions(q.items || []))
           .catch(() => {});
 
         startStream(resolvedURL, resolvedToken);
@@ -884,6 +893,16 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
     setTakeovers(res.items || []);
   }, []);
 
+  const replyQuestion = useCallback(async (id: string, answers: Record<string, unknown>, cancelled: boolean) => {
+    const res = await apiRequest<{ ok: boolean; items: PendingQuestion[] }>(
+      baseURLRef.current,
+      authTokenRef.current,
+      `/api/questions/${encodeURIComponent(id)}/reply`,
+      { method: 'POST', body: { answers, cancelled } }
+    );
+    setQuestions(res.items || []);
+  }, []);
+
   const activeServer = servers.find((s) => s.id === activeServerId) || null;
 
   return (
@@ -908,6 +927,7 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
         nodes,
         tailcat,
         takeovers,
+        questions,
         desktopTargets,
         setActiveChatBot,
         addAndConnectServer,
@@ -948,6 +968,7 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
         fetchDesktopFrame,
         sendDesktopInput,
         resolveTakeover,
+        replyQuestion,
       }}
     >
       {children}

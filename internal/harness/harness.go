@@ -26,6 +26,36 @@ type TurnResult struct {
 	Usage      Usage         `json:"usage,omitempty"`
 }
 
+type QuestionOption struct {
+	Value       string `json:"value"`
+	Label       string `json:"label"`
+	Description string `json:"description,omitempty"`
+}
+
+type QuestionField struct {
+	Key         string           `json:"key"`
+	Title       string           `json:"title,omitempty"`
+	Description string           `json:"description,omitempty"`
+	Type        string           `json:"type"`
+	Required    bool             `json:"required,omitempty"`
+	Placeholder string           `json:"placeholder,omitempty"`
+	Default     any              `json:"default,omitempty"`
+	Options     []QuestionOption `json:"options,omitempty"`
+	Custom      bool             `json:"custom,omitempty"`
+}
+
+type QuestionRequest struct {
+	ID     string          `json:"id"`
+	Title  string          `json:"title,omitempty"`
+	Fields []QuestionField `json:"fields"`
+}
+
+type QuestionResponse struct {
+	Answers   map[string]any `json:"answers,omitempty"`
+	Cancelled bool           `json:"cancelled,omitempty"`
+	Message   string         `json:"message,omitempty"`
+}
+
 type RunOptions struct {
 	Bot                      config.BotConfig
 	Prompt                   string
@@ -39,6 +69,7 @@ type RunOptions struct {
 	ExtraEnv   map[string]string
 	OnText     func(chunk string)
 	OnToolUse  func(toolName string)
+	OnQuestion func(ctx context.Context, req QuestionRequest) (QuestionResponse, error)
 }
 
 // Harness runs agent turns. Implementations keep a long-lived connection to

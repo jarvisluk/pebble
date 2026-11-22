@@ -1,9 +1,10 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { BotStatus, ChatMessage, ResolvedLang, TakeoverRequest } from '../types';
+import type { BotStatus, ChatMessage, PendingQuestion, ResolvedLang, TakeoverRequest } from '../types';
 import { translate } from '../lib/i18n';
 import { renderMarkdownHtml } from '../lib/markdown';
 import { botColor, contrastText, formatStamp } from '../lib/theme';
 import { BotAvatar } from './BotAvatar';
+import { QuestionCard } from './QuestionCard';
 
 interface ChatViewProps {
   hidden: boolean;
@@ -13,6 +14,7 @@ interface ChatViewProps {
   seenIds: Set<string>;
   toolName?: string;
   takeovers: TakeoverRequest[];
+  questions: PendingQuestion[];
   deskOpen: boolean;
   lang: ResolvedLang;
   inputRef: React.RefObject<HTMLTextAreaElement | null>;
@@ -20,6 +22,7 @@ interface ChatViewProps {
   onToggleDesktop: () => void;
   onOpenDesktopTarget: (target: string) => void;
   onResolveTakeover: (to: TakeoverRequest) => void;
+  onReplyQuestion: (id: string, answers: Record<string, unknown>, cancelled: boolean) => Promise<void>;
   onOpenDetail: () => void;
   onOpenCreate: () => void;
   onSendMessage: (text: string) => Promise<void>;
@@ -35,6 +38,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
   seenIds,
   toolName,
   takeovers,
+  questions,
   deskOpen,
   lang,
   inputRef,
@@ -42,6 +46,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
   onToggleDesktop,
   onOpenDesktopTarget,
   onResolveTakeover,
+  onReplyQuestion,
   onOpenDetail,
   onOpenCreate,
   onSendMessage,
@@ -101,7 +106,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
       sc.scrollTop = sc.scrollHeight;
     }
     messages.forEach((m) => seenIds.add(m.id));
-  }, [messages, activeBot?.id, activeBot?.busy, toolName, seenIds]);
+  }, [messages, questions.length, activeBot?.id, activeBot?.busy, toolName, seenIds]);
 
   const stopMode = Boolean(activeBot?.busy) && !draft.trim();
   const canSend = stopMode || (Boolean(draft.trim()) && Boolean(activeBot));
@@ -360,6 +365,9 @@ export const ChatView: React.FC<ChatViewProps> = ({
                       </span>
                     </div>
                   )}
+                  {questions.map((q) => (
+                    <QuestionCard key={q.id} question={q} lang={lang} onReply={onReplyQuestion} />
+                  ))}
                 </>
               )}
             </div>

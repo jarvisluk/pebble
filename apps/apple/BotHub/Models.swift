@@ -222,6 +222,86 @@ struct BotsResp: Decodable { var bots: [BotStatus]? }
 struct MessagesResp: Decodable { var messages: [ChatMessage]? }
 struct NodesResp: Decodable { var nodes: [NodeInfo]? }
 struct TakeoversResp: Decodable { var ok: Bool?; var items: [TakeoverRequest]? }
+
+enum JSONValue: Codable, Hashable {
+    case string(String)
+    case number(Double)
+    case bool(Bool)
+    case array([JSONValue])
+    case object([String: JSONValue])
+    case null
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        if c.decodeNil() { self = .null }
+        else if let b = try? c.decode(Bool.self) { self = .bool(b) }
+        else if let n = try? c.decode(Double.self) { self = .number(n) }
+        else if let s = try? c.decode(String.self) { self = .string(s) }
+        else if let a = try? c.decode([JSONValue].self) { self = .array(a) }
+        else if let o = try? c.decode([String: JSONValue].self) { self = .object(o) }
+        else { self = .null }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        switch self {
+        case .string(let s): try c.encode(s)
+        case .number(let n): try c.encode(n)
+        case .bool(let b): try c.encode(b)
+        case .array(let a): try c.encode(a)
+        case .object(let o): try c.encode(o)
+        case .null: try c.encodeNil()
+        }
+    }
+
+    var stringValue: String? {
+        switch self {
+        case .string(let s): return s
+        case .number(let n): return n.truncatingRemainder(dividingBy: 1) == 0 ? String(Int(n)) : String(n)
+        case .bool(let b): return b ? "true" : "false"
+        default: return nil
+        }
+    }
+
+    var boolValue: Bool? {
+        if case .bool(let b) = self { return b }
+        return nil
+    }
+
+    var stringArrayValue: [String]? {
+        if case .array(let a) = self { return a.compactMap(\.stringValue) }
+        return nil
+    }
+}
+
+struct QuestionOption: Codable, Hashable {
+    var value: String
+    var label: String?
+    var description: String?
+}
+
+struct QuestionField: Codable, Hashable {
+    var key: String
+    var title: String?
+    var description: String?
+    var type: String
+    var required: Bool?
+    var placeholder: String?
+    var `default`: JSONValue?
+    var options: [QuestionOption]?
+    var custom: Bool?
+}
+
+struct PendingQuestion: Codable, Identifiable, Hashable {
+    var id: String
+    var botId: String
+    var botName: String?
+    var title: String?
+    var fields: [QuestionField]
+    var createdAt: String?
+}
+
+struct QuestionsResp: Decodable { var ok: Bool?; var items: [PendingQuestion]? }
 struct RoutinesResp: Decodable { var routines: [RoutineItem]? }
 struct RunsResp: Decodable { var runs: [RoutineRun]? }
 struct ModelsResp: Decodable { var models: [String]? }

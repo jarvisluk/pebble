@@ -1,5 +1,5 @@
 import React from 'react';
-import type { BotStatus, ChatMessage, ResolvedLang, SettingsTab } from '../types';
+import type { BotStatus, ChatMessage, PendingQuestion, ResolvedLang, SettingsTab } from '../types';
 import { translate } from '../lib/i18n';
 import { formatShortTime, plainPreviewText } from '../lib/theme';
 import { BotAvatar } from './BotAvatar';
@@ -13,6 +13,7 @@ interface SidebarProps {
   lastMessages: Record<string, ChatMessage>;
   unread: Record<string, number>;
   toolUse: Record<string, string>;
+  questions: PendingQuestion[];
   filter: string;
   lang: ResolvedLang;
   filterInputRef: React.RefObject<HTMLInputElement | null>;
@@ -34,6 +35,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   lastMessages,
   unread,
   toolUse,
+  questions,
   filter,
   lang,
   filterInputRef,
@@ -123,8 +125,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
               const count = unread[b.id] || 0;
               const m = lastMessages[b.id];
               const tool = toolUse[b.id];
+              const hasQuestion = questions.some((item) => item.botId === b.id);
               let previewNode: React.ReactNode;
-              if (b.busy) {
+              if (hasQuestion) {
+                previewNode = (
+                  <div className="pv run">
+                    <span>{t('questionWaitingBadge')}</span>
+                    {count > 0 && <i className="badge">{count}</i>}
+                  </div>
+                );
+              } else if (b.busy) {
                 previewNode = (
                   <div className="pv run">
                     <span>{tool ? t('callingTool', { tool }) : t('thinking')}</span>

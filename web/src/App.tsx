@@ -6,6 +6,7 @@ import type {
   ConfirmOptions,
   LangPref,
   NodeInfo,
+  PendingQuestion,
   ResolvedLang,
   ScreenState,
   SettingsData,
@@ -43,6 +44,7 @@ export default function App() {
   const [modelsMap, setModelsMap] = useState<Record<string, string[]>>({});
   const [nodesFromEvents, setNodesFromEvents] = useState<NodeInfo[] | null>(null);
   const [takeovers, setTakeovers] = useState<TakeoverRequest[]>([]);
+  const [questions, setQuestions] = useState<PendingQuestion[]>([]);
   const [liveScreen, setLiveScreen] = useState<ScreenState | null>(null);
   const [screenSeq, setScreenSeq] = useState(0);
 
@@ -212,6 +214,13 @@ export default function App() {
     } catch {}
   }, []);
 
+  const refreshQuestions = useCallback(async () => {
+    try {
+      const d = await api<{ items?: PendingQuestion[] }>('/api/questions');
+      setQuestions(d.items || []);
+    } catch {}
+  }, []);
+
   const removeBotLocally = useCallback(
     (id: string) => {
       setBots((prev) => {
@@ -331,6 +340,10 @@ export default function App() {
       setTakeovers(payload?.items || []);
     });
 
+    on('questions', ({ payload }: { payload?: { items?: PendingQuestion[] } }) => {
+      setQuestions(payload?.items || []);
+    });
+
     on('routine_updated', ({ botId }: { botId?: string }) => {
       if (panelOpenRef.current && panelDetailRef.current?.id === botId) {
         setRoutineRefreshSeq((n) => n + 1);
@@ -358,6 +371,7 @@ export default function App() {
       .then(([, s]) => {
         connectEvents();
         void refreshTakeovers();
+        void refreshQuestions();
         maybeAutoOpenUnbox(s);
       })
       .catch(() => {});
@@ -456,6 +470,19 @@ export default function App() {
     }
   };
 
+  const handleReplyQuestion = async (id: string, answers: Record<string, unknown>, cancelled: boolean) => {
+    try {
+      const res = await api<{ items?: PendingQuestion[] }>(`/api/questions/${encodeURIComponent(id)}/reply`, {
+        method: 'POST',
+        body: { answers, cancelled },
+      });
+      setQuestions(res.items || []);
+    } catch (e) {
+      if (e instanceof Error && e.message !== 'unauthorized') showToast(e.message);
+      await refreshQuestions();
+    }
+  };
+
   const activeBot = bots.find((b) => b.id === activeBotId);
   const shadeOpen = mobileSideOpen || panelOpen;
 
@@ -515,6 +542,7 @@ export default function App() {
           lastMessages={lastMap}
           unread={unreadMap}
           toolUse={toolMap}
+          questions={questions}
           filter={filter}
           lang={lang}
           filterInputRef={filterInputRef}
@@ -566,9 +594,11 @@ export default function App() {
             seenIds={seenIdsRef.current}
             toolName={activeBotId ? toolMap[activeBotId] : undefined}
             takeovers={takeovers}
+            questions={activeBotId ? questions.filter((q) => q.botId === activeBotId) : []}
             deskOpen={deskOpen}
             lang={lang}
             inputRef={inputRef}
+            onReplyQuestion={handleReplyQuestion}
             onOpenMenu={() => {
               if (matchMedia('(min-width: 821px)').matches) {
                 toggleDesktopSidebar(false);
