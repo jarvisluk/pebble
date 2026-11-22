@@ -883,7 +883,7 @@ export default function SettingsScreen() {
           </View>
 
           <View style={[styles.card, { backgroundColor: theme.card }]}>
-            <Text style={[styles.sectionTitle, { color: theme.text }]}>{t('remoteDevicesTitle')}</Text>
+            <Text style={[styles.sectionTitle, { color: theme.text }]}>{t('deskWorkerTitle')}</Text>
             <View style={{ gap: 6, backgroundColor: theme.s1, borderRadius: 14, padding: 10 }}>
               <Text style={[styles.subLabel, { color: theme.text2 }]}>{t('deskWorkerHarnessLabel')}</Text>
               <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap' }}>
@@ -949,30 +949,6 @@ export default function SettingsScreen() {
                 </Pressable>
               </View>
             </View>
-            <View style={styles.rowBetween}>
-              <View style={styles.connCol}>
-                <Text style={[styles.connLbl, { color: theme.text }]}>
-                  {activeServer?.label || t('noHostSelected')}
-                </Text>
-                <Text numberOfLines={1} style={[styles.connAddr, { color: theme.mute, fontFamily: MONO_FONT }]}>
-                  {activeServer?.address || '-'}
-                </Text>
-              </View>
-              <View style={styles.magpieActs}>
-                <Pressable
-                  onPress={() => router.push('/devices')}
-                  style={[styles.switchBtn, { backgroundColor: theme.s1 }]}
-                >
-                  <Text style={[styles.switchBtnTxt, { color: theme.text }]}>{t('pairingNodes')}</Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => router.push('/connect')}
-                  style={[styles.switchBtn, { backgroundColor: theme.s1 }]}
-                >
-                  <Text style={[styles.switchBtnTxt, { color: theme.text }]}>{t('switchHost')}</Text>
-                </Pressable>
-              </View>
-            </View>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -1032,9 +1008,6 @@ const styles = StyleSheet.create({
   botHeadTxt: { flex: 1 },
   botName: { fontSize: 17, fontWeight: '700' },
   botId: { fontSize: 13 },
-  connCol: { flex: 1, minWidth: 0, gap: 2 },
-  connLbl: { fontSize: 16, fontWeight: '600' },
-  connAddr: { fontSize: 13 },
   switchBtn: { borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8 },
   switchBtnTxt: { fontSize: 15, fontWeight: '600' },
 });

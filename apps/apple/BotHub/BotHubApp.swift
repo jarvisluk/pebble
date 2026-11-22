@@ -138,6 +138,14 @@ struct SheetHost: View {
             case let .desktop(target): DesktopView(initialTarget: target)
             }
         }
+        .wideSheet(route.isWide)
+    }
+}
+
+extension View {
+    /// iPad 上设置与远程桌面用更大的页面尺寸，其余表单保持默认大小。
+    @ViewBuilder func wideSheet(_ wide: Bool) -> some View {
+        if wide, #available(iOS 18.0, *) { presentationSizing(.page) } else { self }
     }
 }
 

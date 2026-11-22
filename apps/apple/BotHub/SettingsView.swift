@@ -458,7 +458,7 @@ struct SettingsView: View {
     // MARK: 远程与设备
 
     private var remoteSection: some View {
-        Section(hub.t("remoteDevicesTitle")) {
+        Section(hub.t("deskWorkerTitle")) {
             Picker(hub.t("deskWorkerHarnessLabel"), selection: Binding(get: { deskHarness }, set: { deskHarness = $0; deskTouched = true })) {
                 Text(hub.t("deskWorkerFollowBot")).tag("")
                 ForEach(hub.settings?.harnesses ?? []) { Text($0.title).tag($0.id) }
@@ -477,11 +477,6 @@ struct SettingsView: View {
                 .buttonStyle(.bordered)
                 .disabled(!deskTouched || busy == "desk")
             }
-            LabeledContent(hub.activeServer?.label ?? hub.t("noHostSelected")) {
-                Text(hub.activeServer?.address ?? "-").font(.system(size: 13, design: .monospaced)).lineLimit(1).truncationMode(.middle)
-            }
-            Button(hub.t("pairingNodes")) { router.sheet = .devices }
-            Button(hub.t("switchHost")) { router.sheet = .connect(scan: false) }
         }
     }
 }

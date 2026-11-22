@@ -53,10 +53,12 @@ struct BotListView: View {
                 TextField(hub.t("searchBot"), text: $query)
                     .focused($searchFocused)
                     .submitLabel(.search)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
             }
             .padding(.horizontal, 12)
             .frame(height: 40)
-            .background(p.card, in: Capsule())
+            .background(router.compact ? p.card : p.s1, in: Capsule())
             .listRowSeparator(.hidden)
             .listRowBackground(Color.clear)
         }
