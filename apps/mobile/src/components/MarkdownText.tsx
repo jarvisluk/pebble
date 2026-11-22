@@ -51,7 +51,7 @@ function renderInline(line: string, theme: Theme, baseColor: string, keyPrefix: 
     const k = `${keyPrefix}-${idx++}`;
     if (tok.startsWith('`') && tok.endsWith('`')) {
       parts.push(
-        <Text key={k} style={{ fontFamily: MONO_FONT, fontSize: 13, backgroundColor: theme.s2, color: baseColor }}>
+        <Text key={k} style={{ fontFamily: MONO_FONT, fontSize: 15, backgroundColor: theme.s2, color: baseColor }}>
           {` ${tok.slice(1, -1)} `}
         </Text>
       );
@@ -157,7 +157,7 @@ export function MarkdownText({
         flushPara(key);
         flushList(key);
         const level = hm[1].length;
-        const size = level === 1 ? 17 : level === 2 ? 16 : 15;
+        const size = level === 1 ? 19 : level === 2 ? 18 : 17;
         blocks.push(
           <Text key={`h-${key}`} selectable style={[styles.heading, { fontSize: size, color: baseColor }]}>
             {renderInline(hm[2], theme, baseColor, `h-${key}`)}
@@ -209,12 +209,12 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   para: {
-    fontSize: 15,
-    lineHeight: 22.5,
+    fontSize: 17,
+    lineHeight: 25,
   },
   heading: {
     fontWeight: '700',
-    lineHeight: 23,
+    lineHeight: 26,
     marginTop: 2,
   },
   list: {
@@ -226,8 +226,8 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   listBullet: {
-    fontSize: 15,
-    lineHeight: 22.5,
+    fontSize: 17,
+    lineHeight: 25,
     minWidth: 14,
   },
   listBody: {
@@ -254,7 +254,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   codeLang: {
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '600',
   },
   copyBtn: {
@@ -263,7 +263,7 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
   },
   copyTxt: {
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '600',
   },
   codeBody: {
@@ -271,7 +271,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   codeText: {
-    fontSize: 12.5,
-    lineHeight: 18,
+    fontSize: 13.5,
+    lineHeight: 20,
   },
 });

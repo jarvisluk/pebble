@@ -248,18 +248,18 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   lbl: {
-    fontSize: 13,
+    fontSize: 15,
     fontWeight: '600',
   },
   input: {
     borderRadius: 14,
     paddingHorizontal: 13,
     paddingVertical: 11,
-    fontSize: 16,
+    fontSize: 17,
   },
   textarea: {
     minHeight: 96,
-    lineHeight: 22,
+    lineHeight: 25,
   },
   wrapRow: {
     flexDirection: 'row',
@@ -272,12 +272,12 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   pillTxt: {
-    fontSize: 13.5,
+    fontSize: 15,
     fontWeight: '700',
   },
   errTxt: {
-    fontSize: 13,
-    lineHeight: 18,
+    fontSize: 15,
+    lineHeight: 20,
   },
   createBtn: {
     borderRadius: 999,
@@ -287,7 +287,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   createTxt: {
-    fontSize: 15,
+    fontSize: 17,
     fontWeight: '700',
   },
 });

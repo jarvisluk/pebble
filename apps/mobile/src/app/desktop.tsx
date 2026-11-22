@@ -305,7 +305,7 @@ const styles = StyleSheet.create({
   topStrip: { paddingHorizontal: 14, paddingBottom: 8 },
   targetRow: { gap: 8 },
   targetPill: { borderRadius: 999, paddingHorizontal: 13, paddingVertical: 7 },
-  targetTxt: { fontSize: 13, fontWeight: '700' },
+  targetTxt: { fontSize: 15, fontWeight: '700' },
   alertCard: {
     marginHorizontal: 14,
     marginBottom: 8,
@@ -317,9 +317,9 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: 10,
   },
-  alertTxt: { flex: 1, fontSize: 13, fontWeight: '600' },
+  alertTxt: { flex: 1, fontSize: 15, fontWeight: '600' },
   alertBtn: { borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
-  alertBtnTxt: { fontSize: 12.5, fontWeight: '700' },
+  alertBtnTxt: { fontSize: 13.5, fontWeight: '700' },
   stageWrap: {
     flex: 1,
     marginHorizontal: 12,
@@ -331,7 +331,7 @@ const styles = StyleSheet.create({
   touchLayer: { flex: 1 },
   stageImage: { width: '100%', height: '100%' },
   centerBox: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10, padding: 24 },
-  waitTxt: { color: '#a6a09a', fontSize: 13.5, textAlign: 'center' },
+  waitTxt: { color: '#a6a09a', fontSize: 15, textAlign: 'center' },
   errFloat: {
     position: 'absolute',
     top: 10,
@@ -341,7 +341,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 8,
   },
-  errFloatTxt: { color: '#fecaca', fontSize: 12 },
+  errFloatTxt: { color: '#fecaca', fontSize: 13 },
   controlsBar: {
     marginTop: 8,
     marginHorizontal: 12,
@@ -351,8 +351,8 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   typeRow: { flexDirection: 'row', gap: 8, alignItems: 'center' },
-  typeInput: { flex: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8, fontSize: 15 },
+  typeInput: { flex: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8, fontSize: 17 },
   keysRow: { gap: 8, alignItems: 'center' },
   keyBtn: { borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
-  keyTxt: { fontSize: 12.5, fontWeight: '600' },
+  keyTxt: { fontSize: 13.5, fontWeight: '600' },
 });

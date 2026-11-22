@@ -15,7 +15,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BotAvatar } from '../components/BotAvatar';
-import { GlobeIcon, MonitorIcon, PlusIcon, SearchIcon, SettingsIcon } from '../components/Icons';
+import { PlusIcon, SearchIcon, SettingsIcon, XIcon } from '../components/Icons';
 import { useI18n } from '../i18n';
 import { formatShortTime, plainPreview, useHub } from '../store';
 import { useTheme } from '../theme';
@@ -29,12 +29,10 @@ export default function BotsScreen() {
     activeServer,
     connState,
     connError,
-    online,
     bots,
     last,
     unread,
     tools,
-    nodes,
     takeovers,
     refreshBots,
     reconnect,
@@ -42,9 +40,8 @@ export default function BotsScreen() {
   } = useHub();
 
   const [query, setQuery] = useState('');
+  const [searching, setSearching] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-
-  const onlineNodesCount = useMemo(() => nodes.filter((n) => n.connected).length, [nodes]);
 
   const filteredBots = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -56,23 +53,6 @@ export default function BotsScreen() {
         (b.description || '').toLowerCase().includes(q)
     );
   }, [bots, query]);
-
-  const statusDotColor = useMemo(() => {
-    if (connState === 'connected' && online) return theme.sageInk;
-    if (connState === 'connected' || connState === 'connecting') return theme.busy;
-    if (connState === 'unauthorized' || connState === 'error') return theme.danger;
-    return theme.mute;
-  }, [connState, online, theme]);
-
-  const statusText = useMemo(() => {
-    if (!activeServer) return t('disconnected');
-    if (connState === 'connecting') return `${activeServer.label} · ${t('connectingShort')}`;
-    if (connState === 'unauthorized') return `${activeServer.label} · ${t('needsToken')}`;
-    if (connState === 'error') return `${activeServer.label} · ${t('connLost')}`;
-    if (connState === 'connected' && !online) return `${activeServer.label} · ${t('reconnecting')}`;
-    if (connState === 'connected') return activeServer.label;
-    return t('disconnected');
-  }, [activeServer, connState, online, t]);
 
   const onRefresh = useCallback(async () => {
     if (connState !== 'connected') {
@@ -154,56 +134,25 @@ export default function BotsScreen() {
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: theme.page }]} edges={['top', 'left', 'right']}>
       <View style={styles.header}>
-        <View style={styles.titleBlock}>
-          <Text style={[styles.title, { color: theme.text }]}>Bots</Text>
-          <Pressable
-            onPress={() => router.push('/connect')}
-            style={[styles.serverPill, { backgroundColor: theme.s1 }]}
-          >
-            <View style={[styles.statusDot, { backgroundColor: statusDotColor }]} />
-            <Text numberOfLines={1} style={[styles.serverPillTxt, { color: theme.text2 }]}>
-              {statusText}
-            </Text>
-          </Pressable>
-        </View>
+        <Text style={[styles.title, { color: theme.text }]}>Bots</Text>
 
         <View style={styles.headerActions}>
+          <Pressable
+            accessibilityLabel={t('searchBot')}
+            onPress={() => {
+              if (searching) setQuery('');
+              setSearching((v) => !v);
+            }}
+            style={[styles.iconBtn, { backgroundColor: theme.s1 }]}
+          >
+            {searching ? <XIcon size={19} color={theme.text} /> : <SearchIcon size={19} color={theme.text} />}
+          </Pressable>
           <Pressable
             accessibilityLabel={t('newBot')}
             onPress={() => router.push(connState === 'connected' ? '/create-bot' : '/connect')}
             style={[styles.iconBtn, { backgroundColor: theme.s1 }]}
           >
             <PlusIcon size={19} color={theme.text} />
-          </Pressable>
-          <Pressable
-            accessibilityLabel={t('remoteDesktop')}
-            onPress={() =>
-              router.push(
-                connState === 'connected'
-                  ? `/desktop?target=${encodeURIComponent(takeovers[0]?.target || 'local')}`
-                  : '/connect'
-              )
-            }
-            style={[styles.iconBtn, { backgroundColor: theme.s1 }]}
-          >
-            <MonitorIcon size={19} color={theme.text} />
-            {takeovers.length > 0 && (
-              <View style={[styles.nodeBadge, { backgroundColor: theme.danger }]}>
-                <Text style={styles.nodeBadgeTxt}>{takeovers.length}</Text>
-              </View>
-            )}
-          </Pressable>
-          <Pressable
-            accessibilityLabel={t('devicesTunnel')}
-            onPress={() => router.push('/devices')}
-            style={[styles.iconBtn, { backgroundColor: theme.s1 }]}
-          >
-            <GlobeIcon size={19} color={theme.text} />
-            {onlineNodesCount > 0 && (
-              <View style={[styles.nodeBadge, { backgroundColor: theme.sageInk }]}>
-                <Text style={styles.nodeBadgeTxt}>{onlineNodesCount}</Text>
-              </View>
-            )}
           </Pressable>
           <Pressable
             accessibilityLabel={t('settings')}
@@ -215,7 +164,7 @@ export default function BotsScreen() {
         </View>
       </View>
 
-      {!needsFirstPairing && (
+      {!needsFirstPairing && searching && (
         <View style={[styles.searchBox, { backgroundColor: theme.s1 }]}>
           <SearchIcon size={16} color={theme.mute} />
           <TextInput
@@ -224,6 +173,7 @@ export default function BotsScreen() {
             placeholder={t('searchBot')}
             placeholderTextColor={theme.mute}
             style={[styles.searchInput, { color: theme.text }]}
+            autoFocus
             clearButtonMode="while-editing"
             returnKeyType="search"
           />
@@ -375,35 +325,10 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: 10,
   },
-  titleBlock: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    flex: 1,
-    minWidth: 0,
-  },
   title: {
     fontSize: 28,
     fontWeight: '700',
     letterSpacing: -0.7,
-  },
-  serverPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 999,
-    maxWidth: 160,
-  },
-  statusDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-  },
-  serverPillTxt: {
-    fontSize: 12,
-    fontWeight: '600',
   },
   headerActions: {
     flexDirection: 'row',
@@ -418,22 +343,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     position: 'relative',
   },
-  nodeBadge: {
-    position: 'absolute',
-    top: -3,
-    right: -3,
-    minWidth: 16,
-    height: 16,
-    borderRadius: 8,
-    paddingHorizontal: 4,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  nodeBadgeTxt: {
-    color: '#ffffff',
-    fontSize: 10,
-    fontWeight: '700',
-  },
   searchBox: {
     marginHorizontal: 16,
     marginBottom: 12,
@@ -446,11 +355,11 @@ const styles = StyleSheet.create({
   },
   searchInput: {
     flex: 1,
-    fontSize: 16,
+    fontSize: 17,
     paddingVertical: 0,
   },
   clearTxt: {
-    fontSize: 13,
+    fontSize: 15,
     fontWeight: '600',
   },
   toBanner: {
@@ -466,7 +375,7 @@ const styles = StyleSheet.create({
   },
   toBannerTxt: {
     flex: 1,
-    fontSize: 13,
+    fontSize: 15,
     fontWeight: '600',
   },
   toBannerActs: {
@@ -479,7 +388,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   toBannerBtnTxt: {
-    fontSize: 12.5,
+    fontSize: 13.5,
     fontWeight: '700',
   },
   listContent: {
@@ -506,12 +415,12 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   botName: {
-    fontSize: 16,
+    fontSize: 17,
     fontWeight: '600',
     flex: 1,
   },
   botTime: {
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '500',
   },
   botBottomRow: {
@@ -521,7 +430,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   botPreview: {
-    fontSize: 13.5,
+    fontSize: 15,
     flex: 1,
   },
   unreadPill: {
@@ -533,7 +442,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   unreadTxt: {
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '700',
   },
   centerBox: {
@@ -544,7 +453,7 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   centerTxt: {
-    fontSize: 14,
+    fontSize: 16,
     textAlign: 'center',
   },
   cardWrap: {
@@ -562,8 +471,8 @@ const styles = StyleSheet.create({
     letterSpacing: -0.3,
   },
   onboardDesc: {
-    fontSize: 14,
-    lineHeight: 20,
+    fontSize: 16,
+    lineHeight: 22,
   },
   onboardSteps: {
     gap: 8,
@@ -585,13 +494,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   stepBadgeTxt: {
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '700',
   },
   onboardStepTxt: {
     flex: 1,
-    fontSize: 13.5,
-    lineHeight: 19,
+    fontSize: 15,
+    lineHeight: 21,
   },
   onboardBtns: {
     flexDirection: 'row',
@@ -607,7 +516,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   primaryBtnTxt: {
-    fontSize: 15,
+    fontSize: 17,
     fontWeight: '600',
   },
   secondaryBtn: {
@@ -618,7 +527,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   secondaryBtnTxt: {
-    fontSize: 15,
+    fontSize: 17,
     fontWeight: '600',
   },
 });

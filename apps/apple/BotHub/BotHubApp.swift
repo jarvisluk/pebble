@@ -73,7 +73,7 @@ struct RootView: View {
             } else {
                 NavigationSplitView {
                     BotListView()
-                        .navigationSplitViewColumnWidth(min: 260, ideal: 300, max: 380)
+                        .navigationSplitViewColumnWidth(min: 300, ideal: 340, max: 420)
                 } detail: {
                     NavigationStack {
                         if let id = router.selected, hub.bots.contains(where: { $0.id == id }) {

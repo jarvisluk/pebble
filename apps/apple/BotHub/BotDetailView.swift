@@ -37,7 +37,7 @@ struct BotDetailView: View {
 
     var body: some View {
         let pal = p.bot(botId, index)
-        Form {
+        Form { Group {
             if !err.isEmpty { Section { StatusText(text: err) } }
             if inline && dirty {
                 Section {
@@ -112,7 +112,7 @@ struct BotDetailView: View {
                     }
                 }
             }
-        }
+        }.listRowBackground(p.card) }
         .hubForm()
         .navigationTitle(inline ? "" : hub.t("botDetails"))
         .navigationBarTitleDisplayMode(.inline)

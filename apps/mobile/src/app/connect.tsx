@@ -394,12 +394,12 @@ const styles = StyleSheet.create({
     gap: 3,
   },
   cardTitle: {
-    fontSize: 16,
+    fontSize: 17,
     fontWeight: '700',
   },
   cardSub: {
-    fontSize: 13,
-    lineHeight: 18,
+    fontSize: 15,
+    lineHeight: 20,
   },
   qrBtn: {
     flexDirection: 'row',
@@ -410,7 +410,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
   },
   qrBtnTxt: {
-    fontSize: 13.5,
+    fontSize: 15,
     fontWeight: '700',
   },
   camWrap: {
@@ -427,28 +427,28 @@ const styles = StyleSheet.create({
     paddingVertical: 11,
   },
   noticeTxt: {
-    fontSize: 13,
-    lineHeight: 18.5,
+    fontSize: 15,
+    lineHeight: 21,
   },
   field: {
     gap: 6,
   },
   fieldLbl: {
-    fontSize: 13,
+    fontSize: 15,
     fontWeight: '600',
   },
   fieldHint: {
-    fontSize: 12,
+    fontSize: 13,
   },
   input: {
     borderRadius: 14,
     paddingHorizontal: 13,
     paddingVertical: 11,
-    fontSize: 16,
+    fontSize: 17,
   },
   errTxt: {
-    fontSize: 13,
-    lineHeight: 18,
+    fontSize: 15,
+    lineHeight: 20,
   },
   submitBtn: {
     borderRadius: 999,
@@ -458,7 +458,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   submitTxt: {
-    fontSize: 15,
+    fontSize: 17,
     fontWeight: '700',
   },
   savedList: {
@@ -483,7 +483,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   savedName: {
-    fontSize: 14.5,
+    fontSize: 16,
     fontWeight: '600',
     flexShrink: 1,
   },
@@ -493,18 +493,18 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
   },
   curBadgeTxt: {
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '700',
   },
   savedAddr: {
-    fontSize: 12,
+    fontSize: 13,
   },
   delBtn: {
     paddingHorizontal: 6,
     paddingVertical: 4,
   },
   delTxt: {
-    fontSize: 13,
+    fontSize: 15,
     fontWeight: '600',
   },
 });

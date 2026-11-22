@@ -221,18 +221,18 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   cardTitle: {
-    fontSize: 16,
+    fontSize: 17,
     fontWeight: '700',
   },
   kvGroup: {
     gap: 6,
   },
   serverName: {
-    fontSize: 16,
+    fontSize: 17,
     fontWeight: '700',
   },
   addrTxt: {
-    fontSize: 12.5,
+    fontSize: 13.5,
   },
   badgeRow: {
     flexDirection: 'row',
@@ -246,7 +246,7 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
   },
   badgeTxt: {
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '700',
   },
   manageBtn: {
@@ -256,7 +256,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   manageBtnTxt: {
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: '600',
   },
   rowBetween: {
@@ -266,19 +266,19 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   lbl: {
-    fontSize: 14,
+    fontSize: 16,
   },
   val: {
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: '600',
   },
   countTxt: {
-    fontSize: 13,
+    fontSize: 15,
     fontWeight: '700',
   },
   emptyTxt: {
-    fontSize: 13.5,
-    lineHeight: 20,
+    fontSize: 15,
+    lineHeight: 22,
   },
   nodeList: {
     gap: 10,
@@ -289,7 +289,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   nodeName: {
-    fontSize: 15,
+    fontSize: 17,
     fontWeight: '700',
   },
   statePill: {
@@ -298,11 +298,11 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
   },
   statePillTxt: {
-    fontSize: 11.5,
+    fontSize: 12.5,
     fontWeight: '700',
   },
   nodeMeta: {
-    fontSize: 12,
+    fontSize: 13,
   },
   permRow: {
     flexDirection: 'row',
@@ -315,7 +315,7 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   permTxt: {
-    fontSize: 11.5,
+    fontSize: 12.5,
     fontWeight: '600',
   },
 });

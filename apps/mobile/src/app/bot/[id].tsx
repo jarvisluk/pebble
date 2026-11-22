@@ -508,7 +508,7 @@ export default function BotChatScreen() {
               selectable
               style={[
                 styles.systemTxt,
-                isCmd && { fontFamily: MONO_FONT, fontSize: 12.5 },
+                isCmd && { fontFamily: MONO_FONT, fontSize: 13.5 },
                 { color: isErr ? theme.danger : theme.text2 },
               ]}
             >
@@ -586,13 +586,13 @@ export default function BotChatScreen() {
             onPress={() => router.push(`/desktop?target=${encodeURIComponent(takeovers[0].target || 'local')}`)}
             style={{ borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5, backgroundColor: theme.card }}
           >
-            <Text style={{ fontSize: 12, fontWeight: '700', color: theme.text }}>{t('handleAction')}</Text>
+            <Text style={{ fontSize: 13, fontWeight: '700', color: theme.text }}>{t('handleAction')}</Text>
           </Pressable>
           <Pressable
             onPress={() => void resolveTakeover(takeovers[0].id)}
             style={{ borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5, backgroundColor: botPal.accent }}
           >
-            <Text style={{ fontSize: 12, fontWeight: '700', color: botPal.text }}>{t('resumeShort')}</Text>
+            <Text style={{ fontSize: 13, fontWeight: '700', color: botPal.text }}>{t('resumeShort')}</Text>
           </Pressable>
         </View>
       )}
@@ -793,7 +793,7 @@ export default function BotChatScreen() {
                       onPress={() => setBotMemShowAdd((v) => !v)}
                       style={{ borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4, backgroundColor: botPal.soft }}
                     >
-                      <Text style={{ fontSize: 12, fontWeight: '700', color: botPal.accent }}>
+                      <Text style={{ fontSize: 13, fontWeight: '700', color: botPal.accent }}>
                         {botMemShowAdd ? t('collapse') : t('addShort')}
                       </Text>
                     </Pressable>
@@ -828,7 +828,7 @@ export default function BotChatScreen() {
                         }}
                         style={{ borderRadius: 999, paddingVertical: 9, alignItems: 'center', backgroundColor: botPal.accent }}
                       >
-                        <Text style={{ fontSize: 13, fontWeight: '700', color: botPal.text }}>
+                        <Text style={{ fontSize: 15, fontWeight: '700', color: botPal.text }}>
                           {botMemSaving ? t('saving') : t('saveMemory')}
                         </Text>
                       </Pressable>
@@ -847,7 +847,7 @@ export default function BotChatScreen() {
                       {botMem.items.map((it) => (
                         <View key={it.id} style={{ backgroundColor: theme.s1, borderRadius: 14, padding: 10, gap: 6 }}>
                           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                            <Text style={{ fontSize: 11.5, fontWeight: '700', color: theme.sageInk }}>
+                            <Text style={{ fontSize: 12.5, fontWeight: '700', color: theme.sageInk }}>
                               {it.kind || 'memory'}
                             </Text>
                             <Pressable
@@ -864,7 +864,7 @@ export default function BotChatScreen() {
                               }}
                               style={{ borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3, backgroundColor: theme.card }}
                             >
-                              <Text style={{ fontSize: 11.5, fontWeight: '700', color: theme.danger }}>{t('delete')}</Text>
+                              <Text style={{ fontSize: 12.5, fontWeight: '700', color: theme.danger }}>{t('delete')}</Text>
                             </Pressable>
                           </View>
                           <Text selectable style={[styles.instructionsTxt, { color: theme.text }]}>
@@ -882,7 +882,7 @@ export default function BotChatScreen() {
                     style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}
                   >
                     <Text style={[styles.sectionLabel, { color: theme.text2 }]}>{t('techDetails')}</Text>
-                    <Text style={{ fontSize: 12, fontWeight: '700', color: theme.mute }}>
+                    <Text style={{ fontSize: 13, fontWeight: '700', color: theme.mute }}>
                       {techExpanded ? t('collapse') : '▾'}
                     </Text>
                   </Pressable>
@@ -957,7 +957,7 @@ export default function BotChatScreen() {
                       }}
                       style={{ borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4, backgroundColor: theme.accentSoft }}
                     >
-                      <Text style={{ fontSize: 12, fontWeight: '700', color: theme.accent }}>
+                      <Text style={{ fontSize: 13, fontWeight: '700', color: theme.accent }}>
                         {rtShowForm && !rtEditId ? t('collapse') : t('addShort')}
                       </Text>
                     </Pressable>
@@ -988,7 +988,7 @@ export default function BotChatScreen() {
                               backgroundColor: rtMode === m ? theme.accent : theme.card,
                             }}
                           >
-                            <Text style={{ fontSize: 12, fontWeight: '700', color: rtMode === m ? theme.accentText : theme.text2 }}>
+                            <Text style={{ fontSize: 13, fontWeight: '700', color: rtMode === m ? theme.accentText : theme.text2 }}>
                               {m === 'interval'
                                 ? t('rtModeInterval')
                                 : m === 'daily'
@@ -1029,7 +1029,7 @@ export default function BotChatScreen() {
                       ) : null}
                       {rtMode !== 'webhook' && (
                         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                          <Text style={{ fontSize: 13, color: theme.text }}>{t('rtAllowWebhook')}</Text>
+                          <Text style={{ fontSize: 15, color: theme.text }}>{t('rtAllowWebhook')}</Text>
                           <Switch
                             value={rtWebhookTrigger}
                             onValueChange={setRtWebhookTrigger}
@@ -1051,7 +1051,7 @@ export default function BotChatScreen() {
                           />
                           {rtWebhookSecretSet && (
                             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                              <Text style={{ fontSize: 12.5, color: theme.text2 }}>{t('rtWebhookClearSecret')}</Text>
+                              <Text style={{ fontSize: 13.5, color: theme.text2 }}>{t('rtWebhookClearSecret')}</Text>
                               <Switch
                                 value={rtClearSecret}
                                 onValueChange={(v) => {
@@ -1092,7 +1092,7 @@ export default function BotChatScreen() {
                               backgroundColor: rtDelivery === val ? theme.accent : theme.card,
                             }}
                           >
-                            <Text style={{ fontSize: 12, fontWeight: '700', color: rtDelivery === val ? theme.accentText : theme.text2 }}>
+                            <Text style={{ fontSize: 13, fontWeight: '700', color: rtDelivery === val ? theme.accentText : theme.text2 }}>
                               {lbl}
                             </Text>
                           </Pressable>
@@ -1108,7 +1108,7 @@ export default function BotChatScreen() {
                         style={[styles.editInput, { minHeight: 72, backgroundColor: theme.card, color: theme.text }]}
                       />
                       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                        <Text style={{ fontSize: 13, color: theme.text }}>{t('rtEnabled')}</Text>
+                        <Text style={{ fontSize: 15, color: theme.text }}>{t('rtEnabled')}</Text>
                         <Switch
                           value={rtEnabled}
                           onValueChange={setRtEnabled}
@@ -1123,14 +1123,14 @@ export default function BotChatScreen() {
                           }}
                           style={{ flex: 1, borderRadius: 999, paddingVertical: 9, alignItems: 'center', backgroundColor: theme.card }}
                         >
-                          <Text style={{ fontSize: 13, fontWeight: '700', color: theme.text2 }}>{t('cancel')}</Text>
+                          <Text style={{ fontSize: 15, fontWeight: '700', color: theme.text2 }}>{t('cancel')}</Text>
                         </Pressable>
                         <Pressable
                           disabled={rtSaving}
                           onPress={() => void onSaveRoutine()}
                           style={{ flex: 1, borderRadius: 999, paddingVertical: 9, alignItems: 'center', backgroundColor: theme.accent }}
                         >
-                          <Text style={{ fontSize: 13, fontWeight: '700', color: theme.accentText }}>
+                          <Text style={{ fontSize: 15, fontWeight: '700', color: theme.accentText }}>
                             {rtSaving ? t('saving') : t('rtSaveBtn')}
                           </Text>
                         </Pressable>
@@ -1139,7 +1139,7 @@ export default function BotChatScreen() {
                   )}
 
                   {rtErr ? (
-                    <Text style={{ fontSize: 12.5, color: theme.danger }}>{rtErr}</Text>
+                    <Text style={{ fontSize: 13.5, color: theme.danger }}>{rtErr}</Text>
                   ) : null}
 
                   {rtLoading && botRoutines.length === 0 ? (
@@ -1178,13 +1178,13 @@ export default function BotChatScreen() {
                           <View key={rt.id} style={{ backgroundColor: theme.s1, borderRadius: 14, padding: 10, gap: 6 }}>
                             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
                               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
-                                <Text style={{ fontSize: 14, fontWeight: '700', color: theme.text }} numberOfLines={1}>
+                                <Text style={{ fontSize: 16, fontWeight: '700', color: theme.text }} numberOfLines={1}>
                                   {rt.name}
                                 </Text>
                                 {statusTxt ? (
                                   <Text
                                     style={{
-                                      fontSize: 11.5,
+                                      fontSize: 12.5,
                                       fontWeight: '700',
                                       color: rt.lastRun?.status === 'error' && !rt.running ? theme.danger : theme.sageInk,
                                     }}
@@ -1203,7 +1203,7 @@ export default function BotChatScreen() {
                                 trackColor={{ false: theme.s2, true: theme.accent }}
                               />
                             </View>
-                            <Text style={{ fontSize: 12, color: theme.mute }}>
+                            <Text style={{ fontSize: 13, color: theme.mute }}>
                               {[trig, delivLbl, rt.webhookUrl ? t('rtWebhookPushTag') : '', rt.model].filter(Boolean).join(' · ')}
                             </Text>
                             <Text selectable style={[styles.instructionsTxt, { color: theme.text }]}>
@@ -1218,7 +1218,7 @@ export default function BotChatScreen() {
                                 }}
                                 style={{ borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4, backgroundColor: theme.card }}
                               >
-                                <Text style={{ fontSize: 12, fontWeight: '700', color: theme.text }}>
+                                <Text style={{ fontSize: 13, fontWeight: '700', color: theme.text }}>
                                   {rt.running ? t('rtRunningBtn') : t('rtRunNow')}
                                 </Text>
                               </Pressable>
@@ -1238,7 +1238,7 @@ export default function BotChatScreen() {
                                 }}
                                 style={{ borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4, backgroundColor: theme.card }}
                               >
-                                <Text style={{ fontSize: 12, fontWeight: '700', color: theme.text2 }}>
+                                <Text style={{ fontSize: 13, fontWeight: '700', color: theme.text2 }}>
                                   {runsOpen ? t('rtRunsHide') : t('rtRunsBtn')}
                                 </Text>
                               </Pressable>
@@ -1246,7 +1246,7 @@ export default function BotChatScreen() {
                                 onPress={() => openRoutineEditor(rt)}
                                 style={{ borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4, backgroundColor: theme.card }}
                               >
-                                <Text style={{ fontSize: 12, fontWeight: '700', color: theme.text2 }}>{t('edit')}</Text>
+                                <Text style={{ fontSize: 13, fontWeight: '700', color: theme.text2 }}>{t('edit')}</Text>
                               </Pressable>
                               {rt.webhookTrigger && rt.webhookPath ? (
                                 <Pressable
@@ -1259,7 +1259,7 @@ export default function BotChatScreen() {
                                   }}
                                   style={{ borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4, backgroundColor: theme.card }}
                                 >
-                                  <Text style={{ fontSize: 12, fontWeight: '700', color: theme.accent }}>
+                                  <Text style={{ fontSize: 13, fontWeight: '700', color: theme.accent }}>
                                     {rtCopiedId === rt.id ? t('rtWebhookCopied') : t('rtCopyWebhook')}
                                   </Text>
                                 </Pressable>
@@ -1277,23 +1277,23 @@ export default function BotChatScreen() {
                                 }}
                                 style={{ borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4, backgroundColor: theme.card }}
                               >
-                                <Text style={{ fontSize: 12, fontWeight: '700', color: theme.danger }}>{t('delete')}</Text>
+                                <Text style={{ fontSize: 13, fontWeight: '700', color: theme.danger }}>{t('delete')}</Text>
                               </Pressable>
                             </View>
                             {runsOpen && (
                               <View style={{ gap: 4, paddingTop: 4 }}>
                                 {runList.length === 0 ? (
-                                  <Text style={{ fontSize: 12, color: theme.mute }}>{t('rtRunsEmpty')}</Text>
+                                  <Text style={{ fontSize: 13, color: theme.mute }}>{t('rtRunsEmpty')}</Text>
                                 ) : (
                                   runList.map((r) => (
                                     <View key={r.id} style={{ backgroundColor: theme.card, borderRadius: 8, padding: 6, gap: 2 }}>
-                                      <Text style={{ fontSize: 11.5, color: theme.mute }}>
+                                      <Text style={{ fontSize: 12.5, color: theme.mute }}>
                                         {`${r.status === 'ok' ? t('rtStatusOk') : r.status === 'silent' ? t('rtStatusSilent') : t('rtStatusError')} · ${r.trigger} · ${((r.durationMs || 0) / 1000).toFixed(1)}s`}
                                       </Text>
                                       {r.error ? (
-                                        <Text style={{ fontSize: 12, color: theme.danger }}>{r.error}</Text>
+                                        <Text style={{ fontSize: 13, color: theme.danger }}>{r.error}</Text>
                                       ) : r.output ? (
-                                        <Text numberOfLines={3} style={{ fontSize: 12, color: theme.text2 }}>
+                                        <Text numberOfLines={3} style={{ fontSize: 13, color: theme.text2 }}>
                                           {r.output}
                                         </Text>
                                       ) : null}
@@ -1367,7 +1367,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   headName: {
-    fontSize: 16,
+    fontSize: 17,
     fontWeight: '700',
   },
   docBtn: {
@@ -1393,15 +1393,15 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   emptyTitle: {
-    fontSize: 20,
+    fontSize: 22,
     fontWeight: '700',
     letterSpacing: -0.4,
     marginTop: 4,
   },
   emptyDesc: {
-    fontSize: 14,
+    fontSize: 16,
     textAlign: 'center',
-    lineHeight: 20,
+    lineHeight: 22,
     marginBottom: 8,
   },
   suggestGrid: {
@@ -1418,14 +1418,14 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   suggestTitle: {
-    fontSize: 14.5,
+    fontSize: 16,
     fontWeight: '700',
   },
   suggestSub: {
-    fontSize: 12.5,
+    fontSize: 13.5,
   },
   stamp: {
-    fontSize: 11.5,
+    fontSize: 12.5,
     textAlign: 'center',
     marginTop: 4,
     marginBottom: 8,
@@ -1442,8 +1442,8 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   userText: {
-    fontSize: 15,
-    lineHeight: 22,
+    fontSize: 17,
+    lineHeight: 25,
   },
   assistantRow: {
     flexDirection: 'row',
@@ -1458,7 +1458,7 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   msgMeta: {
-    fontSize: 11.5,
+    fontSize: 12.5,
     fontWeight: '500',
   },
   botRelBubble: {
@@ -1469,7 +1469,7 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   botRelLabel: {
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '700',
   },
   systemWrap: {
@@ -1482,8 +1482,8 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   systemTxt: {
-    fontSize: 13,
-    lineHeight: 19,
+    fontSize: 15,
+    lineHeight: 21,
   },
   busyFoot: {
     alignSelf: 'flex-start',
@@ -1496,7 +1496,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
   },
   busyFootTxt: {
-    fontSize: 13,
+    fontSize: 15,
     fontWeight: '600',
   },
   errBanner: {
@@ -1507,7 +1507,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
   },
   errTxt: {
-    fontSize: 13,
+    fontSize: 15,
   },
   composerWrap: {
     paddingHorizontal: 12,
@@ -1527,11 +1527,11 @@ const styles = StyleSheet.create({
     borderRadius: 999,
   },
   slashCmd: {
-    fontSize: 13,
+    fontSize: 15,
     fontWeight: '700',
   },
   slashLbl: {
-    fontSize: 12.5,
+    fontSize: 13.5,
   },
   composerCapsule: {
     borderRadius: 24,
@@ -1544,8 +1544,8 @@ const styles = StyleSheet.create({
   },
   composerInput: {
     flex: 1,
-    fontSize: 16,
-    lineHeight: 22,
+    fontSize: 17,
+    lineHeight: 25,
     maxHeight: 120,
     minHeight: 36,
     outlineWidth: 0,
@@ -1586,11 +1586,11 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   detailId: {
-    fontSize: 13,
+    fontSize: 15,
   },
   detailDesc: {
-    fontSize: 14,
-    lineHeight: 20,
+    fontSize: 16,
+    lineHeight: 22,
   },
   statGrid: {
     flexDirection: 'row',
@@ -1606,24 +1606,24 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   statLbl: {
-    fontSize: 11.5,
+    fontSize: 12.5,
     fontWeight: '600',
   },
   statVal: {
-    fontSize: 14.5,
+    fontSize: 16,
     fontWeight: '700',
   },
   sectionLabel: {
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '700',
   },
   monoBlock: {
-    fontSize: 12.5,
-    lineHeight: 18,
+    fontSize: 13.5,
+    lineHeight: 20,
   },
   instructionsTxt: {
-    fontSize: 14,
-    lineHeight: 21,
+    fontSize: 16,
+    lineHeight: 24,
   },
   dangerBtn: {
     borderRadius: 999,
@@ -1633,18 +1633,18 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   dangerBtnTxt: {
-    fontSize: 15,
+    fontSize: 17,
     fontWeight: '700',
   },
   editInput: {
     borderRadius: 14,
     paddingHorizontal: 13,
     paddingVertical: 10,
-    fontSize: 15,
+    fontSize: 17,
   },
   editTextarea: {
     minHeight: 200,
-    fontSize: 13,
-    lineHeight: 19,
+    fontSize: 15,
+    lineHeight: 21,
   },
 });

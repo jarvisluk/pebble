@@ -88,6 +88,7 @@ struct BotListView: View {
 
     private var title: some View {
         Text("Bots").font(.system(size: 22, weight: .bold)).fixedSize()
+            .padding(.leading, router.compact ? 0 : 8)
     }
 
     @ToolbarContentBuilder

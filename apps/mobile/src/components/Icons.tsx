@@ -14,6 +14,14 @@ export function PlusIcon({ size = 20, color }: IconProps) {
   );
 }
 
+export function XIcon({ size = 20, color }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2.2} strokeLinecap="round">
+      <Path d="M6 6l12 12M18 6L6 18" />
+    </Svg>
+  );
+}
+
 export function SettingsIcon({ size = 20, color }: IconProps) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round">

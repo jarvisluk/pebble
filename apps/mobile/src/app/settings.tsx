@@ -49,6 +49,10 @@ export default function SettingsScreen() {
   const { pref: langPref, setPref: setLangPref, t } = useI18n();
   const {
     activeServer,
+    connState,
+    online,
+    nodes,
+    takeovers,
     bots,
     settings,
     models,
@@ -65,6 +69,24 @@ export default function SettingsScreen() {
     deleteMemory,
   } = useHub();
 
+  const statusDotColor = useMemo(() => {
+    if (connState === 'connected' && online) return theme.sageInk;
+    if (connState === 'connected' || connState === 'connecting') return theme.busy;
+    if (connState === 'unauthorized' || connState === 'error') return theme.danger;
+    return theme.mute;
+  }, [connState, online, theme]);
+
+  const statusText = useMemo(() => {
+    if (!activeServer) return t('disconnected');
+    if (connState === 'connecting') return `${activeServer.label} · ${t('connectingShort')}`;
+    if (connState === 'unauthorized') return `${activeServer.label} · ${t('needsToken')}`;
+    if (connState === 'error') return `${activeServer.label} · ${t('connLost')}`;
+    if (connState === 'connected' && !online) return `${activeServer.label} · ${t('reconnecting')}`;
+    if (connState === 'connected') return activeServer.label;
+    return t('disconnected');
+  }, [activeServer, connState, online, t]);
+
+  const onlineNodes = nodes.filter((n) => n.connected).length;
   const [defaultModel, setDefaultModel] = useState('');
   const [defaultModelTouched, setDefaultModelTouched] = useState(false);
   const [defaultModelsDraft, setDefaultModelsDraft] = useState<Record<string, string>>({});
@@ -307,6 +329,29 @@ export default function SettingsScreen() {
               <Text style={[styles.msgTxt, { color: theme.sageInk }]}>{savedMsg}</Text>
             </View>
           ) : null}
+
+          <View style={[styles.card, { backgroundColor: theme.card }]}>
+            <Text style={[styles.sectionTitle, { color: theme.text }]}>{t('hostSection')}</Text>
+            <Pressable onPress={() => router.push('/connect')} style={styles.rowBetween}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1, minWidth: 0 }}>
+                <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: statusDotColor }} />
+                <Text numberOfLines={1} style={[styles.hostTxt, { color: theme.text }]}>{statusText}</Text>
+              </View>
+              <Text style={[styles.hostTxt, { color: theme.mute }]}>{t('switchHost')}</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => router.push(`/desktop?target=${encodeURIComponent(takeovers[0]?.target || 'local')}`)}
+            >
+              <Text style={[styles.hostTxt, { color: theme.accent }]}>
+                {takeovers.length > 0 ? `${t('remoteDesktop')} (${takeovers.length})` : t('remoteDesktop')}
+              </Text>
+            </Pressable>
+            <Pressable onPress={() => router.push('/devices')}>
+              <Text style={[styles.hostTxt, { color: theme.accent }]}>
+                {onlineNodes > 0 ? `${t('devicesTunnel')} (${onlineNodes})` : t('devicesTunnel')}
+              </Text>
+            </Pressable>
+          </View>
 
           <View style={[styles.card, { backgroundColor: theme.card }]}>
             <View style={styles.rowBetween}>
@@ -940,17 +985,18 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   scroll: { padding: 16, gap: 12, paddingBottom: 36 },
   msgCard: { borderRadius: 16, paddingHorizontal: 14, paddingVertical: 10 },
-  msgTxt: { fontSize: 13.5, fontWeight: '600' },
+  msgTxt: { fontSize: 15, fontWeight: '600' },
   card: { borderRadius: 22, padding: 16, gap: 12 },
-  sectionTitle: { fontSize: 16, fontWeight: '700' },
-  subLabel: { fontSize: 13.5, fontWeight: '600' },
+  sectionTitle: { fontSize: 17, fontWeight: '700' },
+  hostTxt: { fontSize: 17 },
+  subLabel: { fontSize: 15, fontWeight: '600' },
   swatchRow: { flexDirection: 'row', gap: 10, flexWrap: 'wrap' },
   swatch: { width: 28, height: 28, borderRadius: 14 },
-  noteTxt: { fontSize: 13.5, lineHeight: 19, flex: 1 },
+  noteTxt: { fontSize: 15, lineHeight: 21, flex: 1 },
   rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
   segmentRow: { flexDirection: 'row', gap: 8 },
   segmentPill: { flex: 1, borderRadius: 999, paddingVertical: 8, alignItems: 'center', justifyContent: 'center' },
-  segmentTxt: { fontSize: 13, fontWeight: '700' },
+  segmentTxt: { fontSize: 15, fontWeight: '700' },
   magpieList: { gap: 8 },
   magpieRow: {
     borderRadius: 14,
@@ -962,33 +1008,33 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   magpieInfo: { flex: 1, minWidth: 0, gap: 2 },
-  magpieName: { fontSize: 14, fontWeight: '600' },
-  magpieSub: { fontSize: 11.5 },
+  magpieName: { fontSize: 16, fontWeight: '600' },
+  magpieSub: { fontSize: 12.5 },
   magpieActs: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   magpieBtn: { borderRadius: 999, paddingHorizontal: 11, paddingVertical: 6 },
-  magpieBtnTxt: { fontSize: 12.5, fontWeight: '700' },
+  magpieBtnTxt: { fontSize: 13.5, fontWeight: '700' },
   addProvBox: { borderRadius: 16, padding: 12, gap: 10 },
   addBtn: { borderRadius: 999, paddingVertical: 10, alignItems: 'center', justifyContent: 'center' },
   smallBtn: { borderRadius: 999, paddingHorizontal: 11, paddingVertical: 5 },
-  smallBtnTxt: { fontSize: 12.5, fontWeight: '600' },
-  input: { borderRadius: 14, paddingHorizontal: 13, paddingVertical: 10, fontSize: 15 },
-  textArea: { minHeight: 110, fontSize: 13, lineHeight: 19 },
+  smallBtnTxt: { fontSize: 13.5, fontWeight: '600' },
+  input: { borderRadius: 14, paddingHorizontal: 13, paddingVertical: 10, fontSize: 17 },
+  textArea: { minHeight: 110, fontSize: 15, lineHeight: 21 },
   perHarnessItem: { gap: 4 },
   pillRow: { gap: 8 },
   wrapRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   pill: { borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
-  pillTxt: { fontSize: 13, fontWeight: '700' },
-  modelChipTxt: { fontSize: 12.5, fontWeight: '600' },
-  emptyNote: { fontSize: 13.5 },
+  pillTxt: { fontSize: 15, fontWeight: '700' },
+  modelChipTxt: { fontSize: 13.5, fontWeight: '600' },
+  emptyNote: { fontSize: 15 },
   botList: { gap: 10 },
   botItem: { borderRadius: 18, padding: 13, gap: 10 },
   botHead: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   botHeadTxt: { flex: 1 },
-  botName: { fontSize: 15, fontWeight: '700' },
-  botId: { fontSize: 12 },
+  botName: { fontSize: 17, fontWeight: '700' },
+  botId: { fontSize: 13 },
   connCol: { flex: 1, minWidth: 0, gap: 2 },
-  connLbl: { fontSize: 14.5, fontWeight: '600' },
-  connAddr: { fontSize: 12 },
+  connLbl: { fontSize: 16, fontWeight: '600' },
+  connAddr: { fontSize: 13 },
   switchBtn: { borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8 },
-  switchBtnTxt: { fontSize: 13, fontWeight: '600' },
+  switchBtnTxt: { fontSize: 15, fontWeight: '600' },
 });
