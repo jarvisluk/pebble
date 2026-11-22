@@ -10,8 +10,17 @@ struct HubError: LocalizedError {
 }
 
 func errText(_ error: Error, _ fallback: String) -> String {
-    let s = (error as? HubError)?.message ?? error.localizedDescription
-    return s.isEmpty ? fallback : s
+    if let e = error as? HubError { return e.message.isEmpty ? fallback : e.message }
+    // 系统网络错误的文案语言跟随系统，不一定与 App 语言一致，统一用自己的文案。
+    if let u = error as? URLError {
+        switch u.code {
+        case .timedOut: return L.t("netTimeout")
+        case .notConnectedToInternet, .networkConnectionLost, .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed:
+            return L.t("netUnreachable")
+        default: return fallback
+        }
+    }
+    return fallback
 }
 
 /// 路径段编码（与 encodeURIComponent 一致）。
@@ -157,13 +166,11 @@ final class EventStream {
 /// Go Tailcat 隧道（cmd/libbothub c-archive）。
 enum Tunnel {
     static func start(link: String, token: String) async throws -> (url: String, token: String) {
-        #if os(iOS)
         // 先发一个普通请求触发 iOS「无线数据」授权弹窗，否则 Go 侧直连会被系统静默拦截。
         var probe = URLRequest(url: URL(string: "https://captive.apple.com/hotspot-detect.html")!)
         probe.httpMethod = "HEAD"
         probe.timeoutInterval = 5
         _ = try? await URLSession.shared.data(for: probe)
-        #endif
         let json: String = await Task.detached {
             let l = strdup(link), t = strdup(token)
             defer { free(l); free(t) }
@@ -184,24 +191,6 @@ enum Tunnel {
 
 /// 主机列表含访问口令：iOS 存 Keychain；macOS 为免去 ad-hoc 签名重建后的钥匙串弹窗，存用户目录下 0600 文件。
 enum SecureStore {
-    #if os(macOS)
-    private static var dir: URL {
-        let d = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("BotHubClient", isDirectory: true)
-        try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-        return d
-    }
-
-    static func read(_ key: String) -> Data? {
-        try? Data(contentsOf: dir.appendingPathComponent(key))
-    }
-
-    static func write(_ key: String, _ data: Data?) {
-        let url = dir.appendingPathComponent(key)
-        guard let data else { try? FileManager.default.removeItem(at: url); return }
-        FileManager.default.createFile(atPath: url.path, contents: data, attributes: [.posixPermissions: 0o600])
-    }
-    #else
     private static let service = "local.bothub.apple"
 
     static func read(_ key: String) -> Data? {
@@ -221,5 +210,4 @@ enum SecureStore {
         add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
         SecItemAdd(add as CFDictionary, nil)
     }
-    #endif
 }

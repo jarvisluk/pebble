@@ -295,7 +295,7 @@ To reach a `bot-hub` running at home or in the office from your laptop:
   </tr>
   <tr>
     <td><a href="apps/apple/README.md"><code>apps/apple</code></a></td>
-    <td>Native SwiftUI client for iPhone, iPad and Mac.</td>
+    <td>Native SwiftUI client for iPhone and iPad.</td>
   </tr>
   <tr>
     <td><a href="config/bots.example.json"><code>config/bots.example.json</code></a></td>

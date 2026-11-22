@@ -61,9 +61,7 @@ struct CreateBotView: View {
         }
         .hubForm()
         .navigationTitle(hub.t("newBot"))
-        #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
-        #endif
         .toolbar { SheetToolbar(actionTitle: hub.t("create"), loading: submitting) { create() } }
         .task { if hub.settings == nil { _ = try? await hub.loadSettings() } }
     }

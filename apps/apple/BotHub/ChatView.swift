@@ -43,7 +43,7 @@ struct ChatView: View {
                 if let to = hub.takeovers.first {
                     HStack(spacing: 8) {
                         Label(hub.t("takeoverInline", ["reason": to.reason ?? ""]), systemImage: "hand.raised.fill")
-                            .font(.system(size: 13)).foregroundStyle(p.pinkInk).lineLimit(2)
+                            .font(.system(size: 15)).foregroundStyle(p.pinkInk).lineLimit(2)
                         Spacer(minLength: 4)
                         Button(hub.t("handleAction")) { router.sheet = .desktop(target: to.target ?? "local") }
                             .buttonStyle(.bordered)
@@ -57,22 +57,14 @@ struct ChatView: View {
             }
             .safeAreaInset(edge: .bottom, spacing: 0) { composer(pal) }
             .background(p.page)
-            #if os(iOS)
             .toolbarBackground(p.page, for: .navigationBar)
-            #endif
             .detailPanel(isPresented: $detailOpen, compact: router.compact) {
                 BotDetailView(botId: botId, isPresented: $detailOpen, inline: !router.compact)
             }
             .navigationTitle(name)
-            #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
-            #endif
             .toolbar {
-                #if os(macOS)
-                ToolbarItem(placement: .navigation) { titleView }
-                #else
                 ToolbarItem(placement: .principal) { titleView }
-                #endif
                 ToolbarItemGroup(placement: .primaryAction) {
                     Button { router.sheet = .desktop(target: hub.takeovers.first?.target ?? "local") } label: {
                         Label(hub.t("remoteDesktop"), systemImage: hub.takeovers.isEmpty ? "display" : "exclamationmark.triangle")
@@ -96,7 +88,7 @@ struct ChatView: View {
     private var titleView: some View {
         HStack(spacing: 8) {
             BotAvatar(id: botId, size: 28, index: index, busy: bot?.isBusy ?? false)
-            Text(name).font(.system(size: 15, weight: .bold)).lineLimit(1)
+            Text(name).font(.system(size: 17, weight: .bold)).lineLimit(1)
         }
     }
 
@@ -108,7 +100,7 @@ struct ChatView: View {
                     ForEach(Array(list.enumerated()), id: \.element.id) { i, m in
                         let prev = i > 0 ? list[i - 1] : nil
                         if showStamp(m, prev) {
-                            Text(formatStamp(m.createdAt)).font(.system(size: 12)).foregroundStyle(p.mute)
+                            Text(formatStamp(m.createdAt)).font(.system(size: 13)).foregroundStyle(p.mute)
                                 .frame(maxWidth: .infinity).padding(.top, 4)
                         }
                         MessageBubble(msg: m, soft: pal.soft)
@@ -117,7 +109,7 @@ struct ChatView: View {
                         HStack(spacing: 8) {
                             BotAvatar(id: botId, size: 24, index: index, busy: true)
                             Text(hub.tools[botId].map { $0.isEmpty ? hub.t("thinking") : hub.t("callingTool", ["tool": $0]) } ?? hub.t("thinking"))
-                                .font(.system(size: 13)).foregroundStyle(p.busy)
+                                .font(.system(size: 15)).foregroundStyle(p.busy)
                         }
                         .padding(.vertical, 6)
                     }
@@ -151,15 +143,15 @@ struct ChatView: View {
         ]
         return VStack(spacing: 10) {
             BotAvatar(id: botId, size: 72, index: index)
-            Text(name).font(.system(size: 20, weight: .bold))
+            Text(name).font(.system(size: 22, weight: .bold))
             Text((bot?.description ?? "").isEmpty ? hub.t("emptyChatHint") : bot!.description!)
-                .font(.system(size: 13)).foregroundStyle(p.text2).multilineTextAlignment(.center)
+                .font(.system(size: 15)).foregroundStyle(p.text2).multilineTextAlignment(.center)
             LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
                 ForEach(cards, id: \.0) { c in
                     Button(action: c.4) {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(c.0).font(.system(size: 14, weight: .semibold)).foregroundStyle(c.3)
-                            Text(c.1).font(.system(size: 12)).foregroundStyle(p.text2)
+                            Text(c.0).font(.system(size: 16, weight: .semibold)).foregroundStyle(c.3)
+                            Text(c.1).font(.system(size: 13)).foregroundStyle(p.text2)
                         }
                         .frame(maxWidth: .infinity, minHeight: 56, alignment: .topLeading)
                         .padding(12)
@@ -185,7 +177,7 @@ struct ChatView: View {
                 Divider()
                 Button(role: .destructive) { input = ""; send("/reset") } label: { Label("/reset · \(hub.t("resetSessionLabel"))", systemImage: "arrow.counterclockwise") }
             } label: {
-                Text("/").font(.system(size: 17, weight: .semibold)).foregroundStyle(p.text2)
+                Text("/").font(.system(size: 19, weight: .semibold)).foregroundStyle(p.text2)
                     .frame(width: 40, height: 40)
                     .background(p.s1, in: Circle())
             }
@@ -194,14 +186,11 @@ struct ChatView: View {
             .fixedSize()
             TextField(hub.t("msgBotPh", ["name": name]), text: $input, axis: .vertical)
                 .textFieldStyle(.plain)
-                .font(.system(size: 14))
+                .font(.system(size: 16))
                 .lineLimit(1...6)
                 .focused($focused)
                 .padding(.vertical, 11)
                 .onChange(of: input) { _, v in if v.count > 8000 { input = String(v.prefix(8000)) } }
-                #if os(macOS)
-                .onSubmit { submit() }
-                #endif
             Button {
                 showStop ? interrupt() : submit()
             } label: {
@@ -263,7 +252,7 @@ struct MessageBubble: View {
         case "user":
             HStack {
                 Spacer(minLength: 48)
-                Text(msg.body).font(.system(size: 14)).textSelection(.enabled)
+                Text(msg.body).font(.system(size: 16)).textSelection(.enabled)
                     .padding(.horizontal, 16).padding(.vertical, 10)
                     .background(soft, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
             }
@@ -275,11 +264,11 @@ struct MessageBubble: View {
             VStack(alignment: .leading, spacing: 6) {
                 if let from = msg.from, from.hasPrefix("routine:") {
                     Text(hub.t("routineReceiptFrom", ["name": String(from.dropFirst(8))]))
-                        .font(.system(size: 12, weight: .semibold)).foregroundStyle(p.accent)
+                        .font(.system(size: 13, weight: .semibold)).foregroundStyle(p.accent)
                 }
                 MarkdownText(text: msg.body)
                 if !meta.isEmpty {
-                    Text(meta.joined(separator: " · ")).font(.system(size: 12)).foregroundStyle(p.mute)
+                    Text(meta.joined(separator: " · ")).font(.system(size: 13)).foregroundStyle(p.mute)
                 }
             }
             .padding(.horizontal, 16).padding(.vertical, 10)
@@ -288,7 +277,7 @@ struct MessageBubble: View {
         case "bot_out", "bot_in":
             VStack(alignment: .leading, spacing: 6) {
                 Text(msg.role == "bot_out" ? hub.t("delegateTo", ["peer": msg.to ?? ""]) : hub.t("fromPeer", ["peer": msg.from ?? ""]))
-                    .font(.system(size: 12, weight: .semibold)).foregroundStyle(p.lilacInk)
+                    .font(.system(size: 13, weight: .semibold)).foregroundStyle(p.lilacInk)
                 MarkdownText(text: msg.body)
             }
             .padding(.horizontal, 16).padding(.vertical, 10)
@@ -297,7 +286,7 @@ struct MessageBubble: View {
         default:
             if msg.from == "command" {
                 Text(msg.body)
-                    .font(.system(size: 13, design: .monospaced))
+                    .font(.system(size: 15, design: .monospaced))
                     .foregroundStyle(p.text)
                     .textSelection(.enabled)
                     .padding(.horizontal, 16).padding(.vertical, 10)
@@ -305,7 +294,7 @@ struct MessageBubble: View {
                     .padding(.trailing, 24)
             } else {
                 Text(msg.body)
-                    .font(.system(size: 12))
+                    .font(.system(size: 13))
                     .foregroundStyle(msg.from == "error" ? p.danger : p.mute)
                     .multilineTextAlignment(.center)
                     .textSelection(.enabled)

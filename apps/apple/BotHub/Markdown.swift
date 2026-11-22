@@ -31,13 +31,13 @@ struct MarkdownText: View {
         case let .code(lang, body):
             CodeCard(lang: lang, code: body)
         case let .heading(level, t):
-            inline(t).font(.system(size: level == 1 ? 17 : 15, weight: .bold)).foregroundStyle(fg)
+            inline(t).font(.system(size: level == 1 ? 19 : 17, weight: .bold)).foregroundStyle(fg)
         case .rule:
             Rectangle().fill(p.s3).frame(height: 1).padding(.vertical, 4)
         case let .quote(t):
             HStack(spacing: 10) {
                 RoundedRectangle(cornerRadius: 2).fill(p.s3).frame(width: 3)
-                inline(t).font(.system(size: 14)).foregroundStyle(p.text2)
+                inline(t).font(.system(size: 16)).foregroundStyle(p.text2)
             }
             .fixedSize(horizontal: false, vertical: true)
         case let .list(ordered, items):
@@ -47,11 +47,11 @@ struct MarkdownText: View {
                         Text(ordered ? "\(i + 1)." : "•").foregroundStyle(p.text2)
                         inline(item).foregroundStyle(fg)
                     }
-                    .font(.system(size: 14))
+                    .font(.system(size: 16))
                 }
             }
         case let .para(t):
-            inline(t).font(.system(size: 14)).foregroundStyle(fg).lineSpacing(4)
+            inline(t).font(.system(size: 16)).foregroundStyle(fg).lineSpacing(4)
         }
     }
 
@@ -59,7 +59,7 @@ struct MarkdownText: View {
         let linked = s.replacingOccurrences(of: "(?<![(<\\]])(https?://[^\\s)<>]+)", with: "<$1>", options: .regularExpression)
         if var a = try? AttributedString(markdown: linked, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)) {
             for run in a.runs where run.inlinePresentationIntent?.contains(.code) == true {
-                a[run.range].font = .system(size: 13, design: .monospaced)
+                a[run.range].font = .system(size: 15, design: .monospaced)
                 a[run.range].backgroundColor = p.s2
             }
             for run in a.runs where run.link != nil {
@@ -145,14 +145,14 @@ struct CodeCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text(lang.isEmpty ? "code" : lang).font(.system(size: 12)).foregroundStyle(p.mute)
+                Text(lang.isEmpty ? "code" : lang).font(.system(size: 13)).foregroundStyle(p.mute)
                 Spacer()
                 Button(copied ? L.t("copied") : L.t("copy")) {
                     copyToClipboard(code)
                     copied = true
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { copied = false }
                 }
-                .font(.system(size: 12, weight: .semibold))
+                .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(p.text2)
                 .buttonStyle(.plain)
             }
@@ -160,7 +160,7 @@ struct CodeCard: View {
             .padding(.top, 8)
             ScrollView(.horizontal, showsIndicators: false) {
                 Text(code)
-                    .font(.system(size: 13, design: .monospaced))
+                    .font(.system(size: 15, design: .monospaced))
                     .foregroundStyle(p.text)
                     .padding(12)
             }

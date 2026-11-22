@@ -20,7 +20,7 @@ struct DevicesView: View {
             Section(hub.t("currentMobileConn")) {
                 if let s = hub.activeServer {
                     LabeledContent(s.label) {
-                        Text(s.address).font(.system(size: 12, design: .monospaced)).lineLimit(1).truncationMode(.middle)
+                        Text(s.address).font(.system(size: 13, design: .monospaced)).lineLimit(1).truncationMode(.middle)
                     }
                     HStack(spacing: 6) {
                         Tag(text: hub.isTailcat ? hub.t("tailcatE2E") : hub.t("httpLan"), bg: p.lilac, fg: p.lilacInk)
@@ -51,9 +51,7 @@ struct DevicesView: View {
         }
         .hubForm()
         .navigationTitle(hub.t("devicesTunnel"))
-        #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
-        #endif
         .toolbar { SheetToolbar() }
         .refreshable { await load() }
         .task { await load() }
@@ -72,12 +70,12 @@ struct DevicesView: View {
         let labels = ["files": hub.t("permFiles"), "exec": hub.t("permExec"), "desktop": hub.t("permDesktop")]
         return VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text(node.name ?? node.id).font(.system(size: 14, weight: .semibold))
+                Text(node.name ?? node.id).font(.system(size: 16, weight: .semibold))
                 Spacer()
                 Tag(text: on ? hub.t("online") : hub.t("offline"), bg: on ? p.sage : p.s2, fg: on ? p.sageInk : .secondary)
             }
             Text("\(node.os ?? "")/\(node.arch ?? "")\((node.hostname ?? "").isEmpty ? "" : " · \(node.hostname!)")")
-                .font(.system(size: 12, design: .monospaced)).foregroundStyle(.secondary)
+                .font(.system(size: 13, design: .monospaced)).foregroundStyle(.secondary)
             if !perms.isEmpty {
                 HStack(spacing: 6) {
                     ForEach(perms, id: \.self) { Tag(text: labels[$0] ?? $0, bg: p.s1, fg: .secondary) }

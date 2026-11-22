@@ -1,7 +1,5 @@
 import SwiftUI
-#if os(iOS)
 import AVFoundation
-#endif
 
 struct ConnectView: View {
     @Environment(HubStore.self) private var hub
@@ -20,7 +18,6 @@ struct ConnectView: View {
     var body: some View {
         let norm = normalizeAddress(address)
         Form {
-            #if os(iOS)
             Section {
                 Button {
                     toggleScanner()
@@ -38,7 +35,6 @@ struct ConnectView: View {
             } footer: {
                 Text(hub.t("scanPairDesc"))
             }
-            #endif
             Section {
                 TextField(hub.t("labelOptional"), text: $label, prompt: Text(hub.t("labelExamplePh")))
                 TextField(hub.t("connAddr"), text: $address, prompt: Text("tailcat://… / 192.168.1.10:3789")).monoInput()
@@ -61,7 +57,7 @@ struct ConnectView: View {
                             HStack {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(s.label).foregroundStyle(.primary)
-                                    Text(s.address).font(.system(size: 12, design: .monospaced)).foregroundStyle(.secondary)
+                                    Text(s.address).font(.system(size: 13, design: .monospaced)).foregroundStyle(.secondary)
                                         .lineLimit(1).truncationMode(.middle)
                                 }
                                 Spacer()
@@ -85,9 +81,7 @@ struct ConnectView: View {
         }
         .hubForm()
         .navigationTitle(hub.t("connectHost"))
-        #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
-        #endif
         .toolbar { SheetToolbar(actionTitle: hub.t("connect"), loading: submitting) { submit() } }
         .confirmAlert($confirm)
         .onAppear {
@@ -95,9 +89,7 @@ struct ConnectView: View {
                 if label.isEmpty { label = s.label }
                 if address.isEmpty { address = s.address }
             }
-            #if os(iOS)
             if startScan { toggleScanner() }
-            #endif
         }
         .onChange(of: hub.connState) { _, st in
             guard submitting else { return }
@@ -115,7 +107,6 @@ struct ConnectView: View {
         confirm = ConfirmItem(title: hub.t("removeBtn"), message: s.label) { await hub.removeServer(s.id) }
     }
 
-    #if os(iOS)
     private func toggleScanner() {
         err = ""
         if scanning { scanning = false; return }
@@ -143,7 +134,6 @@ struct ConnectView: View {
         if !norm.token.isEmpty { token = norm.token }
         connect(address: s, token: norm.token.isEmpty ? token : norm.token)
     }
-    #endif
 
     private func submit() {
         err = ""
@@ -165,7 +155,6 @@ struct ConnectView: View {
 
 }
 
-#if os(iOS)
 /// AVFoundation 二维码扫描。
 struct QRScanner: UIViewRepresentable {
     var onCode: (String) -> Void
@@ -218,4 +207,3 @@ struct QRScanner: UIViewRepresentable {
         }
     }
 }
-#endif

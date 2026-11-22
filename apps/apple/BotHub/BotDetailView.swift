@@ -54,8 +54,8 @@ struct BotDetailView: View {
                 HStack(spacing: 14) {
                     BotAvatar(id: botId, size: 56, index: index)
                     VStack(alignment: .leading, spacing: 4) {
-                        TextField(hub.t("botNamePh"), text: $editName).font(.system(size: 14, weight: .semibold))
-                        Text("@\(botId)").font(.system(size: 12, design: .monospaced)).foregroundStyle(.secondary)
+                        TextField(hub.t("botNamePh"), text: $editName).font(.system(size: 16, weight: .semibold))
+                        Text("@\(botId)").font(.system(size: 13, design: .monospaced)).foregroundStyle(.secondary)
                     }
                 }
                 TextField(hub.t("descPh"), text: $editDesc, axis: .vertical)
@@ -72,17 +72,17 @@ struct BotDetailView: View {
                     LabeledContent(hub.t("statArchived"), value: hub.t("archivedCount", ["n": active?.archivedSessions ?? 0])
                         + ((active?.privateSessions ?? false) ? hub.t("privateTag") : ""))
                     LabeledContent(hub.t("workspaceDir")) {
-                        Text(active?.workspace ?? "-").font(.system(size: 12, design: .monospaced)).textSelection(.enabled)
+                        Text(active?.workspace ?? "-").font(.system(size: 13, design: .monospaced)).textSelection(.enabled)
                     }
                     Toggle(hub.t("privateSessions"), isOn: $editPrivate).tint(pal.accent)
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("AGENTS.md").font(.system(size: 13)).foregroundStyle(.secondary)
+                        Text("AGENTS.md").font(.system(size: 15)).foregroundStyle(.secondary)
                         if loading && detail == nil {
                             ProgressView()
                         } else {
                             TextField(hub.t("agentsPh"), text: $editInst, axis: .vertical)
                                 .lineLimit(6...24)
-                                .font(.system(size: 13, design: .monospaced))
+                                .font(.system(size: 15, design: .monospaced))
                         }
                     }
                 }
@@ -115,9 +115,7 @@ struct BotDetailView: View {
         }
         .hubForm()
         .navigationTitle(inline ? "" : hub.t("botDetails"))
-        #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
-        #endif
         .toolbar {
             if !inline {
             ToolbarItem(placement: .cancellationAction) {
@@ -237,14 +235,14 @@ struct MemoryRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
-                Text(item.kind ?? "memory").font(.system(size: 12, weight: .semibold)).foregroundStyle(p.sageInk)
+                Text(item.kind ?? "memory").font(.system(size: 13, weight: .semibold)).foregroundStyle(p.sageInk)
                 if showTags {
                     ForEach((item.tags ?? []).filter { !$0.hasPrefix("bot:") }, id: \.self) { tag in
-                        Text("#\(tag)").font(.system(size: 12)).foregroundStyle(.secondary)
+                        Text("#\(tag)").font(.system(size: 13)).foregroundStyle(.secondary)
                     }
                 }
             }
-            Text(item.text ?? "").font(.system(size: 13)).textSelection(.enabled)
+            Text(item.text ?? "").font(.system(size: 15)).textSelection(.enabled)
         }
         .swipeActions { Button(hub.t("delete"), role: .destructive, action: onDelete) }
         .contextMenu { Button(hub.t("delete"), systemImage: "trash", role: .destructive, action: onDelete) }
@@ -311,9 +309,9 @@ struct RoutinesSection: View {
         let meta = [trig, deliv, (rt.webhookUrl ?? "").isEmpty ? "" : hub.t("rtWebhookPushTag"), rt.model ?? ""].filter { !$0.isEmpty }.joined(separator: " · ")
         return VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
-                Text(rt.name ?? rt.id).font(.system(size: 14, weight: .semibold)).lineLimit(1)
+                Text(rt.name ?? rt.id).font(.system(size: 16, weight: .semibold)).lineLimit(1)
                 if !status.isEmpty {
-                    Text(status).font(.system(size: 12, weight: .semibold))
+                    Text(status).font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(rt.lastRun?.status == "error" && !running ? p.danger : p.sageInk)
                 }
                 Spacer()
@@ -321,13 +319,9 @@ struct RoutinesSection: View {
                     Task { do { try await hub.updateRoutine(botId, rt.id, ["enabled": v]) } catch { err = errText(error, hub.t("rtStatusUpdateFailed")) } }
                 }))
                 .labelsHidden()
-                #if os(macOS)
-                .toggleStyle(.switch)
-                .controlSize(.small)
-                #endif
             }
-            Text(meta).font(.system(size: 12)).foregroundStyle(.secondary)
-            Text(rt.prompt ?? "").font(.system(size: 13)).lineLimit(4)
+            Text(meta).font(.system(size: 13)).foregroundStyle(.secondary)
+            Text(rt.prompt ?? "").font(.system(size: 15)).lineLimit(4)
             HStack(spacing: 8) {
                 Button(running ? hub.t("rtRunningBtn") : hub.t("rtRunNow")) {
                     err = ""
@@ -365,16 +359,16 @@ struct RoutinesSection: View {
             if open {
                 let l = runs[rt.id] ?? []
                 if l.isEmpty {
-                    Text(hub.t("rtRunsEmpty")).font(.system(size: 12)).foregroundStyle(.secondary)
+                    Text(hub.t("rtRunsEmpty")).font(.system(size: 13)).foregroundStyle(.secondary)
                 } else {
                     ForEach(l) { r in
                         VStack(alignment: .leading, spacing: 2) {
                             Text("\(statusText(r.status).isEmpty ? hub.t("rtStatusError") : statusText(r.status)) · \(r.trigger ?? "") · \(String(format: "%.1fs", (r.durationMs ?? 0) / 1000))")
-                                .font(.system(size: 12)).foregroundStyle(.secondary)
+                                .font(.system(size: 13)).foregroundStyle(.secondary)
                             if let e = r.error, !e.isEmpty {
-                                Text(e).font(.system(size: 12)).foregroundStyle(p.danger)
+                                Text(e).font(.system(size: 13)).foregroundStyle(p.danger)
                             } else if let o = r.output, !o.isEmpty {
-                                Text(o).font(.system(size: 12)).lineLimit(3)
+                                Text(o).font(.system(size: 13)).lineLimit(3)
                             }
                         }
                     }
@@ -429,9 +423,7 @@ struct RoutineEditor: View {
                 .pickerStyle(.segmented)
                 switch mode {
                 case .interval: TextField(hub.t("rtEveryPh"), text: $every).monoInput()
-                    #if os(iOS)
                     .keyboardType(.numberPad)
-                    #endif
                 case .daily: TextField(hub.t("rtDailyPh"), text: $daily).monoInput()
                 case .cron: TextField(hub.t("rtCronPh"), text: $cron).monoInput()
                 case .webhook: EmptyView()
@@ -461,18 +453,13 @@ struct RoutineEditor: View {
         }
         .hubForm()
         .navigationTitle(routine == nil ? hub.t("routines") : (routine?.name ?? hub.t("routines")))
-        #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
-        #endif
         .toolbar {
             ToolbarItem(placement: .cancellationAction) { Button(hub.t("cancel")) { dismiss() } }
             ToolbarItem(placement: .confirmationAction) {
                 if saving { ProgressView().controlSize(.small) } else { Button(hub.t("rtSaveBtn")) { save() } }
             }
         }
-        #if os(macOS)
-        .frame(minWidth: 480, minHeight: 520)
-        #endif
         .onAppear(perform: load)
     }
 

@@ -162,7 +162,7 @@ struct Tag: View {
     var fg: Color
     var body: some View {
         Text(text)
-            .font(.system(size: 12, weight: .semibold))
+            .font(.system(size: 13, weight: .semibold))
             .foregroundStyle(fg)
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
@@ -177,7 +177,7 @@ struct StatusText: View {
     var error = true
     var body: some View {
         Label(text, systemImage: error ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
-            .font(.system(size: 13))
+            .font(.system(size: 15))
             .foregroundStyle(error ? p.danger : p.sageInk)
     }
 }
@@ -189,11 +189,9 @@ extension View {
     func hubList(sidebar: Bool = false) -> some View { modifier(HubSurface(form: false, sidebar: sidebar)) }
 
     func monoInput() -> some View {
-        self.font(.system(size: 13, design: .monospaced))
+        self.font(.system(size: 15, design: .monospaced))
             .autocorrectionDisabled()
-            #if os(iOS)
             .textInputAutocapitalization(.never)
-            #endif
     }
 }
 
@@ -227,12 +225,7 @@ struct FlowLayout: Layout {
 }
 
 func copyToClipboard(_ s: String) {
-    #if os(iOS)
     UIPasteboard.general.string = s
-    #else
-    NSPasteboard.general.clearContents()
-    NSPasteboard.general.setString(s, forType: .string)
-    #endif
 }
 
 struct HubSurface: ViewModifier {
@@ -242,20 +235,9 @@ struct HubSurface: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            #if os(macOS)
-            .modifier(GroupedIfForm(form: form))
-            #endif
             .scrollContentBackground(.hidden)
             .background(sidebar ? p.card : p.page)
-            .font(.system(size: 14))
+            .font(.system(size: 16))
     }
 }
 
-#if os(macOS)
-private struct GroupedIfForm: ViewModifier {
-    var form: Bool
-    func body(content: Content) -> some View {
-        if form { content.formStyle(.grouped) } else { content }
-    }
-}
-#endif

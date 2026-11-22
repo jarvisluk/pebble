@@ -1,12 +1,7 @@
 import SwiftUI
 
-#if os(iOS)
 typealias PlatformImage = UIImage
 extension Image { init(platform img: UIImage) { self.init(uiImage: img) } }
-#else
-typealias PlatformImage = NSImage
-extension Image { init(platform img: NSImage) { self.init(nsImage: img) } }
-#endif
 
 struct DesktopView: View {
     @Environment(HubStore.self) private var hub
@@ -51,7 +46,7 @@ struct DesktopView: View {
             if let to = activeTakeover {
                 HStack(spacing: 10) {
                     Label(hub.t("takeoverBanner", ["bot": to.botName ?? to.botId ?? "Bot", "reason": to.reason ?? ""]), systemImage: "hand.raised.fill")
-                        .font(.system(size: 13)).foregroundStyle(p.pinkInk)
+                        .font(.system(size: 15)).foregroundStyle(p.pinkInk)
                     Spacer(minLength: 4)
                     Button(hub.t("doneResumeAI")) { Task { try? await hub.resolveTakeover(to.id) } }
                         .buttonStyle(.borderedProminent).controlSize(.small)
@@ -65,9 +60,7 @@ struct DesktopView: View {
         }
         .padding(.top, 8)
         .navigationTitle(hub.t("remoteDesktop"))
-        #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
-        #endif
         .toolbar {
             SheetToolbar()
             ToolbarItem(placement: .primaryAction) {
@@ -91,14 +84,14 @@ struct DesktopView: View {
                     VStack(spacing: 10) {
                         ProgressView().tint(p.accent)
                         Text(error.isEmpty ? hub.t("fetchingDesktop") : error)
-                            .font(.system(size: 13)).foregroundStyle(Color(hex: "#a6a09a")).multilineTextAlignment(.center)
+                            .font(.system(size: 15)).foregroundStyle(Color(hex: "#a6a09a")).multilineTextAlignment(.center)
                     }
                     .padding(20)
                 }
                 if image != nil, !error.isEmpty {
                     VStack {
                         Spacer()
-                        Text(error).font(.system(size: 12)).foregroundStyle(Color(hex: "#f3f1ee"))
+                        Text(error).font(.system(size: 13)).foregroundStyle(Color(hex: "#f3f1ee"))
                             .padding(.horizontal, 12).padding(.vertical, 6)
                             .background(Color(hex: "#1f1d1b"), in: Capsule())
                             .padding(10)

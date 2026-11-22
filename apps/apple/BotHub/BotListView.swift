@@ -5,26 +5,8 @@ struct BotListView: View {
     @Environment(Router.self) private var router
     @Environment(\.palette) private var p
     @State private var query = ""
-
-    private var statusColor: Color {
-        switch hub.connState {
-        case .connected: return hub.online ? p.sageInk : p.busy
-        case .connecting: return p.busy
-        case .unauthorized, .error: return p.danger
-        case .idle: return p.mute
-        }
-    }
-
-    private var statusText: String {
-        guard let s = hub.activeServer else { return hub.t("disconnected") }
-        switch hub.connState {
-        case .connecting: return "\(s.label) · \(hub.t("connectingShort"))"
-        case .unauthorized: return "\(s.label) · \(hub.t("needsToken"))"
-        case .error: return "\(s.label) · \(hub.t("connLost"))"
-        case .connected: return hub.online ? s.label : "\(s.label) · \(hub.t("reconnecting"))"
-        case .idle: return hub.t("disconnected")
-        }
-    }
+    @State private var searching = false
+    @FocusState private var searchFocused: Bool
 
     private var filtered: [(Int, BotStatus)] {
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
@@ -53,19 +35,31 @@ struct BotListView: View {
                     } else { List { rows } }
                 }
                 .hubList(sidebar: !router.compact)
-                .searchable(text: $query, placement: router.compact ? .automatic : .sidebar, prompt: hub.t("searchBot"))
                 .refreshable {
                     if hub.isConnected { try? await hub.refreshBots() } else { await hub.reconnect() }
                 }
             }
         }
         .navigationTitle("Bots")
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar { toolbar }
     }
 
     @ViewBuilder
     private var rows: some View {
-        statusRow
+        if searching {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass").foregroundStyle(p.mute)
+                TextField(hub.t("searchBot"), text: $query)
+                    .focused($searchFocused)
+                    .submitLabel(.search)
+            }
+            .padding(.horizontal, 12)
+            .frame(height: 40)
+            .background(p.card, in: Capsule())
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
+        }
         if let to = hub.takeovers.first { takeoverSection(to) }
         Section {
             ForEach(filtered, id: \.1.id) { idx, bot in
@@ -92,46 +86,35 @@ struct BotListView: View {
         }
     }
 
-    @ToolbarContentBuilder
-    private var toolbar: some ToolbarContent {
-        ToolbarItemGroup(placement: .primaryAction) {
-            Button { go(.createBot) } label: { Label(hub.t("newBot"), systemImage: "plus") }
-            Menu {
-                Button { go(.desktop(target: hub.takeovers.first?.target ?? "local")) } label: {
-                    Label(hub.takeovers.isEmpty ? hub.t("remoteDesktop") : "\(hub.t("remoteDesktop")) (\(hub.takeovers.count))", systemImage: "display")
-                }
-                Button { router.sheet = .devices } label: {
-                    let n = hub.nodes.filter { $0.connected == true }.count
-                    Label(n > 0 ? "\(hub.t("devicesTunnel")) (\(n))" : hub.t("devicesTunnel"), systemImage: "globe")
-                }
-                Button { router.sheet = .connect(scan: false) } label: { Label(hub.t("switchHost"), systemImage: "server.rack") }
-                Divider()
-                Button { go(.settings) } label: { Label(hub.t("settings"), systemImage: "gearshape") }
-            } label: {
-                Label(hub.t("settings"), systemImage: hub.takeovers.isEmpty ? "ellipsis.circle" : "exclamationmark.circle")
-            }
-        }
+    private var title: some View {
+        Text("Bots").font(.system(size: 22, weight: .bold)).fixedSize()
     }
 
-    private var statusRow: some View {
-        Button { router.sheet = .connect(scan: false) } label: {
-            HStack(spacing: 8) {
-                Circle().fill(statusColor).frame(width: 8, height: 8)
-                Text(statusText).font(.system(size: 13)).foregroundStyle(.secondary).lineLimit(1)
-                Spacer()
-                Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold)).foregroundStyle(.tertiary)
-            }
-            .contentShape(Rectangle())
+    @ToolbarContentBuilder
+    private var toolbar: some ToolbarContent {
+        ToolbarItem(placement: .principal) { Color.clear.frame(width: 1, height: 1) }
+        if #available(iOS 26.0, *) {
+            ToolbarItem(placement: .topBarLeading) { title }.sharedBackgroundVisibility(.hidden)
+        } else {
+            ToolbarItem(placement: .topBarLeading) { title }
         }
-        .buttonStyle(.plain)
-        .selectionDisabled()
+        ToolbarItemGroup(placement: .topBarTrailing) {
+            Button {
+                searching.toggle()
+                if searching { searchFocused = true } else { query = "" }
+            } label: {
+                Label(hub.t("searchBot"), systemImage: searching ? "xmark" : "magnifyingglass")
+            }
+            Button { go(.createBot) } label: { Label(hub.t("newBot"), systemImage: "plus") }
+            Button { go(.settings) } label: { Label(hub.t("settings"), systemImage: "gearshape") }
+        }
     }
 
     private func takeoverSection(_ to: TakeoverRequest) -> some View {
         Section {
             VStack(alignment: .leading, spacing: 8) {
                 Label(hub.t("takeoverBanner", ["bot": to.botName ?? to.botId ?? "Bot", "reason": to.reason ?? ""]), systemImage: "hand.raised.fill")
-                    .font(.system(size: 13)).foregroundStyle(p.pinkInk)
+                    .font(.system(size: 15)).foregroundStyle(p.pinkInk)
                 HStack {
                     Button(hub.t("desktopShort")) { router.sheet = .desktop(target: to.target ?? "local") }
                         .buttonStyle(.bordered)
@@ -151,9 +134,7 @@ struct BotListView: View {
         } description: {
             Text("1. \(hub.t("onboardStep1"))\n2. \(hub.t("onboardStep2"))")
         } actions: {
-            #if os(iOS)
             Button(hub.t("scanConnect")) { router.sheet = .connect(scan: true) }.buttonStyle(.borderedProminent)
-            #endif
             Button(hub.t("manualEnterAddr")) { router.sheet = .connect(scan: false) }.buttonStyle(.bordered)
         }
     }
@@ -199,16 +180,16 @@ struct BotRow: View {
             BotAvatar(id: bot.id, size: 40, index: index, busy: bot.isBusy)
             VStack(alignment: .leading, spacing: 2) {
                 HStack {
-                    Text(bot.displayName).font(.system(size: 14, weight: .semibold)).lineLimit(1)
+                    Text(bot.displayName).font(.system(size: 16, weight: .semibold)).lineLimit(1)
                     Spacer(minLength: 4)
-                    Text(formatShortTime(lastMsg?.createdAt)).font(.system(size: 12)).foregroundStyle(p.mute)
+                    Text(formatShortTime(lastMsg?.createdAt)).font(.system(size: 13)).foregroundStyle(p.mute)
                 }
                 HStack {
-                    Text(sub).font(.system(size: 13)).foregroundStyle(subColor).lineLimit(1)
+                    Text(sub).font(.system(size: 15)).foregroundStyle(subColor).lineLimit(1)
                     Spacer(minLength: 4)
                     if unread > 0 {
                         Text(unread > 99 ? "99+" : "\(unread)")
-                            .font(.system(size: 12, weight: .semibold)).foregroundStyle(p.lilacInk)
+                            .font(.system(size: 13, weight: .semibold)).foregroundStyle(p.lilacInk)
                             .padding(.horizontal, 6).frame(minWidth: 20, minHeight: 18)
                             .background(p.lilac, in: Capsule())
                     }

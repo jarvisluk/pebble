@@ -5,17 +5,9 @@ struct BotHubApp: App {
     @State private var hub = HubStore()
 
     var body: some Scene {
-        #if os(macOS)
-        // 单窗口：bothub:// 链接不再额外开新窗口。
-        Window("Bot Hub", id: "main") {
-            RootView().environment(hub)
-        }
-        .defaultSize(width: 1180, height: 780)
-        #else
         WindowGroup {
             RootView().environment(hub)
         }
-        #endif
     }
 }
 
@@ -60,17 +52,11 @@ struct RootView: View {
     @Environment(HubStore.self) private var hub
     @Environment(\.colorScheme) private var scheme
     @Environment(\.scenePhase) private var phase
-    #if os(iOS)
     @Environment(\.horizontalSizeClass) private var hsc
-    #endif
     @State private var router = Router()
 
     private var isCompact: Bool {
-        #if os(iOS)
         return hsc == .compact
-        #else
-        return false
-        #endif
     }
 
     private var scheme0: ColorScheme? { hub.themePref == "light" ? .light : hub.themePref == "dark" ? .dark : nil }
@@ -104,7 +90,7 @@ struct RootView: View {
         }
         .tint(palette.accent)
         .buttonBorderShape(.capsule)
-        .font(.system(size: 14))
+        .font(.system(size: 16))
         .environment(\.palette, palette)
         .environment(router)
         .preferredColorScheme(scheme0)
@@ -115,7 +101,7 @@ struct RootView: View {
                 .environment(hub)
                 .tint(palette.accent)
                 .buttonBorderShape(.capsule)
-                .font(.system(size: 14))
+                .font(.system(size: 16))
                 .preferredColorScheme(scheme0)
         }
         .onAppear { router.compact = isCompact }
@@ -152,10 +138,6 @@ struct SheetHost: View {
             case let .desktop(target): DesktopView(initialTarget: target)
             }
         }
-        #if os(macOS)
-        .frame(minWidth: route.isWide ? 860 : 520, idealWidth: route.isWide ? 980 : 600,
-               minHeight: 560, idealHeight: 720)
-        #endif
     }
 }
 

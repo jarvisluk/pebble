@@ -69,6 +69,7 @@ struct SettingsView: View {
         Form {
             if !error.isEmpty { Section { StatusText(text: error) } }
             if !saved.isEmpty { Section { StatusText(text: saved, error: false) } }
+            hostSection
             magpieSection
             appearanceSection
             defaultModelSection
@@ -81,16 +82,14 @@ struct SettingsView: View {
             } header: {
                 Text(hub.t("globalSharedMem"))
             } footer: {
-                Text("_shared/USER.md").font(.system(size: 12, design: .monospaced))
+                Text("_shared/USER.md").font(.system(size: 13, design: .monospaced))
             }
             memorySection
             remoteSection
         }
         .hubForm()
         .navigationTitle(hub.t("settings"))
-        #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
-        #endif
         .toolbar { SheetToolbar(actionTitle: hub.t("save"), actionDisabled: !dirty, loading: saving) { save() } }
         .confirmAlert($confirm)
         .task {
@@ -147,6 +146,48 @@ struct SettingsView: View {
         }
     }
 
+    // MARK: 主机
+
+    private var hostColor: Color {
+        switch hub.connState {
+        case .connected: return hub.online ? p.sageInk : p.busy
+        case .connecting: return p.busy
+        case .unauthorized, .error: return p.danger
+        case .idle: return p.mute
+        }
+    }
+
+    private var hostText: String {
+        guard let s = hub.activeServer else { return hub.t("disconnected") }
+        switch hub.connState {
+        case .connecting: return "\(s.label) · \(hub.t("connectingShort"))"
+        case .unauthorized: return "\(s.label) · \(hub.t("needsToken"))"
+        case .error: return "\(s.label) · \(hub.t("connLost"))"
+        case .connected: return hub.online ? s.label : "\(s.label) · \(hub.t("reconnecting"))"
+        case .idle: return hub.t("disconnected")
+        }
+    }
+
+    private var hostSection: some View {
+        Section(hub.t("hostSection")) {
+            Button { router.sheet = .connect(scan: false) } label: {
+                HStack(spacing: 8) {
+                    Circle().fill(hostColor).frame(width: 8, height: 8)
+                    Text(hostText).foregroundStyle(p.text).lineLimit(1)
+                    Spacer()
+                    Text(hub.t("switchHost")).foregroundStyle(p.mute)
+                }
+            }
+            Button { router.sheet = .desktop(target: hub.takeovers.first?.target ?? "local") } label: {
+                Label(hub.takeovers.isEmpty ? hub.t("remoteDesktop") : "\(hub.t("remoteDesktop")) (\(hub.takeovers.count))", systemImage: "display")
+            }
+            Button { router.sheet = .devices } label: {
+                let n = hub.nodes.filter { $0.connected == true }.count
+                Label(n > 0 ? "\(hub.t("devicesTunnel")) (\(n))" : hub.t("devicesTunnel"), systemImage: "globe")
+            }
+        }
+    }
+
     // MARK: Magpie
 
     private var magpieSection: some View {
@@ -195,10 +236,10 @@ struct SettingsView: View {
         return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(h.title).font(.system(size: 14, weight: .semibold))
+                    Text(h.title).font(.system(size: 16, weight: .semibold))
                     Text(connected ? "Magpie · \((h.magpie?.model ?? "").isEmpty ? hub.t("mpConnected") : h.magpie!.model!)"
                          : hub.t("mpNative") + ((h.magpie?.nativeModel ?? "").isEmpty ? "" : " · \(h.magpie!.nativeModel!)"))
-                        .font(.system(size: 12)).foregroundStyle(connected ? p.sageInk : .secondary).lineLimit(1)
+                        .font(.system(size: 13)).foregroundStyle(connected ? p.sageInk : .secondary).lineLimit(1)
                 }
                 Spacer()
                 if busy == key { ProgressView().controlSize(.small) }
@@ -256,14 +297,14 @@ struct SettingsView: View {
                             Circle().fill(Color(hex: hex)).frame(width: 28, height: 28)
                                 .overlay {
                                     if hub.accentHex.lowercased() == hex {
-                                        Image(systemName: "checkmark").font(.system(size: 12, weight: .bold)).foregroundStyle(.white)
+                                        Image(systemName: "checkmark").font(.system(size: 13, weight: .bold)).foregroundStyle(.white)
                                     }
                                 }
                         }
                         .buttonStyle(.plain)
                     }
                 }
-                Text(hub.t("appAccentDesc")).font(.system(size: 12)).foregroundStyle(.secondary)
+                Text(hub.t("appAccentDesc")).font(.system(size: 13)).foregroundStyle(.secondary)
             }
             .padding(.vertical, 4)
             Picker(hub.t("language"), selection: $h.langPref) {
@@ -332,8 +373,8 @@ struct SettingsView: View {
                     HStack(spacing: 10) {
                         BotAvatar(id: b.id, size: 28, index: i)
                         VStack(alignment: .leading, spacing: 0) {
-                            Text(b.displayName).font(.system(size: 14, weight: .semibold))
-                            Text("@\(b.id)").font(.system(size: 12, design: .monospaced)).foregroundStyle(.secondary)
+                            Text(b.displayName).font(.system(size: 16, weight: .semibold))
+                            Text("@\(b.id)").font(.system(size: 13, design: .monospaced)).foregroundStyle(.secondary)
                         }
                         Spacer()
                         Picker(hub.t("statHarness"), selection: Binding(get: { d.harness }, set: { var n = d; n.harness = $0; drafts[b.id] = n; saved = "" })) {
@@ -437,7 +478,7 @@ struct SettingsView: View {
                 .disabled(!deskTouched || busy == "desk")
             }
             LabeledContent(hub.activeServer?.label ?? hub.t("noHostSelected")) {
-                Text(hub.activeServer?.address ?? "-").font(.system(size: 12, design: .monospaced)).lineLimit(1).truncationMode(.middle)
+                Text(hub.activeServer?.address ?? "-").font(.system(size: 13, design: .monospaced)).lineLimit(1).truncationMode(.middle)
             }
             Button(hub.t("pairingNodes")) { router.sheet = .devices }
             Button(hub.t("switchHost")) { router.sheet = .connect(scan: false) }

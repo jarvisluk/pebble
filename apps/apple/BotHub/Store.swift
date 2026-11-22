@@ -7,7 +7,7 @@ enum L {
     static var lang = L.systemLang
 
     static var systemLang: String {
-        (Locale.preferredLanguages.first ?? "en").lowercased().hasPrefix("zh") ? "zh-CN" : "en"
+        (Bundle.main.preferredLocalizations.first ?? "en").lowercased().hasPrefix("zh") ? "zh-CN" : "en"
     }
 
     static func t(_ key: String, _ vars: [String: Any] = [:]) -> String {

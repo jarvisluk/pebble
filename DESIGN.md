@@ -172,10 +172,14 @@
 
 ## 9. 原生 Apple 客户端（`apps/apple`）
 
-iOS / iPadOS / macOS 共用一个 SwiftUI 工程，**结构与控件用系统原生组件，视觉沿用本文件 Token**，整体观感与 Web/桌面端一致：
+iOS / iPadOS 共用一个 SwiftUI 工程（macOS 使用 Web/桌面端，不出原生 Mac 版），**结构与控件用系统原生组件，视觉沿用本文件 Token**，整体观感与 Web/桌面端一致：
 
-- **导航**：iPhone 用 `NavigationStack`；iPad 与 Mac 用 `NavigationSplitView`（侧栏为 Bot 列表，底色 `--card`，选中行 `--sel` 圆角底）。标题、图标按钮放系统工具栏（SF Symbols），搜索用 `.searchable`。
-- **表单与弹层**：设置、连接、新建、详情、设备等一律用 `Form`/`List` + 系统 sheet，工具栏左侧「关闭/取消」、右侧「保存/创建/连接」；Bot 详情在 iPad/Mac 用 `.inspector` 侧栏（栏内保存按钮放表单顶部，仅有改动时出现），iPhone 用 sheet。
+- **首页**：标题「Bots」与图标按钮在同一行（左侧标题，右侧「搜索 / 新建 / 设置」三个图标）；搜索平时收起为图标，点开后在列表顶部出现胶囊搜索框；主机连接状态、切换主机、远程桌面、设备与隧道统一放在「设置 → 主机」分组，首页只保留人工接管提示。
+- **字号**：移动端在第 4 节字阶上整体上调一档（正文 16、次要 15、说明 13、标题 17~22），保证手机上的可读性。
+- **语言**：App 文案与系统级文案（网络错误等）同一语言，跟随 App 语言设置；系统错误不直接展示，改用自有文案。
+
+- **导航**：iPhone 用 `NavigationStack`；iPad 用 `NavigationSplitView`（侧栏为 Bot 列表，底色 `--card`，选中行 `--sel` 圆角底）。标题、图标按钮放系统工具栏（SF Symbols）。
+- **表单与弹层**：设置、连接、新建、详情、设备等一律用 `Form`/`List` + 系统 sheet，工具栏左侧「关闭/取消」、右侧「保存/创建/连接」；Bot 详情在 iPad 用 `.inspector` 侧栏（栏内保存按钮放表单顶部，仅有改动时出现），iPhone 用 sheet。
 - **控件**：按钮用 `.borderedProminent`（主操作）/`.bordered`/`role: .destructive`，全局 `buttonBorderShape(.capsule)` 保持胶囊形；二选一或少量选项用 `Picker(.segmented)`，其余用默认菜单样式 `Picker`；开关用 `Toggle`；空状态用 `ContentUnavailableView`；确认用系统 `alert`。
 - **颜色**：`Form`/`List` 隐藏系统底色，页面底用 `--page`、行与卡片用 `--card`，`--s1`~`--s3`、文字色均取第 2 节 Token 并随深浅模式切换；App 重点色作为全局 `tint`；Bot 头像色、粉/紫/绿、`--busy`、`--danger` 用于消息气泡、Bot 局部强调与状态，远程桌面舞台保持固定深色底。
 - **保留自绘**：仅 Bot 头像（blob + 双眼）、消息气泡、空会话建议卡与远程桌面舞台。
