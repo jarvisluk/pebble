@@ -640,6 +640,8 @@
   .mp-hname { font-weight: 600; font-size: var(--fs-base); color: var(--text); display: flex; flex-direction: column; gap: 2px; }
   .mp-hname small { font-weight: 400; font-size: var(--fs-xs); color: var(--mute); }
   .mp-hacts { display: flex; align-items: center; gap: 5px; }
+  .mp-hmodel { min-width: 0; font-family: var(--mono); font-size: var(--fs-sm); color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mp-open { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-top: 12px; border-top: 1px solid var(--s2); }
   .add-prov button.mp:not(.go):not(.ok):not(.bad) { background: var(--card); }
   .add-prov button.mp:not(.go):not(.ok):not(.bad):hover { background: var(--s2); }
   /* card list rows sit flat on the card, split by hairlines */

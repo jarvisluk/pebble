@@ -494,12 +494,8 @@ final class HubStore {
         models = [:]
     }
 
-    @discardableResult
-    func providerAction(_ body: [String: Any]) async throws -> OkResp {
-        let r: OkResp = try await api.call("/api/magpie/providers", method: "POST", body: body)
-        models = [:]
-        _ = try? await loadSettings()
-        return r
+    func openMagpie() async throws {
+        let _: OkResp = try await api.call("/api/magpie/open", method: "POST", body: [:])
     }
 
     func setDesktopWorker(harness: String, model: String) async throws {

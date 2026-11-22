@@ -57,7 +57,7 @@ export default function SettingsScreen() {
     saveSettings,
     connectMagpie,
     disconnectMagpie,
-    magpieProviderAction,
+    openMagpie,
     setDesktopWorker,
     fetchMemories,
     saveMemory,
@@ -73,19 +73,11 @@ export default function SettingsScreen() {
   const [sharedUserMdTouched, setSharedUserMdTouched] = useState(false);
   const [botDrafts, setBotDrafts] = useState<Record<string, BotDraft>>({});
   const [loadingModelsFor, setLoadingModelsFor] = useState<string | null>(null);
-  const [magpiePickHarness, setMagpiePickHarness] = useState('');
   const [saving, setSaving] = useState(false);
   const [busyAction, setBusyAction] = useState('');
   const [error, setError] = useState('');
   const [savedMsg, setSavedMsg] = useState('');
 
-  const [showAddProv, setShowAddProv] = useState(false);
-  const [provMode, setProvMode] = useState<'preset' | 'custom'>('preset');
-  const [provPreset, setProvPreset] = useState('deepseek');
-  const [provProtocol, setProvProtocol] = useState<'openai' | 'anthropic' | 'responses' | 'gemini'>('openai');
-  const [provName, setProvName] = useState('');
-  const [provUrl, setProvUrl] = useState('');
-  const [provKey, setProvKey] = useState('');
 
   const [memData, setMemData] = useState<MagpieMemoryList | null>(null);
   const [memLoading, setMemLoading] = useState(false);
@@ -135,10 +127,7 @@ export default function SettingsScreen() {
     if (settings && !sharedUserMdTouched) {
       setSharedUserMd(settings.sharedUserMd || '');
     }
-    if (settings?.magpie?.presets?.length && !settings.magpie.presets.some((p) => p.id === provPreset)) {
-      setProvPreset(settings.magpie.presets[0].id);
-    }
-  }, [defaultModelTouched, defaultModelsTouched, provPreset, settings, sharedUserMdTouched]);
+  }, [defaultModelTouched, defaultModelsTouched, settings, sharedUserMdTouched]);
 
   useEffect(() => {
     setBotDrafts((prev) => {
@@ -222,38 +211,6 @@ export default function SettingsScreen() {
     }
   };
 
-  const applyMagpieModel = async (harnessId: string, model: string) => {
-    setError('');
-    setBusyAction(`magpie:${harnessId}`);
-    try {
-      await connectMagpie(harnessId, model);
-      setMagpiePickHarness('');
-      setSavedMsg(t('connectedMagpie', { label: harnessId }));
-    } catch (err: any) {
-      setError(err?.message || t('connectFailed'));
-    } finally {
-      setBusyAction('');
-    }
-  };
-
-  const onToggleMagpiePicker = async (harnessId: string) => {
-    if (magpiePickHarness === harnessId) {
-      setMagpiePickHarness('');
-      return;
-    }
-    setMagpiePickHarness(harnessId);
-    if (!(models[harnessId]?.length > 0)) {
-      setLoadingModelsFor(harnessId);
-      try {
-        await loadModels(harnessId);
-      } catch {
-        // ignore
-      } finally {
-        setLoadingModelsFor(null);
-      }
-    }
-  };
-
   const onConnectMagpie = (harnessId: string) => {
     const targetModel = defaultModel.trim() || settings?.harnesses.find((h) => h.id === harnessId)?.defaultModel || '';
     if (!targetModel) {
@@ -298,48 +255,12 @@ export default function SettingsScreen() {
     );
   };
 
-  const onProviderAct = async (action: 'on' | 'off' | 'rm' | 'test', id: string) => {
-    const run = async () => {
-      setError('');
-      setSavedMsg('');
-      setBusyAction(`prov:${action}:${id}`);
-      try {
-        const res = await magpieProviderAction({ action, id });
-        setSavedMsg(res.output || t('opSuccess'));
-      } catch (err: any) {
-        setError(err?.message || t('opFailed'));
-      } finally {
-        setBusyAction('');
-      }
-    };
-    if (action === 'rm') {
-      confirmAction(t('rmProviderTitle'), t('rmProviderDesc', { id }), run, true);
-    } else {
-      await run();
-    }
-  };
-
-  const onAddProvider = async () => {
+  const onOpenMagpie = async () => {
     setError('');
-    setBusyAction('prov:add');
     try {
-      await magpieProviderAction({
-        action: 'add',
-        preset: provMode === 'preset' ? provPreset : undefined,
-        name: provName.trim() || undefined,
-        protocol: provMode === 'custom' ? provProtocol : undefined,
-        url: provMode === 'custom' ? provUrl.trim() : undefined,
-        key: provKey.trim() || undefined,
-      });
-      setProvKey('');
-      setProvName('');
-      setProvUrl('');
-      setShowAddProv(false);
-      setSavedMsg(t('providerAdded'));
+      await openMagpie();
     } catch (err: any) {
-      setError(err?.message || t('addFailed'));
-    } finally {
-      setBusyAction('');
+      setError(err?.message || t('opFailed'));
     }
   };
 
@@ -357,13 +278,6 @@ export default function SettingsScreen() {
 
   const candidateModels = models[primaryHarness] || [];
   const mp = settings?.magpie;
-  const providers = mp?.providers || [];
-  const presets = mp?.presets || [
-    { id: 'deepseek', name: 'DeepSeek' },
-    { id: 'anthropic', name: 'Anthropic' },
-    { id: 'openai', name: 'OpenAI' },
-    { id: 'openrouter', name: 'OpenRouter' },
-  ];
 
   return (
     <View style={[styles.root, { backgroundColor: theme.page }]}>
@@ -430,10 +344,8 @@ export default function SettingsScreen() {
             ) : (
               <View style={styles.magpieList}>
                 {harnessOptions.map((h) => {
-                  const pickerOpen = h.magpie.connected && magpiePickHarness === h.id;
-                  const hModels = models[h.id] || [];
                   return (
-                    <View key={h.id} style={[styles.magpieRow, { backgroundColor: theme.s1, flexDirection: 'column', alignItems: 'stretch' }]}>
+                    <View key={h.id} style={[styles.magpieRow, { flexDirection: 'column', alignItems: 'stretch' }]}>
                       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
                         <View style={styles.magpieInfo}>
                           <Text style={[styles.magpieName, { color: theme.text }]}>{h.label || h.id}</Text>
@@ -444,19 +356,19 @@ export default function SettingsScreen() {
                           </Text>
                         </View>
                         <View style={styles.magpieActs}>
-                          <Pressable
-                            disabled={busyAction === `magpie:${h.id}`}
-                            onPress={() => (h.magpie.connected ? void onToggleMagpiePicker(h.id) : onConnectMagpie(h.id))}
-                            style={[styles.magpieBtn, { backgroundColor: h.magpie.connected ? theme.card : theme.accent }]}
-                          >
-                            {busyAction === `magpie:${h.id}` ? (
-                              <ActivityIndicator size="small" color={h.magpie.connected ? theme.text : theme.accentText} />
-                            ) : (
-                              <Text style={[styles.magpieBtnTxt, { color: h.magpie.connected ? theme.text : theme.accentText }]}>
-                                {h.magpie.connected ? t('mpSwitch') : t('mpConnect')}
-                              </Text>
-                            )}
-                          </Pressable>
+                          {!h.magpie.connected && (
+                            <Pressable
+                              disabled={busyAction === `magpie:${h.id}`}
+                              onPress={() => onConnectMagpie(h.id)}
+                              style={[styles.magpieBtn, { backgroundColor: theme.accent }]}
+                            >
+                              {busyAction === `magpie:${h.id}` ? (
+                                <ActivityIndicator size="small" color={theme.accentText} />
+                              ) : (
+                                <Text style={[styles.magpieBtnTxt, { color: theme.accentText }]}>{t('mpConnect')}</Text>
+                              )}
+                            </Pressable>
+                          )}
                           {h.magpie.connected && (
                             <Pressable
                               disabled={busyAction === `magpie:${h.id}`}
@@ -468,40 +380,6 @@ export default function SettingsScreen() {
                           )}
                         </View>
                       </View>
-                      {pickerOpen && (
-                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
-                          {loadingModelsFor === h.id && hModels.length === 0 ? (
-                            <ActivityIndicator size="small" color={theme.accent} />
-                          ) : (
-                            hModels.slice(0, 24).map((m) => {
-                              const active = m === h.magpie.model;
-                              return (
-                                <Pressable
-                                  key={m}
-                                  disabled={busyAction === `magpie:${h.id}` || active}
-                                  onPress={() => void applyMagpieModel(h.id, m)}
-                                  style={{
-                                    borderRadius: 999,
-                                    paddingHorizontal: 10,
-                                    paddingVertical: 5,
-                                    backgroundColor: active ? theme.accent : theme.card,
-                                  }}
-                                >
-                                  <Text
-                                    style={{
-                                      fontSize: 11.5,
-                                      fontFamily: MONO_FONT,
-                                      color: active ? theme.accentText : theme.text,
-                                    }}
-                                  >
-                                    {m}
-                                  </Text>
-                                </Pressable>
-                              );
-                            })
-                          )}
-                        </View>
-                      )}
                     </View>
                   );
                 })}
@@ -509,161 +387,12 @@ export default function SettingsScreen() {
             )}
 
             {mp?.installed && (
-              <>
-                <View style={styles.rowBetween}>
-                  <Text style={[styles.subLabel, { color: theme.text2 }]}>
-                    {t('providersTitle', { n: providers.length })}
-                  </Text>
-                  <Pressable
-                    onPress={() => setShowAddProv((v) => !v)}
-                    style={[styles.smallBtn, { backgroundColor: theme.accentSoft }]}
-                  >
-                    <Text style={[styles.smallBtnTxt, { color: theme.accent }]}>
-                      {showAddProv ? t('collapse') : t('addProvider')}
-                    </Text>
-                  </Pressable>
-                </View>
-
-                {showAddProv && (
-                  <View style={[styles.addProvBox, { backgroundColor: theme.s1 }]}>
-                    <View style={styles.segmentRow}>
-                      {[
-                        { key: 'preset' as const, label: t('presetTab') },
-                        { key: 'custom' as const, label: t('customTab') },
-                      ].map((opt) => (
-                        <Pressable
-                          key={opt.key}
-                          onPress={() => setProvMode(opt.key)}
-                          style={[
-                            styles.segmentPill,
-                            { backgroundColor: provMode === opt.key ? theme.card : theme.s2 },
-                          ]}
-                        >
-                          <Text
-                            style={[
-                              styles.segmentTxt,
-                              { color: provMode === opt.key ? theme.accent : theme.text2 },
-                            ]}
-                          >
-                            {opt.label}
-                          </Text>
-                        </Pressable>
-                      ))}
-                    </View>
-
-                    {provMode === 'preset' ? (
-                      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.pillRow}>
-                        {presets.map((p) => (
-                          <Pressable
-                            key={p.id}
-                            onPress={() => setProvPreset(p.id)}
-                            style={[
-                              styles.pill,
-                              { backgroundColor: provPreset === p.id ? theme.accentSoft : theme.card },
-                            ]}
-                          >
-                            <Text style={[styles.pillTxt, { color: provPreset === p.id ? theme.accent : theme.text2 }]}>
-                              {p.name}
-                            </Text>
-                          </Pressable>
-                        ))}
-                      </ScrollView>
-                    ) : (
-                      <>
-                        <View style={styles.wrapRow}>
-                          {(['openai', 'anthropic', 'responses', 'gemini'] as const).map((proto) => (
-                            <Pressable
-                              key={proto}
-                              onPress={() => setProvProtocol(proto)}
-                              style={[
-                                styles.pill,
-                                { backgroundColor: provProtocol === proto ? theme.accentSoft : theme.card },
-                              ]}
-                            >
-                              <Text style={[styles.pillTxt, { color: provProtocol === proto ? theme.accent : theme.text2 }]}>
-                                {proto}
-                              </Text>
-                            </Pressable>
-                          ))}
-                        </View>
-                        <TextInput
-                          value={provUrl}
-                          onChangeText={setProvUrl}
-                          placeholder={t('baseUrlPh')}
-                          placeholderTextColor={theme.mute}
-                          autoCapitalize="none"
-                          autoCorrect={false}
-                          style={[styles.input, { backgroundColor: theme.card, color: theme.text, fontFamily: MONO_FONT }]}
-                        />
-                      </>
-                    )}
-
-                    <TextInput
-                      value={provName}
-                      onChangeText={setProvName}
-                      placeholder={t('aliasOptionalPh')}
-                      placeholderTextColor={theme.mute}
-                      autoCapitalize="none"
-                      autoCorrect={false}
-                      style={[styles.input, { backgroundColor: theme.card, color: theme.text }]}
-                    />
-                    <TextInput
-                      value={provKey}
-                      onChangeText={setProvKey}
-                      placeholder={t('apiKeyPh')}
-                      placeholderTextColor={theme.mute}
-                      secureTextEntry
-                      autoCapitalize="none"
-                      autoCorrect={false}
-                      style={[styles.input, { backgroundColor: theme.card, color: theme.text, fontFamily: MONO_FONT }]}
-                    />
-                    <Pressable
-                      disabled={busyAction === 'prov:add'}
-                      onPress={() => void onAddProvider()}
-                      style={[styles.addBtn, { backgroundColor: theme.accent }]}
-                    >
-                      <Text style={[styles.magpieBtnTxt, { color: theme.accentText }]}>
-                        {busyAction === 'prov:add' ? t('adding') : t('confirmAdd')}
-                      </Text>
-                    </Pressable>
-                  </View>
-                )}
-
-                {providers.map((p) => (
-                  <View key={p.id} style={[styles.magpieRow, { backgroundColor: theme.s1 }]}>
-                    <View style={styles.magpieInfo}>
-                      <Text style={[styles.magpieName, { color: theme.text }]}>
-                        {p.name} · {p.enabled ? t('enabled') : t('paused')}
-                      </Text>
-                      <Text numberOfLines={1} style={[styles.magpieSub, { color: theme.mute }]}>
-                        {[p.endpoint, p.modelsInfo].filter(Boolean).join(' · ')}
-                      </Text>
-                    </View>
-                    <View style={styles.magpieActs}>
-                      <Pressable
-                        onPress={() => void onProviderAct('test', p.id)}
-                        style={[styles.magpieBtn, { backgroundColor: theme.card }]}
-                      >
-                        <Text style={[styles.magpieBtnTxt, { color: theme.text2 }]}>{t('testBtn')}</Text>
-                      </Pressable>
-                      <Pressable
-                        onPress={() => void onProviderAct(p.enabled ? 'off' : 'on', p.id)}
-                        style={[styles.magpieBtn, { backgroundColor: theme.card }]}
-                      >
-                        <Text style={[styles.magpieBtnTxt, { color: theme.text2 }]}>
-                          {p.enabled ? t('paused') : t('enabled')}
-                        </Text>
-                      </Pressable>
-                      <Pressable
-                        onPress={() => void onProviderAct('rm', p.id)}
-                        style={[styles.magpieBtn, { backgroundColor: theme.card }]}
-                      >
-                        <Text style={[styles.magpieBtnTxt, { color: theme.danger }]}>{t('removeBtn')}</Text>
-                      </Pressable>
-                    </View>
-                  </View>
-                ))}
-              </>
+              <View style={styles.rowBetween}>
+                <Text style={[styles.noteTxt, { color: theme.mute, flex: 1 }]}>{t('mpManageInApp')}</Text>
+                <Pressable onPress={() => void onOpenMagpie()} style={[styles.magpieBtn, { backgroundColor: theme.accent }]}>
+                  <Text style={[styles.magpieBtnTxt, { color: theme.accentText }]}>{t('mpOpenApp')}</Text>
+                </Pressable>
+              </View>
             )}
           </View>
 

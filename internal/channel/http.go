@@ -110,6 +110,7 @@ func NewHTTPServer(h *hub.Hub, cfg config.HTTPConfig) *HTTPServer {
 	mux.HandleFunc("GET /api/models", s.handleModels)
 	mux.HandleFunc("POST /api/harnesses/{id}/magpie", s.handleMagpieConnect)
 	mux.HandleFunc("POST /api/magpie/providers", s.handleMagpieProvider)
+	mux.HandleFunc("POST /api/magpie/open", s.handleMagpieOpen)
 
 	mux.HandleFunc("GET /api/desktop/targets", s.handleDesktopTargets)
 	mux.HandleFunc("GET /api/desktop/state", s.handleDesktopState)
@@ -601,6 +602,14 @@ func (s *HTTPServer) handleMagpieConnect(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	s.handleSettings(w, r)
+}
+
+func (s *HTTPServer) handleMagpieOpen(w http.ResponseWriter, r *http.Request) {
+	if err := harness.MagpieOpen(); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (s *HTTPServer) handleMagpieProvider(w http.ResponseWriter, r *http.Request) {

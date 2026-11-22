@@ -70,17 +70,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [settingsErr, setSettingsErr] = useState('');
 
   // Magpie
-  const [provsExpanded, setProvsExpanded] = useState(false);
-  const [addProvOpen, setAddProvOpen] = useState(false);
   const [harnessModelsDraft, setHarnessModelsDraft] = useState<Record<string, string>>({});
   const [magpieBusyId, setMagpieBusyId] = useState('');
-  const [apKind, setApKind] = useState<'preset' | 'custom'>('preset');
-  const [apPreset, setApPreset] = useState('');
-  const [apProtocol, setApProtocol] = useState('openai');
-  const [apName, setApName] = useState('');
-  const [apKey, setApKey] = useState('');
-  const [apUrl, setApUrl] = useState('');
-  const [apModels, setApModels] = useState('');
   const [copiedKey, setCopiedKey] = useState('');
 
   // Remote & Devices
@@ -170,9 +161,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     }
     setDeskHarness(settings.desktopHarness || '');
     setDeskModel(settings.desktopModel || '');
-    if (settings.magpie?.presets?.[0] && !apPreset) {
-      setApPreset(settings.magpie.presets[0].id);
-    }
     settings.harnesses.forEach((h) => {
       void onLoadModels(h.id);
     });
@@ -346,7 +334,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   const titleKey = tab === 'remote' ? 'tabRemote' : tab === 'general' ? 'tabGeneral' : 'tabModels';
   const mp = settings?.magpie;
-  const provs = mp?.providers || [];
   const onlineNodeCount = nodes.filter((n) => n.connected).length;
 
   const applyHarnessMagpie = async (hId: string, hLabel: string, model: string) => {
@@ -468,8 +455,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                         ? activeModel
                         : defaultModel.trim() || h.defaultModel || '';
                       const curVal = harnessModelsDraft[h.id] ?? fallbackVal;
-                      const knownModels = models[h.id] || [];
-                      const isDirty = conn && curVal.trim() !== '' && curVal.trim() !== activeModel;
                       const isBusy = magpieBusyId === h.id;
                       return (
                         <div key={h.id} className="mp-hrow">
@@ -484,6 +469,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                               </small>
                             )}
                           </div>
+                          {conn ? (
+                            <span className="mp-hmodel">{activeModel}</span>
+                          ) : (
                           <input
                             className="mono"
                             list={`models-${h.id}`}
@@ -494,30 +482,27 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                             onChange={(e) => {
                               const nextVal = e.target.value;
                               setHarnessModelsDraft((prev) => ({ ...prev, [h.id]: nextVal }));
-                              const trimmed = nextVal.trim();
-                              if (conn && trimmed && trimmed !== activeModel && knownModels.includes(trimmed)) {
-                                void applyHarnessMagpie(h.id, h.label, trimmed);
-                              }
                             }}
                             onKeyDown={(e) => {
-                              if (e.key === 'Enter' && isDirty) {
+                              if (e.key === 'Enter') {
                                 e.preventDefault();
                                 void applyHarnessMagpie(h.id, h.label, curVal);
                               }
                             }}
                           />
+                          )}
                           <div className="mp-hacts">
-                            {(!conn || isDirty) && (
+                            {!conn && (
                               <button
                                 type="button"
-                                className={`mp ${conn ? '' : 'go'}`}
+                                className="mp go"
                                 disabled={isBusy}
                                 onClick={() => {
                                   const model = curVal.trim() || defaultModel.trim();
                                   void applyHarnessMagpie(h.id, h.label, model);
                                 }}
                               >
-                                {conn ? t('mpSwitch') : t('mpConnect')}
+                                {t('mpConnect')}
                               </button>
                             )}
                             {conn && (
@@ -552,256 +537,23 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     })}
                   </div>
 
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginTop: 4 }}>
-                    <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-2)' }}>
-                      {t('providersLabel')}
-                      <em id="sProvCount" style={{ fontStyle: 'normal' }}>
-                        {provs.length}
-                      </em>
-                      {t('providersLabelEnd')}
-                    </span>
-                    <div style={{ display: 'flex', gap: 6 }}>
-                      <button
-                        type="button"
-                        id="sToggleProvs"
-                        className="mp"
-                        onClick={() => setProvsExpanded((v) => !v)}
-                      >
-                        {provsExpanded ? t('collapseList') : t('expandList')}
-                      </button>
-                      <button
-                        type="button"
-                        id="sShowAddProv"
-                        className="mp go"
-                        onClick={() => {
-                          setAddProvOpen((v) => {
-                            const next = !v;
-                            if (next) setProvsExpanded(true);
-                            return next;
-                          });
-                        }}
-                      >
-                        {t('addProviderBtn')}
-                      </button>
-                    </div>
+                  <div className="mp-open">
+                    <span className="set-card-desc">{t('mpManageInApp')}</span>
+                    <button
+                      type="button"
+                      className="mp go"
+                      onClick={async () => {
+                        setSettingsErr('');
+                        try {
+                          await api('/api/magpie/open', { method: 'POST' });
+                        } catch (e) {
+                          if (e instanceof Error && e.message !== 'unauthorized') setSettingsErr(e.message);
+                        }
+                      }}
+                    >
+                      {t('mpOpenApp')}
+                    </button>
                   </div>
-
-                  {addProvOpen && (
-                    <div id="sAddProvBox" className="add-prov">
-                      <div className="two">
-                        <div className="fld">
-                          <label>{t('addMethod')}</label>
-                          <select
-                            id="apKind"
-                            value={apKind}
-                            onChange={(e) => setApKind(e.target.value as 'preset' | 'custom')}
-                          >
-                            <option value="preset">{t('presetVendor')}</option>
-                            <option value="custom">{t('customEndpoint')}</option>
-                          </select>
-                        </div>
-                        {apKind === 'preset' ? (
-                          <div className="fld" id="apPresetFld">
-                            <label>{t('presetVendor')}</label>
-                            <select id="apPreset" value={apPreset} onChange={(e) => setApPreset(e.target.value)}>
-                              {(mp.presets || []).map((p) => (
-                                <option key={p.id} value={p.id}>
-                                  {p.name} ({p.id})
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                        ) : (
-                          <div className="fld" id="apProtoFld">
-                            <label>{t('apiProtocol')}</label>
-                            <select
-                              id="apProtocol"
-                              value={apProtocol}
-                              onChange={(e) => setApProtocol(e.target.value)}
-                            >
-                              <option value="openai">{t('protoOpenAI')}</option>
-                              <option value="anthropic">{t('protoAnthropic')}</option>
-                              <option value="responses">OpenAI Responses</option>
-                              <option value="gemini">Google Gemini</option>
-                            </select>
-                          </div>
-                        )}
-                      </div>
-                      <div className="two">
-                        <div className="fld">
-                          {apKind === 'custom' ? (
-                            <label>{t('aliasRequired')}</label>
-                          ) : (
-                            <label dangerouslySetInnerHTML={{ __html: t('aliasOptional') }} />
-                          )}
-                          <input
-                            id="apName"
-                            placeholder={t('aliasPh')}
-                            value={apName}
-                            onChange={(e) => setApName(e.target.value)}
-                          />
-                        </div>
-                        <div className="fld">
-                          <label dangerouslySetInnerHTML={{ __html: t('apiKeyLabel') }} />
-                          <input
-                            id="apKey"
-                            type="password"
-                            className="mono"
-                            placeholder="sk-..."
-                            autoComplete="new-password"
-                            value={apKey}
-                            onChange={(e) => setApKey(e.target.value)}
-                          />
-                        </div>
-                      </div>
-                      {apKind === 'custom' && (
-                        <div id="apCustomUrlRow" className="two">
-                          <div className="fld">
-                            <label>Base URL</label>
-                            <input
-                              id="apUrl"
-                              className="mono"
-                              placeholder="https://api.example.com/v1"
-                              value={apUrl}
-                              onChange={(e) => setApUrl(e.target.value)}
-                            />
-                          </div>
-                          <div className="fld">
-                            <label dangerouslySetInnerHTML={{ __html: t('modelsListOptional') }} />
-                            <input
-                              id="apModels"
-                              className="mono"
-                              placeholder="model-a,model-b"
-                              value={apModels}
-                              onChange={(e) => setApModels(e.target.value)}
-                            />
-                          </div>
-                        </div>
-                      )}
-                      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
-                        <button type="button" id="apCancel" className="mp" onClick={() => setAddProvOpen(false)}>
-                          {t('cancel')}
-                        </button>
-                        <button
-                          type="button"
-                          id="apSubmit"
-                          className="mp go"
-                          onClick={async () => {
-                            const custom = apKind === 'custom';
-                            setSettingsErr('');
-                            try {
-                              await api('/api/magpie/providers', {
-                                method: 'POST',
-                                body: {
-                                  action: 'add',
-                                  preset: custom ? '' : apPreset,
-                                  name: apName.trim(),
-                                  protocol: custom ? apProtocol : '',
-                                  url: custom ? apUrl.trim() : '',
-                                  key: apKey.trim(),
-                                  models: custom ? apModels.trim() : '',
-                                },
-                              });
-                              setApKey('');
-                              setApName('');
-                              setApUrl('');
-                              setApModels('');
-                              setAddProvOpen(false);
-                              onResetModels();
-                              onToast(t('providerAdded'));
-                              const fresh = await api<SettingsData>('/api/settings');
-                              onSettingsUpdated(fresh);
-                            } catch (e) {
-                              if (e instanceof Error && e.message !== 'unauthorized') setSettingsErr(e.message);
-                            }
-                          }}
-                        >
-                          {t('confirmAdd')}
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  {provsExpanded && (
-                    <div id="sMagpieProviders" className="stack6">
-                      {provs.length === 0 ? (
-                        <div className="set-card-desc">{t('noProvidersDesc')}</div>
-                      ) : (
-                        provs.map((p) => {
-                          const meta = [
-                            p.id,
-                            p.endpoint,
-                            p.status,
-                            p.modelsInfo,
-                            p.usedBy ? t('usedBy', { who: p.usedBy }) : '',
-                          ]
-                            .filter(Boolean)
-                            .join(' · ');
-                          const runAction = async (action: string) => {
-                            setSettingsErr('');
-                            try {
-                              const res = await api<{ providers?: SettingsData['magpie'] extends infer M ? M extends { providers?: infer P } ? P : never : never; output?: string }>(
-                                '/api/magpie/providers',
-                                { method: 'POST', body: { action, id: p.id } }
-                              );
-                              onResetModels();
-                              if (action === 'test') {
-                                onToast(res.output || t('testPassed', { id: p.id }));
-                              } else {
-                                onToast(t('providerUpdated'));
-                                const fresh = await api<SettingsData>('/api/settings');
-                                onSettingsUpdated(fresh);
-                              }
-                            } catch (e) {
-                              if (e instanceof Error && e.message !== 'unauthorized') setSettingsErr(e.message);
-                            }
-                          };
-                          return (
-                            <div key={p.id} className="prov-row">
-                              <div className="prov-meta">
-                                <div className="nm">
-                                  {p.name}{' '}
-                                  <span className={`mp ${p.enabled ? 'ok' : ''}`}>
-                                    {p.enabled ? t('enabled') : t('paused')}
-                                  </span>
-                                </div>
-                                <div className="subt">{meta}</div>
-                              </div>
-                              <div className="prov-acts">
-                                <button type="button" className="mp" onClick={() => void runAction('test')}>
-                                  {t('testBtn')}
-                                </button>
-                                <button type="button" className="mp" onClick={() => void runAction('refresh')}>
-                                  {t('refresh')}
-                                </button>
-                                <button
-                                  type="button"
-                                  className="mp"
-                                  onClick={() => void runAction(p.enabled ? 'off' : 'on')}
-                                >
-                                  {p.enabled ? t('paused') : t('enabled')}
-                                </button>
-                                <button
-                                  type="button"
-                                  className="mp bad"
-                                  onClick={() =>
-                                    onConfirm({
-                                      title: t('rmProviderTitle', { id: p.id }),
-                                      text: t('rmProviderDesc'),
-                                      okText: t('confirmRemove'),
-                                      onOk: () => runAction('rm'),
-                                    })
-                                  }
-                                >
-                                  {t('removeBtn')}
-                                </button>
-                              </div>
-                            </div>
-                          );
-                        })
-                      )}
-                    </div>
-                  )}
                 </div>
               )}
             </section>

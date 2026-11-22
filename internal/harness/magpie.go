@@ -367,6 +367,25 @@ func MagpieDisconnect(ctx context.Context, kind string) error {
 	return nil
 }
 
+// MagpieOpen opens magpie's own window on this machine, where providers and
+// models are managed.
+func MagpieOpen() error {
+	if !magpieInstalled() {
+		return fmt.Errorf("magpie is not installed")
+	}
+	cmd := exec.Command(magpieBin())
+	if runtime.GOOS == "darwin" {
+		if info, err := os.Stat("/Applications/magpie.app"); err == nil && info.IsDir() {
+			cmd = exec.Command("open", "/Applications/magpie.app")
+		}
+	}
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	go func() { _ = cmd.Wait() }()
+	return nil
+}
+
 func parseProvidersOutput(raw string) []MagpieProvider {
 	var out []MagpieProvider
 	for _, line := range strings.Split(raw, "\n") {

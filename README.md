@@ -273,6 +273,7 @@ To reach a `bot-hub` running at home or in the office from your laptop:
 - `GET  /api/settings`, `PUT /api/settings` — Read or update `modelAccess` (`magpie` / `self`) and default models
 - `GET  /api/models` — List available model IDs for `?harness=`
 - `POST /api/harnesses/{id}/magpie` — Connect a harness CLI to Magpie with a chosen model
+- `POST /api/magpie/open` — Open the Magpie app on the host to manage providers and models
 - `POST /api/login` — Exchange `http.apiToken` for an `HttpOnly` session cookie (used by Web UI)
 - `GET  /api/tailcat`, `GET /api/tailcat/qr.png` — Tailcat tunnel status, link, and QR code
 - `POST /hooks/{id}` — Wake a bot from an external webhook (optional `X-Webhook-Secret` or `Bearer` auth)

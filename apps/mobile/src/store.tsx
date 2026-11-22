@@ -124,15 +124,7 @@ interface HubContextValue {
   }) => Promise<void>;
   connectMagpie: (harnessId: string, model: string) => Promise<SettingsData>;
   disconnectMagpie: (harnessId: string) => Promise<SettingsData>;
-  magpieProviderAction: (body: {
-    action: 'add' | 'on' | 'off' | 'rm' | 'refresh' | 'test';
-    id?: string;
-    preset?: string;
-    name?: string;
-    url?: string;
-    protocol?: string;
-    key?: string;
-  }) => Promise<{ ok: boolean; output?: string }>;
+  openMagpie: () => Promise<void>;
   setDesktopWorker: (harness: string, model: string) => Promise<SettingsData>;
   refreshNodes: () => Promise<void>;
   refreshTailcat: () => Promise<TailcatStatus>;
@@ -817,28 +809,9 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
     return s;
   }, []);
 
-  const magpieProviderAction = useCallback(
-    async (body: {
-      action: 'add' | 'on' | 'off' | 'rm' | 'refresh' | 'test';
-      id?: string;
-      preset?: string;
-      name?: string;
-      url?: string;
-      protocol?: string;
-      key?: string;
-    }) => {
-      const res = await apiRequest<{ ok: boolean; output?: string }>(
-        baseURLRef.current,
-        authTokenRef.current,
-        '/api/magpie/providers',
-        { method: 'POST', body }
-      );
-      setModels({});
-      await loadSettings().catch(() => {});
-      return res;
-    },
-    [loadSettings]
-  );
+  const openMagpie = useCallback(async () => {
+    await apiRequest(baseURLRef.current, authTokenRef.current, '/api/magpie/open', { method: 'POST' });
+  }, []);
 
   const setDesktopWorker = useCallback(async (harness: string, model: string) => {
     const s = await apiRequest<SettingsData>(baseURLRef.current, authTokenRef.current, '/api/settings', {
@@ -966,7 +939,7 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
         saveSettings,
         connectMagpie,
         disconnectMagpie,
-        magpieProviderAction,
+        openMagpie,
         setDesktopWorker,
         refreshNodes,
         refreshTailcat,

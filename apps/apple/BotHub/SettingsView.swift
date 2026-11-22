@@ -16,20 +16,11 @@ struct SettingsView: View {
     @State private var userMdTouched = false
     @State private var drafts: [String: BotDraft] = [:]
     @State private var loadingModelsFor = ""
-    @State private var pickHarness = ""
     @State private var saving = false
     @State private var busy = ""
     @State private var error = ""
     @State private var saved = ""
     @State private var confirm: ConfirmItem?
-
-    @State private var showAddProv = false
-    @State private var provMode = "preset"
-    @State private var provPreset = "deepseek"
-    @State private var provProtocol = "openai"
-    @State private var provName = ""
-    @State private var provUrl = ""
-    @State private var provKey = ""
 
     @State private var mem: MemoryList?
     @State private var memQuery = ""
@@ -123,7 +114,6 @@ struct SettingsView: View {
             if !perHarness.isEmpty { perOpen = true }
         }
         if !userMdTouched { userMd = s.sharedUserMd ?? "" }
-        if let ps = s.magpie?.presets, !ps.isEmpty, !ps.contains(where: { $0.id == provPreset }) { provPreset = ps[0].id }
         syncDrafts()
     }
 
@@ -161,11 +151,6 @@ struct SettingsView: View {
     private var magpieSection: some View {
         let mp = hub.settings?.magpie
         let installed = mp?.installed == true
-        let providers = mp?.providers ?? []
-        let presets = (mp?.presets ?? []).isEmpty
-            ? [MagpiePreset(id: "deepseek", name: "DeepSeek"), MagpiePreset(id: "anthropic", name: "Anthropic"),
-               MagpiePreset(id: "openai", name: "OpenAI"), MagpiePreset(id: "openrouter", name: "OpenRouter")]
-            : mp!.presets!
         return Group {
             Section {
                 if !installed {
@@ -186,31 +171,12 @@ struct SettingsView: View {
                 if installed { Text(hub.t("magpieHint")) }
             }
             if installed {
-                Section(hub.t("providersTitle", ["n": providers.count])) {
-                    ForEach(providers) { pr in providerRow(pr) }
-                    DisclosureGroup(hub.t("addProvider"), isExpanded: $showAddProv) {
-                        Picker(hub.t("addProvider"), selection: $provMode) {
-                            Text(hub.t("presetTab")).tag("preset")
-                            Text(hub.t("customTab")).tag("custom")
-                        }
-                        .pickerStyle(.segmented)
-                        .labelsHidden()
-                        if provMode == "preset" {
-                            Picker(hub.t("presetTab"), selection: $provPreset) {
-                                ForEach(presets) { Text($0.name ?? $0.id).tag($0.id) }
-                            }
-                        } else {
-                            Picker("Protocol", selection: $provProtocol) {
-                                ForEach(["openai", "anthropic", "responses", "gemini"], id: \.self) { Text($0).tag($0) }
-                            }
-                            TextField(hub.t("baseUrlPh"), text: $provUrl).monoInput()
-                        }
-                        TextField(hub.t("aliasOptionalPh"), text: $provName).monoInput()
-                        SecureField(hub.t("apiKeyPh"), text: $provKey)
-                        Button(hub.t("confirmAdd")) { addProvider() }
-                            .buttonStyle(.borderedProminent)
-                            .disabled(busy == "prov:add")
+                Section {
+                    Button(hub.t("mpOpenApp")) {
+                        run("magpie:open", "opFailed") { try await hub.openMagpie(); return nil }
                     }
+                } footer: {
+                    Text(hub.t("mpManageInApp"))
                 }
             }
         }
@@ -219,8 +185,6 @@ struct SettingsView: View {
     private func harnessRow(_ h: HarnessInfo) -> some View {
         let connected = h.magpie?.connected == true
         let key = "magpie:\(h.id)"
-        let open = connected && pickHarness == h.id
-        let list = hub.models[h.id] ?? []
         return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
                 VStack(alignment: .leading, spacing: 2) {
@@ -232,7 +196,6 @@ struct SettingsView: View {
                 Spacer()
                 if busy == key { ProgressView().controlSize(.small) }
                 if connected {
-                    Button(hub.t("mpSwitch")) { togglePicker(h.id) }.buttonStyle(.bordered)
                     Button(hub.t("mpRestore"), role: .destructive) {
                         confirm = ConfirmItem(title: hub.t("restoreNativeTitle"), message: hub.t("restoreNativeDesc", ["label": h.id])) {
                             run(key, "restoreFailed") { try await hub.disconnectMagpie(h.id); return hub.t("restoredNative", ["label": h.id]) }
@@ -245,63 +208,8 @@ struct SettingsView: View {
             }
             .controlSize(.small)
             .disabled(busy == key)
-            if open {
-                if loadingModelsFor == h.id && list.isEmpty {
-                    ProgressView()
-                } else {
-                    Picker(hub.t("statModel"), selection: Binding(get: { h.magpie?.model ?? "" }, set: { m in
-                        guard !m.isEmpty, m != h.magpie?.model else { return }
-                        run(key, "connectFailed") {
-                            try await hub.connectMagpie(h.id, model: m)
-                            pickHarness = ""
-                            return hub.t("connectedMagpie", ["label": h.id])
-                        }
-                    })) {
-                        if !list.contains(h.magpie?.model ?? "") { Text(h.magpie?.model ?? "-").tag(h.magpie?.model ?? "") }
-                        ForEach(Array(list.prefix(24)), id: \.self) { Text($0).tag($0) }
-                    }
-                }
-            }
         }
         .padding(.vertical, 2)
-    }
-
-    private func providerRow(_ pr: MagpieProvider) -> some View {
-        HStack(spacing: 8) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("\(pr.name ?? pr.id) · \(pr.enabled == true ? hub.t("enabled") : hub.t("paused"))")
-                    .foregroundStyle(pr.enabled == true ? .primary : .secondary)
-                let meta = [pr.endpoint, pr.modelsInfo].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
-                if !meta.isEmpty { Text(meta).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(2) }
-            }
-            Spacer()
-            if busy.hasSuffix(":\(pr.id)") { ProgressView().controlSize(.small) }
-            Menu {
-                Button(hub.t("testBtn"), systemImage: "speedometer") { providerAct("test", pr.id) }
-                Button(pr.enabled == true ? hub.t("paused") : hub.t("enabled"), systemImage: pr.enabled == true ? "pause.circle" : "play.circle") {
-                    providerAct(pr.enabled == true ? "off" : "on", pr.id)
-                }
-                Divider()
-                Button(hub.t("removeBtn"), systemImage: "trash", role: .destructive) {
-                    confirm = ConfirmItem(title: hub.t("rmProviderTitle"), message: hub.t("rmProviderDesc", ["id": pr.id])) { providerAct("rm", pr.id) }
-                }
-            } label: {
-                Label(hub.t("edit"), systemImage: "ellipsis.circle").labelStyle(.iconOnly)
-            }
-            .menuIndicator(.hidden)
-            .fixedSize()
-        }
-    }
-
-    private func togglePicker(_ id: String) {
-        if pickHarness == id { pickHarness = ""; return }
-        pickHarness = id
-        guard (hub.models[id] ?? []).isEmpty else { return }
-        loadingModelsFor = id
-        Task {
-            _ = try? await hub.loadModels(id)
-            loadingModelsFor = ""
-        }
     }
 
     private func connectMagpie(_ h: HarnessInfo) {
@@ -313,29 +221,6 @@ struct SettingsView: View {
                 try await hub.connectMagpie(h.id, model: target)
                 return hub.t("connectedMagpie", ["label": h.id])
             }
-        }
-    }
-
-    private func providerAct(_ action: String, _ id: String) {
-        run("prov:\(action):\(id)", "opFailed") {
-            let r = try await hub.providerAction(["action": action, "id": id])
-            return (r.output ?? "").isEmpty ? hub.t("opSuccess") : r.output
-        }
-    }
-
-    private func addProvider() {
-        var body: [String: Any] = ["action": "add"]
-        if provMode == "preset" { body["preset"] = provPreset } else {
-            body["protocol"] = provProtocol
-            body["url"] = provUrl.trimmingCharacters(in: .whitespaces)
-        }
-        let n = provName.trimmingCharacters(in: .whitespaces), k = provKey.trimmingCharacters(in: .whitespaces)
-        if !n.isEmpty { body["name"] = n }
-        if !k.isEmpty { body["key"] = k }
-        run("prov:add", "addFailed") {
-            try await hub.providerAction(body)
-            provKey = ""; provName = ""; provUrl = ""; showAddProv = false
-            return hub.t("providerAdded")
         }
     }
 
