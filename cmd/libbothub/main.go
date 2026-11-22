@@ -31,4 +31,26 @@ func BothubFreeString(s *C.char) {
 	}
 }
 
+func goStr(s *C.char) string {
+	if s == nil {
+		return ""
+	}
+	return C.GoString(s)
+}
+
+//export BothubTailscaleStart
+func BothubTailscaleStart(cStateDir, cHostname, cControlURL, cAuthKey *C.char) *C.char {
+	return C.CString(tailscaleStartJSON(goStr(cStateDir), goStr(cHostname), goStr(cControlURL), goStr(cAuthKey)))
+}
+
+//export BothubTailscaleStatus
+func BothubTailscaleStatus(includePeers C.int) *C.char {
+	return C.CString(tailscaleStatusJSON(includePeers != 0))
+}
+
+//export BothubTailscaleLogout
+func BothubTailscaleLogout() *C.char {
+	return C.CString(tailscaleLogoutJSON(""))
+}
+
 func main() {}

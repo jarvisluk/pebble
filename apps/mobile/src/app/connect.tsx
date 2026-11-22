@@ -5,6 +5,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
+  Linking,
   Platform,
   Pressable,
   ScrollView,
@@ -14,10 +15,11 @@ import {
   View,
 } from 'react-native';
 
-import { isNativeTunnelAvailable } from '../../modules/bothub-tunnel';
+import { isNativeTunnelAvailable, type TailscalePeer } from '../../modules/bothub-tunnel';
 import { normalizeAddress } from '../api';
 import { QrCodeIcon } from '../components/Icons';
 import { ModalHeader } from '../components/ModalHeader';
+import { confirmAction } from '../confirm';
 import { useI18n } from '../i18n';
 import { useHub } from '../store';
 import { MONO_FONT, useTheme } from '../theme';
@@ -30,9 +32,15 @@ export default function ConnectScreen() {
     activeServer,
     connState,
     connError,
+    mobileTailscale,
+    tsBinding,
+    tsControlUrl: savedTsControlUrl,
     addAndConnectServer,
     selectServer,
     removeServer,
+    bindTailscale,
+    refreshMobileTailscale,
+    logoutTailscale,
   } = useHub();
 
   const [permission, requestPermission] = useCameraPermissions();
@@ -41,7 +49,11 @@ export default function ConnectScreen() {
   const [address, setAddress] = useState('');
   const [token, setToken] = useState('');
   const [localError, setLocalError] = useState('');
+  const [infoHint, setInfoHint] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [tsAdvOpen, setTsAdvOpen] = useState(false);
+  const [tsAuthKey, setTsAuthKey] = useState('');
+  const [tsControlUrl, setTsControlUrl] = useState('');
 
   const {
     address: paramAddr,
@@ -92,6 +104,12 @@ export default function ConnectScreen() {
       setAddress((prev) => prev || activeServer.address);
     }
   }, [activeServer, connState]);
+
+  useEffect(() => {
+    if (savedTsControlUrl && !tsControlUrl) {
+      setTsControlUrl(savedTsControlUrl);
+    }
+  }, [savedTsControlUrl, tsControlUrl]);
 
   useEffect(() => {
     if (!submitting) return;
@@ -160,7 +178,12 @@ export default function ConnectScreen() {
     if (!raw) return;
 
     const lower = raw.toLowerCase();
-    if (!lower.startsWith('tailcat://') && !lower.startsWith('http://') && !lower.startsWith('https://')) {
+    if (
+      !lower.startsWith('tailcat://') &&
+      !lower.startsWith('tailscale://') &&
+      !lower.startsWith('http://') &&
+      !lower.startsWith('https://')
+    ) {
       setLocalError(t('invalidQr'));
       return;
     }
@@ -213,6 +236,36 @@ export default function ConnectScreen() {
       setSubmitting(false);
       setLocalError(err?.message || t('switchFailed'));
     }
+  };
+
+  const onPickPeer = async (peer: TailscalePeer) => {
+    setLocalError('');
+    setInfoHint('');
+    setLabel(peer.hostname);
+    setAddress(peer.address);
+    const saved = servers.find((s) => s.address === peer.address && s.token);
+    if (saved) {
+      setToken(saved.token);
+      setSubmitting(true);
+      try {
+        await addAndConnectServer({ label: peer.hostname, address: peer.address, token: saved.token });
+      } catch (err: any) {
+        setSubmitting(false);
+        setLocalError(err?.message || t('connFailed'));
+      }
+      return;
+    }
+    if (token.trim()) {
+      setSubmitting(true);
+      try {
+        await addAndConnectServer({ label: peer.hostname, address: peer.address, token: token.trim() });
+      } catch (err: any) {
+        setSubmitting(false);
+        setLocalError(err?.message || t('connFailed'));
+      }
+      return;
+    }
+    setInfoHint(t('tsPeerSelectedHint'));
   };
 
   return (
@@ -288,16 +341,14 @@ export default function ConnectScreen() {
               <TextInput
                 value={address}
                 onChangeText={setAddress}
-                placeholder="tailcat://connect/... or http://192.168.1.x:3789"
+                placeholder="tailcat://… / tailscale://… / 192.168.1.x:3789"
                 placeholderTextColor={theme.mute}
                 autoCapitalize="none"
                 autoCorrect={false}
                 style={[styles.input, { backgroundColor: theme.s1, color: theme.text, fontFamily: MONO_FONT }]}
               />
-              <Text style={[styles.fieldHint, { color: parsedPreview?.token ? theme.sageInk : theme.mute }]}>
-                {parsedPreview?.token
-                  ? t('tokenRecognized')
-                  : t('tokenAutoHint')}
+              <Text style={[styles.fieldHint, { color: infoHint || parsedPreview?.token ? theme.sageInk : theme.mute }]}>
+                {infoHint || (parsedPreview?.token ? t('tokenRecognized') : t('tokenAutoHint'))}
               </Text>
             </View>
 
@@ -332,13 +383,179 @@ export default function ConnectScreen() {
             </Pressable>
           </View>
 
+          {tunnelAvailable && (
+            <View style={[styles.card, { backgroundColor: theme.card }]}>
+              <View style={styles.rowBetween}>
+                <View style={styles.col}>
+                  <Text style={[styles.cardTitle, { color: theme.text }]}>{t('tsNetwork')}</Text>
+                  {mobileTailscale?.state === 'running' && (
+                    <Text style={[styles.cardSub, { color: theme.sageInk }]}>
+                      {t('tsBoundReady', { tailnet: mobileTailscale.tailnet || 'Tailscale' })}
+                      {mobileTailscale.ip ? ` · ${mobileTailscale.ip}` : ''}
+                    </Text>
+                  )}
+                </View>
+                {mobileTailscale?.state === 'running' && (
+                  <View style={{ flexDirection: 'row', gap: 8 }}>
+                    <Pressable
+                      onPress={() => void refreshMobileTailscale(true)}
+                      style={[styles.qrBtn, { backgroundColor: theme.s1 }]}
+                    >
+                      <Text style={[styles.qrBtnTxt, { color: theme.text }]}>{t('tsRefreshPeers')}</Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() =>
+                        confirmAction(
+                          t('tsUnlinkTitle'),
+                          t('tsUnlinkDesc'),
+                          () => logoutTailscale(),
+                          true
+                        )
+                      }
+                      style={[styles.qrBtn, { backgroundColor: theme.s1 }]}
+                    >
+                      <Text style={[styles.qrBtnTxt, { color: theme.danger }]}>{t('tsUnlink')}</Text>
+                    </Pressable>
+                  </View>
+                )}
+              </View>
+
+              {mobileTailscale?.state === 'running' ? (
+                (() => {
+                  const peers = (mobileTailscale.peers || []).filter((p) => p.online);
+                  if (peers.length === 0) {
+                    return <Text style={[styles.cardSub, { color: theme.mute }]}>{t('tsNoPeers')}</Text>;
+                  }
+                  return (
+                    <View style={styles.savedList}>
+                      {peers.map((peer) => (
+                        <Pressable
+                          key={peer.id}
+                          onPress={() => void onPickPeer(peer)}
+                          style={[styles.savedRow, { backgroundColor: theme.s1 }]}
+                        >
+                          <View style={styles.savedInfo}>
+                            <View style={styles.savedHead}>
+                              <Text numberOfLines={1} style={[styles.savedName, { color: theme.text }]}>
+                                {peer.hostname}
+                              </Text>
+                              {peer.isBotHub && (
+                                <View style={[styles.curBadge, { backgroundColor: theme.lilac }]}>
+                                  <Text style={[styles.curBadgeTxt, { color: theme.lilacInk }]}>
+                                    {t('tsBotHubBadge')}
+                                  </Text>
+                                </View>
+                              )}
+                            </View>
+                            <Text numberOfLines={1} style={[styles.savedAddr, { color: theme.mute, fontFamily: MONO_FONT }]}>
+                              {peer.dnsName || peer.ip || peer.address}
+                            </Text>
+                          </View>
+                        </Pressable>
+                      ))}
+                    </View>
+                  );
+                })()
+              ) : mobileTailscale?.state === 'needs_login' ? (
+                <View style={styles.rowBetween}>
+                  <Text style={[styles.cardSub, { color: theme.accent }]}>{t('tsNeedsLogin')}</Text>
+                  {mobileTailscale.authUrl ? (
+                    <Pressable
+                      onPress={() => void Linking.openURL(mobileTailscale.authUrl!)}
+                      style={[styles.qrBtn, { backgroundColor: theme.accentSoft }]}
+                    >
+                      <Text style={[styles.qrBtnTxt, { color: theme.accent }]}>{t('tsOpenLogin')}</Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+              ) : mobileTailscale?.state === 'starting' || tsBinding ? (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                  <ActivityIndicator size="small" color={theme.accent} />
+                  <Text style={[styles.cardSub, { color: theme.text2 }]}>{t('tsBinding')}</Text>
+                </View>
+              ) : (
+                <>
+                  {mobileTailscale?.state === 'error' && mobileTailscale.error ? (
+                    <Text style={[styles.errTxt, { color: theme.danger }]}>{mobileTailscale.error}</Text>
+                  ) : null}
+                  <Pressable
+                    onPress={() => {
+                      void bindTailscale({ authKey: tsAuthKey, controlUrl: tsControlUrl }).then(() => {
+                        setTsAuthKey('');
+                      });
+                    }}
+                    style={[styles.qrBtn, { backgroundColor: theme.accentSoft, alignSelf: 'flex-start' }]}
+                  >
+                    <Text style={[styles.qrBtnTxt, { color: theme.accent }]}>{t('tsBindAccount')}</Text>
+                  </Pressable>
+                  <Pressable onPress={() => setTsAdvOpen((v) => !v)}>
+                    <Text style={[styles.fieldHint, { color: theme.text2 }]}>{t('tsAdvanced')}</Text>
+                  </Pressable>
+                  {tsAdvOpen && (
+                    <View style={{ gap: 10 }}>
+                      <TextInput
+                        value={tsAuthKey}
+                        onChangeText={setTsAuthKey}
+                        placeholder={t('tsAuthKeyPh')}
+                        placeholderTextColor={theme.mute}
+                        secureTextEntry
+                        autoCapitalize="none"
+                        autoCorrect={false}
+                        style={[styles.input, { backgroundColor: theme.s1, color: theme.text, fontFamily: MONO_FONT }]}
+                      />
+                      <TextInput
+                        value={tsControlUrl}
+                        onChangeText={setTsControlUrl}
+                        placeholder={t('tsControlUrlPh')}
+                        placeholderTextColor={theme.mute}
+                        autoCapitalize="none"
+                        autoCorrect={false}
+                        style={[styles.input, { backgroundColor: theme.s1, color: theme.text, fontFamily: MONO_FONT }]}
+                      />
+                    </View>
+                  )}
+                </>
+              )}
+            </View>
+          )}
+
           {servers.length > 0 && (
             <View style={[styles.card, { backgroundColor: theme.card }]}>
               <Text style={[styles.cardTitle, { color: theme.text }]}>{t('savedHosts')}</Text>
               <View style={styles.savedList}>
                 {servers.map((s) => {
                   const isCurrent = activeServer?.id === s.id;
-                  return (
+                  const onPickPeer = async (peer: TailscalePeer) => {
+    setLocalError('');
+    setInfoHint('');
+    setLabel(peer.hostname);
+    setAddress(peer.address);
+    const saved = servers.find((s) => s.address === peer.address && s.token);
+    if (saved) {
+      setToken(saved.token);
+      setSubmitting(true);
+      try {
+        await addAndConnectServer({ label: peer.hostname, address: peer.address, token: saved.token });
+      } catch (err: any) {
+        setSubmitting(false);
+        setLocalError(err?.message || t('connFailed'));
+      }
+      return;
+    }
+    if (token.trim()) {
+      setSubmitting(true);
+      try {
+        await addAndConnectServer({ label: peer.hostname, address: peer.address, token: token.trim() });
+      } catch (err: any) {
+        setSubmitting(false);
+        setLocalError(err?.message || t('connFailed'));
+      }
+      return;
+    }
+    setInfoHint(t('tsPeerSelectedHint'));
+  };
+
+  return (
                     <View key={s.id} style={[styles.savedRow, { backgroundColor: theme.s1 }]}>
                       <Pressable onPress={() => void onPickServer(s.id)} style={styles.savedInfo}>
                         <View style={styles.savedHead}>

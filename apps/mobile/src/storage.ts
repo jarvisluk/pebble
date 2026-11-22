@@ -8,6 +8,7 @@ const ACTIVE_KEY = 'bothub.activeServerId.v1';
 const THEME_KEY = 'bothub.theme.v1';
 const LANG_KEY = 'bothub.lang.v1';
 const ACCENT_KEY = 'bothub.accent.v1';
+const TS_BIND_KEY = 'bothub.tsBind.v1';
 
 export type ThemePreference = 'system' | 'light' | 'dark';
 export type LanguagePreference = 'system' | 'zh-CN' | 'en';
@@ -87,4 +88,24 @@ export async function loadAccentPref(): Promise<string | null> {
 
 export async function saveAccentPref(hex: string | null): Promise<void> {
   await writeKey(ACCENT_KEY, hex && /^#[0-9a-fA-F]{6}$/.test(hex) ? hex.toLowerCase() : null);
+}
+
+export interface TailscaleBindPref {
+  bound: boolean;
+  controlUrl?: string;
+}
+
+export async function loadTailscaleBindPref(): Promise<TailscaleBindPref> {
+  const raw = await readKey(TS_BIND_KEY);
+  if (!raw) return { bound: false };
+  try {
+    const parsed = JSON.parse(raw) as TailscaleBindPref;
+    return { bound: Boolean(parsed.bound), controlUrl: parsed.controlUrl || '' };
+  } catch {
+    return { bound: false };
+  }
+}
+
+export async function saveTailscaleBindPref(pref: TailscaleBindPref | null): Promise<void> {
+  await writeKey(TS_BIND_KEY, pref && pref.bound ? JSON.stringify(pref) : null);
 }

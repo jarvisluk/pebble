@@ -5,6 +5,7 @@ struct ConnectView: View {
     @Environment(HubStore.self) private var hub
     @Environment(Router.self) private var router
     @Environment(\.palette) private var p
+    @Environment(\.openURL) private var openURL
     var startScan: Bool
 
     @State private var scanning = false
@@ -12,8 +13,12 @@ struct ConnectView: View {
     @State private var address = ""
     @State private var token = ""
     @State private var err = ""
+    @State private var infoHint = ""
     @State private var submitting = false
     @State private var confirm: ConfirmItem?
+    @State private var tsAdvOpen = false
+    @State private var tsAuthKey = ""
+    @State private var tsControlUrl = ""
 
     var body: some View {
         let norm = normalizeAddress(address)
@@ -37,15 +42,16 @@ struct ConnectView: View {
             }
             Section {
                 TextField(hub.t("labelOptional"), text: $label, prompt: Text(hub.t("labelExamplePh")))
-                TextField(hub.t("connAddr"), text: $address, prompt: Text("tailcat://… / 192.168.1.10:3789")).monoInput()
+                TextField(hub.t("connAddr"), text: $address, prompt: Text("tailcat://… / tailscale://… / 192.168.1.10:3789")).monoInput()
                 SecureField(hub.t("tokenOptionalLbl"), text: $token, prompt: Text(hub.t("tokenFillHint")))
             } header: {
                 Text(hub.t("manualAddrTitle"))
             } footer: {
-                Text(!norm.token.isEmpty ? hub.t("tokenRecognized") : hub.t("tokenAutoHint"))
-                    .foregroundStyle(!norm.token.isEmpty ? p.sageInk : .secondary)
+                Text(!infoHint.isEmpty ? infoHint : !norm.token.isEmpty ? hub.t("tokenRecognized") : hub.t("tokenAutoHint"))
+                    .foregroundStyle((!infoHint.isEmpty || !norm.token.isEmpty) ? p.sageInk : .secondary)
             }
             if !err.isEmpty { Section { StatusText(text: err) } }
+            tailscaleSection
             if !hub.servers.isEmpty {
                 Section(hub.t("savedHosts")) {
                     ForEach(hub.servers) { s in
@@ -89,6 +95,10 @@ struct ConnectView: View {
                 if label.isEmpty { label = s.label }
                 if address.isEmpty { address = s.address }
             }
+            if tsControlUrl.isEmpty { tsControlUrl = hub.tsControlUrl }
+            if hub.tsBound && hub.mobileTailscale == nil {
+                Task { await hub.refreshMobileTailscale(includePeers: true) }
+            }
             if startScan { toggleScanner() }
         }
         .onChange(of: hub.connState) { _, st in
@@ -123,7 +133,7 @@ struct ConnectView: View {
     private func onScanned(_ raw: String) {
         let s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         let lower = s.lowercased()
-        guard lower.hasPrefix("tailcat://") || lower.hasPrefix("http://") || lower.hasPrefix("https://") else {
+        guard lower.hasPrefix("tailcat://") || lower.hasPrefix("tailscale://") || lower.hasPrefix("http://") || lower.hasPrefix("https://") else {
             err = hub.t("invalidQr")
             return
         }
@@ -151,6 +161,114 @@ struct ConnectView: View {
                 err = errText(error, hub.t("connFailed"))
             }
         }
+    }
+
+    @ViewBuilder
+    private var tailscaleSection: some View {
+        let ts = hub.mobileTailscale
+        let state = ts?.state ?? "disabled"
+        Section(hub.t("tsNetwork")) {
+            if state == "running" {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(hub.t("tsBoundReady", ["tailnet": ts?.tailnet ?? "Tailscale"]))
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(p.sageInk)
+                        if let ip = ts?.ip, !ip.isEmpty {
+                            Text(ip).font(.system(size: 13, design: .monospaced)).foregroundStyle(.secondary)
+                        }
+                    }
+                    Spacer()
+                    Button(hub.t("tsRefreshPeers")) {
+                        Task { await hub.refreshMobileTailscale(includePeers: true) }
+                    }
+                    .buttonStyle(.bordered).controlSize(.small)
+                    Button(hub.t("tsUnlink"), role: .destructive) {
+                        confirm = ConfirmItem(title: hub.t("tsUnlinkTitle"), message: hub.t("tsUnlinkDesc")) {
+                            await hub.logoutTailscale()
+                        }
+                    }
+                    .buttonStyle(.bordered).controlSize(.small)
+                }
+                let peers = (ts?.peers ?? []).filter { $0.online }
+                if peers.isEmpty {
+                    Text(hub.t("tsNoPeers")).font(.system(size: 14)).foregroundStyle(.secondary)
+                } else {
+                    ForEach(peers) { peer in
+                        Button {
+                            selectPeer(peer)
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    HStack(spacing: 6) {
+                                        Text(peer.hostname).foregroundStyle(.primary)
+                                        if peer.isBotHub {
+                                            Tag(text: hub.t("tsBotHubBadge"), bg: p.lilac, fg: p.lilacInk)
+                                        }
+                                    }
+                                    Text(peer.dnsName ?? peer.ip ?? peer.address)
+                                        .font(.system(size: 12, design: .monospaced))
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1).truncationMode(.middle)
+                                }
+                                Spacer()
+                                Image(systemName: "arrow.up.right.circle").foregroundStyle(.tint)
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            } else if state == "needs_login" {
+                HStack {
+                    Label(hub.t("tsNeedsLogin"), systemImage: "person.badge.key")
+                        .foregroundStyle(p.accent)
+                    Spacer()
+                    if let auth = ts?.authUrl, let url = URL(string: auth) {
+                        Button(hub.t("tsOpenLogin")) { openURL(url) }
+                            .buttonStyle(.borderedProminent).controlSize(.small)
+                    }
+                }
+            } else if state == "starting" || hub.tsBinding {
+                HStack(spacing: 10) {
+                    ProgressView()
+                    Text(hub.t("tsBinding")).foregroundStyle(.secondary)
+                }
+            } else {
+                if state == "error", let msg = ts?.error, !msg.isEmpty {
+                    StatusText(text: msg)
+                }
+                Button {
+                    Task {
+                        await hub.bindTailscale(authKey: tsAuthKey, controlUrl: tsControlUrl)
+                        tsAuthKey = ""
+                    }
+                } label: {
+                    Label(hub.t("tsBindAccount"), systemImage: "network")
+                }
+                DisclosureGroup(hub.t("tsAdvanced"), isExpanded: $tsAdvOpen) {
+                    SecureField(hub.t("tsAuthKeyPh"), text: $tsAuthKey).monoInput()
+                    TextField(hub.t("tsControlUrlPh"), text: $tsControlUrl).monoInput()
+                }
+            }
+        }
+    }
+
+    private func selectPeer(_ peer: TailscalePeer) {
+        err = ""
+        infoHint = ""
+        label = peer.hostname
+        address = peer.address
+        if let saved = hub.servers.first(where: { $0.address == peer.address && !$0.token.isEmpty }) {
+            token = saved.token
+            connect(address: peer.address, token: saved.token)
+            return
+        }
+        if !token.trimmingCharacters(in: .whitespaces).isEmpty {
+            connect(address: peer.address, token: token)
+            return
+        }
+        infoHint = hub.t("tsPeerSelectedHint")
     }
 
 }
@@ -202,7 +320,7 @@ struct QRScanner: UIViewRepresentable {
         func metadataOutput(_ output: AVCaptureMetadataOutput, didOutput objects: [AVMetadataObject], from connection: AVCaptureConnection) {
             guard !locked, let code = (objects.first as? AVMetadataMachineReadableCodeObject)?.stringValue, !code.isEmpty else { return }
             let lower = code.lowercased()
-            if lower.hasPrefix("tailcat://") || lower.hasPrefix("http://") || lower.hasPrefix("https://") { locked = true }
+            if lower.hasPrefix("tailcat://") || lower.hasPrefix("tailscale://") || lower.hasPrefix("http://") || lower.hasPrefix("https://") { locked = true }
             onCode(code)
         }
     }

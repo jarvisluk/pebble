@@ -183,6 +183,8 @@ type HTTPConfig struct {
 	APIToken string `json:"apiToken,omitempty"`
 	// Tailcat exposes the same server through a Tailcat tunnel (no Tailscale account needed).
 	Tailcat *TailcatConfig `json:"tailcat,omitempty"`
+	// Tailscale exposes the same server inside the user's Tailscale tailnet via tsnet.
+	Tailscale *TailscaleConfig `json:"tailscale,omitempty"`
 }
 
 type TailcatConfig struct {
@@ -190,7 +192,15 @@ type TailcatConfig struct {
 	DERPMapURL string `json:"derpMapURL,omitempty"` // optional self-hosted DERP map (https)
 }
 
-func (h HTTPConfig) TailcatEnabled() bool { return h.Tailcat != nil && h.Tailcat.Enabled }
+type TailscaleConfig struct {
+	Enabled    bool   `json:"enabled"`
+	Hostname   string `json:"hostname,omitempty"`
+	ControlURL string `json:"controlUrl,omitempty"`
+	AuthKey    string `json:"authKey,omitempty"`
+}
+
+func (h HTTPConfig) TailcatEnabled() bool   { return h.Tailcat != nil && h.Tailcat.Enabled }
+func (h HTTPConfig) TailscaleEnabled() bool { return h.Tailscale != nil && h.Tailscale.Enabled }
 
 // IsLoopback reports whether the server only listens on a loopback address.
 func (h HTTPConfig) IsLoopback() bool {
@@ -462,6 +472,11 @@ func Load(projectRoot, explicitPath string) (*HubConfig, string, error) {
 	cfg.OpenCodeServerURL = expandEnv(cfg.OpenCodeServerURL)
 	cfg.HTTP.WebhookSecret = expandEnv(cfg.HTTP.WebhookSecret)
 	cfg.HTTP.APIToken = expandEnv(cfg.HTTP.APIToken)
+	if cfg.HTTP.Tailscale != nil {
+		cfg.HTTP.Tailscale.Hostname = strings.TrimSpace(cfg.HTTP.Tailscale.Hostname)
+		cfg.HTTP.Tailscale.ControlURL = strings.TrimSpace(expandEnv(cfg.HTTP.Tailscale.ControlURL))
+		cfg.HTTP.Tailscale.AuthKey = strings.TrimSpace(expandEnv(cfg.HTTP.Tailscale.AuthKey))
+	}
 
 	if cfg.SharedDir == "" {
 		cfg.SharedDir = "./workspaces/_shared"
@@ -734,7 +749,10 @@ func MCPCommand(cfg *HubConfig, botID string) []string {
 
 type rawTokenDoc struct {
 	HTTP struct {
-		APIToken string `json:"apiToken"`
+		APIToken  string `json:"apiToken"`
+		Tailscale *struct {
+			AuthKey string `json:"authKey"`
+		} `json:"tailscale"`
 	} `json:"http"`
 }
 
@@ -759,6 +777,27 @@ func RawAPITokenEnvRef(configPath string) string {
 	tok := readRawAPIToken(configPath)
 	if envRefRe.MatchString(tok) {
 		return tok
+	}
+	return ""
+}
+
+// RawTailscaleAuthKeyEnvRef returns the raw http.tailscale.authKey string if it
+// contains an unexpanded `${VAR}` environment reference, or empty string otherwise.
+func RawTailscaleAuthKeyEnvRef(configPath string) string {
+	if configPath == "" {
+		return ""
+	}
+	raw, err := os.ReadFile(configPath)
+	if err != nil {
+		return ""
+	}
+	var doc rawTokenDoc
+	if json.Unmarshal(raw, &doc) != nil || doc.HTTP.Tailscale == nil {
+		return ""
+	}
+	ak := strings.TrimSpace(doc.HTTP.Tailscale.AuthKey)
+	if envRefRe.MatchString(ak) {
+		return ak
 	}
 	return ""
 }

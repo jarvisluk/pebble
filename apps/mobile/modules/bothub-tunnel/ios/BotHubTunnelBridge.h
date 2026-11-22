@@ -8,6 +8,9 @@ extern "C" {
 extern char* BothubStartTunnel(char* link, char* token);
 extern void BothubStopTunnel(void);
 extern void BothubFreeString(char* p);
+extern char* BothubTailscaleStart(char* stateDir, char* hostname, char* controlUrl, char* authKey);
+extern char* BothubTailscaleStatus(int includePeers);
+extern char* BothubTailscaleLogout(void);
 
 #ifdef __cplusplus
 }

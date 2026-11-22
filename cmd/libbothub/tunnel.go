@@ -27,10 +27,11 @@ var (
 )
 
 type tunnelInstance struct {
-	cancel context.CancelFunc
-	done   chan struct{}
-	url    string
-	token  string
+	cancel      context.CancelFunc
+	done        chan struct{}
+	url         string
+	token       string
+	isTailscale bool
 }
 
 func startTunnelJSON(rawLink, explicitToken string) string {
@@ -45,7 +46,15 @@ func startTunnelJSON(rawLink, explicitToken string) string {
 
 func startTunnelInternal(rawLink, explicitToken string) (string, string, error) {
 	cleanLink, fragTok := tunnel.ExtractTokenFromLink(rawLink)
-	if _, _, err := tunnel.ParseLink(cleanLink); err != nil {
+	isTailscale := strings.HasPrefix(strings.ToLower(cleanLink), "tailscale://")
+	var tsTarget string
+	if isTailscale {
+		var err error
+		tsTarget, err = tunnel.ParseTailscaleLink(cleanLink)
+		if err != nil {
+			return "", "", err
+		}
+	} else if _, _, err := tunnel.ParseLink(cleanLink); err != nil {
 		return "", "", err
 	}
 	tok := strings.TrimSpace(explicitToken)
@@ -56,10 +65,29 @@ func startTunnelInternal(rawLink, explicitToken string) (string, string, error) 
 	stopTunnelInternal()
 
 	ctx, cancel := context.WithCancel(context.Background())
-	dial, closeClient, err := tunnel.Connect(ctx, cleanLink)
-	if err != nil {
-		cancel()
-		return "", "", err
+	var (
+		dial        func(context.Context) (net.Conn, error)
+		closeClient func() error
+	)
+	if isTailscale {
+		waitCtx, waitCancel := context.WithTimeout(ctx, 25*time.Second)
+		_, err := dialTailscaleCheck(waitCtx)
+		waitCancel()
+		if err != nil {
+			cancel()
+			return "", "", err
+		}
+		dial = func(dctx context.Context) (net.Conn, error) {
+			return dialTailscale(dctx, tsTarget)
+		}
+		closeClient = func() error { return nil }
+	} else {
+		var err error
+		dial, closeClient, err = tunnel.Connect(ctx, cleanLink)
+		if err != nil {
+			cancel()
+			return "", "", err
+		}
 	}
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -97,10 +125,11 @@ func startTunnelInternal(rawLink, explicitToken string) (string, string, error) 
 
 	done := make(chan struct{})
 	inst := &tunnelInstance{
-		cancel: cancel,
-		done:   done,
-		url:    localURL,
-		token:  tok,
+		cancel:      cancel,
+		done:        done,
+		url:         localURL,
+		token:       tok,
+		isTailscale: isTailscale,
 	}
 
 	tunnelMu.Lock()
@@ -141,4 +170,27 @@ func stopTunnelInternal() {
 	case <-inst.done:
 	case <-time.After(3 * time.Second):
 	}
+}
+
+func stopTailscaleTunnelIfActive() {
+	tunnelMu.Lock()
+	inst := active
+	isTS := inst != nil && inst.isTailscale
+	tunnelMu.Unlock()
+	if isTS {
+		stopTunnelInternal()
+	}
+}
+
+func dialTailscaleCheck(ctx context.Context) (*tunnel.TailscaleNode, error) {
+	tsMu.Lock()
+	node := tsNode
+	tsMu.Unlock()
+	if node == nil {
+		return nil, errors.New("tailscale is not bound")
+	}
+	if err := node.WaitRunning(ctx); err != nil {
+		return nil, err
+	}
+	return node, nil
 }

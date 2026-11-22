@@ -1,16 +1,25 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
-import { AppState } from 'react-native';
+import { AppState, Linking } from 'react-native';
 
-import { startTunnel, stopTunnel } from '../modules/bothub-tunnel';
+import {
+  isNativeTunnelAvailable,
+  startTunnel,
+  stopTunnel,
+  tailscaleLogout,
+  tailscaleStart,
+  tailscaleStatus,
+  type MobileTailscaleState,
+} from '../modules/bothub-tunnel';
 import { apiRequest, connectSSE, normalizeAddress, UnauthorizedError } from './api';
 import { tStatic, type ResolvedLang } from './i18n';
-import { loadSavedServers, saveServers } from './storage';
+import { loadSavedServers, loadTailscaleBindPref, saveServers, saveTailscaleBindPref } from './storage';
 import type {
   BotDetail,
   BotStatus,
   ChatMessage,
   DesktopFrame,
   DesktopTarget,
+  HostTailscaleStatus,
   MagpieMemoryList,
   NodeInfo,
   PendingQuestion,
@@ -77,6 +86,7 @@ interface HubContextValue {
   baseURL: string;
   authToken: string;
   isTailcat: boolean;
+  isTailscale: boolean;
   online: boolean;
   bots: BotStatus[];
   msgs: Record<string, ChatMessage[]>;
@@ -87,6 +97,10 @@ interface HubContextValue {
   models: Record<string, string[]>;
   nodes: NodeInfo[];
   tailcat: TailcatStatus | null;
+  mobileTailscale: MobileTailscaleState | null;
+  hostTailscale: HostTailscaleStatus | null;
+  tsBinding: boolean;
+  tsControlUrl: string;
   takeovers: TakeoverRequest[];
   questions: PendingQuestion[];
   desktopTargets: DesktopTarget[];
@@ -130,6 +144,10 @@ interface HubContextValue {
   setDesktopWorker: (harness: string, model: string) => Promise<SettingsData>;
   refreshNodes: () => Promise<void>;
   refreshTailcat: () => Promise<TailcatStatus>;
+  refreshHostTailscale: () => Promise<HostTailscaleStatus>;
+  refreshMobileTailscale: (includePeers?: boolean) => Promise<MobileTailscaleState>;
+  bindTailscale: (opts?: { authKey?: string; controlUrl?: string }) => Promise<MobileTailscaleState>;
+  logoutTailscale: () => Promise<void>;
   refreshDesktopTargets: () => Promise<DesktopTarget[]>;
   fetchDesktopState: (target: string) => Promise<{
     screen: ScreenState;
@@ -153,6 +171,7 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
   const [baseURL, setBaseURL] = useState('');
   const [authToken, setAuthToken] = useState('');
   const [isTailcat, setIsTailcat] = useState(false);
+  const [isTailscale, setIsTailscale] = useState(false);
   const [online, setOnline] = useState(false);
 
   const [bots, setBots] = useState<BotStatus[]>([]);
@@ -164,6 +183,14 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
   const [models, setModels] = useState<Record<string, string[]>>({});
   const [nodes, setNodes] = useState<NodeInfo[]>([]);
   const [tailcat, setTailcat] = useState<TailcatStatus | null>(null);
+  const [mobileTailscale, setMobileTailscale] = useState<MobileTailscaleState | null>(null);
+  const [hostTailscale, setHostTailscale] = useState<HostTailscaleStatus | null>(null);
+  const [tsBinding, setTsBinding] = useState(false);
+  const [tsControlUrl, setTsControlUrl] = useState('');
+  const tsControlUrlRef = useRef('');
+  const mobileTsRef = useRef<MobileTailscaleState | null>(null);
+  tsControlUrlRef.current = tsControlUrl;
+  mobileTsRef.current = mobileTailscale;
   const [takeovers, setTakeovers] = useState<TakeoverRequest[]>([]);
   const [questions, setQuestions] = useState<PendingQuestion[]>([]);
   const [desktopTargets, setDesktopTargets] = useState<DesktopTarget[]>([]);
@@ -307,7 +334,21 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
       let resolvedURL = norm.cleanAddress;
 
       try {
-        if (norm.isTailcat) {
+        if (norm.isTailscale) {
+          if (mobileTsRef.current?.state !== 'running') {
+            const st = await tailscaleStart({ controlUrl: tsControlUrlRef.current });
+            setMobileTailscale(st);
+            if (st.state === 'needs_login' && st.authUrl) {
+              void Linking.openURL(st.authUrl).catch(() => {});
+            }
+          }
+          const tRes = await startTunnel(norm.cleanAddress, resolvedToken);
+          if (seq !== connSeqRef.current) return;
+          resolvedURL = tRes.url;
+          if (tRes.token && !resolvedToken) {
+            resolvedToken = tRes.token;
+          }
+        } else if (norm.isTailcat) {
           const tRes = await startTunnel(norm.cleanAddress, resolvedToken);
           if (seq !== connSeqRef.current) return;
           resolvedURL = tRes.url;
@@ -330,6 +371,7 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
         }
 
         setIsTailcat(norm.isTailcat);
+        setIsTailscale(norm.isTailscale);
         setBaseURL(resolvedURL);
         setAuthToken(resolvedToken);
 
@@ -375,6 +417,9 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
         apiRequest<TailcatStatus>(resolvedURL, resolvedToken, '/api/tailcat')
           .then((t) => seq === connSeqRef.current && setTailcat(t))
           .catch(() => {});
+        apiRequest<HostTailscaleStatus>(resolvedURL, resolvedToken, '/api/tailscale')
+          .then((ts) => seq === connSeqRef.current && setHostTailscale(ts))
+          .catch(() => {});
         apiRequest<{ items: TakeoverRequest[] }>(resolvedURL, resolvedToken, '/api/desktop/takeovers')
           .then((t) => seq === connSeqRef.current && setTakeovers(t.items || []))
           .catch(() => {});
@@ -388,6 +433,7 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
         setBaseURL(resolvedURL);
         setAuthToken(resolvedToken);
         setIsTailcat(norm.isTailcat);
+        setIsTailscale(norm.isTailscale);
         if (err instanceof UnauthorizedError) {
           setConnState('unauthorized');
           setConnError(err.message);
@@ -403,8 +449,20 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
   // Initial load from secure store
   useEffect(() => {
     let mounted = true;
-    loadSavedServers().then(({ servers: saved, activeId }) => {
+    Promise.all([loadSavedServers(), loadTailscaleBindPref()]).then(([{ servers: saved, activeId }, tsPref]) => {
       if (!mounted) return;
+      if (tsPref.controlUrl) setTsControlUrl(tsPref.controlUrl);
+      if (tsPref.bound && isNativeTunnelAvailable()) {
+        void tailscaleStart({ controlUrl: tsPref.controlUrl || '' })
+          .then((st) => {
+            if (!mounted) return;
+            setMobileTailscale(st);
+            if (st.state === 'running') {
+              void tailscaleStatus(true).then((full) => mounted && setMobileTailscale(full)).catch(() => {});
+            }
+          })
+          .catch(() => {});
+      }
       setServers(saved);
       const target = saved.find((s) => s.id === activeId) || saved[0] || null;
       setActiveServerId(target?.id || null);
@@ -842,6 +900,64 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
     return t;
   }, []);
 
+  const refreshHostTailscale = useCallback(async () => {
+    const ts = await apiRequest<HostTailscaleStatus>(baseURLRef.current, authTokenRef.current, '/api/tailscale');
+    setHostTailscale(ts);
+    return ts;
+  }, []);
+
+  const refreshMobileTailscale = useCallback(async (includePeers = true) => {
+    const st = await tailscaleStatus(includePeers);
+    setMobileTailscale(st);
+    if (st.state === 'running') {
+      await saveTailscaleBindPref({ bound: true, controlUrl: tsControlUrlRef.current });
+    }
+    return st;
+  }, []);
+
+  const bindTailscale = useCallback(async (opts: { authKey?: string; controlUrl?: string } = {}) => {
+    setTsBinding(true);
+    try {
+      const ctrl = (opts.controlUrl || '').trim();
+      const key = (opts.authKey || '').trim();
+      let st = await tailscaleStart({ controlUrl: ctrl, authKey: key });
+      setMobileTailscale(st);
+      let openedAuth = '';
+      if (st.state === 'needs_login' && st.authUrl) {
+        openedAuth = st.authUrl;
+        void Linking.openURL(st.authUrl).catch(() => {});
+      }
+      const deadline = Date.now() + 180000;
+      while ((st.state === 'starting' || st.state === 'needs_login') && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 1500));
+        st = await tailscaleStatus(true);
+        setMobileTailscale(st);
+        if (st.state === 'needs_login' && st.authUrl && st.authUrl !== openedAuth) {
+          openedAuth = st.authUrl;
+          void Linking.openURL(st.authUrl).catch(() => {});
+        }
+      }
+      if (st.state === 'running') {
+        setTsControlUrl(ctrl);
+        await saveTailscaleBindPref({ bound: true, controlUrl: ctrl });
+        if (!st.peers || st.peers.length === 0) {
+          st = await tailscaleStatus(true);
+          setMobileTailscale(st);
+        }
+      }
+      return st;
+    } finally {
+      setTsBinding(false);
+    }
+  }, []);
+
+  const logoutTailscale = useCallback(async () => {
+    await tailscaleLogout();
+    setMobileTailscale(null);
+    setTsControlUrl('');
+    await saveTailscaleBindPref(null);
+  }, []);
+
   const refreshDesktopTargets = useCallback(async () => {
     const d = await apiRequest<{ targets: DesktopTarget[]; takeovers: TakeoverRequest[] }>(
       baseURLRef.current,
@@ -916,6 +1032,7 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
         baseURL,
         authToken,
         isTailcat,
+        isTailscale,
         online,
         bots,
         msgs,
@@ -926,6 +1043,10 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
         models,
         nodes,
         tailcat,
+        mobileTailscale,
+        hostTailscale,
+        tsBinding,
+        tsControlUrl,
         takeovers,
         questions,
         desktopTargets,
@@ -963,6 +1084,10 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
         setDesktopWorker,
         refreshNodes,
         refreshTailcat,
+        refreshHostTailscale,
+        refreshMobileTailscale,
+        bindTailscale,
+        logoutTailscale,
         refreshDesktopTargets,
         fetchDesktopState,
         fetchDesktopFrame,

@@ -125,6 +125,23 @@ export interface TailcatStatus {
   apiToken?: string;
 }
 
+export interface TailscaleStatus {
+  enabled?: boolean;
+  state: 'disabled' | 'starting' | 'needs_login' | 'running' | 'error' | string;
+  authUrl?: string;
+  hostname?: string;
+  dnsName?: string;
+  ip?: string;
+  tailnet?: string;
+  link?: string;
+  controlUrl?: string;
+  error?: string;
+  hasToken?: boolean;
+  tokenEnvRef?: string;
+  authKeyEnvRef?: string;
+  apiToken?: string;
+}
+
 export interface MemoryItem {
   id: string;
   kind?: string;
