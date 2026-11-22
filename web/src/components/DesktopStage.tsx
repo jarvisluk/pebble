@@ -54,6 +54,9 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
   const [resLabel, setResLabel] = useState('—');
   const [jpegSrc, setJpegSrc] = useState('');
   const [screen, setScreen] = useState<ScreenState>({ target: 'local', owner: 'idle' });
+  const [hostStatus, setHostStatus] = useState<DesktopHostStatus | null>(null);
+  const [setupBusy, setSetupBusy] = useState(false);
+  const [installCmdHint, setInstallCmdHint] = useState('');
 
   const stageRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -215,6 +218,8 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
         takeovers?: TakeoverRequest[];
       }>(`/api/desktop/state?target=${encodeURIComponent(targetRef.current)}`);
       hostStatusRef.current = st.status || null;
+      setHostStatus(st.status || null);
+      setInstallCmdHint(st.status?.installCommand || '');
       setScreen(st.screen || { target: targetRef.current, owner: 'idle' });
       if (st.takeovers) onTakeoversChange(st.takeovers);
       if (st.status?.screenRecording === 'denied') {
@@ -222,6 +227,15 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
         setCenterText(
           t('deskScreenRecordingDenied') +
             (st.status?.accessibility === 'denied' ? t('deskAccessibilityHint') : '')
+        );
+        setShowRetry(true);
+        setShowCenterMsg(true);
+        return;
+      }
+      if (st.status && st.status.supported === false && st.status.installable) {
+        setMode('error');
+        setCenterText(
+          t('deskMissingDepsHint', { deps: (st.status.missingDeps || []).join(', ') || 'Xvfb, openbox' })
         );
         setShowRetry(true);
         setShowCenterMsg(true);
@@ -566,6 +580,35 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
 
         <div id="deskCenterMsg" className="d-center-msg" hidden={!showCenterMsg}>
           <div id="deskCenterText">{centerText}</div>
+          {hostStatus?.installable && hostStatus?.supported === false && (
+            <div className="desk-setup-box">
+              <button
+                type="button"
+                id="deskSetupBtn"
+                className="btn go"
+                disabled={setupBusy}
+                onClick={async () => {
+                  setSetupBusy(true);
+                  setCenterText(t('deskInstalling'));
+                  try {
+                    await api('/api/desktop/setup', { method: 'POST', body: { target: targetRef.current } });
+                    void startStream();
+                  } catch (err) {
+                    setCenterText(err instanceof Error ? err.message : t('deskConnectFailed'));
+                  } finally {
+                    setSetupBusy(false);
+                  }
+                }}
+              >
+                {setupBusy ? t('deskInstalling') : t('deskSetupBtn')}
+              </button>
+              {installCmdHint && (
+                <code className="desk-setup-cmd">
+                  {installCmdHint}
+                </code>
+              )}
+            </div>
+          )}
           <button type="button" id="deskRetryBtn" className="btn" hidden={!showRetry} onClick={() => void startStream()}>
             {t('retryConnect')}
           </button>
@@ -635,12 +678,24 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
               <dd id="ddRes">{resLabel || '—'}</dd>
               <dt>{t('deskLockState')}</dt>
               <dd id="ddLock">{screen?.owner === 'human' ? t('deskHumanCtrl') : t('idle')}</dd>
+              {hostStatus?.virtual && (
+                <>
+                  <dt>{t('deskPowerState')}</dt>
+                  <dd id="ddPower">
+                    {hostStatus.powerState === 'frozen'
+                      ? t('deskPowerFrozen')
+                      : hostStatus.powerState === 'stopped'
+                        ? t('deskPowerStopped')
+                        : t('deskPowerRunning')}
+                  </dd>
+                </>
+              )}
             </dl>
           </div>
 
           {activeTakeover && (
             <div id="deskAlert" className="d-pill top-alert takeover">
-              <span id="deskAlertText" style={{ minWidth: 0, wordBreak: 'break-word' }}>
+              <span id="deskAlertText" className="text-wrap-word">
                 {t('deskAlertTakeover', { reason: activeTakeover.reason })}
               </span>
               <button type="button" id="deskAlertBtn" className="btn go" onClick={() => void onResolveTakeover(activeTakeover)}>
@@ -695,6 +750,38 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
             >
               {zoom1 ? '1:1' : t('fitZoom')}
             </button>
+            {hostStatus?.virtual && (
+              <button
+                type="button"
+                id="deskPowerBtn"
+                className="d-btn"
+                title={hostStatus.powerState === 'running' ? t('deskSleepBtn') : t('deskWakeBtn')}
+                onClick={async () => {
+                  const act = hostStatus.powerState === 'running' ? 'freeze' : 'wake';
+                  try {
+                    const res = await api<{ status?: DesktopHostStatus }>('/api/desktop/power', {
+                      method: 'POST',
+                      body: { target: targetRef.current, action: act },
+                    });
+                    if (res.status) {
+                      hostStatusRef.current = res.status;
+                      setHostStatus(res.status);
+                    }
+                    if (act === 'freeze') {
+                      stopStreams();
+                      setMode('sleeping');
+                      setCenterText(t('deskSleeping'));
+                      setShowRetry(false);
+                      setShowCenterMsg(true);
+                    } else {
+                      void startStream();
+                    }
+                  } catch {}
+                }}
+              >
+                {hostStatus.powerState === 'running' ? t('deskSleepBtn') : t('deskWakeBtn')}
+              </button>
+            )}
             <button
               type="button"
               id="deskRefreshBtn"

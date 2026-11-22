@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 
+	"bot-hub/internal/desktop"
 	"bot-hub/internal/mcp"
 )
 
@@ -790,7 +791,7 @@ func runNodeCmd(ctx context.Context, args []string, cwd string, stdout, stderr i
 
 func runDesktopCmd(ctx context.Context, args []string, cwd string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: bot-hub desktop <task|takeover> [flags]")
+		return errors.New("usage: bot-hub desktop <task|takeover|setup|power> [flags]")
 	}
 	action := args[0]
 	rest := args[1:]
@@ -857,7 +858,65 @@ func runDesktopCmd(ctx context.Context, args []string, cwd string, stdout, stder
 		}
 		return writeJSONOut(stdout, body)
 
+	case "setup":
+		fs := newSubFlagSet("desktop setup", stderr, &co)
+		nodeID := fs.String("node", "", "target desktop ('local' or node ID)")
+		if err := fs.Parse(rest); err != nil {
+			return err
+		}
+		target := strings.TrimSpace(*nodeID)
+		if target == "" || strings.EqualFold(target, "local") {
+			eng := desktop.NewEngine()
+			defer eng.Close()
+			res, err := eng.Setup(ctx)
+			if err != nil {
+				return err
+			}
+			b, err := json.Marshal(res)
+			if err != nil {
+				return err
+			}
+			if err := writeJSONOut(stdout, b); err != nil {
+				return err
+			}
+			if res != nil && !res.OK {
+				return errors.New(res.Error)
+			}
+			return nil
+		}
+		c := resolveClient(co, cwd)
+		body, err := c.DoJSON(ctx, http.MethodPost, "/api/desktop/setup", map[string]any{
+			"target": target,
+		})
+		if err != nil {
+			return err
+		}
+		return writeJSONOut(stdout, body)
+
+	case "power":
+		fs := newSubFlagSet("desktop power", stderr, &co)
+		nodeID := fs.String("node", "", "target desktop ('local' or node ID)")
+		action := fs.String("action", "", "power action: wake|freeze|stop|keep_awake|allow_sleep")
+		if err := fs.Parse(rest); err != nil {
+			return err
+		}
+		if strings.TrimSpace(*action) == "" && fs.NArg() > 0 {
+			*action = fs.Arg(0)
+		}
+		if strings.TrimSpace(*action) == "" {
+			return errors.New("--action is required (wake|freeze|stop|keep_awake|allow_sleep)")
+		}
+		c := resolveClient(co, cwd)
+		body, err := c.DoJSON(ctx, http.MethodPost, "/api/desktop/power", map[string]any{
+			"target": *nodeID,
+			"action": *action,
+		})
+		if err != nil {
+			return err
+		}
+		return writeJSONOut(stdout, body)
+
 	default:
-		return fmt.Errorf("unknown desktop action %q (expected task|takeover)", action)
+		return fmt.Errorf("unknown desktop action %q (expected task|takeover|setup|power)", action)
 	}
 }

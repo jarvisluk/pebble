@@ -74,7 +74,10 @@ JSON.stringify({x: b.origin.x, y: b.origin.y, width: b.size.width, height: b.siz
 	}
 }
 
-func captureFallbackFrame(ctx context.Context, windowID string, maxDim, quality int) (*FrameResult, error) {
+func captureFallbackFrame(ctx context.Context, extraEnv []string, windowID string, maxDim, quality int) (*FrameResult, error) {
+	if runtime.GOOS == "linux" {
+		return captureLinuxFallbackFrame(ctx, extraEnv, windowID, maxDim, quality)
+	}
 	if maxDim <= 0 {
 		maxDim = 1440
 	}
@@ -193,7 +196,10 @@ $bmp.Dispose()
 	}
 }
 
-func listFallbackWindows(ctx context.Context) ([]WindowInfo, error) {
+func listFallbackWindows(ctx context.Context, extraEnv []string) ([]WindowInfo, error) {
+	if runtime.GOOS == "linux" {
+		return listLinuxFallbackWindows(ctx, extraEnv)
+	}
 	if runtime.GOOS != "darwin" {
 		return nil, nil
 	}
@@ -226,7 +232,10 @@ JSON.stringify(out);`
 	return res, nil
 }
 
-func focusFallbackWindow(ctx context.Context, app, _ string) error {
+func focusFallbackWindow(ctx context.Context, extraEnv []string, app, windowID string) error {
+	if runtime.GOOS == "linux" {
+		return focusLinuxFallbackWindow(ctx, extraEnv, app, windowID)
+	}
 	app = strings.TrimSpace(app)
 	if app == "" {
 		return nil
@@ -240,7 +249,10 @@ func focusFallbackWindow(ctx context.Context, app, _ string) error {
 	}
 }
 
-func injectFallbackInput(ctx context.Context, ev UnifiedInput) error {
+func injectFallbackInput(ctx context.Context, extraEnv []string, ev UnifiedInput) error {
+	if runtime.GOOS == "linux" {
+		return injectLinuxFallbackInput(ctx, extraEnv, ev)
+	}
 	if runtime.GOOS == "darwin" {
 		return injectMacOSInput(ctx, ev)
 	}
@@ -257,7 +269,7 @@ func injectMacOSInput(ctx context.Context, ev UnifiedInput) error {
 		y = *ev.Y
 	}
 	if ev.App != "" && kind != "move" {
-		_ = focusFallbackWindow(ctx, ev.App, ev.WindowID)
+		_ = focusFallbackWindow(ctx, nil, ev.App, ev.WindowID)
 	}
 
 	switch kind {

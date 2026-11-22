@@ -283,3 +283,31 @@ func TestDesktopWorkerConfigAndHasDesktopModel(t *testing.T) {
 	}
 }
 
+func TestDesktopConfigDefaults(t *testing.T) {
+	var d DesktopConfig
+	if d.EffectiveMode() != "auto" {
+		t.Fatalf("expected default mode auto, got %q", d.EffectiveMode())
+	}
+	if d.EffectiveResolution() != "1440x900" {
+		t.Fatalf("expected default resolution 1440x900, got %q", d.EffectiveResolution())
+	}
+	if d.EffectiveIdleFreezeMinutes() != 5 || d.EffectiveIdleStopMinutes() != 30 {
+		t.Fatalf("unexpected default idle timers: freeze=%d stop=%d", d.EffectiveIdleFreezeMinutes(), d.EffectiveIdleStopMinutes())
+	}
+	if !d.ShouldStopOnlyWhenNoWindows() {
+		t.Fatal("expected ShouldStopOnlyWhenNoWindows=true by default")
+	}
+
+	disabled := false
+	d = DesktopConfig{
+		Mode:                  "virtual",
+		Resolution:            "1920x1080",
+		IdleFreezeMinutes:     -1,
+		IdleStopMinutes:       10,
+		StopOnlyWhenNoWindows: &disabled,
+	}
+	if d.EffectiveMode() != "virtual" || d.EffectiveResolution() != "1920x1080" || d.EffectiveIdleFreezeMinutes() != 0 || d.EffectiveIdleStopMinutes() != 10 || d.ShouldStopOnlyWhenNoWindows() {
+		t.Fatalf("unexpected custom DesktopConfig values: %+v", d)
+	}
+}
+

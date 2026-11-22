@@ -52,6 +52,7 @@ type IsolatedOptions struct {
 	Model      string
 	MCPRole    string
 	TimeoutSec int
+	ExtraEnv   map[string]string
 	OnToolUse  func(toolName string)
 }
 
@@ -230,12 +231,20 @@ func New(cfg *config.HubConfig, store *state.Store, messages *state.MessageStore
 	if reg == nil {
 		reg = harness.NewDefaultRegistry(cfg)
 	}
+	deskCfg := desktop.VirtualConfig{
+		Mode:                  cfg.Desktop.EffectiveMode(),
+		AutoInstall:           cfg.Desktop.AutoInstall,
+		Resolution:            cfg.Desktop.EffectiveResolution(),
+		IdleFreeze:            time.Duration(cfg.Desktop.EffectiveIdleFreezeMinutes()) * time.Minute,
+		IdleStop:              time.Duration(cfg.Desktop.EffectiveIdleStopMinutes()) * time.Minute,
+		StopOnlyWhenNoWindows: cfg.Desktop.ShouldStopOnlyWhenNoWindows(),
+	}
 	h := &Hub{
-		cfg:           cfg,
-		store:         store,
-		messages:      messages,
-		registry:      reg,
-		localDesk:     desktop.NewEngine(),
+		cfg:                cfg,
+		store:              store,
+		messages:           messages,
+		registry:           reg,
+		localDesk:          desktop.NewEngineWithConfig(deskCfg),
 		lanes:              make(map[string]*botLane, len(cfg.Bots)),
 		order:              make([]string, 0, len(cfg.Bots)),
 		pendingReload:      make(map[string]bool),
@@ -259,6 +268,14 @@ func New(cfg *config.HubConfig, store *state.Store, messages *state.MessageStore
 			h.broadcast(Event{Type: "takeover", Payload: map[string]any{"items": items}})
 		},
 	)
+	h.localDesk.SetHasTakeover(func() bool {
+		for _, item := range h.desktop.ListTakeovers() {
+			if item.Target == "local" || item.Target == "" {
+				return true
+			}
+		}
+		return false
+	})
 	for _, bot := range cfg.Bots {
 		h.startLaneLocked(bot)
 	}
@@ -1997,6 +2014,11 @@ func (h *Hub) RunIsolated(ctx context.Context, botID, prompt string, opts Isolat
 		}
 		mcpEnv["BOT_HUB_MCP_ROLE"] = role
 	}
+	for k, v := range opts.ExtraEnv {
+		if k != "" && v != "" {
+			extraEnv[k] = v
+		}
+	}
 
 	runCtx, cancel := context.WithCancel(ctx)
 	cancelID := h.registerIsolatedCancel(bot.ID, cancel)
@@ -2604,6 +2626,21 @@ func (h *Hub) RunDesktopTask(ctx context.Context, req DesktopTaskRequest) (*harn
 		h.desktopTaskMu.Unlock()
 	}()
 
+	var taskEnv map[string]string
+	if target == "local" && h.localDesk != nil {
+		release := h.localDesk.AcquireTaskLease()
+		defer release()
+		_ = h.localDesk.PrepareForTask(ctx)
+		if envs := h.localDesk.Env(); len(envs) > 0 {
+			taskEnv = make(map[string]string, len(envs))
+			for _, kv := range envs {
+				if k, v, ok := strings.Cut(kv, "="); ok {
+					taskEnv[k] = v
+				}
+			}
+		}
+	}
+
 	deskHarness, deskModel := h.DesktopWorkerSnapshot()
 	var lines []string
 	lines = append(lines,
@@ -2631,6 +2668,7 @@ func (h *Hub) RunDesktopTask(ctx context.Context, req DesktopTaskRequest) (*harn
 		Model:      deskModel,
 		MCPRole:    "computer_use",
 		TimeoutSec: req.TimeoutSec,
+		ExtraEnv:   taskEnv,
 		OnToolUse: func(toolName string) {
 			if toolName == "" {
 				return

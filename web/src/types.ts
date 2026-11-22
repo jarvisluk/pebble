@@ -192,6 +192,9 @@ export interface DesktopTarget {
   local?: boolean;
   supported?: boolean;
   webrtcAvailable?: boolean;
+  virtual?: boolean;
+  powerState?: 'running' | 'frozen' | 'stopped' | string;
+  installable?: boolean;
   screen?: ScreenState;
 }
 
@@ -210,6 +213,13 @@ export interface DesktopHostStatus {
   logicalY?: number;
   logicalWidth?: number;
   logicalHeight?: number;
+  virtual?: boolean;
+  powerState?: 'running' | 'frozen' | 'stopped' | string;
+  keepAwake?: boolean;
+  installable?: boolean;
+  missingDeps?: string[];
+  installCommand?: string;
+  displayServer?: string;
 }
 
 export interface DesktopFrame {

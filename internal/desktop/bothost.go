@@ -103,6 +103,7 @@ type botHostClient struct {
 	pending map[int64]chan rpcResponse
 	nextID  atomic.Int64
 	closed  bool
+	envFn   func() []string
 }
 
 func newBotHostClient() *botHostClient {
@@ -147,6 +148,11 @@ func (c *botHostClient) ensureStarted() (io.WriteCloser, error) {
 		return nil, errors.New("bot-host unavailable")
 	}
 	cmd := exec.Command(bin, "--stdio")
+	if c.envFn != nil {
+		if extra := c.envFn(); len(extra) > 0 {
+			cmd.Env = mergeEnv(os.Environ(), extra)
+		}
+	}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err

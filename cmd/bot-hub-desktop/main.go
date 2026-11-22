@@ -596,7 +596,12 @@ func shellEnv() {
 	}
 	shell := os.Getenv("SHELL")
 	if shell == "" {
-		shell = "/bin/zsh"
+		for _, cand := range []string{"/bin/zsh", "/bin/bash", "/bin/sh"} {
+			if _, err := os.Stat(cand); err == nil {
+				shell = cand
+				break
+			}
+		}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

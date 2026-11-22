@@ -13,16 +13,23 @@ import (
 
 // HostStatus describes the desktop capture/input capabilities and primary bounds of a machine.
 type HostStatus struct {
-	Platform        string  `json:"platform"`
-	Supported       bool    `json:"supported"`
-	WebRTCAvailable bool    `json:"webrtcAvailable"`
-	Backend         string  `json:"backend"`
-	ScreenRecording string  `json:"screenRecording,omitempty"`
-	Accessibility   string  `json:"accessibility,omitempty"`
-	LogicalX        float64 `json:"logicalX"`
-	LogicalY        float64 `json:"logicalY"`
-	LogicalWidth    float64 `json:"logicalWidth"`
-	LogicalHeight   float64 `json:"logicalHeight"`
+	Platform        string   `json:"platform"`
+	Supported       bool     `json:"supported"`
+	WebRTCAvailable bool     `json:"webrtcAvailable"`
+	Backend         string   `json:"backend"`
+	ScreenRecording string   `json:"screenRecording,omitempty"`
+	Accessibility   string   `json:"accessibility,omitempty"`
+	LogicalX        float64  `json:"logicalX"`
+	LogicalY        float64  `json:"logicalY"`
+	LogicalWidth    float64  `json:"logicalWidth"`
+	LogicalHeight   float64  `json:"logicalHeight"`
+	Virtual         bool     `json:"virtual,omitempty"`
+	PowerState      string   `json:"powerState,omitempty"`
+	KeepAwake       bool     `json:"keepAwake,omitempty"`
+	Installable     bool     `json:"installable,omitempty"`
+	MissingDeps     []string `json:"missingDeps,omitempty"`
+	InstallCommand  string   `json:"installCommand,omitempty"`
+	DisplayServer   string   `json:"displayServer,omitempty"`
 }
 
 // WindowInfo describes an open desktop window.
@@ -84,16 +91,29 @@ var ErrScreenRecordingDenied = errors.New("缺少 macOS 屏幕录制权限，请
 // Engine drives local desktop capture, WebRTC streaming, window inspection, and input injection,
 // preferring opencode-remote-desktop's native `bot-host` sidecar with OS fallback when absent.
 type Engine struct {
-	host      *botHostClient
-	wakeMu    sync.Mutex
-	lastWake  time.Time
-	permMu    sync.Mutex
-	srDenied  bool
-	srChecked time.Time
+	host         *botHostClient
+	vm           *virtualManager
+	wakeMu       sync.Mutex
+	lastWake     time.Time
+	permMu       sync.Mutex
+	srDenied     bool
+	srChecked    time.Time
+	streamMu     sync.Mutex
+	streamLease  func()
 }
 
 func NewEngine() *Engine {
-	return &Engine{host: newBotHostClient()}
+	return NewEngineWithConfig(VirtualConfig{})
+}
+
+func NewEngineWithConfig(cfg VirtualConfig) *Engine {
+	vm := newVirtualManager(cfg, nil)
+	host := newBotHostClient()
+	host.envFn = vm.Env
+	return &Engine{
+		host: host,
+		vm:   vm,
+	}
 }
 
 func (e *Engine) recordScreenRecording(state string) {
@@ -156,22 +176,134 @@ func (e *Engine) wakeMacDisplay(wait bool) bool {
 }
 
 func (e *Engine) Close() {
-	if e != nil && e.host != nil {
+	if e == nil {
+		return
+	}
+	e.releaseStreamLease()
+	if e.host != nil {
 		e.host.Close()
+	}
+	if e.vm != nil {
+		e.vm.Close()
+	}
+}
+
+func (e *Engine) SetHasTakeover(fn func() bool) {
+	if e != nil && e.vm != nil {
+		e.vm.SetHasTakeover(fn)
+	}
+}
+
+func (e *Engine) AcquireTaskLease() func() {
+	if e != nil && e.vm != nil {
+		return e.vm.AcquireLease()
+	}
+	return func() {}
+}
+
+func (e *Engine) PrepareForTask(ctx context.Context) error {
+	return e.prepareActive(ctx)
+}
+
+func (e *Engine) Env() []string {
+	if e != nil && e.vm != nil {
+		return e.vm.Env()
+	}
+	return nil
+}
+
+func (e *Engine) Power(ctx context.Context, action string) (*HostStatus, error) {
+	if e == nil || e.vm == nil {
+		return nil, errors.New("desktop engine unavailable")
+	}
+	if strings.EqualFold(strings.TrimSpace(action), "stop") || strings.EqualFold(strings.TrimSpace(action), "freeze") {
+		e.releaseStreamLease()
+		if e.host != nil {
+			_ = e.host.Request(ctx, "stream.close", map[string]any{}, nil)
+		}
+	}
+	if err := e.vm.Power(ctx, action); err != nil {
+		return nil, err
+	}
+	return e.Status(ctx)
+}
+
+func (e *Engine) Setup(ctx context.Context) (*SetupResult, error) {
+	if e == nil || e.vm == nil {
+		return nil, errors.New("desktop engine unavailable")
+	}
+	return e.vm.Setup(ctx)
+}
+
+func (e *Engine) prepareActive(ctx context.Context) error {
+	if e == nil {
+		return nil
+	}
+	if e.vm != nil {
+		usedVirtual, err := e.vm.EnsureAwake(ctx)
+		if err != nil {
+			return err
+		}
+		if usedVirtual {
+			return nil
+		}
+	}
+	if runtime.GOOS == "linux" {
+		wakeLinuxNativeDisplay()
+	}
+	return nil
+}
+
+func (e *Engine) acquireStreamLease() {
+	if e == nil || e.vm == nil {
+		return
+	}
+	e.streamMu.Lock()
+	defer e.streamMu.Unlock()
+	if e.streamLease == nil {
+		e.streamLease = e.vm.AcquireLease()
+	}
+}
+
+func (e *Engine) releaseStreamLease() {
+	if e == nil {
+		return
+	}
+	e.streamMu.Lock()
+	rel := e.streamLease
+	e.streamLease = nil
+	e.streamMu.Unlock()
+	if rel != nil {
+		rel()
 	}
 }
 
 func (e *Engine) Status(ctx context.Context) (*HostStatus, error) {
 	b := fallbackBounds(ctx)
+	var vst VirtualStatus
+	if e.vm != nil {
+		vst = e.vm.Status()
+	}
+	linuxSupported := runtime.GOOS == "linux" && (e.host.Available() || (vst.UsingNative && hasAgentDesktop()) || (vst.Virtual && vst.VirtualReady && hasAgentDesktop()))
 	st := &HostStatus{
 		Platform:        runtime.GOOS,
-		Supported:       runtime.GOOS == "darwin" || runtime.GOOS == "windows" || e.host.Available(),
+		Supported:       runtime.GOOS == "darwin" || runtime.GOOS == "windows" || linuxSupported,
 		WebRTCAvailable: e.host.Available(),
 		Backend:         "fallback",
 		LogicalX:        b.X,
 		LogicalY:        b.Y,
 		LogicalWidth:    b.Width,
 		LogicalHeight:   b.Height,
+		Virtual:         vst.Virtual,
+		PowerState:      string(vst.PowerState),
+		KeepAwake:       vst.KeepAwake,
+		Installable:     vst.Installable,
+		MissingDeps:     vst.MissingDeps,
+		InstallCommand:  vst.InstallCommand,
+		DisplayServer:   vst.DisplayServer,
+	}
+	if runtime.GOOS == "linux" && hasAgentDesktop() && !e.host.Available() {
+		st.Backend = "agent-desktop"
 	}
 	if e.host.Available() {
 		type hostStatusPayload struct {
@@ -225,6 +357,9 @@ func (e *Engine) Status(ctx context.Context) (*HostStatus, error) {
 }
 
 func (e *Engine) Windows(ctx context.Context) ([]WindowInfo, error) {
+	if err := e.prepareActive(ctx); err != nil {
+		return []WindowInfo{}, err
+	}
 	if e.host.Available() {
 		if e.isScreenRecordingDenied(ctx) {
 			return []WindowInfo{}, nil
@@ -235,14 +370,20 @@ func (e *Engine) Windows(ctx context.Context) ([]WindowInfo, error) {
 		}
 		return list, nil
 	}
-	return listFallbackWindows(ctx)
+	return listFallbackWindows(ctx, e.Env())
 }
 
 func (e *Engine) Focus(ctx context.Context, app, windowID string) error {
-	return focusFallbackWindow(ctx, app, windowID)
+	if err := e.prepareActive(ctx); err != nil {
+		return err
+	}
+	return focusFallbackWindow(ctx, e.Env(), app, windowID)
 }
 
 func (e *Engine) Frame(ctx context.Context, windowID string, maxDim, quality int) (*FrameResult, error) {
+	if err := e.prepareActive(ctx); err != nil {
+		return nil, err
+	}
 	if e.isScreenRecordingDenied(ctx) {
 		return nil, ErrScreenRecordingDenied
 	}
@@ -296,15 +437,18 @@ func (e *Engine) Frame(ctx context.Context, windowID string, maxDim, quality int
 			}, nil
 		}
 	}
-	return captureFallbackFrame(ctx, windowID, maxDim, quality)
+	return captureFallbackFrame(ctx, e.Env(), windowID, maxDim, quality)
 }
 
 func (e *Engine) SendInput(ctx context.Context, ev UnifiedInput) error {
+	if err := e.prepareActive(ctx); err != nil {
+		return err
+	}
 	if e.host.Available() {
 		events, ok := toBotHostEvents(ev)
 		if ok {
 			if ev.App != "" && strings.ToLower(ev.Kind) != "move" {
-				_ = focusFallbackWindow(ctx, ev.App, ev.WindowID)
+				_ = focusFallbackWindow(ctx, e.Env(), ev.App, ev.WindowID)
 			}
 			var firstErr error
 			for _, item := range events {
@@ -318,10 +462,13 @@ func (e *Engine) SendInput(ctx context.Context, ev UnifiedInput) error {
 			}
 		}
 	}
-	return injectFallbackInput(ctx, ev)
+	return injectFallbackInput(ctx, e.Env(), ev)
 }
 
 func (e *Engine) StreamOffer(ctx context.Context, sdp, target string, fps, maxDim, bitrate int) (*StreamOfferResult, error) {
+	if err := e.prepareActive(ctx); err != nil {
+		return nil, err
+	}
 	if !e.host.Available() {
 		return nil, errors.New("bot-host unavailable; using JPEG stream")
 	}
@@ -357,10 +504,12 @@ func (e *Engine) StreamOffer(ctx context.Context, sdp, target string, fps, maxDi
 	if err != nil {
 		return nil, err
 	}
+	e.acquireStreamLease()
 	return &res, nil
 }
 
 func (e *Engine) StreamClose(ctx context.Context, session string) error {
+	e.releaseStreamLease()
 	if !e.host.Available() {
 		return nil
 	}

@@ -228,7 +228,7 @@ export const UnboxModal: React.FC<UnboxModalProps> = ({
   return (
     <div id="unboxDlg" className={`dlg-wrap${open ? ' open' : ''}`} aria-label={t('ubAria')}>
       <div className="dlg unbox">
-        <div className="dlg-h" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 0 }}>
+        <div className="dlg-h dlg-h-col">
           <div className="unbox-top">
             <div>
               <h3 id="ubTitle">{headerMeta.title}</h3>
@@ -343,7 +343,7 @@ export const UnboxModal: React.FC<UnboxModalProps> = ({
               <div id="ubMagpiePanel" className="note">
                 {!mp?.installed ? (
                   <>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+                    <div className="row-between row-wrap">
                       <span>{t('ubMagpieNotInstalledPlain', { label: hLabel })}</span>
                       <button type="button" id="ubRecheck2" className="mp" disabled={busy} onClick={() => void recheck()}>
                         {t('ubRecheck')}
@@ -369,15 +369,15 @@ export const UnboxModal: React.FC<UnboxModalProps> = ({
                   </>
                 ) : (
                   <>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <div className="row-between row-wrap">
+                      <div className="row-inline row-wrap">
                         <strong>Magpie</strong>
                         <span className={`mp ${mp.healthy ? 'ok' : 'bad'}`}>
                           {mp.healthy ? t('ubGatewayRunning') : t('ubGatewayNotStarted')}
                         </span>
                         <span className="mp">{t('ubProviderCount', { n: provs.length })}</span>
                       </div>
-                      <div style={{ display: 'flex', gap: 6 }}>
+                      <div className="row-inline-sm">
                         <button type="button" id="ubRecheck2" className="mp" disabled={busy} onClick={() => void recheck()}>
                           {t('ubRecheck')}
                         </button>
@@ -489,7 +489,7 @@ export const UnboxModal: React.FC<UnboxModalProps> = ({
                       </div>
                     </div>
                   )}
-                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
+                  <div className="row-end-sm">
                     <button
                       type="button"
                       id="ubApCancel"
@@ -548,7 +548,7 @@ export const UnboxModal: React.FC<UnboxModalProps> = ({
 
               {mp?.installed && (hInfo?.magpie?.connected || provs.length > 0) && (
                 <div id="ubConnectBox" className="note">
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+                  <div className="row-between row-wrap">
                     <span id="ubConnectText">
                       {hInfo?.magpie?.connected
                         ? t('ubConnectedMagpie', { label: hLabel, model: hInfo.magpie.model || t('defaultTag') })
@@ -618,7 +618,7 @@ export const UnboxModal: React.FC<UnboxModalProps> = ({
             <div id="ubStep3" className="set-stack">
               <p className="set-card-desc">{t('ubStep3Hint')}</p>
               <div className="note">
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                <div className="row-between">
                   <span>
                     <span>{t('ubTailcatLabel')}</span>
                     <strong id="ubRemoteState">
@@ -667,9 +667,8 @@ export const UnboxModal: React.FC<UnboxModalProps> = ({
                     <div id="ubRemoteLinkFld" className="fld">
                       <textarea
                         id="ubRemoteLink"
-                        className="mono"
+                        className="mono ta-sm"
                         readOnly
-                        style={{ minHeight: 66 }}
                         value={tailcat.link || ''}
                       />
                     </div>

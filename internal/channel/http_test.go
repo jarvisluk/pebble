@@ -602,3 +602,37 @@ func TestRoutineWebhookEndpointAndSecretRedaction(t *testing.T) {
 		t.Fatalf("expected 200 webhook run, got %d %s", rec200.Code, rec200.Body.String())
 	}
 }
+
+func TestDesktopSetupAndPowerRoutes(t *testing.T) {
+	srv := NewHTTPServer(nil, config.HTTPConfig{Host: "127.0.0.1", Port: 3789, APIToken: "tok-123"})
+	mux := srv.srv.Handler
+
+	// Unauthorized request should return 401.
+	unauth := httptest.NewRequest(http.MethodPost, "/api/desktop/power", bytes.NewBufferString(`{"action":"wake"}`))
+	unauth.Host = "127.0.0.1:3789"
+	unauthRec := httptest.NewRecorder()
+	mux.ServeHTTP(unauthRec, unauth)
+	if unauthRec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 without token, got %d", unauthRec.Code)
+	}
+
+	// Missing action should return 400.
+	bad := httptest.NewRequest(http.MethodPost, "/api/desktop/power", bytes.NewBufferString(`{}`))
+	bad.Host = "127.0.0.1:3789"
+	bad.Header.Set("Authorization", "Bearer tok-123")
+	badRec := httptest.NewRecorder()
+	mux.ServeHTTP(badRec, bad)
+	if badRec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for missing action, got %d %s", badRec.Code, badRec.Body.String())
+	}
+
+	// Setup on non-linux returns 400 with structured SetupResult.
+	setupReq := httptest.NewRequest(http.MethodPost, "/api/desktop/setup", bytes.NewBufferString(`{"target":"local"}`))
+	setupReq.Host = "127.0.0.1:3789"
+	setupReq.Header.Set("Authorization", "Bearer tok-123")
+	setupRec := httptest.NewRecorder()
+	mux.ServeHTTP(setupRec, setupReq)
+	if setupRec.Code != http.StatusBadRequest && setupRec.Code != http.StatusOK {
+		t.Fatalf("unexpected setup status %d: %s", setupRec.Code, setupRec.Body.String())
+	}
+}

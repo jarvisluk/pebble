@@ -18,6 +18,7 @@ import (
 
 	"bot-hub/internal/channel"
 	"bot-hub/internal/config"
+	"bot-hub/internal/desktop"
 	"bot-hub/internal/harness"
 	"bot-hub/internal/hub"
 	"bot-hub/internal/mcp"
@@ -51,6 +52,10 @@ func Main(args []string) {
 
 	fs := flag.NewFlagSet(sub, flag.ExitOnError)
 	cfgFlag := fs.String("config", "", "path to bots.json config file")
+	var autoDesktop *bool
+	if sub == "serve" {
+		autoDesktop = fs.Bool("auto-desktop", false, "auto install headless Linux virtual desktop dependencies if missing")
+	}
 	_ = fs.Parse(args[1:])
 	rest := fs.Args()
 
@@ -69,6 +74,9 @@ func Main(args []string) {
 	case "serve":
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
+		if (autoDesktop != nil && *autoDesktop) || h.Config().Desktop.AutoInstall {
+			go maybeAutoSetupDesktop(ctx, h.LocalDesktop())
+		}
 		if err := runServe(ctx, h, cfgPath); err != nil {
 			log.Fatal(err)
 		}
@@ -88,7 +96,7 @@ func Main(args []string) {
 
 func printUsage() {
 	fmt.Println(`Usage:
-  bot-hub serve  [-config path]                                   Start Web UI, HTTP API, and scheduler
+  bot-hub serve  [-config path] [-auto-desktop]                   Start Web UI, HTTP API, and scheduler
   bot-hub chat   [-config path] [bot]                             Interactive terminal chat with a bot
   bot-hub status [-config path]                                   Show configured bots and persisted sessions
   bot-hub mcp     [--hub-url url] [--bot-id id] [--config path]   Run stdio MCP server exposing core runtime primitives
@@ -97,7 +105,7 @@ func printUsage() {
   bot-hub session <list|recall|rotate> [flags]                    Inspect, recall, or rotate bot sessions
   bot-hub routine <list|upsert|delete|run> [flags]                Manage and trigger scheduled routines
   bot-hub node    <list|exec|file> [flags]                        List or invoke remote computer nodes
-  bot-hub desktop <task|takeover> [flags]                         Delegate desktop GUI tasks or request human takeover`)
+  bot-hub desktop <task|takeover|setup|power> [flags]             Delegate desktop GUI tasks, setup virtual desktop, or control power`)
 }
 
 func runConnect(args []string) {
@@ -214,6 +222,29 @@ func Serve(ctx context.Context, root string) error {
 	}
 	defer h.Close()
 	return runServe(ctx, h, cfgPath)
+}
+
+func maybeAutoSetupDesktop(ctx context.Context, eng *desktop.Engine) {
+	if eng == nil {
+		return
+	}
+	st, err := eng.Status(ctx)
+	if err != nil || st == nil || !st.Virtual || !st.Installable || len(st.MissingDeps) == 0 {
+		return
+	}
+	log.Printf("[desktop] headless virtual desktop missing deps (%s); attempting auto-install...", strings.Join(st.MissingDeps, ", "))
+	setupCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+	res, err := eng.Setup(setupCtx)
+	if err != nil {
+		log.Printf("[desktop] auto-install failed: %v", err)
+		return
+	}
+	if res != nil && !res.OK {
+		log.Printf("[desktop] auto-install incomplete: %s", res.Error)
+		return
+	}
+	log.Printf("[desktop] virtual desktop dependencies ready")
 }
 
 func runServe(parent context.Context, h *hub.Hub, cfgPath string) error {
