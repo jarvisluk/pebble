@@ -73,6 +73,7 @@ export default function SettingsScreen() {
   const [sharedUserMdTouched, setSharedUserMdTouched] = useState(false);
   const [botDrafts, setBotDrafts] = useState<Record<string, BotDraft>>({});
   const [loadingModelsFor, setLoadingModelsFor] = useState<string | null>(null);
+  const [magpiePickHarness, setMagpiePickHarness] = useState('');
   const [saving, setSaving] = useState(false);
   const [busyAction, setBusyAction] = useState('');
   const [error, setError] = useState('');
@@ -218,6 +219,38 @@ export default function SettingsScreen() {
       setError(err?.message || t('saveFailed'));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const applyMagpieModel = async (harnessId: string, model: string) => {
+    setError('');
+    setBusyAction(`magpie:${harnessId}`);
+    try {
+      await connectMagpie(harnessId, model);
+      setMagpiePickHarness('');
+      setSavedMsg(t('connectedMagpie', { label: harnessId }));
+    } catch (err: any) {
+      setError(err?.message || t('connectFailed'));
+    } finally {
+      setBusyAction('');
+    }
+  };
+
+  const onToggleMagpiePicker = async (harnessId: string) => {
+    if (magpiePickHarness === harnessId) {
+      setMagpiePickHarness('');
+      return;
+    }
+    setMagpiePickHarness(harnessId);
+    if (!(models[harnessId]?.length > 0)) {
+      setLoadingModelsFor(harnessId);
+      try {
+        await loadModels(harnessId);
+      } catch {
+        // ignore
+      } finally {
+        setLoadingModelsFor(null);
+      }
     }
   };
 
@@ -396,42 +429,82 @@ export default function SettingsScreen() {
               </Text>
             ) : (
               <View style={styles.magpieList}>
-                {harnessOptions.map((h) => (
-                  <View key={h.id} style={[styles.magpieRow, { backgroundColor: theme.s1 }]}>
-                    <View style={styles.magpieInfo}>
-                      <Text style={[styles.magpieName, { color: theme.text }]}>{h.label || h.id}</Text>
-                      <Text numberOfLines={1} style={[styles.magpieSub, { color: theme.mute, fontFamily: MONO_FONT }]}>
-                        {h.magpie.connected
-                          ? `Magpie · ${h.magpie.model || t('mpConnected')}`
-                          : `${t('mpNative')}${h.magpie.nativeModel ? ` · ${h.magpie.nativeModel}` : ''}`}
-                      </Text>
-                    </View>
-                    <View style={styles.magpieActs}>
-                      <Pressable
-                        disabled={busyAction === `magpie:${h.id}`}
-                        onPress={() => onConnectMagpie(h.id)}
-                        style={[styles.magpieBtn, { backgroundColor: h.magpie.connected ? theme.card : theme.accent }]}
-                      >
-                        {busyAction === `magpie:${h.id}` ? (
-                          <ActivityIndicator size="small" color={h.magpie.connected ? theme.text : theme.accentText} />
-                        ) : (
-                          <Text style={[styles.magpieBtnTxt, { color: h.magpie.connected ? theme.text : theme.accentText }]}>
-                            {h.magpie.connected ? t('mpSwitch') : t('mpConnect')}
+                {harnessOptions.map((h) => {
+                  const pickerOpen = h.magpie.connected && magpiePickHarness === h.id;
+                  const hModels = models[h.id] || [];
+                  return (
+                    <View key={h.id} style={[styles.magpieRow, { backgroundColor: theme.s1, flexDirection: 'column', alignItems: 'stretch' }]}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                        <View style={styles.magpieInfo}>
+                          <Text style={[styles.magpieName, { color: theme.text }]}>{h.label || h.id}</Text>
+                          <Text numberOfLines={1} style={[styles.magpieSub, { color: theme.mute, fontFamily: MONO_FONT }]}>
+                            {h.magpie.connected
+                              ? `Magpie · ${h.magpie.model || t('mpConnected')}`
+                              : `${t('mpNative')}${h.magpie.nativeModel ? ` · ${h.magpie.nativeModel}` : ''}`}
                           </Text>
-                        )}
-                      </Pressable>
-                      {h.magpie.connected && (
-                        <Pressable
-                          disabled={busyAction === `magpie:${h.id}`}
-                          onPress={() => onDisconnectMagpie(h.id)}
-                          style={[styles.magpieBtn, { backgroundColor: theme.card }]}
-                        >
-                          <Text style={[styles.magpieBtnTxt, { color: theme.danger }]}>{t('mpRestore')}</Text>
-                        </Pressable>
+                        </View>
+                        <View style={styles.magpieActs}>
+                          <Pressable
+                            disabled={busyAction === `magpie:${h.id}`}
+                            onPress={() => (h.magpie.connected ? void onToggleMagpiePicker(h.id) : onConnectMagpie(h.id))}
+                            style={[styles.magpieBtn, { backgroundColor: h.magpie.connected ? theme.card : theme.accent }]}
+                          >
+                            {busyAction === `magpie:${h.id}` ? (
+                              <ActivityIndicator size="small" color={h.magpie.connected ? theme.text : theme.accentText} />
+                            ) : (
+                              <Text style={[styles.magpieBtnTxt, { color: h.magpie.connected ? theme.text : theme.accentText }]}>
+                                {h.magpie.connected ? t('mpSwitch') : t('mpConnect')}
+                              </Text>
+                            )}
+                          </Pressable>
+                          {h.magpie.connected && (
+                            <Pressable
+                              disabled={busyAction === `magpie:${h.id}`}
+                              onPress={() => onDisconnectMagpie(h.id)}
+                              style={[styles.magpieBtn, { backgroundColor: theme.card }]}
+                            >
+                              <Text style={[styles.magpieBtnTxt, { color: theme.danger }]}>{t('mpRestore')}</Text>
+                            </Pressable>
+                          )}
+                        </View>
+                      </View>
+                      {pickerOpen && (
+                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+                          {loadingModelsFor === h.id && hModels.length === 0 ? (
+                            <ActivityIndicator size="small" color={theme.accent} />
+                          ) : (
+                            hModels.slice(0, 24).map((m) => {
+                              const active = m === h.magpie.model;
+                              return (
+                                <Pressable
+                                  key={m}
+                                  disabled={busyAction === `magpie:${h.id}` || active}
+                                  onPress={() => void applyMagpieModel(h.id, m)}
+                                  style={{
+                                    borderRadius: 999,
+                                    paddingHorizontal: 10,
+                                    paddingVertical: 5,
+                                    backgroundColor: active ? theme.accent : theme.card,
+                                  }}
+                                >
+                                  <Text
+                                    style={{
+                                      fontSize: 11.5,
+                                      fontFamily: MONO_FONT,
+                                      color: active ? theme.accentText : theme.text,
+                                    }}
+                                  >
+                                    {m}
+                                  </Text>
+                                </Pressable>
+                              );
+                            })
+                          )}
+                        </View>
                       )}
                     </View>
-                  </View>
-                ))}
+                  );
+                })}
               </View>
             )}
 
