@@ -104,7 +104,7 @@ export default function BotsScreen() {
           { backgroundColor: pressed ? theme.sel : theme.card },
         ]}
       >
-        <BotAvatar id={item.id} size={50} index={index} busy={!!item.busy} ringColor={theme.card} />
+        <BotAvatar id={item.id} size={50} index={index} avatar={item.avatar} color={item.color} busy={!!item.busy} ringColor={theme.card} />
         <View style={styles.botBody}>
           <View style={styles.botTopRow}>
             <Text numberOfLines={1} style={[styles.botName, { color: theme.text }]}>

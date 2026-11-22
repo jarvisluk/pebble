@@ -154,6 +154,8 @@ type BotConfig struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
+	Avatar      string `json:"avatar,omitempty"`
+	Color       string `json:"color,omitempty"`
 	Workspace   string `json:"workspace"`
 	Harness     string `json:"harness,omitempty"` // default: "opencode"
 	Model       string `json:"model,omitempty"`
@@ -288,9 +290,41 @@ type HubConfig struct {
 }
 
 var (
-	envRefRe = regexp.MustCompile(`\$\{([A-Z0-9_]+)\}`)
-	botIDRe  = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+	envRefRe   = regexp.MustCompile(`\$\{([A-Z0-9_]+)\}`)
+	botIDRe    = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+	botColorRe = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
 )
+
+// ValidBotAvatars lists the supported built-in bot avatar shapes.
+var ValidBotAvatars = []string{"blob", "squircle", "cat", "bear", "cloud", "ghost", "star", "sprout"}
+
+// NormalizeBotAvatar trims, lowercases, and validates a bot avatar shape.
+// An empty string is allowed and represents the default "blob" avatar.
+func NormalizeBotAvatar(v string) (string, error) {
+	s := strings.ToLower(strings.TrimSpace(v))
+	if s == "" || s == "blob" {
+		return s, nil
+	}
+	for _, valid := range ValidBotAvatars {
+		if s == valid {
+			return s, nil
+		}
+	}
+	return "", fmt.Errorf("invalid bot avatar %q (expected one of %s)", v, strings.Join(ValidBotAvatars, ", "))
+}
+
+// NormalizeBotColor trims, lowercases, and validates a bot hex color (#rrggbb).
+// An empty string is allowed and represents the automatic palette color.
+func NormalizeBotColor(v string) (string, error) {
+	s := strings.ToLower(strings.TrimSpace(v))
+	if s == "" {
+		return "", nil
+	}
+	if !botColorRe.MatchString(s) {
+		return "", fmt.Errorf("invalid bot color %q (expected #rrggbb)", v)
+	}
+	return s, nil
+}
 
 func ValidateBotID(id string) error {
 	if !botIDRe.MatchString(id) {
@@ -462,6 +496,17 @@ func Load(projectRoot, explicitPath string) (*HubConfig, string, error) {
 		}
 		seen[b.ID] = struct{}{}
 
+		avatar, err := NormalizeBotAvatar(b.Avatar)
+		if err != nil {
+			return nil, cfgPath, fmt.Errorf("bot %q: %w", b.ID, err)
+		}
+		b.Avatar = avatar
+		color, err := NormalizeBotColor(b.Color)
+		if err != nil {
+			return nil, cfgPath, fmt.Errorf("bot %q: %w", b.ID, err)
+		}
+		b.Color = color
+
 		NormalizeBot(b, &cfg)
 		if err := EnsureWorkspace(b, &cfg, ""); err != nil {
 			return nil, cfgPath, fmt.Errorf("init workspace for bot %q: %w", b.ID, err)
@@ -478,6 +523,12 @@ func Load(projectRoot, explicitPath string) (*HubConfig, string, error) {
 func NormalizeBot(b *BotConfig, cfg *HubConfig) {
 	if b.Name == "" {
 		b.Name = b.ID
+	}
+	if avatar, err := NormalizeBotAvatar(b.Avatar); err == nil {
+		b.Avatar = avatar
+	}
+	if color, err := NormalizeBotColor(b.Color); err == nil {
+		b.Color = color
 	}
 	if b.Harness == "" {
 		b.Harness = "opencode"

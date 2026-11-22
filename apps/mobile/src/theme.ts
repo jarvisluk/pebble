@@ -12,6 +12,12 @@ import {
 export const DEFAULT_ACCENT = '#d9774b';
 export const ACCENT_PRESETS = ['#d9774b', '#3b82f6', '#10b981', '#8b5cf6', '#e11d48', '#f59e0b'];
 export const BOT_COLORS = ['#f08a2c', '#8a7ad8', '#86a33a', '#b85a4a', '#7a7465', '#e0685a'];
+export const BOT_AVATARS = ['blob', 'squircle', 'cat', 'bear', 'cloud', 'ghost', 'star', 'sprout'] as const;
+
+export function normalizeBotHex(hex?: string): string {
+  const clean = String(hex || '').trim().toLowerCase();
+  return /^#[0-9a-f]{6}$/.test(clean) ? clean : '';
+}
 
 export interface Theme {
   dark: boolean;
@@ -70,7 +76,9 @@ function fnv1a(s: string): number {
   return h >>> 0;
 }
 
-export function getBotColor(id: string, index = -1): string {
+export function getBotColor(id: string, index = -1, customColor?: string): string {
+  const custom = normalizeBotHex(customColor);
+  if (custom) return custom;
   const h = fnv1a(id || '?');
   return BOT_COLORS[(index >= 0 ? index : h) % BOT_COLORS.length];
 }
@@ -78,9 +86,10 @@ export function getBotColor(id: string, index = -1): string {
 export function getBotPalette(
   id: string,
   index: number,
-  dark: boolean
+  dark: boolean,
+  customColor?: string
 ): { accent: string; text: string; soft: string } {
-  const accent = getBotColor(id, index);
+  const accent = getBotColor(id, index, customColor);
   return {
     accent,
     text: contrastText(accent),

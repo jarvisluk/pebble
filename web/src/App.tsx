@@ -25,6 +25,8 @@ import { BotDetailPanel } from './components/BotDetailPanel';
 import { UnboxModal } from './components/UnboxModal';
 import { ConfirmModal, CreateBotModal, LoginModal } from './components/Modals';
 
+const VIEW_ORDER = ['chat', 'settings'] as const;
+
 export default function App() {
   const [langPref, setLangPrefState] = useState<LangPref>(() => getLangPref());
   const [lang, setLang] = useState<ResolvedLang>(() => resolveLang());
@@ -48,7 +50,7 @@ export default function App() {
   const [screenSeq, setScreenSeq] = useState(0);
 
   const [view, setView] = useState<'chat' | 'settings'>('chat');
-  const viewTx = useViewTransition(view, ['chat', 'settings'] as const);
+  const viewTx = useViewTransition(view, VIEW_ORDER);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>('models');
   const [sideCollapsed, setSideCollapsed] = useState<boolean>(() => {
     try {
@@ -505,7 +507,7 @@ export default function App() {
     <>
       <div
         id="app"
-        className={`app${sideCollapsed ? ' side-collapsed' : ''}${view === 'settings' ? ' in-settings' : ''}${deskOpen ? ' desk-open' : ''}`}
+        className={`app${sideCollapsed ? ' side-collapsed' : ''}${view === 'settings' || viewTx.leaving === 'settings' ? ' in-settings' : ''}${deskOpen ? ' desk-open' : ''}`}
         style={sideWidth != null ? ({ '--side-w': `${sideWidth}px` } as React.CSSProperties) : undefined}
       >
         <Sidebar

@@ -311,3 +311,46 @@ func TestDesktopConfigDefaults(t *testing.T) {
 	}
 }
 
+func TestBotAvatarAndColorValidation(t *testing.T) {
+	for _, av := range []string{"", "blob", " CAT ", "sprout"} {
+		got, err := NormalizeBotAvatar(av)
+		if err != nil {
+			t.Fatalf("NormalizeBotAvatar(%q) unexpected error: %v", av, err)
+		}
+		if av == " CAT " && got != "cat" {
+			t.Fatalf("expected cat, got %q", got)
+		}
+	}
+	if _, err := NormalizeBotAvatar("robot"); err == nil {
+		t.Fatal("expected invalid avatar to fail")
+	}
+
+	for _, c := range []string{"", " #D9774B ", "#10b981"} {
+		got, err := NormalizeBotColor(c)
+		if err != nil {
+			t.Fatalf("NormalizeBotColor(%q) unexpected error: %v", c, err)
+		}
+		if c == " #D9774B " && got != "#d9774b" {
+			t.Fatalf("expected #d9774b, got %q", got)
+		}
+	}
+	for _, bad := range []string{"red", "#fff", "#12345g"} {
+		if _, err := NormalizeBotColor(bad); err == nil {
+			t.Fatalf("expected invalid color %q to fail", bad)
+		}
+	}
+
+	root := t.TempDir()
+	cfgDir := filepath.Join(root, "config")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	badCfg := filepath.Join(cfgDir, "bad.json")
+	if err := os.WriteFile(badCfg, []byte(`{"bots":[{"id":"a","avatar":"nope"}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Load(root, badCfg); err == nil {
+		t.Fatal("expected Load to fail on invalid bot avatar")
+	}
+}
+

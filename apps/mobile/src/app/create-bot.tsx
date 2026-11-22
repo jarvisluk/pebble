@@ -12,6 +12,7 @@ import {
   View,
 } from 'react-native';
 
+import { BotAppearancePicker } from '../components/BotAppearancePicker';
 import { BotAvatar } from '../components/BotAvatar';
 import { ModalHeader } from '../components/ModalHeader';
 import { useI18n } from '../i18n';
@@ -34,6 +35,8 @@ export default function CreateBotScreen() {
   const [botId, setBotId] = useState('');
   const [idTouched, setIdTouched] = useState(false);
   const [description, setDescription] = useState('');
+  const [avatar, setAvatar] = useState('');
+  const [color, setColor] = useState('');
   const [harness, setHarness] = useState('opencode');
   const [model, setModel] = useState('');
   const [instructions, setInstructions] = useState('');
@@ -99,6 +102,8 @@ export default function CreateBotScreen() {
         id: cleanId,
         name: cleanName,
         description: description.trim() || undefined,
+        avatar: avatar || undefined,
+        color: color || undefined,
         harness,
         model: model.trim() || undefined,
         instructions: instructions.trim() || undefined,
@@ -119,7 +124,7 @@ export default function CreateBotScreen() {
       >
         <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
           <View style={styles.avatarPreview}>
-            <BotAvatar id={botId.trim() || name.trim() || 'new'} size={68} />
+            <BotAvatar id={botId.trim() || name.trim() || 'new'} size={68} avatar={avatar} color={color} />
           </View>
 
           <View style={[styles.card, { backgroundColor: theme.card }]}>
@@ -157,6 +162,14 @@ export default function CreateBotScreen() {
                 style={[styles.input, { backgroundColor: theme.s1, color: theme.text }]}
               />
             </View>
+
+            <BotAppearancePicker
+              botId={botId.trim() || name.trim() || 'new'}
+              avatar={avatar}
+              color={color}
+              onAvatarChange={setAvatar}
+              onColorChange={setColor}
+            />
 
             <View style={styles.field}>
               <Text style={[styles.lbl, { color: theme.text2 }]}>{t('harnessBackend')}</Text>

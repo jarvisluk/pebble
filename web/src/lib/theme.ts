@@ -4,6 +4,8 @@ import { translate } from './i18n';
 export const DEFAULT_ACCENT = '#d9774b';
 export const ACCENT_PRESETS = ['#d9774b', '#3b82f6', '#10b981', '#8b5cf6', '#e11d48', '#f59e0b'];
 export const BOT_COLORS = ['#f08a2c', '#8a7ad8', '#86a33a', '#b85a4a', '#7a7465', '#e0685a'];
+export const BOT_AVATARS = ['blob', 'squircle', 'cat', 'bear', 'cloud', 'ghost', 'star', 'sprout'] as const;
+export type BotAvatarKind = (typeof BOT_AVATARS)[number];
 
 export function hashStr(s: string): number {
   let h = 2166136261;
@@ -74,7 +76,17 @@ export function applyAccentPref(hex: string): string {
   return clean;
 }
 
-export function botColor(id: string, bots: BotStatus[]): string {
+export function normalizeBotHex(hex: string | undefined): string {
+  const clean = String(hex || '').trim().toLowerCase();
+  return /^#[0-9a-f]{6}$/.test(clean) ? clean : '';
+}
+
+export function botColor(id: string, bots: BotStatus[], overrideColor?: string): string {
+  const custom = normalizeBotHex(overrideColor);
+  if (custom) return custom;
+  const found = bots.find((b) => b.id === id);
+  const stored = normalizeBotHex(found?.color);
+  if (stored) return stored;
   const h = hashStr(id || '?');
   const i = bots.findIndex((b) => b.id === id);
   return BOT_COLORS[(i >= 0 ? i : h) % BOT_COLORS.length];

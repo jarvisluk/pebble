@@ -100,8 +100,8 @@ interface HubContextValue {
   interruptBot: (botId: string) => Promise<boolean>;
   resetBot: (botId: string) => Promise<void>;
   getBotDetail: (botId: string) => Promise<BotDetail>;
-  createBot: (body: { id: string; name: string; description?: string; harness?: string; model?: string; instructions?: string; privateSessions?: boolean }) => Promise<BotStatus>;
-  updateBot: (botId: string, body: { name?: string; description?: string; instructions?: string; privateSessions?: boolean }) => Promise<BotStatus>;
+  createBot: (body: { id: string; name: string; description?: string; avatar?: string; color?: string; harness?: string; model?: string; instructions?: string; privateSessions?: boolean }) => Promise<BotStatus>;
+  updateBot: (botId: string, body: { name?: string; description?: string; avatar?: string; color?: string; instructions?: string; privateSessions?: boolean }) => Promise<BotStatus>;
   deleteBot: (botId: string) => Promise<void>;
   fetchMemories: (opts: { scope?: 'global' | 'project' | 'all'; botId?: string; query?: string; limit?: number }) => Promise<MagpieMemoryList>;
   saveMemory: (body: { scope?: 'global' | 'project'; botId?: string; kind?: string; text: string; tags?: string[] }) => Promise<void>;

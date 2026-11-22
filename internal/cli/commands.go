@@ -262,6 +262,8 @@ func runBotCmd(ctx context.Context, args []string, cwd string, stdout, stderr io
 		id := fs.String("id", "", "unique bot ID")
 		name := fs.String("name", "", "display name")
 		desc := fs.String("description", "", "bot description")
+		avatar := fs.String("avatar", "", "avatar shape (blob|squircle|cat|bear|cloud|ghost|star|sprout)")
+		color := fs.String("color", "", "avatar hex color (#rrggbb)")
 		instr := fs.String("instructions", "", "AGENTS.md markdown content")
 		instrFile := fs.String("instructions-file", "", "path to markdown file for AGENTS.md")
 		model := fs.String("model", "", "model override")
@@ -285,6 +287,12 @@ func runBotCmd(ctx context.Context, args []string, cwd string, stdout, stderr io
 		}
 		if visited["description"] {
 			payload["description"] = *desc
+		}
+		if visited["avatar"] {
+			payload["avatar"] = *avatar
+		}
+		if visited["color"] {
+			payload["color"] = *color
 		}
 		if hasInstr {
 			payload["instructions"] = instructions
@@ -310,6 +318,8 @@ func runBotCmd(ctx context.Context, args []string, cwd string, stdout, stderr io
 		id := fs.String("id", "", "bot ID (defaults to current bot)")
 		name := fs.String("name", "", "new display name")
 		desc := fs.String("description", "", "new description")
+		avatar := fs.String("avatar", "", "avatar shape (blob|squircle|cat|bear|cloud|ghost|star|sprout)")
+		color := fs.String("color", "", "avatar hex color (#rrggbb; empty string restores default)")
 		instr := fs.String("instructions", "", "new AGENTS.md markdown content")
 		instrFile := fs.String("instructions-file", "", "path to markdown file for AGENTS.md")
 		model := fs.String("model", "", "model override (empty string inherits hub default)")
@@ -331,6 +341,12 @@ func runBotCmd(ctx context.Context, args []string, cwd string, stdout, stderr io
 		if visited["description"] {
 			payload["description"] = *desc
 		}
+		if visited["avatar"] {
+			payload["avatar"] = *avatar
+		}
+		if visited["color"] {
+			payload["color"] = *color
+		}
 		if hasInstr {
 			payload["instructions"] = instructions
 		}
@@ -344,7 +360,7 @@ func runBotCmd(ctx context.Context, args []string, cwd string, stdout, stderr io
 			payload["privateSessions"] = *priv
 		}
 		if len(payload) == 0 {
-			return errors.New("specify at least one field to update (--name, --description, --instructions, --instructions-file, --model, --harness, --private-sessions)")
+			return errors.New("specify at least one field to update (--name, --description, --avatar, --color, --instructions, --instructions-file, --model, --harness, --private-sessions)")
 		}
 		c := resolveClient(co, cwd)
 		target := c.ResolveBotID(*id)

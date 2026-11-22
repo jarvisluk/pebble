@@ -371,7 +371,7 @@ struct SettingsView: View {
                 let ph = per.isEmpty ? resolveDefaultModel(defaultModel.trimmingCharacters(in: .whitespaces), d.harness) : per
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 10) {
-                        BotAvatar(id: b.id, size: 28, index: i)
+                        BotAvatar(id: b.id, size: 28, index: i, avatar: b.avatar, color: b.color)
                         VStack(alignment: .leading, spacing: 0) {
                             Text(b.displayName).font(.system(size: 16, weight: .semibold))
                             Text("@\(b.id)").font(.system(size: 13, design: .monospaced)).foregroundStyle(.secondary)

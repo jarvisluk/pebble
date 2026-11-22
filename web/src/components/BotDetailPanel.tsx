@@ -12,6 +12,7 @@ import type {
 import { api } from '../lib/api';
 import { translate } from '../lib/i18n';
 import { botColor, contrastText, formatStamp } from '../lib/theme';
+import { BotAppearancePicker } from './BotAppearancePicker';
 import { BotAvatar } from './BotAvatar';
 
 interface BotDetailPanelProps {
@@ -56,6 +57,9 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
   // Inline edit form fields
   const [editName, setEditName] = useState('');
   const [editDesc, setEditDesc] = useState('');
+  const [editAvatar, setEditAvatar] = useState('');
+  const [editColor, setEditColor] = useState('');
+  const [appearanceOpen, setAppearanceOpen] = useState(false);
   const [editPrivate, setEditPrivate] = useState(false);
   const [editInst, setEditInst] = useState('');
   const [editErr, setEditErr] = useState('');
@@ -122,6 +126,7 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
   useEffect(() => {
     if (!open || !detail) return;
     setTechOpen(false);
+    setAppearanceOpen(false);
     setMemAddOpen(false);
     setMemErr('');
     setRtFormOpen(false);
@@ -136,10 +141,12 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
     if (!open || !detail) return;
     setEditName(detail.name || '');
     setEditDesc(detail.description || '');
+    setEditAvatar(detail.avatar || '');
+    setEditColor(detail.color || '');
     setEditPrivate(Boolean(detail.privateSessions));
     setEditInst(detail.instructions || '');
     setEditErr('');
-  }, [open, detail?.id, detail?.name, detail?.description, detail?.privateSessions, detail?.instructions]);
+  }, [open, detail?.id, detail?.name, detail?.description, detail?.avatar, detail?.color, detail?.privateSessions, detail?.instructions]);
 
   useEffect(() => {
     if (open && detail && routineRefreshSeq > 0) {
@@ -149,8 +156,8 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
 
   const botAccentStyle: React.CSSProperties | undefined = detail
     ? ({
-        '--bot-accent': botColor(detail.id, bots),
-        '--bot-accent-text': contrastText(botColor(detail.id, bots)),
+        '--bot-accent': botColor(detail.id, bots, editColor),
+        '--bot-accent-text': contrastText(botColor(detail.id, bots, editColor)),
       } as React.CSSProperties)
     : undefined;
 
@@ -161,6 +168,8 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
     detail &&
       (editName !== (detail.name || '') ||
         editDesc !== (detail.description || '') ||
+        editAvatar !== (detail.avatar || '') ||
+        editColor !== (detail.color || '') ||
         editPrivate !== Boolean(detail.privateSessions) ||
         editInst !== (detail.instructions || ''))
   );
@@ -181,6 +190,8 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
         body: {
           name,
           description: editDesc.trim(),
+          avatar: editAvatar,
+          color: editColor,
           instructions: editInst,
           privateSessions: editPrivate,
         },
@@ -351,9 +362,35 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
         {detail && (
           <div id="pView">
             <div className="p-hero">
-              <div id="pAv">
-                <BotAvatar id={detail.id} bots={bots} />
-              </div>
+              <button
+                type="button"
+                id="pAv"
+                className="p-av-btn"
+                aria-label={t('appearance')}
+                aria-expanded={appearanceOpen}
+                onClick={() => setAppearanceOpen((v) => !v)}
+              >
+                <BotAvatar id={detail.id} bots={bots} avatar={editAvatar} color={editColor} />
+              </button>
+              <button
+                type="button"
+                id="pAppearToggle"
+                className={`mp mb-6${appearanceOpen ? ' go' : ''}`}
+                onClick={() => setAppearanceOpen((v) => !v)}
+              >
+                {t('appearance')}
+              </button>
+              {appearanceOpen && (
+                <BotAppearancePicker
+                  botId={detail.id}
+                  bots={bots}
+                  avatar={editAvatar}
+                  color={editColor}
+                  lang={lang}
+                  onAvatarChange={setEditAvatar}
+                  onColorChange={setEditColor}
+                />
+              )}
               <input
                 id="pName"
                 className="p-hero-name"

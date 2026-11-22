@@ -8,6 +8,8 @@ export interface BotStatus {
   id: string;
   name: string;
   description?: string;
+  avatar?: string;
+  color?: string;
   workspace: string;
   harness: string;
   model?: string;

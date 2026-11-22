@@ -18,6 +18,7 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { BotAppearancePicker } from '../../components/BotAppearancePicker';
 import { BotAvatar } from '../../components/BotAvatar';
 import { ChevronLeftIcon, DocIcon, MonitorIcon, SendIcon, StopIcon } from '../../components/Icons';
 import { MarkdownText } from '../../components/MarkdownText';
@@ -73,7 +74,6 @@ export default function BotChatScreen() {
 
   const botIndex = useMemo(() => bots.findIndex((b) => b.id === botId), [bots, botId]);
   const bot = botIndex >= 0 ? bots[botIndex] : undefined;
-  const botPal = useMemo(() => getBotPalette(botId, botIndex, theme.dark), [botId, botIndex, theme.dark]);
   const chatList = msgs[botId] || [];
 
   const slashCommands = useMemo(
@@ -94,11 +94,18 @@ export default function BotChatScreen() {
   const [techExpanded, setTechExpanded] = useState(false);
   const [editName, setEditName] = useState('');
   const [editDesc, setEditDesc] = useState('');
+  const [editAvatar, setEditAvatar] = useState('');
+  const [editColor, setEditColor] = useState('');
+  const [appearOpen, setAppearOpen] = useState(false);
   const [editInst, setEditInst] = useState('');
   const [editPrivate, setEditPrivate] = useState(false);
   const [editSaving, setEditSaving] = useState(false);
   const [editErr, setEditErr] = useState('');
   const [sendErr, setSendErr] = useState('');
+  const botPal = useMemo(
+    () => getBotPalette(botId, botIndex, theme.dark, detailOpen ? editColor || bot?.color : bot?.color),
+    [botId, botIndex, theme.dark, detailOpen, editColor, bot?.color]
+  );
 
   const [botMem, setBotMem] = useState<MagpieMemoryList | null>(null);
   const [botMemLoading, setBotMemLoading] = useState(false);
@@ -273,6 +280,9 @@ export default function BotChatScreen() {
     const initSrc = detail || bot;
     setEditName(initSrc?.name || botId);
     setEditDesc(initSrc?.description || '');
+    setEditAvatar(initSrc?.avatar || '');
+    setEditColor(initSrc?.color || '');
+    setAppearOpen(false);
     setEditInst(detail?.instructions || '');
     setEditPrivate(!!initSrc?.privateSessions);
     setDetailOpen(true);
@@ -284,6 +294,8 @@ export default function BotChatScreen() {
       setDetail(d);
       setEditName(d.name || botId);
       setEditDesc(d.description || '');
+      setEditAvatar(d.avatar || '');
+      setEditColor(d.color || '');
       setEditInst(d.instructions || '');
       setEditPrivate(!!d.privateSessions);
     } catch {
@@ -305,6 +317,8 @@ export default function BotChatScreen() {
       await updateBot(botId, {
         name: trimmed,
         description: editDesc.trim(),
+        avatar: editAvatar,
+        color: editColor,
         instructions: editInst,
         privateSessions: editPrivate,
       });
@@ -312,6 +326,8 @@ export default function BotChatScreen() {
       setDetail(fresh);
       setEditName(fresh.name || botId);
       setEditDesc(fresh.description || '');
+      setEditAvatar(fresh.avatar || '');
+      setEditColor(fresh.color || '');
       setEditInst(fresh.instructions || '');
       setEditPrivate(!!fresh.privateSessions);
     } catch (err: any) {
@@ -535,6 +551,8 @@ export default function BotChatScreen() {
     activeDetail &&
       (editName !== (activeDetail.name || botId) ||
         editDesc !== (activeDetail.description || '') ||
+        editAvatar !== (activeDetail.avatar || '') ||
+        editColor !== (activeDetail.color || '') ||
         editPrivate !== Boolean(activeDetail.privateSessions) ||
         editInst !== (detail?.instructions || ''))
   );
@@ -551,7 +569,7 @@ export default function BotChatScreen() {
           <ChevronLeftIcon size={22} color={theme.text} />
         </Pressable>
 
-        <BotAvatar id={botId} size={42} index={botIndex} busy={!!bot?.busy} ringColor={theme.page} />
+        <BotAvatar id={botId} size={42} index={botIndex} avatar={bot?.avatar} color={bot?.color} busy={!!bot?.busy} ringColor={theme.page} />
 
         <View style={styles.headInfo}>
           <Text numberOfLines={1} style={[styles.headName, { color: theme.text }]}>
@@ -621,7 +639,7 @@ export default function BotChatScreen() {
           }}
           ListEmptyComponent={
             <View style={styles.emptyWrap}>
-              <BotAvatar id={botId} size={92} index={botIndex} />
+              <BotAvatar id={botId} size={92} index={botIndex} avatar={bot?.avatar} color={bot?.color} />
               <Text style={[styles.emptyTitle, { color: theme.text }]}>{bot?.name || botId}</Text>
               <Text style={[styles.emptyDesc, { color: theme.text2 }]}>
                 {bot?.description || t('emptyChatHint')}
@@ -739,7 +757,9 @@ export default function BotChatScreen() {
             <>
               <View style={[styles.detailCard, { backgroundColor: theme.card }]}>
                 <View style={styles.detailTop}>
-                  <BotAvatar id={botId} size={76} index={botIndex} />
+                  <Pressable onPress={() => setAppearOpen((v) => !v)}>
+                    <BotAvatar id={botId} size={76} index={botIndex} avatar={editAvatar} color={editColor} />
+                  </Pressable>
                   <View style={[styles.detailTitleCol, { gap: 4 }]}>
                     <TextInput
                       value={editName}
@@ -757,11 +777,37 @@ export default function BotChatScreen() {
                         },
                       ]}
                     />
-                    <Text style={[styles.detailId, { color: theme.mute, fontFamily: MONO_FONT }]}>
-                      @{botId}
-                    </Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                      <Text style={[styles.detailId, { color: theme.mute, fontFamily: MONO_FONT }]}>
+                        @{botId}
+                      </Text>
+                      <Pressable
+                        onPress={() => setAppearOpen((v) => !v)}
+                        style={{
+                          borderRadius: 999,
+                          paddingHorizontal: 10,
+                          paddingVertical: 3,
+                          backgroundColor: appearOpen ? botPal.accent : botPal.soft,
+                        }}
+                      >
+                        <Text style={{ fontSize: 12, fontWeight: '700', color: appearOpen ? botPal.text : botPal.accent }}>
+                          {t('appearance')}
+                        </Text>
+                      </Pressable>
+                    </View>
                   </View>
                 </View>
+                {appearOpen && (
+                  <BotAppearancePicker
+                    botId={botId}
+                    botIndex={botIndex}
+                    avatar={editAvatar}
+                    color={editColor}
+                    accent={botPal.accent}
+                    onAvatarChange={setEditAvatar}
+                    onColorChange={setEditColor}
+                  />
+                )}
                 <TextInput
                   value={editDesc}
                   onChangeText={setEditDesc}
