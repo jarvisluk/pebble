@@ -35,6 +35,7 @@ export default function BotsScreen() {
     tools,
     takeovers,
     activeDesktopTarget,
+    usingStandby,
     questions,
     refreshBots,
     reconnect,
@@ -230,6 +231,22 @@ export default function BotsScreen() {
               <Text style={[styles.clearTxt, { color: theme.mute }]}>{t('clear')}</Text>
             </Pressable>
           )}
+        </View>
+      )}
+
+      {usingStandby && (
+        <View style={[styles.toBanner, { backgroundColor: theme.card, borderWidth: 1, borderColor: theme.s2 }]}>
+          <Text numberOfLines={1} style={[styles.toBannerTxt, { color: theme.text }]}>
+            {t('standbyActiveBanner')}
+          </Text>
+          <View style={styles.toBannerActs}>
+            <Pressable
+              onPress={() => void reconnect()}
+              style={[styles.toBannerBtn, { backgroundColor: theme.s1 }]}
+            >
+              <Text style={[styles.toBannerBtnTxt, { color: theme.text }]}>{t('retryPrimary')}</Text>
+            </Pressable>
+          </View>
         </View>
       )}
 

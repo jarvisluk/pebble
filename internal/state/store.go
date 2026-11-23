@@ -117,6 +117,7 @@ type RoutineRun struct {
 	StartedAt    string  `json:"startedAt"`
 	FinishedAt   string  `json:"finishedAt"`
 	InjectedAt   string  `json:"injectedAt,omitempty"`
+	SlotKey      string  `json:"slotKey,omitempty"`
 }
 
 type Store struct {
@@ -1155,7 +1156,7 @@ func (s *Store) RecallSession(opts RecallOptions) (*RecallResult, error) {
 const routineRunSelectCols = `
   id, bot_id, routine_id, routine_name, trigger, status, delivery, model,
   output, error, duration_ms, cost_usd, input_tokens, output_tokens,
-  started_at, finished_at, injected_at
+  started_at, finished_at, injected_at, slot_key
 `
 
 func scanRoutineRunRow(scanner interface{ Scan(...any) error }) (RoutineRun, error) {
@@ -1178,6 +1179,7 @@ func scanRoutineRunRow(scanner interface{ Scan(...any) error }) (RoutineRun, err
 		&r.StartedAt,
 		&r.FinishedAt,
 		&r.InjectedAt,
+		&r.SlotKey,
 	)
 	return r, err
 }
@@ -1206,10 +1208,10 @@ func (s *Store) RecordRoutineRun(run RoutineRun) (RoutineRun, error) {
 
 	if _, err := s.db.Exec(`
 		INSERT INTO routine_runs(`+routineRunSelectCols+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, run.ID, run.BotID, run.RoutineID, run.RoutineName, run.Trigger, run.Status, run.Delivery, run.Model,
 		run.Output, run.Error, run.DurationMs, run.CostUSD, run.InputTokens, run.OutputTokens,
-		run.StartedAt, run.FinishedAt, run.InjectedAt); err != nil {
+		run.StartedAt, run.FinishedAt, run.InjectedAt, run.SlotKey); err != nil {
 		return run, err
 	}
 	return run, nil

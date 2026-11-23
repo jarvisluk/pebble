@@ -141,6 +141,7 @@ final class HubStore {
     var questions: [PendingQuestion] = []
     var desktopTargets: [DesktopTarget] = []
     var activeDesktopTarget = ActiveDesktopTarget(target: "local", name: nil, temporary: false, expiresAt: nil)
+    var usingStandby = false
     var routines: [String: [RoutineItem]] = [:]
 
     @ObservationIgnored private var activeChat: String?
@@ -286,11 +287,44 @@ final class HubStore {
         let seq = connSeq
         stream.stop()
         online = false
+        usingStandby = false
         connState = .connecting
         connError = ""
 
-        let norm = normalizeAddress(profile.address)
-        var tok = profile.token.isEmpty ? norm.token : profile.token
+        do {
+            try await connectEndpoint(profile: profile, rawAddress: profile.address, rawToken: profile.token, isStandby: false, seq: seq)
+        } catch {
+            guard seq == connSeq else { return }
+            let isUnauth = (error as? HubError)?.unauthorized == true
+            let sbAddr = (profile.standbyAddress ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !isUnauth && !sbAddr.isEmpty {
+                do {
+                    try await connectEndpoint(profile: profile, rawAddress: sbAddr, rawToken: profile.standbyToken ?? "", isStandby: true, seq: seq)
+                    return
+                } catch {
+                    guard seq == connSeq else { return }
+                    handleConnectError(error)
+                    return
+                }
+            }
+            handleConnectError(error)
+        }
+    }
+
+    private func handleConnectError(_ error: Error) {
+        usingStandby = false
+        if let e = error as? HubError, e.unauthorized {
+            connState = .unauthorized
+            connError = e.message
+        } else {
+            connState = .error
+            connError = errText(error, L.t("connFailed"))
+        }
+    }
+
+    private func connectEndpoint(profile: ServerProfile, rawAddress: String, rawToken: String, isStandby: Bool, seq: Int) async throws {
+        let norm = normalizeAddress(rawAddress)
+        var tok = rawToken.isEmpty ? norm.token : rawToken
         var url = norm.cleanAddress
         do {
             if norm.isTailscale {
@@ -314,7 +348,7 @@ final class HubStore {
                 await Tunnel.stop()
             }
             guard seq == connSeq else { return }
-            if tok != profile.token || norm.cleanAddress != profile.address,
+            if !isStandby, tok != profile.token || norm.cleanAddress != profile.address,
                let i = servers.firstIndex(where: { $0.id == profile.id }) {
                 servers[i].address = norm.cleanAddress
                 servers[i].token = tok
@@ -331,6 +365,7 @@ final class HubStore {
             let list = data.bots ?? []
             bots = list
             msgs = [:]; last = [:]; unread = [:]; tools = [:]; models = [:]; routines = [:]
+            usingStandby = isStandby
             connState = .connected
             connError = ""
 
@@ -354,18 +389,12 @@ final class HubStore {
             Task { if let q: QuestionsResp = try? await client.call("/api/questions"), seq == connSeq { questions = q.items ?? [] } }
             startStream(url, tok)
         } catch {
-            guard seq == connSeq else { return }
+            guard seq == connSeq else { throw error }
             baseURL = url
             authToken = tok
             isTailcat = norm.isTailcat
             isTailscale = norm.isTailscale
-            if let e = error as? HubError, e.unauthorized {
-                connState = .unauthorized
-                connError = e.message
-            } else {
-                connState = .error
-                connError = errText(error, L.t("connFailed"))
-            }
+            throw error
         }
     }
 
@@ -386,22 +415,32 @@ final class HubStore {
         }
     }
 
-    func addAndConnectServer(label: String, address: String, token: String) async throws {
+    func addAndConnectServer(label: String, address: String, token: String, standbyAddress: String? = nil, standbyToken: String? = nil) async throws {
         let norm = normalizeAddress(address)
         if norm.cleanAddress.isEmpty { throw HubError(message: L.t("enterValidAddr")) }
         let tok = (token.isEmpty ? norm.token : token).trimmingCharacters(in: .whitespaces)
         let lbl = label.trimmingCharacters(in: .whitespaces)
+        let sbRaw = (standbyAddress ?? "").trimmingCharacters(in: .whitespaces)
+        let sbNorm = sbRaw.isEmpty ? nil : normalizeAddress(sbRaw)
+        let sbAddr = sbNorm?.cleanAddress
+        let sbTokTrim = (standbyToken ?? "").trimmingCharacters(in: .whitespaces)
+        let sbTok = !sbTokTrim.isEmpty ? sbTokTrim : (sbNorm?.token.isEmpty == false ? sbNorm?.token : nil)
+
         var target: ServerProfile
         if let i = servers.firstIndex(where: { $0.address == norm.cleanAddress }) {
             target = servers[i]
             if !lbl.isEmpty { target.label = lbl }
             if !tok.isEmpty { target.token = tok }
+            if let sbAddr, !sbAddr.isEmpty { target.standbyAddress = sbAddr }
+            if let sbTok, !sbTok.isEmpty { target.standbyToken = sbTok }
             servers[i] = target
         } else {
             let def = norm.isTailcat ? L.t("remoteHostDefault")
                 : norm.cleanAddress.replacingOccurrences(of: "^https?://", with: "", options: .regularExpression)
             target = ServerProfile(id: "\(Int(Date().timeIntervalSince1970 * 1000))", label: lbl.isEmpty ? def : lbl,
-                                   address: norm.cleanAddress, token: tok)
+                                   address: norm.cleanAddress, token: tok,
+                                   standbyAddress: (sbAddr?.isEmpty == false ? sbAddr : nil),
+                                   standbyToken: sbTok)
             servers.insert(target, at: 0)
         }
         activeServerId = target.id

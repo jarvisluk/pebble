@@ -114,10 +114,12 @@ CREATE TABLE IF NOT EXISTS routine_runs (
   output_tokens INTEGER NOT NULL DEFAULT 0,
   started_at    TEXT NOT NULL,
   finished_at   TEXT NOT NULL,
-  injected_at   TEXT NOT NULL DEFAULT ''
+  injected_at   TEXT NOT NULL DEFAULT '',
+  slot_key      TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_routine_runs_bot_routine ON routine_runs(bot_id, routine_id, started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_routine_runs_pending     ON routine_runs(bot_id, delivery, status, injected_at);
+CREATE INDEX IF NOT EXISTS idx_routine_runs_slot_key    ON routine_runs(slot_key);
 `
 
 func openSQLite(dbPath string) (*sql.DB, error) {
@@ -151,7 +153,42 @@ func openSQLite(dbPath string) (*sql.DB, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("migrate messages.media_json: %w", err)
 	}
+	if err := ensureRoutineRunsSlotKeyColumn(db); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("migrate routine_runs.slot_key: %w", err)
+	}
 	return db, nil
+}
+
+func ensureRoutineRunsSlotKeyColumn(db *sql.DB) error {
+	rows, err := db.Query(`PRAGMA table_info(routine_runs)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			cid        int
+			name, ctyp string
+			notnull    int
+			dflt       sql.NullString
+			pk         int
+		)
+		if err := rows.Scan(&cid, &name, &ctyp, &notnull, &dflt, &pk); err != nil {
+			return err
+		}
+		if name == "slot_key" {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if _, err = db.Exec(`ALTER TABLE routine_runs ADD COLUMN slot_key TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
+	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_routine_runs_slot_key ON routine_runs(slot_key)`)
+	return err
 }
 
 func ensureMessagesMediaColumn(db *sql.DB) error {

@@ -248,6 +248,8 @@ struct ServerProfile: Codable, Identifiable, Hashable {
     var label: String
     var address: String
     var token: String
+    var standbyAddress: String?
+    var standbyToken: String?
 }
 
 struct RoutineRun: Codable, Identifiable, Hashable {
