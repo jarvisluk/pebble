@@ -16,7 +16,6 @@ import type {
 import { api, setUnauthorizedHandler } from './lib/api';
 import { getLangPref, resolveLang, setLangPref, translate } from './lib/i18n';
 import { installMacWindowDragBridge } from './lib/macShell';
-import { applyAccentPref, getAccentPref } from './lib/theme';
 import { useViewTransition } from './lib/useViewTransition';
 import { Sidebar } from './components/Sidebar';
 import { ChatView } from './components/ChatView';
@@ -121,7 +120,11 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    applyAccentPref(getAccentPref());
+    document.documentElement.style.removeProperty('--accent');
+    document.documentElement.style.removeProperty('--accent-text');
+    try {
+      localStorage.removeItem('bothub.accent');
+    } catch {}
     document.documentElement.lang = lang;
     setUnauthorizedHandler(() => setLoginOpen(true));
     const uninstallDrag = installMacWindowDragBridge();

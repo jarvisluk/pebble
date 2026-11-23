@@ -18,7 +18,7 @@ import { ModalHeader } from '../components/ModalHeader';
 import { confirmAction } from '../confirm';
 import { useI18n } from '../i18n';
 import { resolveDefaultModel, useHub } from '../store';
-import { ACCENT_PRESETS, DEFAULT_ACCENT, MONO_FONT, useTheme, useThemePref } from '../theme';
+import { MONO_FONT, useTheme, useThemePref } from '../theme';
 import type { LanguagePreference, ThemePreference } from '../storage';
 import type { MagpieMemoryList } from '../types';
 
@@ -45,7 +45,7 @@ function mapsEqual(a: Record<string, string>, b: Record<string, string>): boolea
 
 export default function SettingsScreen() {
   const theme = useTheme();
-  const { pref: themePref, setPref: setThemePref, accent, setAccent } = useThemePref();
+  const { pref: themePref, setPref: setThemePref } = useThemePref();
   const { pref: langPref, setPref: setLangPref, t } = useI18n();
   const {
     activeServer,
@@ -558,30 +558,6 @@ export default function SettingsScreen() {
                   </Text>
                 </Pressable>
               ))}
-            </View>
-
-            <View style={styles.rowBetween}>
-              <Text style={[styles.subLabel, { color: theme.text2 }]}>{t('appAccent')}</Text>
-              <Pressable onPress={() => setAccent(DEFAULT_ACCENT)}>
-                <Text style={[styles.smallBtnTxt, { color: theme.accent }]}>{t('resetDefault')}</Text>
-              </Pressable>
-            </View>
-            <Text style={[styles.magpieSub, { color: theme.mute }]}>{t('appAccentDesc')}</Text>
-            <View style={styles.swatchRow}>
-              {ACCENT_PRESETS.map((hex) => {
-                const selected = accent === hex;
-                return (
-                  <Pressable
-                    key={hex}
-                    onPress={() => setAccent(hex)}
-                    style={[
-                      styles.swatch,
-                      { backgroundColor: hex },
-                      selected && { borderWidth: 3, borderColor: theme.text },
-                    ]}
-                  />
-                );
-              })}
             </View>
 
             <Text style={[styles.subLabel, { color: theme.text2 }]}>{t('language')}</Text>

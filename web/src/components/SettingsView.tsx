@@ -15,7 +15,7 @@ import type {
 } from '../types';
 import { api } from '../lib/api';
 import { translate } from '../lib/i18n';
-import { ACCENT_PRESETS, DEFAULT_ACCENT, applyAccentPref, applyThemePref, getAccentPref, getThemePref } from '../lib/theme';
+import { applyThemePref, getThemePref } from '../lib/theme';
 import type { ViewDir, ViewState } from '../lib/useViewTransition';
 import { BotAvatar } from './BotAvatar';
 
@@ -110,7 +110,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   // General
   const [themePref, setThemePref] = useState<ThemePref>(() => getThemePref());
-  const [accentPref, setAccentPref] = useState<string>(() => getAccentPref());
   const [memData, setMemData] = useState<MemoryResponse | null>(null);
   const [memStatus, setMemStatus] = useState('');
   const [memStatusClass, setMemStatusClass] = useState('');
@@ -1540,46 +1539,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   <option value="light">{t('themeLight')}</option>
                   <option value="dark">{t('themeDark')}</option>
                 </select>
-              </div>
-            </section>
-
-            <section className="set-card">
-              <div className="set-card-hd">
-                <h2>{t('appAccent')}</h2>
-                <button
-                  type="button"
-                  id="sAccentReset"
-                  className="link-btn"
-                  onClick={() => {
-                    setAccentPref(applyAccentPref(DEFAULT_ACCENT));
-                    onToast(t('accentResetToast'));
-                  }}
-                >
-                  {t('resetDefault')}
-                </button>
-              </div>
-              <p className="set-card-desc">{t('appAccentDesc')}</p>
-              <div className="accent-row">
-                <div id="sAccentSwatches" className="accent-row">
-                  {ACCENT_PRESETS.map((c) => (
-                    <button
-                      key={c}
-                      type="button"
-                      className={`swatch${accentPref === c ? ' on' : ''}`}
-                      style={{ background: c }}
-                      aria-label={c}
-                      onClick={() => setAccentPref(applyAccentPref(c))}
-                    />
-                  ))}
-                </div>
-                <input
-                  id="sAccentCustom"
-                  type="color"
-                  className="accent-pick"
-                  title={t('customColor')}
-                  value={accentPref}
-                  onChange={(e) => setAccentPref(applyAccentPref(e.target.value))}
-                />
               </div>
             </section>
 

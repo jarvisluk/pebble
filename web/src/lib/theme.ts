@@ -1,8 +1,6 @@
 import type { BotStatus, ResolvedLang, ThemePref } from '../types';
 import { translate } from './i18n';
 
-export const DEFAULT_ACCENT = '#d9774b';
-export const ACCENT_PRESETS = ['#d9774b', '#3b82f6', '#10b981', '#8b5cf6', '#e11d48', '#f59e0b'];
 export const BOT_COLORS = ['#f08a2c', '#8a7ad8', '#86a33a', '#b85a4a', '#7a7465', '#e0685a'];
 export const BOT_AVATARS = ['blob', 'squircle', 'cat', 'bear', 'cloud', 'ghost', 'star', 'sprout'] as const;
 export type BotAvatarKind = (typeof BOT_AVATARS)[number];
@@ -47,33 +45,6 @@ export function applyThemePref(val: ThemePref): void {
       localStorage.removeItem('bothub.theme');
     } catch {}
   }
-}
-
-export function getAccentPref(): string {
-  try {
-    const a = localStorage.getItem('bothub.accent');
-    return a && /^#[0-9a-fA-F]{6}$/.test(a) ? a.toLowerCase() : DEFAULT_ACCENT;
-  } catch {
-    return DEFAULT_ACCENT;
-  }
-}
-
-export function applyAccentPref(hex: string): string {
-  const clean = /^#[0-9a-fA-F]{6}$/.test(String(hex || '').trim()) ? hex.toLowerCase() : DEFAULT_ACCENT;
-  if (clean === DEFAULT_ACCENT) {
-    document.documentElement.style.removeProperty('--accent');
-    document.documentElement.style.removeProperty('--accent-text');
-    try {
-      localStorage.removeItem('bothub.accent');
-    } catch {}
-  } else {
-    document.documentElement.style.setProperty('--accent', clean);
-    document.documentElement.style.setProperty('--accent-text', contrastText(clean));
-    try {
-      localStorage.setItem('bothub.accent', clean);
-    } catch {}
-  }
-  return clean;
 }
 
 export function normalizeBotHex(hex: string | undefined): string {
