@@ -1,100 +1,167 @@
 import SwiftUI
 
+enum BotSortMode: String, CaseIterable {
+    case recent
+    case manual
+}
+
 struct BotListView: View {
     @Environment(HubStore.self) private var hub
     @Environment(Router.self) private var router
     @Environment(\.palette) private var p
-    @Environment(\.horizontalSizeClass) private var hsc
+
+    var compact = true
+
     @State private var query = ""
-    @State private var searching = false
-    @FocusState private var searchFocused: Bool
+    @AppStorage("bothub_bot_sort_mode") private var sortModeRaw = BotSortMode.recent.rawValue
+    @State private var pinnedIds: [String] = UserDefaults.standard.stringArray(forKey: "bothub_pinned_bots") ?? []
+    @State private var manualOrder: [String] = UserDefaults.standard.stringArray(forKey: "bothub_manual_order") ?? []
+    @State private var confirm: ConfirmItem?
 
-    private var isCompact: Bool { hsc == .compact }
+    private var sortMode: BotSortMode {
+        BotSortMode(rawValue: sortModeRaw) ?? .recent
+    }
 
-    private var filtered: [(Int, BotStatus)] {
+    private var orderedBots: [(Int, BotStatus)] {
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
-        return hub.bots.enumerated().filter { _, b in
+        let indexed = hub.bots.enumerated().filter { _, b in
             q.isEmpty || b.displayName.lowercased().contains(q) || b.id.lowercased().contains(q)
                 || (b.description ?? "").lowercased().contains(q)
-        }.map { ($0.offset, $0.element) }
+        }
+        let sorted = indexed.sorted { a, b in
+            let aPinned = pinnedIds.firstIndex(of: a.element.id)
+            let bPinned = pinnedIds.firstIndex(of: b.element.id)
+            if let ap = aPinned, let bp = bPinned { return ap < bp }
+            if aPinned != nil { return true }
+            if bPinned != nil { return false }
+
+            switch sortMode {
+            case .recent:
+                let ta = hub.last[a.element.id]?.createdAt ?? ""
+                let tb = hub.last[b.element.id]?.createdAt ?? ""
+                if ta != tb { return ta > tb }
+                return a.offset < b.offset
+            case .manual:
+                let ma = manualOrder.firstIndex(of: a.element.id)
+                let mb = manualOrder.firstIndex(of: b.element.id)
+                if let ia = ma, let ib = mb { return ia < ib }
+                if ma != nil { return true }
+                if mb != nil { return false }
+                return a.offset < b.offset
+            }
+        }
+        return sorted.map { ($0.offset, $0.element) }
     }
 
     private func go(_ route: SheetRoute) {
         router.sheet = hub.isConnected ? route : .connect(scan: false)
     }
 
+    private func togglePin(_ id: String) {
+        if let idx = pinnedIds.firstIndex(of: id) {
+            pinnedIds.remove(at: idx)
+        } else {
+            pinnedIds.insert(id, at: 0)
+        }
+        UserDefaults.standard.set(pinnedIds, forKey: "bothub_pinned_bots")
+    }
+
+    private func moveBots(from source: IndexSet, to destination: Int) {
+        var ids = orderedBots.map(\.1.id)
+        ids.move(fromOffsets: source, toOffset: destination)
+        manualOrder = ids
+        UserDefaults.standard.set(manualOrder, forKey: "bothub_manual_order")
+    }
+
     var body: some View {
         @Bindable var r = router
         List(selection: $r.selected) { rows }
-            .hubList(sidebar: !isCompact)
+            .hubColumnList(compact: compact, page: p.page)
+            .listSectionSpacing(12)
+            .contentMargins(.top, 8, for: .scrollContent)
             .refreshable {
                 if hub.isConnected { try? await hub.refreshBots() } else { await hub.reconnect() }
             }
-            .navigationTitle("Bots")
+            .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { toolbar }
+            .navigationDestination(isPresented: Binding(
+                get: { compact && router.inSettings },
+                set: { if !$0 { router.leaveSettings() } }
+            )) {
+                SettingsSidebarView(compact: true)
+            }
+            .confirmAlert($confirm)
     }
 
     @ViewBuilder
     private var rows: some View {
-        if searching {
-            HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass").foregroundStyle(p.mute)
-                TextField(hub.t("searchBot"), text: $query)
-                    .focused($searchFocused)
-                    .submitLabel(.search)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-            }
-            .padding(.horizontal, 12)
-            .frame(height: 40)
-            .background(isCompact ? p.card : p.s1, in: Capsule())
-            .listRowSeparator(.hidden)
+        NativeSearchBar(text: $query, placeholder: hub.t("searchBot"))
+            .frame(height: 36)
+            .padding(.horizontal, -8)
+            .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
             .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
             .selectionDisabled()
-        }
         if let to = hub.takeovers.first { takeoverSection(to) }
         Section {
-            ForEach(filtered, id: \.1.id) { idx, bot in
-                NavigationLink(value: bot.id) { BotRow(bot: bot, index: idx) }
-                    .tag(bot.id)
-                    .listRowSeparator(.hidden)
-                    .listRowBackground(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .fill(!isCompact && router.selected == bot.id ? p.sel : Color.clear)
-                            .padding(.horizontal, 8)
-                    )
+            ForEach(orderedBots, id: \.1.id) { idx, bot in
+                let pinned = pinnedIds.contains(bot.id)
+                let isUnread = (hub.unread[bot.id] ?? 0) > 0
+                NavigationLink(value: bot.id) {
+                    BotRow(bot: bot, index: idx, pinned: pinned)
+                }
+                .tag(bot.id)
+                .listRowInsets(EdgeInsets(top: 11, leading: 10, bottom: 11, trailing: 10))
+                .listRowBackground(compact ? (router.selected == bot.id ? p.s1 : p.card) : nil)
+                .listRowSeparator(.hidden)
+                .contextMenu {
+                    Button {
+                        togglePin(bot.id)
+                    } label: {
+                        Label(hub.t(pinned ? "unpinBot" : "pinBot"), systemImage: pinned ? "pin.slash" : "pin")
+                    }
+                    Button {
+                        hub.toggleUnread(bot.id)
+                    } label: {
+                        Label(hub.t(isUnread ? "markRead" : "markUnread"), systemImage: isUnread ? "envelope.open" : "envelope.badge")
+                    }
+                    if hub.bots.count > 1 {
+                        Divider()
+                        Button(role: .destructive) {
+                            confirm = ConfirmItem(title: hub.t("deleteBotTitle", ["name": bot.displayName]), message: hub.t("deleteBotDesc")) {
+                                try? await hub.deleteBot(bot.id)
+                                if router.selected == bot.id { router.closeBot() }
+                            }
+                        } label: {
+                            Label(hub.t("delete"), systemImage: "trash")
+                        }
+                    }
+                }
             }
+            .onMove(perform: sortMode == .manual && query.isEmpty ? moveBots : nil)
         }
-        if filtered.isEmpty {
+        if orderedBots.isEmpty {
             Text(query.isEmpty ? hub.t("noBotsYet") : hub.t("noMatchedBots"))
                 .foregroundStyle(.secondary)
                 .selectionDisabled()
         }
     }
 
-    private var title: some View {
-        Text("Bots").font(.system(size: 22, weight: .bold)).fixedSize()
-            .padding(.leading, isCompact ? 0 : 8)
-    }
-
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
-        ToolbarItem(placement: .principal) { Color.clear.frame(width: 1, height: 1) }
-        if #available(iOS 26.0, *) {
-            ToolbarItem(placement: .topBarLeading) { title }.sharedBackgroundVisibility(.hidden)
-        } else {
-            ToolbarItem(placement: .topBarLeading) { title }
-        }
-        ToolbarItemGroup(placement: .topBarTrailing) {
-            Button {
-                searching.toggle()
-                if searching { searchFocused = true } else { query = "" }
+        ToolbarItem(placement: .topBarLeading) {
+            Menu {
+                Picker(hub.t("sortBots"), selection: $sortModeRaw) {
+                    Text(hub.t("sortByRecent")).tag(BotSortMode.recent.rawValue)
+                    Text(hub.t("sortManual")).tag(BotSortMode.manual.rawValue)
+                }
             } label: {
-                Label(hub.t("searchBot"), systemImage: searching ? "xmark" : "magnifyingglass")
+                Label(hub.t("sortBots"), systemImage: "arrow.up.arrow.down")
             }
-            Button { go(.createBot) } label: { Label(hub.t("newBot"), systemImage: "plus") }
-            Button { go(.settings) } label: { Label(hub.t("settings"), systemImage: "gearshape") }
+        }
+        ToolbarItem(placement: .topBarTrailing) {
+            Button { router.openSettings(compact: compact) } label: { Label(hub.t("settings"), systemImage: "gearshape") }
         }
     }
 
@@ -119,9 +186,12 @@ struct BotListView: View {
 
 struct BotRow: View {
     @Environment(HubStore.self) private var hub
+    @Environment(Router.self) private var router
     @Environment(\.palette) private var p
     var bot: BotStatus
     var index: Int
+    var pinned = false
+    @State private var selectBounce = 0
 
     var body: some View {
         let lastMsg = hub.last[bot.id]
@@ -150,9 +220,14 @@ struct BotRow: View {
             return (bot.description ?? bot.harness ?? "", p.mute)
         }()
         HStack(spacing: 12) {
-            BotAvatar(id: bot.id, size: 40, index: index, avatar: bot.avatar, color: bot.color, busy: bot.isBusy)
+            BotAvatar(id: bot.id, size: 40, index: index, avatar: bot.avatar, color: bot.color, busy: bot.isBusy, bounceTrigger: selectBounce)
             VStack(alignment: .leading, spacing: 2) {
-                HStack {
+                HStack(spacing: 4) {
+                    if pinned {
+                        Image(systemName: "pin.fill")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                    }
                     Text(bot.displayName).font(.system(size: 16, weight: .semibold)).lineLimit(1)
                     Spacer(minLength: 4)
                     Text(formatShortTime(lastMsg?.createdAt)).font(.system(size: 13)).foregroundStyle(p.mute)
@@ -170,5 +245,57 @@ struct BotRow: View {
             }
         }
         .padding(.vertical, 4)
+        .onChange(of: router.selected) { _, newId in
+            if newId == bot.id { selectBounce += 1 }
+        }
+    }
+}
+
+private struct NativeSearchBar: UIViewRepresentable {
+    @Binding var text: String
+    var placeholder: String
+
+    func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
+
+    func makeUIView(context: Context) -> UISearchBar {
+        let bar = UISearchBar()
+        bar.searchBarStyle = .minimal
+        bar.placeholder = placeholder
+        bar.autocapitalizationType = .none
+        bar.autocorrectionType = .no
+        bar.delegate = context.coordinator
+        return bar
+    }
+
+    func updateUIView(_ uiView: UISearchBar, context: Context) {
+        if uiView.text != text { uiView.text = text }
+        if uiView.placeholder != placeholder { uiView.placeholder = placeholder }
+    }
+
+    final class Coordinator: NSObject, UISearchBarDelegate {
+        @Binding var text: String
+        init(text: Binding<String>) { _text = text }
+
+        func searchBar(_ searchBar: UISearchBar, textDidChange searchText: String) {
+            text = searchText
+        }
+
+        func searchBarTextDidBeginEditing(_ searchBar: UISearchBar) {
+            searchBar.setShowsCancelButton(true, animated: true)
+        }
+
+        func searchBarTextDidEndEditing(_ searchBar: UISearchBar) {
+            searchBar.setShowsCancelButton(false, animated: true)
+        }
+
+        func searchBarSearchButtonClicked(_ searchBar: UISearchBar) {
+            searchBar.resignFirstResponder()
+        }
+
+        func searchBarCancelButtonClicked(_ searchBar: UISearchBar) {
+            text = ""
+            searchBar.text = ""
+            searchBar.resignFirstResponder()
+        }
     }
 }

@@ -14,15 +14,43 @@ struct BotHubApp: App {
 enum SheetRoute: Identifiable, Equatable {
     case connect(scan: Bool)
     case createBot
-    case settings
     case devices
 
     var id: String {
         switch self {
         case let .connect(scan): return "connect-\(scan)"
         case .createBot: return "create"
-        case .settings: return "settings"
         case .devices: return "devices"
+        }
+    }
+}
+
+enum SettingsTab: String, CaseIterable, Identifiable, Hashable {
+    case general
+    case models
+    case memory
+    case desktop
+    case remote
+
+    var id: String { rawValue }
+
+    var titleKey: String {
+        switch self {
+        case .general: return "tabGeneral"
+        case .models: return "tabModels"
+        case .memory: return "tabMemory"
+        case .desktop: return "tabDesktop"
+        case .remote: return "tabRemote"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .general: return "gearshape"
+        case .models: return "cpu"
+        case .memory: return "brain"
+        case .desktop: return "display"
+        case .remote: return "network"
         }
     }
 }
@@ -40,8 +68,13 @@ final class Router {
     var sheet: SheetRoute?
     var detailOpen = false
     var desktop: DesktopPresentation?
+    var inSettings = false
+    var settingsTab: SettingsTab? = nil
+    var settingsDirty = false
+    var requestLeaveSettings = false
 
     func openBot(_ id: String) {
+        inSettings = false
         selected = id
         preferredColumn = .detail
     }
@@ -50,6 +83,30 @@ final class Router {
         detailOpen = false
         selected = nil
         preferredColumn = .sidebar
+    }
+
+    func openSettings(compact: Bool) {
+        if compact {
+            detailOpen = false
+            inSettings = true
+            settingsTab = nil
+        } else {
+            withAnimation(.easeInOut(duration: 0.3)) {
+                detailOpen = false
+                inSettings = true
+                settingsTab = .general
+                preferredColumn = .sidebar
+            }
+        }
+    }
+
+    func leaveSettings() {
+        withAnimation(.easeInOut(duration: 0.3)) {
+            inSettings = false
+            settingsDirty = false
+            requestLeaveSettings = false
+            preferredColumn = selected == nil ? .sidebar : .detail
+        }
     }
 
     func openDesktop(_ target: String = "local") {
@@ -62,6 +119,7 @@ final class Router {
 struct RootView: View {
     @Environment(HubStore.self) private var hub
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.horizontalSizeClass) private var hsc
     @Environment(\.scenePhase) private var phase
     @State private var router = Router()
 
@@ -77,20 +135,33 @@ struct RootView: View {
     var body: some View {
         let dark = hub.themePref == "dark" || (hub.themePref == "system" && scheme == .dark)
         let palette = Palette(dark: dark)
+        let compact = hsc == .compact
         @Bindable var r = router
         Group {
             if showGate {
                 NavigationStack {
                     ConnectView(startScan: false, isGate: true)
                 }
+            } else if router.inSettings && !compact {
+                NavigationSplitView(preferredCompactColumn: $r.preferredColumn) {
+                    SettingsSidebarView(compact: compact)
+                        .navigationSplitViewColumnWidth(min: 280, ideal: 320, max: 380)
+                } detail: {
+                    NavigationStack {
+                        SettingsView(tab: router.settingsTab ?? .general)
+                    }
+                }
+                .transition(.opacity)
             } else {
                 NavigationSplitView(preferredCompactColumn: $r.preferredColumn) {
-                    BotListView()
+                    BotListView(compact: compact)
                         .navigationSplitViewColumnWidth(min: 300, ideal: 340, max: 420)
                 } detail: {
                     NavigationStack {
                         if let id = router.selected, hub.bots.contains(where: { $0.id == id }) {
-                            ChatView(botId: id).id(id)
+                            ChatView(botId: id)
+                                .id(id)
+                                .transition(.opacity)
                         } else {
                             ContentUnavailableView(hub.isConnected ? hub.t("selectBotHint") : hub.t("connectHost"),
                                                    systemImage: "bubble.left.and.bubble.right")
@@ -98,7 +169,9 @@ struct RootView: View {
                                 .background(palette.page)
                         }
                     }
+                    .animation(.easeInOut(duration: 0.2), value: router.selected)
                 }
+                .transition(.opacity)
                 .inspector(isPresented: $r.detailOpen) {
                     if let id = router.selected, hub.bots.contains(where: { $0.id == id }) {
                         NavigationStack {
@@ -106,6 +179,12 @@ struct RootView: View {
                         }
                         .id(id)
                         .inspectorColumnWidth(min: 340, ideal: 380, max: 460)
+                        .overlay(alignment: .leading) {
+                            Rectangle()
+                                .fill(Color(uiColor: .separator))
+                                .frame(width: 0.5)
+                                .ignoresSafeArea()
+                        }
                         .environment(\.palette, palette)
                         .environment(router)
                         .environment(hub)
@@ -143,7 +222,6 @@ struct RootView: View {
                 .environment(hub)
                 .tint(palette.accent)
                 .buttonBorderShape(.capsule)
-                .font(.system(size: 16))
                 .preferredColorScheme(scheme0)
         }
         .onChange(of: showGate) { _, gate in
@@ -174,25 +252,9 @@ struct SheetHost: View {
             switch route {
             case let .connect(scan): ConnectView(startScan: scan)
             case .createBot: CreateBotView()
-            case .settings: SettingsView()
             case .devices: DevicesView()
             }
         }
-        .wideSheet(route.isWide)
-    }
-}
-
-extension View {
-    /// iPad 上设置与远程桌面用更大的页面尺寸，其余表单保持默认大小。
-    @ViewBuilder func wideSheet(_ wide: Bool) -> some View {
-        if wide, #available(iOS 18.0, *) { presentationSizing(.page) } else { self }
-    }
-}
-
-extension SheetRoute {
-    var isWide: Bool {
-        if case .settings = self { return true }
-        return false
     }
 }
 

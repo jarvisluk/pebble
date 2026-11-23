@@ -12,8 +12,18 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from 'react-native';
+
+type SettingsTab = 'general' | 'models' | 'memory' | 'desktop' | 'remote';
+const SETTINGS_TABS: Array<{ id: SettingsTab; labelKey: string }> = [
+  { id: 'general', labelKey: 'tabGeneral' },
+  { id: 'models', labelKey: 'tabModels' },
+  { id: 'memory', labelKey: 'tabMemory' },
+  { id: 'desktop', labelKey: 'tabDesktop' },
+  { id: 'remote', labelKey: 'tabRemote' },
+];
 
 import { BotAvatar } from '../components/BotAvatar';
 import { ModalHeader } from '../components/ModalHeader';
@@ -46,6 +56,9 @@ function mapsEqual(a: Record<string, string>, b: Record<string, string>): boolea
 }
 
 export default function SettingsScreen() {
+  const { width } = useWindowDimensions();
+  const isWide = width >= 768;
+  const [tab, setTab] = useState<SettingsTab>('general');
   const theme = useTheme();
   const { pref: themePref, setPref: setThemePref } = useThemePref();
   const { pref: langPref, setPref: setLangPref, t } = useI18n();
@@ -426,10 +439,53 @@ export default function SettingsScreen() {
         rightLoading={saving}
       />
       <KeyboardAvoidingView
-        style={styles.flex}
+        style={[styles.flex, isWide && { flexDirection: 'row' }]}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+        {isWide ? (
+          <View style={[styles.sideNav, { borderRightColor: theme.line }]}>
+            {SETTINGS_TABS.map((item) => {
+              const active = tab === item.id;
+              return (
+                <Pressable
+                  key={item.id}
+                  onPress={() => setTab(item.id)}
+                  style={[styles.sideNavItem, active && { backgroundColor: theme.card }]}
+                >
+                  <Text style={[styles.sideNavTxt, { color: active ? theme.text : theme.text2 }]}>
+                    {t(item.labelKey)}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        ) : (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.tabStrip}
+            style={{ flexGrow: 0 }}
+          >
+            {SETTINGS_TABS.map((item) => {
+              const active = tab === item.id;
+              return (
+                <Pressable
+                  key={item.id}
+                  onPress={() => setTab(item.id)}
+                  style={[
+                    styles.pill,
+                    { backgroundColor: active ? theme.accentSoft : theme.s1 },
+                  ]}
+                >
+                  <Text style={[styles.pillTxt, { color: active ? theme.accent : theme.text2 }]}>
+                    {t(item.labelKey)}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        )}
+        <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled" style={styles.flex}>
           {error ? (
             <View style={[styles.msgCard, { backgroundColor: theme.pink }]}>
               <Text style={[styles.msgTxt, { color: theme.danger }]}>{error}</Text>
@@ -441,6 +497,7 @@ export default function SettingsScreen() {
             </View>
           ) : null}
 
+          {tab === 'general' && (
           <View style={[styles.card, { backgroundColor: theme.card }]}>
             <Text style={[styles.sectionTitle, { color: theme.text }]}>{t('appearance')}</Text>
             <View style={styles.segmentRow}>
@@ -500,7 +557,9 @@ export default function SettingsScreen() {
               ))}
             </View>
           </View>
+          )}
 
+          {tab === 'remote' && (
           <View style={[styles.card, { backgroundColor: theme.card }]}>
             <Text style={[styles.sectionTitle, { color: theme.text }]}>{t('hostSection')}</Text>
             <Pressable onPress={() => router.push('/connect')} style={styles.rowBetween}>
@@ -523,7 +582,10 @@ export default function SettingsScreen() {
               </Text>
             </Pressable>
           </View>
+          )}
 
+          {tab === 'models' && (
+          <>
           <View style={[styles.card, { backgroundColor: theme.card }]}>
             <View style={styles.rowBetween}>
               <Text style={[styles.sectionTitle, { color: theme.text }]}>{t('magpieTakeover')}</Text>
@@ -989,7 +1051,11 @@ export default function SettingsScreen() {
               </View>
             )}
           </View>
+          </>
+          )}
 
+          {tab === 'memory' && (
+          <>
           <View style={[styles.card, { backgroundColor: theme.card }]}>
             <View style={styles.rowBetween}>
               <Text style={[styles.sectionTitle, { color: theme.text }]}>{t('globalSharedMem')}</Text>
@@ -1179,7 +1245,11 @@ export default function SettingsScreen() {
               </View>
             )}
           </View>
+          </>
+          )}
 
+          {tab === 'desktop' && (
+          <>
           <View style={[styles.card, { backgroundColor: theme.card }]}>
             <View style={styles.rowBetween}>
               <Text style={[styles.sectionTitle, { color: theme.text }]}>{t('deskPermsTitle')}</Text>
@@ -1324,6 +1394,8 @@ export default function SettingsScreen() {
               </View>
             </View>
           </View>
+          </>
+          )}
         </ScrollView>
       </KeyboardAvoidingView>
     </View>
@@ -1333,6 +1405,10 @@ export default function SettingsScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1 },
   flex: { flex: 1 },
+  sideNav: { width: 220, borderRightWidth: StyleSheet.hairlineWidth, padding: 12, gap: 4 },
+  sideNavItem: { borderRadius: 12, paddingHorizontal: 14, paddingVertical: 11 },
+  sideNavTxt: { fontSize: 16, fontWeight: '600' },
+  tabStrip: { paddingHorizontal: 16, paddingVertical: 8, gap: 8 },
   scroll: { padding: 16, gap: 12, paddingBottom: 36 },
   msgCard: { borderRadius: 16, paddingHorizontal: 14, paddingVertical: 10 },
   msgTxt: { fontSize: 15, fontWeight: '600' },

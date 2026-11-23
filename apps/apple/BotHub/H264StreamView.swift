@@ -25,7 +25,7 @@ final class SampleBufferCanvasView: UIView {
     override init(frame: CGRect) {
         super.init(frame: frame)
         displayLayer.videoGravity = .resizeAspect
-        backgroundColor = UIColor(red: 17 / 255, green: 17 / 255, blue: 16 / 255, alpha: 1)
+        backgroundColor = .black
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }

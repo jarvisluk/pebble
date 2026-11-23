@@ -173,6 +173,16 @@ export default function DesktopScreen() {
   return (
     <View style={[styles.root, { backgroundColor: '#111110' }]}>
       <View style={styles.mainArea}>
+        {isWide && chatOpen && resolvedBotId ? (
+          <View style={styles.sideInline}>
+            <DesktopChatSidebar
+              botId={resolvedBotId}
+              onSelectBot={setChatBotId}
+              onClose={() => setChatOpen(false)}
+            />
+          </View>
+        ) : null}
+
         <KeyboardAvoidingView
           style={[styles.stageCol, { paddingTop: insets.top + 6, paddingBottom: insets.bottom }]}
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -346,16 +356,6 @@ export default function DesktopScreen() {
             </ScrollView>
           </View>
         </KeyboardAvoidingView>
-
-        {isWide && chatOpen && resolvedBotId ? (
-          <View style={styles.sideInline}>
-            <DesktopChatSidebar
-              botId={resolvedBotId}
-              onSelectBot={setChatBotId}
-              onClose={() => setChatOpen(false)}
-            />
-          </View>
-        ) : null}
       </View>
 
       {!isWide && chatOpen && resolvedBotId ? (
@@ -379,7 +379,7 @@ const styles = StyleSheet.create({
   mainArea: { flex: 1, flexDirection: 'row' },
   stageCol: { flex: 1, minWidth: 0 },
   sideInline: { width: 360 },
-  drawerWrap: { flexDirection: 'row', justifyContent: 'flex-end', zIndex: 20 },
+  drawerWrap: { flexDirection: 'row', justifyContent: 'flex-start', zIndex: 20 },
   drawerShade: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, backgroundColor: 'rgba(0,0,0,0.45)' },
   drawerPanel: { height: '100%' },
   topStrip: { paddingHorizontal: 10, paddingBottom: 6 },
