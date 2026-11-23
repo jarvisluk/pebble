@@ -64,17 +64,14 @@ func botColorHex(_ id: String, _ index: Int = -1, custom: String? = nil) -> Stri
 
 /// 颜色全部沿用 DESIGN.md Token，原生控件只换皮不换结构。
 struct Palette {
-    static let defaultAccent = "#d9774b"
-    static let accentPresets = ["#d9774b", "#3b82f6", "#10b981", "#8b5cf6", "#e11d48", "#f59e0b"]
-
     var dark: Bool
     var page, card, s1, s2, s3, text, text2, mute: Color
     var accent, accentSoft, sel: Color
     var pink, pinkInk, lilac, lilacInk, sage, sageInk, busy, danger, eye: Color
 
-    init(dark: Bool, accent: String) {
+    init(dark: Bool) {
         self.dark = dark
-        self.accent = Color(hex: accent)
+        self.accent = Color(hex: dark ? "#f3f1ee" : "#1d1b19")
         page = Color(hex: dark ? "#000000" : "#efece8")
         card = Color(hex: dark ? "#171717" : "#ffffff")
         s1 = Color(hex: dark ? "#232323" : "#f5f3f0")
@@ -83,8 +80,8 @@ struct Palette {
         text = Color(hex: dark ? "#f3f1ee" : "#1d1b19")
         text2 = Color(hex: dark ? "#ccc7c1" : "#57524d")
         mute = Color(hex: dark ? "#948e88" : "#9b958f")
-        accentSoft = Color(hex: dark ? "#2a2a2a" : mixHex(accent, "#ffffff", 0.16))
-        sel = Color(hex: dark ? "#262626" : mixHex(accent, "#ffffff", 0.10))
+        accentSoft = Color(hex: dark ? "#2a2a2a" : "#e9e5e0")
+        sel = Color(hex: dark ? "#262626" : "#eeebe6")
         pink = Color(hex: dark ? "#2a1a18" : "#f7d9d3")
         pinkInk = Color(hex: dark ? "#f0a59b" : "#b2443a")
         lilac = Color(hex: dark ? "#24203a" : "#e0dbfb")
@@ -104,7 +101,7 @@ struct Palette {
 }
 
 private struct PaletteKey: EnvironmentKey {
-    static let defaultValue = Palette(dark: false, accent: Palette.defaultAccent)
+    static let defaultValue = Palette(dark: false)
 }
 
 extension EnvironmentValues {

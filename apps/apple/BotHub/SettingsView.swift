@@ -356,30 +356,6 @@ struct SettingsView: View {
                 Text(hub.t("themeDark")).tag("dark")
             }
             .pickerStyle(.segmented)
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Text(hub.t("appAccent"))
-                    Spacer()
-                    Button(hub.t("resetDefault")) { hub.accentHex = Palette.defaultAccent }
-                        .buttonStyle(.borderless)
-                        .disabled(hub.accentHex.lowercased() == Palette.defaultAccent)
-                }
-                HStack(spacing: 14) {
-                    ForEach(Palette.accentPresets, id: \.self) { hex in
-                        Button { hub.accentHex = hex } label: {
-                            Circle().fill(Color(hex: hex)).frame(width: 28, height: 28)
-                                .overlay {
-                                    if hub.accentHex.lowercased() == hex {
-                                        Image(systemName: "checkmark").font(.system(size: 13, weight: .bold)).foregroundStyle(.white)
-                                    }
-                                }
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                Text(hub.t("appAccentDesc")).font(.system(size: 13)).foregroundStyle(.secondary)
-            }
-            .padding(.vertical, 4)
             Picker(hub.t("language"), selection: $h.langPref) {
                 Text(hub.t("followSystem")).tag("system")
                 Text("简体中文").tag("zh-CN")

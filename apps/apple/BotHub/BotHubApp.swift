@@ -70,7 +70,7 @@ struct RootView: View {
 
     var body: some View {
         let dark = hub.themePref == "dark" || (hub.themePref == "system" && scheme == .dark)
-        let palette = Palette(dark: dark, accent: hub.accentHex)
+        let palette = Palette(dark: dark)
         @Bindable var r = router
         Group {
             if showGate {
