@@ -250,6 +250,7 @@ export default function SettingsScreen() {
       { id: 'qoder', label: 'qoder', defaultModel: '', magpie: { connected: false } },
       { id: 'codex', label: 'codex', defaultModel: '', magpie: { connected: false } },
       { id: 'claude', label: 'claude', defaultModel: '', magpie: { connected: false } },
+      { id: 'grok', label: 'grok', defaultModel: '', magpie: { connected: false } },
       { id: 'pi', label: 'pi', defaultModel: '', magpie: { connected: false } },
     ];
   }, [settings]);

@@ -10,18 +10,30 @@ import (
 
 func TestDetectHarnessAndPreference(t *testing.T) {
 	origLookPath := lookPathFunc
-	t.Cleanup(func() { lookPathFunc = origLookPath })
+	origExtraDirs := extraBinDirsFunc
+	t.Cleanup(func() {
+		lookPathFunc = origLookPath
+		extraBinDirsFunc = origExtraDirs
+	})
 
 	// Isolate HOME and AGY_BIN so host machine binaries don't leak.
 	fakeHome := t.TempDir()
 	t.Setenv("HOME", fakeHome)
 	t.Setenv("AGY_BIN", "")
+	extraBinDirsFunc = func() []string {
+		return []string{
+			filepath.Join(fakeHome, ".opencode", "bin"),
+			filepath.Join(fakeHome, ".local", "bin"),
+			filepath.Join(fakeHome, ".qoder", "bin"),
+			filepath.Join(fakeHome, ".grok", "bin"),
+		}
+	}
 
 	// Case 1: None installed.
 	lookPathFunc = func(string) (string, error) {
 		return "", errors.New("not found")
 	}
-	for _, kind := range []string{"opencode", "codebuddy", "qoder", "codex", "claude", "trae", "pi", "dsh", "agy"} {
+	for _, kind := range []string{"opencode", "codebuddy", "qoder", "codex", "claude", "grok", "trae", "pi", "dsh", "agy"} {
 		if ok, p := DetectHarness(kind); ok || p != "" {
 			t.Fatalf("expected %s not installed, got ok=%v path=%q", kind, ok, p)
 		}
@@ -111,6 +123,7 @@ func TestDetectHarnessAuth(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "")
 	t.Setenv("CODEBUDDY_API_KEY", "")
 	t.Setenv("QODER_API_KEY", "")
+	t.Setenv("XAI_API_KEY", "")
 
 	lookPathFunc = func(bin string) (string, error) {
 		return "/usr/local/bin/" + bin, nil
@@ -162,5 +175,20 @@ func TestDetectHarnessAuth(t *testing.T) {
 	}
 	if st, _ := DetectHarnessAuth(context.Background(), "claude"); st != "ready" {
 		t.Fatalf("claude auth = %q, want ready", st)
+	}
+
+	// grok needs login initially, then becomes ready when ~/.grok/auth.json exists.
+	if st, _ := DetectHarnessAuth(context.Background(), "grok"); st != "needs_login" {
+		t.Fatalf("grok auth = %q, want needs_login", st)
+	}
+	grokDir := filepath.Join(fakeHome, ".grok")
+	if err := os.MkdirAll(grokDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(grokDir, "auth.json"), []byte(`{"token":"xai"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := DetectHarnessAuth(context.Background(), "grok"); st != "ready" {
+		t.Fatalf("grok auth with auth.json = %q, want ready", st)
 	}
 }

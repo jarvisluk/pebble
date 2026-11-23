@@ -64,6 +64,8 @@ func installCommandForTarget(target string) ([]string, error) {
 		return []string{"bash", "-lc", "curl -fsSL https://qoder.com.cn/install | bash"}, nil
 	case "claude":
 		return []string{"bash", "-lc", "curl -fsSL https://claude.ai/install.sh | bash"}, nil
+	case "grok":
+		return []string{"bash", "-lc", "curl -fsSL https://x.ai/cli/install.sh | bash"}, nil
 	case "codebuddy":
 		npmPath, ok := findBinary("npm")
 		if !ok {
@@ -100,6 +102,8 @@ func loginCommandForTarget(kind string) ([]string, error) {
 	case "codebuddy":
 		return []string{binPath, "login"}, nil
 	case "qoder":
+		return []string{binPath, "login"}, nil
+	case "grok":
 		return []string{binPath, "login"}, nil
 	default:
 		return nil, fmt.Errorf("%s 无需或不支持自动登录", kind)

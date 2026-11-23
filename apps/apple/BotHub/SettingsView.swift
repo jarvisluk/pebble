@@ -106,7 +106,7 @@ struct SettingsView: View {
 
     private var harnesses: [HarnessInfo] {
         if let h = hub.settings?.harnesses, !h.isEmpty { return h }
-        return ["opencode", "codebuddy", "qoder", "codex", "claude", "pi"].map { HarnessInfo(id: $0, label: $0) }
+        return ["opencode", "codebuddy", "qoder", "codex", "claude", "grok", "pi"].map { HarnessInfo(id: $0, label: $0) }
     }
 
     private var primaryHarness: String { harnesses.first?.id ?? "opencode" }

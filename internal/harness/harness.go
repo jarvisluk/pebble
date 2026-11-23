@@ -300,6 +300,7 @@ func NewDefaultRegistry(cfg *config.HubConfig) *Registry {
 	r.Register(NewQoderHarness())
 	r.Register(NewCodexHarness())
 	r.Register(NewClaudeHarness())
+	r.Register(NewGrokHarness())
 	r.Register(NewTraeHarness())
 	r.Register(NewPiHarness())
 	r.Register(NewDshHarness())
@@ -333,10 +334,11 @@ var harnessOrder = map[string]int{
 	"qoder":     3,
 	"codex":     4,
 	"claude":    5,
-	"trae":      6,
-	"pi":        7,
-	"dsh":       8,
-	"agy":       9,
+	"grok":      6,
+	"trae":      7,
+	"pi":        8,
+	"dsh":       9,
+	"agy":       10,
 }
 
 // All returns the registered harnesses in display order.

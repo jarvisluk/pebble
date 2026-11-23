@@ -24,6 +24,7 @@ type HarnessInstallInfo struct {
 var (
 	lookPathFunc     = exec.LookPath
 	runAuthCheckFunc = defaultRunAuthCheck
+	extraBinDirsFunc = defaultExtraBinDirs
 )
 
 func defaultRunAuthCheck(ctx context.Context, bin string, args ...string) (int, string, error) {
@@ -88,6 +89,15 @@ var harnessInstallMeta = map[string]HarnessInstallInfo{
 		Category:       "recommended",
 		Summary:        "Claude 订阅",
 	},
+	"grok": {
+		Binary:         "grok",
+		Command:        "curl -fsSL https://x.ai/cli/install.sh | bash",
+		URL:            "https://x.ai",
+		CanAutoInstall: true,
+		RequiresLogin:  true,
+		Category:       "recommended",
+		Summary:        "SuperGrok / X 订阅",
+	},
 	"trae": {
 		Binary:         "traecli",
 		Command:        "查看 Trae CLI 安装说明",
@@ -141,6 +151,7 @@ func defaultExtraBinDirs() []string {
 			filepath.Join(home, ".local", "bin"),
 			filepath.Join(home, ".npm-global", "bin"),
 			filepath.Join(home, ".qoder", "bin"),
+			filepath.Join(home, ".grok", "bin"),
 		)
 	}
 	dirs = append(dirs, "/opt/homebrew/bin", "/usr/local/bin")
@@ -154,7 +165,7 @@ func findBinary(bin string) (string, bool) {
 	if p, err := lookPathFunc(bin); err == nil && p != "" {
 		return p, true
 	}
-	for _, dir := range defaultExtraBinDirs() {
+	for _, dir := range extraBinDirsFunc() {
 		candidate := filepath.Join(dir, bin)
 		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
 			return candidate, true
@@ -188,7 +199,7 @@ func DetectHarness(kind string) (installed bool, binPath string) {
 // PreferredInstalledHarness returns the first installed harness in default priority order,
 // or empty string when none is installed.
 func PreferredInstalledHarness() string {
-	for _, kind := range []string{"opencode", "codebuddy", "qoder", "codex", "claude", "trae", "pi", "dsh", "agy"} {
+	for _, kind := range []string{"opencode", "codebuddy", "qoder", "codex", "claude", "grok", "trae", "pi", "dsh", "agy"} {
 		if ok, _ := DetectHarness(kind); ok {
 			return kind
 		}
@@ -269,6 +280,15 @@ func DetectHarnessAuth(ctx context.Context, kind string) (status string, detail 
 			return "ready", "已登录"
 		}
 		return "needs_login", "需登录 Qoder 账号"
+
+	case "grok":
+		if strings.TrimSpace(os.Getenv("XAI_API_KEY")) != "" {
+			return "ready", "API Key"
+		}
+		if home != "" && nonEmptyFile(filepath.Join(home, ".grok", "auth.json")) {
+			return "ready", "已登录"
+		}
+		return "needs_login", "需登录 xAI / X 账号"
 
 	default:
 		return "ready", ""

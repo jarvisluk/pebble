@@ -85,6 +85,17 @@ func NewTraeHarness() *ACPHarness {
 	})
 }
 
+func NewGrokHarness() *ACPHarness {
+	return NewACPHarness(ACPOptions{
+		Kind:          "grok",
+		Label:         "Grok CLI",
+		Binaries:      []string{"grok"},
+		Args:          []string{"agent", "stdio"},
+		EnvPrefix:     "GROK",
+		DefaultModels: []string{"grok-4", "grok-code-fast-1"},
+	})
+}
+
 func NewACPHarness(opts ACPOptions) *ACPHarness {
 	return &ACPHarness{
 		opts:  opts,
