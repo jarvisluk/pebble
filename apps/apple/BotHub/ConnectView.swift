@@ -5,7 +5,9 @@ struct ConnectView: View {
     @Environment(HubStore.self) private var hub
     @Environment(Router.self) private var router
     @Environment(\.palette) private var p
+    @Environment(\.horizontalSizeClass) private var hsc
     var startScan: Bool
+    var isGate = false
 
     @State private var scanning = false
     @State private var label = ""
@@ -13,11 +15,94 @@ struct ConnectView: View {
     @State private var token = ""
     @State private var err = ""
     @State private var submitting = false
+    @State private var showFormWhileConnecting = false
     @State private var confirm: ConfirmItem?
 
+    private var isConnectingGate: Bool {
+        isGate && hub.activeServer != nil && hub.connState == .connecting && hub.bots.isEmpty && !showFormWhileConnecting && !submitting
+    }
+
     var body: some View {
+        Group {
+            if isConnectingGate {
+                VStack(spacing: 14) {
+                    ProgressView(hub.t("connectingHost"))
+                    Button(hub.t("switchHost")) { showFormWhileConnecting = true }
+                        .buttonStyle(.bordered)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(p.page)
+            } else {
+                formContent
+                    .frame(maxWidth: isGate && hsc != .compact ? 560 : .infinity)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(p.page)
+            }
+        }
+        .navigationTitle(isGate ? "Bot Hub" : hub.t("connectHost"))
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar { connectToolbar }
+        .confirmAlert($confirm)
+        .onAppear {
+            if let s = hub.activeServer, hub.connState == .unauthorized || hub.connState == .error {
+                if label.isEmpty { label = s.label }
+                if address.isEmpty { address = s.address }
+            }
+            if startScan { toggleScanner() }
+        }
+        .onChange(of: hub.connState) { _, st in
+            if st == .connected {
+                submitting = false
+                showFormWhileConnecting = false
+                if !isGate { router.sheet = nil }
+                return
+            }
+            guard submitting else { return }
+            if st == .error || st == .unauthorized {
+                submitting = false
+                err = hub.connError.isEmpty ? hub.t("connFailed") : hub.connError
+            }
+        }
+    }
+
+    @ToolbarContentBuilder
+    private var connectToolbar: some ToolbarContent {
+        if isGate {
+            if !isConnectingGate {
+                ToolbarItem(placement: .confirmationAction) {
+                    if submitting {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Button(hub.t("connect")) { submit() }
+                    }
+                }
+            }
+        } else {
+            SheetToolbar(actionTitle: hub.t("connect"), loading: submitting) { submit() }
+        }
+    }
+
+    private var formContent: some View {
         let norm = normalizeAddress(address)
-        Form {
+        return Form {
+            if isGate {
+                if hub.activeServer == nil {
+                    Section(hub.t("connectHost")) {
+                        Text("1. \(hub.t("onboardStep1"))\n2. \(hub.t("onboardStep2"))")
+                            .foregroundStyle(p.text2)
+                    }
+                } else if hub.connState == .unauthorized || hub.connState == .error {
+                    Section(hub.connState == .unauthorized ? hub.t("tokenRequired") : hub.t("cantConnectHost")) {
+                        Text(hub.connState == .error && !hub.connError.isEmpty ? hub.connError : hub.t("onboardDesc"))
+                            .foregroundStyle(p.text2)
+                        Button(hub.t("retry")) {
+                            err = ""
+                            showFormWhileConnecting = false
+                            Task { await hub.reconnect() }
+                        }
+                    }
+                }
+            }
             Section {
                 Button {
                     toggleScanner()
@@ -80,27 +165,6 @@ struct ConnectView: View {
             }
         }
         .hubForm()
-        .navigationTitle(hub.t("connectHost"))
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar { SheetToolbar(actionTitle: hub.t("connect"), loading: submitting) { submit() } }
-        .confirmAlert($confirm)
-        .onAppear {
-            if let s = hub.activeServer, hub.connState == .unauthorized || hub.connState == .error {
-                if label.isEmpty { label = s.label }
-                if address.isEmpty { address = s.address }
-            }
-            if startScan { toggleScanner() }
-        }
-        .onChange(of: hub.connState) { _, st in
-            guard submitting else { return }
-            if st == .connected {
-                submitting = false
-                router.sheet = nil
-            } else if st == .error || st == .unauthorized {
-                submitting = false
-                err = hub.connError.isEmpty ? hub.t("connFailed") : hub.connError
-            }
-        }
     }
 
     private func askRemove(_ s: ServerProfile) {

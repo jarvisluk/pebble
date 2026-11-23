@@ -1,13 +1,31 @@
-import { Stack } from 'expo-router';
+import { router, Stack, usePathname } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Platform } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { I18nProvider } from '../i18n';
-import { HubProvider } from '../store';
+import { HubProvider, useHub } from '../store';
 import { ThemeProvider, useTheme } from '../theme';
+
+function ConnectionGuard() {
+  const pathname = usePathname();
+  const { ready, activeServer, connState, bots } = useHub();
+
+  useEffect(() => {
+    if (!ready || pathname === '/') return;
+    const blocked =
+      !activeServer ||
+      connState === 'unauthorized' ||
+      (connState === 'error' && bots.length === 0);
+    if (blocked && (pathname !== '/connect' || !activeServer)) {
+      router.replace('/');
+    }
+  }, [activeServer, bots.length, connState, pathname, ready]);
+
+  return null;
+}
 
 function RootContent() {
   const theme = useTheme();
@@ -17,6 +35,7 @@ function RootContent() {
     <GestureHandlerRootView style={{ flex: 1, backgroundColor: theme.page }}>
       <SafeAreaProvider>
         <HubProvider>
+          <ConnectionGuard />
           <StatusBar style={theme.dark ? 'light' : 'dark'} />
           <Stack
             screenOptions={{

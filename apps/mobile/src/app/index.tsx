@@ -1,6 +1,6 @@
 import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -20,6 +20,7 @@ import { useI18n } from '../i18n';
 import { formatShortTime, plainPreview, useHub } from '../store';
 import { useTheme } from '../theme';
 import type { BotStatus } from '../types';
+import { ConnectContent } from './connect';
 
 export default function BotsScreen() {
   const theme = useTheme();
@@ -28,7 +29,6 @@ export default function BotsScreen() {
     ready,
     activeServer,
     connState,
-    connError,
     bots,
     last,
     unread,
@@ -42,6 +42,20 @@ export default function BotsScreen() {
   const [query, setQuery] = useState('');
   const [searching, setSearching] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [manualOverride, setManualOverride] = useState(false);
+
+  useEffect(() => {
+    if (connState === 'connected') {
+      setManualOverride(false);
+    }
+  }, [connState]);
+
+  const showGate =
+    !ready ||
+    !activeServer ||
+    connState === 'unauthorized' ||
+    (connState === 'error' && bots.length === 0) ||
+    (connState === 'connecting' && bots.length === 0);
 
   const filteredBots = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -76,9 +90,29 @@ export default function BotsScreen() {
     router.push(`/bot/${encodeURIComponent(botId)}`);
   };
 
-  const needsFirstPairing = ready && !activeServer;
-  const showDisconnectedCard =
-    ready && !!activeServer && (connState === 'unauthorized' || (connState === 'error' && bots.length === 0));
+  if (showGate) {
+    if (!ready || (!!activeServer && connState === 'connecting' && bots.length === 0 && !manualOverride)) {
+      return (
+        <SafeAreaView style={[styles.safe, { backgroundColor: theme.page }]} edges={['top', 'left', 'right', 'bottom']}>
+          <View style={styles.centerBox}>
+            <ActivityIndicator size="small" color={theme.accent} />
+            <Text style={[styles.centerTxt, { color: theme.text2 }]}>
+              {connState === 'connecting' ? t('connectingHost') : t('loading')}
+            </Text>
+            {ready && !!activeServer && (
+              <Pressable
+                onPress={() => setManualOverride(true)}
+                style={[styles.secondaryBtn, { backgroundColor: theme.s1, marginTop: 8 }]}
+              >
+                <Text style={[styles.secondaryBtnTxt, { color: theme.text2 }]}>{t('switchHost')}</Text>
+              </Pressable>
+            )}
+          </View>
+        </SafeAreaView>
+      );
+    }
+    return <ConnectContent standalone />;
+  }
 
   const renderBotItem = ({ item, index }: { item: BotStatus; index: number }) => {
     const lastMsg = last[item.id];
@@ -164,7 +198,7 @@ export default function BotsScreen() {
         </View>
       </View>
 
-      {!needsFirstPairing && searching && (
+      {searching && (
         <View style={[styles.searchBox, { backgroundColor: theme.s1 }]}>
           <SearchIcon size={16} color={theme.mute} />
           <TextInput
@@ -207,107 +241,27 @@ export default function BotsScreen() {
         </View>
       )}
 
-      {!ready || (connState === 'connecting' && bots.length === 0) ? (
-        <View style={styles.centerBox}>
-          <ActivityIndicator size="small" color={theme.accent} />
-          <Text style={[styles.centerTxt, { color: theme.text2 }]}>
-            {connState === 'connecting' ? t('connectingHost') : t('loading')}
-          </Text>
-        </View>
-      ) : needsFirstPairing ? (
-        <View style={styles.cardWrap}>
-          <View style={[styles.onboardCard, { backgroundColor: theme.card }]}>
-            <Text style={[styles.onboardTitle, { color: theme.text }]}>{t('connectHost')}</Text>
-            <View style={styles.onboardSteps}>
-              <View style={[styles.onboardStepRow, { backgroundColor: theme.s1 }]}>
-                <View style={[styles.stepBadge, { backgroundColor: theme.card }]}>
-                  <Text style={[styles.stepBadgeTxt, { color: theme.text }]}>1</Text>
-                </View>
-                <Text style={[styles.onboardStepTxt, { color: theme.text2 }]}>
-                  {t('onboardStep1')}
-                </Text>
-              </View>
-              <View style={[styles.onboardStepRow, { backgroundColor: theme.s1 }]}>
-                <View style={[styles.stepBadge, { backgroundColor: theme.card }]}>
-                  <Text style={[styles.stepBadgeTxt, { color: theme.text }]}>2</Text>
-                </View>
-                <Text style={[styles.onboardStepTxt, { color: theme.text2 }]}>
-                  {t('onboardStep2')}
-                </Text>
-              </View>
-            </View>
-            <View style={styles.onboardBtns}>
-              <Pressable
-                onPress={() => router.push(Platform.OS === 'web' ? '/connect' : '/connect?scan=1')}
-                style={[styles.primaryBtn, { backgroundColor: theme.accent }]}
-              >
-                <Text style={[styles.primaryBtnTxt, { color: theme.accentText }]}>{t('scanConnect')}</Text>
-              </Pressable>
-              <Pressable
-                onPress={() => router.push('/connect')}
-                style={[styles.secondaryBtn, { backgroundColor: theme.s1 }]}
-              >
-                <Text style={[styles.secondaryBtnTxt, { color: theme.text2 }]}>{t('manualEnterAddr')}</Text>
-              </Pressable>
-            </View>
-          </View>
-        </View>
-      ) : showDisconnectedCard ? (
-        <View style={styles.cardWrap}>
-          <View style={[styles.onboardCard, { backgroundColor: theme.card }]}>
-            <Text style={[styles.onboardTitle, { color: theme.text }]}>
-              {connState === 'unauthorized'
-                ? t('tokenRequired')
-                : connState === 'error'
-                  ? t('cantConnectHost')
-                  : t('connectHost')}
+      <FlatList
+        data={filteredBots}
+        keyExtractor={(item) => item.id}
+        renderItem={renderBotItem}
+        contentContainerStyle={styles.listContent}
+        ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={theme.accent}
+          />
+        }
+        ListEmptyComponent={
+          <View style={styles.centerBox}>
+            <Text style={[styles.centerTxt, { color: theme.mute }]}>
+              {query.trim() ? t('noMatchedBots') : t('noBotsYet')}
             </Text>
-            <Text style={[styles.onboardDesc, { color: theme.text2 }]}>
-              {connState === 'error' && connError ? connError : t('onboardDesc')}
-            </Text>
-            <View style={styles.onboardBtns}>
-              <Pressable
-                onPress={() => router.push('/connect')}
-                style={[styles.primaryBtn, { backgroundColor: theme.accent }]}
-              >
-                <Text style={[styles.primaryBtnTxt, { color: theme.accentText }]}>
-                  {connState === 'unauthorized' ? t('updateToken') : t('scanOrEnterAddr')}
-                </Text>
-              </Pressable>
-              {activeServer && (
-                <Pressable
-                  onPress={() => void reconnect()}
-                  style={[styles.secondaryBtn, { backgroundColor: theme.s1 }]}
-                >
-                  <Text style={[styles.secondaryBtnTxt, { color: theme.text2 }]}>{t('retry')}</Text>
-                </Pressable>
-              )}
-            </View>
           </View>
-        </View>
-      ) : (
-        <FlatList
-          data={filteredBots}
-          keyExtractor={(item) => item.id}
-          renderItem={renderBotItem}
-          contentContainerStyle={styles.listContent}
-          ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={onRefresh}
-              tintColor={theme.accent}
-            />
-          }
-          ListEmptyComponent={
-            <View style={styles.centerBox}>
-              <Text style={[styles.centerTxt, { color: theme.mute }]}>
-                {query.trim() ? t('noMatchedBots') : t('noBotsYet')}
-              </Text>
-            </View>
-          }
-        />
-      )}
+        }
+      />
     </SafeAreaView>
   );
 }
@@ -455,69 +409,6 @@ const styles = StyleSheet.create({
   centerTxt: {
     fontSize: 16,
     textAlign: 'center',
-  },
-  cardWrap: {
-    paddingHorizontal: 16,
-    paddingTop: 12,
-  },
-  onboardCard: {
-    borderRadius: 22,
-    padding: 20,
-    gap: 10,
-  },
-  onboardTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    letterSpacing: -0.3,
-  },
-  onboardDesc: {
-    fontSize: 16,
-    lineHeight: 22,
-  },
-  onboardSteps: {
-    gap: 8,
-    marginTop: 2,
-  },
-  onboardStepRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  stepBadge: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  stepBadgeTxt: {
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  onboardStepTxt: {
-    flex: 1,
-    fontSize: 15,
-    lineHeight: 21,
-  },
-  onboardBtns: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-    marginTop: 6,
-  },
-  primaryBtn: {
-    borderRadius: 999,
-    paddingHorizontal: 18,
-    paddingVertical: 11,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  primaryBtnTxt: {
-    fontSize: 17,
-    fontWeight: '600',
   },
   secondaryBtn: {
     borderRadius: 999,
