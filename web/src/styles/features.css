@@ -445,12 +445,12 @@
 .av-opt:hover { transform: scale(1.06); }
 .av-opt.on { border-color: var(--accent); }
 .panel .av-opt.on { border-color: var(--bot-accent); }
-.av-opt .av { width: 30px; height: 30px; margin: 0; }
+.av-opt .av { width: 32px; height: 32px; margin: 0; }
 .p-av-btn { position: relative; border-radius: 50%; transition: transform var(--dur-fast); }
 .p-av-btn:hover { transform: scale(1.04); }
 .panel-b { flex: 1; overflow-y: auto; margin: 0 calc(-1 * var(--pad)); padding: 8px var(--pad) var(--pad); }
 .p-hero { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 4px; margin-bottom: 16px; }
-.p-hero .av { width: 64px; height: 64px; margin-bottom: 10px; }
+.p-av-btn .av { width: 64px; height: 64px; margin-bottom: 10px; }
 .p-hero h2 { font-size: var(--fs-lg); font-weight: 700; }
 .p-hero p { color: var(--mute); font-size: var(--fs-sm); }
 .p-hero-name, .p-hero-desc { width: 100%; text-align: center; border-radius: var(--r-row); border: 1px solid transparent; background: transparent; padding: 3px 10px; transition: background var(--dur-fast), border-color var(--dur-fast); }

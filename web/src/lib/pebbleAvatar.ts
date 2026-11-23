@@ -1,4 +1,22 @@
-import { hashStr } from './theme';
+import { hashStr, normalizeBotAvatar } from './theme';
+
+const PEBBLE_VARIANT_SEEDS: Record<string, string> = {
+  'pebble-1': 'pebble-v6',
+  'pebble-2': 'pebble-v1',
+  'pebble-3': 'pebble-v30',
+  'pebble-4': 'pebble-v11',
+  'pebble-5': 'pebble-v21',
+  'pebble-6': 'pebble-v17',
+  'pebble-7': 'pebble-v15',
+};
+
+export function resolvePebbleSeed(id: string, avatar?: string): string {
+  const kind = normalizeBotAvatar(avatar);
+  if (kind !== 'blob' && kind in PEBBLE_VARIANT_SEEDS) {
+    return PEBBLE_VARIANT_SEEDS[kind];
+  }
+  return id || '?';
+}
 
 export interface PebbleVert {
   s: number;

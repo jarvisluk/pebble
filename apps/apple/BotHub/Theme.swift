@@ -37,7 +37,42 @@ func fnv1a(_ s: String) -> UInt32 {
 }
 
 let botColors = ["#f08a2c", "#8a7ad8", "#86a33a", "#b85a4a", "#7a7465", "#e0685a"]
-let botAvatars = ["blob", "squircle", "cat", "bear", "cloud", "ghost", "star", "sprout"]
+let botAvatars = ["blob", "pebble-1", "pebble-2", "pebble-3", "pebble-4", "pebble-5", "pebble-6", "pebble-7"]
+
+private let legacyBotAvatarMap: [String: String] = [
+    "squircle": "pebble-1",
+    "cat": "pebble-2",
+    "bear": "pebble-3",
+    "cloud": "pebble-4",
+    "ghost": "pebble-5",
+    "star": "pebble-6",
+    "sprout": "pebble-7",
+]
+
+private let pebbleVariantSeeds: [String: String] = [
+    "pebble-1": "pebble-v6",
+    "pebble-2": "pebble-v1",
+    "pebble-3": "pebble-v30",
+    "pebble-4": "pebble-v11",
+    "pebble-5": "pebble-v21",
+    "pebble-6": "pebble-v17",
+    "pebble-7": "pebble-v15",
+]
+
+func normalizeBotAvatar(_ raw: String?) -> String {
+    let s = (raw ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    if s.isEmpty || s == "blob" { return "blob" }
+    if let mapped = legacyBotAvatarMap[s] { return mapped }
+    return botAvatars.contains(s) ? s : "blob"
+}
+
+func resolvePebbleSeed(id: String, avatar: String?) -> String {
+    let kind = normalizeBotAvatar(avatar)
+    if kind != "blob", let seed = pebbleVariantSeeds[kind] {
+        return seed
+    }
+    return id.isEmpty ? "?" : id
+}
 
 func normalizeBotHex(_ s: String?) -> String? {
     let clean = (s ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -299,148 +334,13 @@ struct BotAvatar: View {
     @State private var startTime = Date()
 
     var body: some View {
-        let shape = (avatar ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let kind = shape.isEmpty ? "blob" : shape
         let blob = Color(hex: botColorHex(id, index, custom: color))
-        let isDefaultBlob = !["squircle", "cat", "bear", "cloud", "ghost", "star", "sprout"].contains(kind)
-        Group {
-            if isDefaultBlob {
-                let params = pebbleParams(for: id)
-                TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: reduceMotion)) { timeline in
-                    let t = reduceMotion ? 0.0 : max(0.0, timeline.date.timeIntervalSince(startTime))
-                    Canvas { ctx, sz in
-                        drawPebble(in: &ctx, size: sz, params: params, color: blob, eye: p.eye, t: t, busy: busy)
-                    }
-                }
-            } else {
-                Canvas { ctx, sz in
-                    let k = sz.width / 100
-                    func drawEye(cx: CGFloat, cy: CGFloat, rx: CGFloat, ry: CGFloat, rot: Double = 0) {
-                        var e = ctx
-                        e.translateBy(x: cx * k, y: cy * k)
-                        if rot != 0 { e.rotate(by: .degrees(rot)) }
-                        e.fill(Path(ellipseIn: CGRect(x: -rx * k, y: -ry * k, width: rx * 2 * k, height: ry * 2 * k)), with: .color(p.eye))
-                    }
-                    func pt(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: x * k, y: y * k) }
-
-                    switch kind {
-                    case "squircle":
-                var path = Path()
-                path.move(to: pt(50, 10))
-                path.addCurve(to: pt(90, 50), control1: pt(78, 10), control2: pt(90, 22))
-                path.addCurve(to: pt(50, 90), control1: pt(90, 78), control2: pt(78, 90))
-                path.addCurve(to: pt(10, 50), control1: pt(22, 90), control2: pt(10, 78))
-                path.addCurve(to: pt(50, 10), control1: pt(10, 22), control2: pt(22, 10))
-                path.closeSubpath()
-                ctx.fill(path, with: .color(blob))
-                drawEye(cx: 38, cy: 48, rx: 5.5, ry: 9.5)
-                drawEye(cx: 62, cy: 48, rx: 5.5, ry: 9.5)
-            case "cat":
-                var path = Path()
-                path.move(to: pt(20, 34))
-                path.addCurve(to: pt(38, 22), control1: pt(18, 16), control2: pt(24, 10))
-                path.addCurve(to: pt(62, 22), control1: pt(46, 19), control2: pt(54, 19))
-                path.addCurve(to: pt(80, 34), control1: pt(76, 10), control2: pt(82, 16))
-                path.addCurve(to: pt(86, 70), control1: pt(88, 44), control2: pt(90, 58))
-                path.addCurve(to: pt(50, 91), control1: pt(80, 86), control2: pt(66, 91))
-                path.addCurve(to: pt(14, 70), control1: pt(34, 91), control2: pt(20, 86))
-                path.addCurve(to: pt(20, 34), control1: pt(10, 58), control2: pt(12, 44))
-                path.closeSubpath()
-                ctx.fill(path, with: .color(blob))
-                drawEye(cx: 38, cy: 55, rx: 5.5, ry: 9)
-                drawEye(cx: 62, cy: 55, rx: 5.5, ry: 9)
-            case "bear":
-                var path = Path()
-                path.move(to: pt(26, 35))
-                path.addCurve(to: pt(19, 14), control1: pt(15, 33), control2: pt(11, 21))
-                path.addCurve(to: pt(39, 23), control1: pt(27, 7), control2: pt(38, 14))
-                path.addCurve(to: pt(61, 23), control1: pt(46, 21), control2: pt(54, 21))
-                path.addCurve(to: pt(81, 14), control1: pt(62, 14), control2: pt(73, 7))
-                path.addCurve(to: pt(74, 35), control1: pt(89, 21), control2: pt(85, 33))
-                path.addCurve(to: pt(84, 73), control1: pt(85, 45), control2: pt(89, 60))
-                path.addCurve(to: pt(50, 91), control1: pt(77, 86), control2: pt(64, 91))
-                path.addCurve(to: pt(16, 73), control1: pt(36, 91), control2: pt(23, 86))
-                path.addCurve(to: pt(26, 35), control1: pt(11, 60), control2: pt(15, 45))
-                path.closeSubpath()
-                ctx.fill(path, with: .color(blob))
-                drawEye(cx: 38, cy: 55, rx: 5.5, ry: 9)
-                drawEye(cx: 62, cy: 55, rx: 5.5, ry: 9)
-            case "cloud":
-                var path = Path()
-                path.move(to: pt(28, 80))
-                path.addCurve(to: pt(9, 58), control1: pt(15, 80), control2: pt(8, 70))
-                path.addCurve(to: pt(26, 39), control1: pt(10, 47), control2: pt(18, 40))
-                path.addCurve(to: pt(54, 15), control1: pt(27, 24), control2: pt(39, 14))
-                path.addCurve(to: pt(78, 38), control1: pt(67, 16), control2: pt(77, 25))
-                path.addCurve(to: pt(92, 60), control1: pt(87, 40), control2: pt(93, 49))
-                path.addCurve(to: pt(69, 80), control1: pt(91, 72), control2: pt(82, 80))
-                path.closeSubpath()
-                ctx.fill(path, with: .color(blob))
-                drawEye(cx: 39, cy: 53, rx: 5.2, ry: 8.5)
-                drawEye(cx: 61, cy: 53, rx: 5.2, ry: 8.5)
-            case "ghost":
-                var path = Path()
-                path.move(to: pt(50, 10))
-                path.addCurve(to: pt(88, 52), control1: pt(74, 10), control2: pt(88, 26))
-                path.addLine(to: pt(88, 84))
-                path.addCurve(to: pt(78, 87), control1: pt(88, 89), control2: pt(82, 91))
-                path.addCurve(to: pt(63, 87), control1: pt(73, 82), control2: pt(68, 82))
-                path.addCurve(to: pt(50, 87), control1: pt(58, 92), control2: pt(53, 92))
-                path.addCurve(to: pt(37, 87), control1: pt(47, 92), control2: pt(42, 92))
-                path.addCurve(to: pt(22, 87), control1: pt(32, 82), control2: pt(27, 82))
-                path.addCurve(to: pt(12, 84), control1: pt(18, 91), control2: pt(12, 89))
-                path.addLine(to: pt(12, 52))
-                path.addCurve(to: pt(50, 10), control1: pt(12, 26), control2: pt(26, 10))
-                path.closeSubpath()
-                ctx.fill(path, with: .color(blob))
-                drawEye(cx: 38, cy: 46, rx: 5.5, ry: 9.5)
-                drawEye(cx: 62, cy: 46, rx: 5.5, ry: 9.5)
-            case "star":
-                var path = Path()
-                path.move(to: pt(50, 8))
-                path.addCurve(to: pt(64, 27), control1: pt(55, 8), control2: pt(59, 23))
-                path.addCurve(to: pt(90, 34), control1: pt(69, 31), control2: pt(87, 28))
-                path.addCurve(to: pt(77, 57), control1: pt(93, 40), control2: pt(78, 51))
-                path.addCurve(to: pt(79, 85), control1: pt(76, 63), control2: pt(85, 80))
-                path.addCurve(to: pt(50, 79), control1: pt(73, 90), control2: pt(58, 79))
-                path.addCurve(to: pt(21, 85), control1: pt(42, 79), control2: pt(27, 90))
-                path.addCurve(to: pt(23, 57), control1: pt(15, 80), control2: pt(24, 63))
-                path.addCurve(to: pt(10, 34), control1: pt(22, 51), control2: pt(7, 40))
-                path.addCurve(to: pt(36, 27), control1: pt(13, 28), control2: pt(31, 31))
-                path.addCurve(to: pt(50, 8), control1: pt(41, 23), control2: pt(45, 8))
-                path.closeSubpath()
-                ctx.fill(path, with: .color(blob))
-                drawEye(cx: 40, cy: 49, rx: 5, ry: 8.5)
-                drawEye(cx: 60, cy: 49, rx: 5, ry: 8.5)
-            case "sprout":
-                var l1 = Path()
-                l1.move(to: pt(50, 28))
-                l1.addCurve(to: pt(25, 13), control1: pt(48, 16), control2: pt(36, 9))
-                l1.addCurve(to: pt(50, 28), control1: pt(26, 23), control2: pt(37, 29))
-                l1.closeSubpath()
-                ctx.fill(l1, with: .color(blob))
-
-                var l2 = Path()
-                l2.move(to: pt(50, 28))
-                l2.addCurve(to: pt(76, 12), control1: pt(53, 15), control2: pt(65, 8))
-                l2.addCurve(to: pt(50, 28), control1: pt(75, 23), control2: pt(63, 29))
-                l2.closeSubpath()
-                ctx.fill(l2, with: .color(blob))
-
-                var body = Path()
-                body.move(to: pt(50, 28))
-                body.addCurve(to: pt(84, 62), control1: pt(66, 28), control2: pt(84, 40))
-                body.addCurve(to: pt(50, 92), control1: pt(84, 82), control2: pt(69, 92))
-                body.addCurve(to: pt(16, 62), control1: pt(31, 92), control2: pt(16, 82))
-                body.addCurve(to: pt(50, 28), control1: pt(16, 40), control2: pt(34, 28))
-                body.closeSubpath()
-                ctx.fill(body, with: .color(blob))
-                drawEye(cx: 39, cy: 59, rx: 5.2, ry: 8.8)
-                drawEye(cx: 61, cy: 59, rx: 5.2, ry: 8.8)
-            default:
-                break
-            }
-                }
+        let seed = resolvePebbleSeed(id: id, avatar: avatar)
+        let params = pebbleParams(for: seed)
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: reduceMotion)) { timeline in
+            let t = reduceMotion ? 0.0 : max(0.0, timeline.date.timeIntervalSince(startTime))
+            Canvas { ctx, sz in
+                drawPebble(in: &ctx, size: sz, params: params, color: blob, eye: p.eye, t: t, busy: busy)
             }
         }
         .frame(width: size, height: size)
@@ -549,8 +449,7 @@ struct BotAppearancePicker: View {
     var accent: Color? = nil
 
     private var effectiveAvatar: String {
-        let s = avatar.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return s.isEmpty ? "blob" : s
+        normalizeBotAvatar(avatar)
     }
 
     private var effectiveHex: String {

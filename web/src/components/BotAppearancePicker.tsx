@@ -1,7 +1,7 @@
 import React from 'react';
 import type { BotStatus, ResolvedLang } from '../types';
 import { translate } from '../lib/i18n';
-import { BOT_AVATARS, BOT_COLORS, botColor, normalizeBotHex } from '../lib/theme';
+import { BOT_AVATARS, BOT_COLORS, botColor, normalizeBotAvatar, normalizeBotHex } from '../lib/theme';
 import { BotAvatar } from './BotAvatar';
 
 interface BotAppearancePickerProps {
@@ -16,13 +16,13 @@ interface BotAppearancePickerProps {
 
 const AVATAR_LABEL_KEY: Record<(typeof BOT_AVATARS)[number], string> = {
   blob: 'avBlob',
-  squircle: 'avSquircle',
-  cat: 'avCat',
-  bear: 'avBear',
-  cloud: 'avCloud',
-  ghost: 'avGhost',
-  star: 'avStar',
-  sprout: 'avSprout',
+  'pebble-1': 'avPebble1',
+  'pebble-2': 'avPebble2',
+  'pebble-3': 'avPebble3',
+  'pebble-4': 'avPebble4',
+  'pebble-5': 'avPebble5',
+  'pebble-6': 'avPebble6',
+  'pebble-7': 'avPebble7',
 };
 
 export const BotAppearancePicker: React.FC<BotAppearancePickerProps> = ({
@@ -35,7 +35,7 @@ export const BotAppearancePicker: React.FC<BotAppearancePickerProps> = ({
   onColorChange,
 }) => {
   const t = (k: string) => translate(lang, k);
-  const effectiveAvatar = avatar.trim().toLowerCase() || 'blob';
+  const effectiveAvatar = normalizeBotAvatar(avatar);
   const effectiveColor = botColor(botId, bots, color);
   const hasCustom = Boolean(effectiveAvatar !== 'blob' || normalizeBotHex(color));
 

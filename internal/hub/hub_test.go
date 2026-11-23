@@ -938,7 +938,7 @@ func TestBotAvatarAndColorCreateUpdatePersist(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateBot failed: %v", err)
 	}
-	if st.Avatar != "cat" || st.Color != "#3b82f6" {
+	if st.Avatar != "pebble-2" || st.Color != "#3b82f6" {
 		t.Fatalf("unexpected created avatar/color: %+v", st)
 	}
 
@@ -949,11 +949,11 @@ func TestBotAvatarAndColorCreateUpdatePersist(t *testing.T) {
 		t.Fatal("expected invalid color on UpdateBot to fail")
 	}
 
-	upd, err := h.UpdateBot("beta", BotUpdate{Avatar: ptr("sprout"), Color: ptr("#10B981")})
+	upd, err := h.UpdateBot("beta", BotUpdate{Avatar: ptr("pebble-7"), Color: ptr("#10B981")})
 	if err != nil {
 		t.Fatalf("UpdateBot failed: %v", err)
 	}
-	if upd.Avatar != "sprout" || upd.Color != "#10b981" {
+	if upd.Avatar != "pebble-7" || upd.Color != "#10b981" {
 		t.Fatalf("unexpected updated avatar/color: %+v", upd)
 	}
 
@@ -969,7 +969,7 @@ func TestBotAvatarAndColorCreateUpdatePersist(t *testing.T) {
 			break
 		}
 	}
-	if found == nil || found.Avatar != "sprout" || found.Color != "#10b981" {
+	if found == nil || found.Avatar != "pebble-7" || found.Color != "#10b981" {
 		t.Fatalf("expected persisted avatar/color in bots.json, got %+v", found)
 	}
 

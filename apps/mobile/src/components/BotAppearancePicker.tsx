@@ -7,6 +7,7 @@ import {
   BOT_COLORS,
   getBotColor,
   MONO_FONT,
+  normalizeBotAvatar,
   normalizeBotHex,
   useTheme,
 } from '../theme';
@@ -39,7 +40,7 @@ export function BotAppearancePicker({
     setHexDraft(color);
   }, [color]);
 
-  const effectiveAvatar = avatar.trim().toLowerCase() || 'blob';
+  const effectiveAvatar = normalizeBotAvatar(avatar);
   const effectiveColor = getBotColor(botId, botIndex, color);
   const ring = accent || theme.accent;
   const hasCustom = effectiveAvatar !== 'blob' || Boolean(normalizeBotHex(color));

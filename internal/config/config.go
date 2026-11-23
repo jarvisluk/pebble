@@ -308,14 +308,28 @@ var (
 )
 
 // ValidBotAvatars lists the supported built-in bot avatar shapes.
-var ValidBotAvatars = []string{"blob", "squircle", "cat", "bear", "cloud", "ghost", "star", "sprout"}
+var ValidBotAvatars = []string{"blob", "pebble-1", "pebble-2", "pebble-3", "pebble-4", "pebble-5", "pebble-6", "pebble-7"}
+
+var legacyBotAvatarAliases = map[string]string{
+	"squircle": "pebble-1",
+	"cat":      "pebble-2",
+	"bear":     "pebble-3",
+	"cloud":    "pebble-4",
+	"ghost":    "pebble-5",
+	"star":     "pebble-6",
+	"sprout":   "pebble-7",
+}
 
 // NormalizeBotAvatar trims, lowercases, and validates a bot avatar shape.
 // An empty string is allowed and represents the default "blob" avatar.
+// Legacy static avatar names are transparently mapped to their Pebble C variants.
 func NormalizeBotAvatar(v string) (string, error) {
 	s := strings.ToLower(strings.TrimSpace(v))
 	if s == "" || s == "blob" {
 		return s, nil
+	}
+	if mapped, ok := legacyBotAvatarAliases[s]; ok {
+		return mapped, nil
 	}
 	for _, valid := range ValidBotAvatars {
 		if s == valid {
