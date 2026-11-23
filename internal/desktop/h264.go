@@ -21,12 +21,19 @@ type VideoPresetConfig struct {
 }
 
 var videoPresets = map[string]VideoPresetConfig{
-	"high":   {FPS: 30, MaxDim: 1600, BitrateKbps: 2500},
-	"medium": {FPS: 15, MaxDim: 1280, BitrateKbps: 900},
-	"low":    {FPS: 8, MaxDim: 960, BitrateKbps: 350},
+	"ultra":  {FPS: 60, MaxDim: 3840, BitrateKbps: 35000},
+	"high":   {FPS: 60, MaxDim: 2560, BitrateKbps: 16000},
+	"medium": {FPS: 30, MaxDim: 1600, BitrateKbps: 6000},
+	"low":    {FPS: 15, MaxDim: 1080, BitrateKbps: 2000},
 }
 
-// ResolveVideoPreset normalizes a preset name ("high", "medium", "low") and returns its config.
+// StreamControl allows live bitrate adaptation and on-demand IDR keyframe insertion.
+type StreamControl interface {
+	SetBitrate(kbps int)
+	ForceKeyframe()
+}
+
+// ResolveVideoPreset normalizes a preset name ("ultra", "high", "medium", "low") and returns its config.
 func ResolveVideoPreset(name string) (string, VideoPresetConfig) {
 	key := strings.ToLower(strings.TrimSpace(name))
 	if cfg, ok := videoPresets[key]; ok {
@@ -38,6 +45,8 @@ func ResolveVideoPreset(name string) (string, VideoPresetConfig) {
 // StepDownPreset returns the next lower quality tier if available.
 func StepDownPreset(cur string) (string, bool) {
 	switch strings.ToLower(strings.TrimSpace(cur)) {
+	case "ultra":
+		return "high", true
 	case "high", "":
 		return "medium", true
 	case "medium":
@@ -54,8 +63,10 @@ func StepUpPreset(cur string) (string, bool) {
 		return "medium", true
 	case "medium":
 		return "high", true
+	case "high":
+		return "ultra", true
 	default:
-		return "high", false
+		return "ultra", false
 	}
 }
 
@@ -76,6 +87,7 @@ type H264Meta struct {
 	FPS           int     `json:"fps"`
 	BitrateKbps   int     `json:"bitrateKbps"`
 	Preset        string  `json:"preset"`
+	Codec         string  `json:"codec"`
 	Backend       string  `json:"backend"`
 }
 
@@ -96,28 +108,41 @@ func (s *AnnexBSplitter) Push(p []byte, emit func(H264Chunk) error) error {
 		return nil
 	}
 	s.buf = append(s.buf, p...)
+	offset := 0
 	for {
-		sc1, sc1Len := findStartCode(s.buf, 0)
+		sc1, sc1Len := findStartCode(s.buf, offset)
 		if sc1 < 0 {
-			// Discard any leading garbage before a potential partial start code.
-			if len(s.buf) > 4 {
-				s.buf = append([]byte(nil), s.buf[len(s.buf)-4:]...)
+			// Preserve up to 4 trailing bytes in case a start code spans chunks.
+			if len(s.buf)-offset > 4 {
+				offset = len(s.buf) - 4
 			}
-			return nil
+			break
 		}
 		sc2, _ := findStartCode(s.buf, sc1+sc1Len)
 		if sc2 < 0 {
-			if sc1 > 0 {
-				s.buf = append([]byte(nil), s.buf[sc1:]...)
-			}
-			return nil
+			offset = sc1
+			break
 		}
 		nal := s.buf[sc1+sc1Len : sc2]
 		if err := s.handleNAL(nal, emit); err != nil {
+			s.compactBuf(sc2)
 			return err
 		}
-		s.buf = append([]byte(nil), s.buf[sc2:]...)
+		offset = sc2
 	}
+	s.compactBuf(offset)
+	return nil
+}
+
+func (s *AnnexBSplitter) compactBuf(offset int) {
+	if offset <= 0 {
+		return
+	}
+	rem := len(s.buf) - offset
+	if rem > 0 {
+		copy(s.buf, s.buf[offset:])
+	}
+	s.buf = s.buf[:rem]
 }
 
 // Flush emits any trailing NAL / access unit buffered at EOF.
@@ -127,9 +152,15 @@ func (s *AnnexBSplitter) Flush(emit func(H264Chunk) error) error {
 		if err := s.handleNAL(nal, emit); err != nil {
 			return err
 		}
-		s.buf = nil
+		s.buf = s.buf[:0]
 	}
 	return s.flushAU(emit)
+}
+
+func isFirstSliceOfFrame(nal []byte) bool {
+	// In H.264 slice_header(), first_mb_in_slice is unsigned Exp-Golomb coded.
+	// first_mb_in_slice == 0 encodes as a leading '1' bit (MSB 0x80) in byte 1.
+	return len(nal) <= 1 || (nal[1]&0x80) != 0
 }
 
 func (s *AnnexBSplitter) handleNAL(nal []byte, emit func(H264Chunk) error) error {
@@ -157,28 +188,32 @@ func (s *AnnexBSplitter) handleNAL(nal []byte, emit func(H264Chunk) error) error
 			return s.flushAU(emit)
 		}
 	case 5: // IDR slice
-		if s.auHasSlice {
+		if s.auHasSlice && isFirstSliceOfFrame(nal) {
 			if err := s.flushAU(emit); err != nil {
 				return err
 			}
 		}
-		if len(s.sps) > 0 {
-			s.appendAnnexBNAL(s.sps)
-		}
-		if len(s.pps) > 0 {
-			s.appendAnnexBNAL(s.pps)
+		if !s.auHasSlice {
+			if len(s.sps) > 0 {
+				s.appendAnnexBNAL(s.sps)
+			}
+			if len(s.pps) > 0 {
+				s.appendAnnexBNAL(s.pps)
+			}
+			s.auIsKey = true
 		}
 		s.appendAnnexBNAL(nal)
-		s.auIsKey = true
 		s.auHasSlice = true
 	case 1: // Non-IDR slice
-		if s.auHasSlice {
+		if s.auHasSlice && isFirstSliceOfFrame(nal) {
 			if err := s.flushAU(emit); err != nil {
 				return err
 			}
 		}
+		if !s.auHasSlice {
+			s.auIsKey = false
+		}
 		s.appendAnnexBNAL(nal)
-		s.auIsKey = false
 		s.auHasSlice = true
 	default:
 		// SEI or other supplemental NALs attached to current AU if any.
@@ -224,18 +259,36 @@ func findStartCode(b []byte, from int) (idx int, length int) {
 	return -1, 0
 }
 
-// StartH264Stream captures the local desktop with ffmpeg as an Annex-B H.264 stream
-// using the given preset ("high" | "medium" | "low") until ctx is cancelled.
+// StartH264Stream captures the local desktop as an Annex-B H.264 stream until ctx is cancelled.
 func (e *Engine) StartH264Stream(
 	ctx context.Context,
 	preset string,
 	onMeta func(H264Meta) error,
 	onChunk func(H264Chunk) error,
 ) error {
-	ffmpegPath, err := exec.LookPath("ffmpeg")
-	if err != nil {
-		return errors.New("需要安装 ffmpeg 以启用 H.264 视频流")
+	return e.StartVideoStream(ctx, preset, "h264", onMeta, nil, onChunk)
+}
+
+// NormalizeVideoCodec normalizes a requested codec name ("hevc" or "h264").
+func NormalizeVideoCodec(codec string) string {
+	switch strings.ToLower(strings.TrimSpace(codec)) {
+	case "hevc", "h265", "h.265":
+		return "hevc"
+	default:
+		return "h264"
 	}
+}
+
+// StartVideoStream captures the local desktop as an Annex-B H.264 or HEVC stream,
+// preferring native ScreenCaptureKit + VideoToolbox on macOS and falling back to ffmpeg.
+func (e *Engine) StartVideoStream(
+	ctx context.Context,
+	preset string,
+	codec string,
+	onMeta func(H264Meta) error,
+	onReady func(StreamControl),
+	onChunk func(H264Chunk) error,
+) error {
 	if err := e.prepareActive(ctx); err != nil {
 		return err
 	}
@@ -247,18 +300,77 @@ func (e *Engine) StartH264Stream(
 	defer e.releaseStreamLease()
 
 	presetName, cfg := ResolveVideoPreset(preset)
-	ref, err := e.Frame(ctx, "", cfg.MaxDim, 50)
-	if err != nil {
-		return err
+	codecName := NormalizeVideoCodec(codec)
+	srcW, srcH, bounds, ok := mainDisplayMetrics(ctx)
+	if !ok {
+		st, err := e.Status(ctx)
+		if err != nil {
+			return err
+		}
+		bounds = displayBounds{
+			X:      st.LogicalX,
+			Y:      st.LogicalY,
+			Width:  st.LogicalWidth,
+			Height: st.LogicalHeight,
+		}
+		if bounds.Width <= 0 || bounds.Height <= 0 {
+			bounds = fallbackBounds(ctx)
+		}
+		srcW = int(bounds.Width)
+		srcH = int(bounds.Height)
 	}
-	w, h := evenDim(ref.ImageWidth), evenDim(ref.ImageHeight)
+	w, h := fitDimensions(srcW, srcH, cfg.MaxDim)
 	if w < 16 || h < 16 {
 		return errors.New("invalid desktop frame dimensions")
 	}
 
+	if nativeCaptureAvailable() {
+		meta := H264Meta{
+			Width:         w,
+			Height:        h,
+			LogicalX:      bounds.X,
+			LogicalY:      bounds.Y,
+			LogicalWidth:  bounds.Width,
+			LogicalHeight: bounds.Height,
+			FPS:           cfg.FPS,
+			BitrateKbps:   cfg.BitrateKbps,
+			Preset:        presetName,
+			Codec:         codecName,
+			Backend:       "sck/" + codecName,
+		}
+		if onMeta != nil {
+			if err := onMeta(meta); err != nil {
+				return err
+			}
+		}
+		emitted := 0
+		err := startNativeVideoStream(ctx, w, h, cfg.FPS, cfg.BitrateKbps, codecName, onReady, func(c H264Chunk) error {
+			emitted++
+			if onChunk != nil {
+				return onChunk(c)
+			}
+			return nil
+		})
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if emitted > 0 || err == nil {
+			return err
+		}
+		// If ScreenCaptureKit reports permission denied or no display, propagate instead of running ffmpeg.
+		if strings.Contains(strings.ToLower(err.Error()), "declined") || strings.Contains(strings.ToLower(err.Error()), "permission") {
+			return err
+		}
+	}
+
+	ffmpegPath, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		return errors.New("需要安装 ffmpeg 以启用视频流")
+	}
+
 	encoders := h264EncodersForOS()
 	if len(encoders) == 0 {
-		return fmt.Errorf("H.264 streaming unsupported on %s", runtime.GOOS)
+		return fmt.Errorf("video streaming unsupported on %s", runtime.GOOS)
 	}
 
 	var lastErr error
@@ -267,13 +379,14 @@ func (e *Engine) StartH264Stream(
 		meta := H264Meta{
 			Width:         w,
 			Height:        h,
-			LogicalX:      ref.LogicalX,
-			LogicalY:      ref.LogicalY,
-			LogicalWidth:  ref.LogicalWidth,
-			LogicalHeight: ref.LogicalHeight,
+			LogicalX:      bounds.X,
+			LogicalY:      bounds.Y,
+			LogicalWidth:  bounds.Width,
+			LogicalHeight: bounds.Height,
 			FPS:           cfg.FPS,
 			BitrateKbps:   cfg.BitrateKbps,
 			Preset:        presetName,
+			Codec:         "h264",
 			Backend:       "ffmpeg/" + enc,
 		}
 		if onMeta != nil {
@@ -281,7 +394,7 @@ func (e *Engine) StartH264Stream(
 				return err
 			}
 		}
-		args := buildFFmpegH264Args(enc, e.Env(), w, h, cfg)
+		args := buildFFmpegH264Args(enc, e.Env(), srcW, srcH, w, h, cfg)
 		err := runFFmpegH264(ctx, ffmpegPath, e.Env(), args, func(c H264Chunk) error {
 			emitted++
 			if onChunk != nil {
@@ -300,7 +413,24 @@ func (e *Engine) StartH264Stream(
 	if lastErr != nil {
 		return lastErr
 	}
-	return errors.New("ffmpeg failed to emit H.264 frames")
+	return errors.New("ffmpeg failed to emit video frames")
+}
+
+func fitDimensions(srcW, srcH, maxDim int) (int, int) {
+	if srcW <= 0 || srcH <= 0 {
+		return 0, 0
+	}
+	w, h := srcW, srcH
+	if maxDim > 0 && (w > maxDim || h > maxDim) {
+		if w >= h {
+			h = (h * maxDim) / w
+			w = maxDim
+		} else {
+			w = (w * maxDim) / h
+			h = maxDim
+		}
+	}
+	return evenDim(w), evenDim(h)
 }
 
 func evenDim(v int) int {
@@ -324,12 +454,11 @@ func h264EncodersForOS() []string {
 	}
 }
 
-func buildFFmpegH264Args(encoder string, env []string, w, h int, cfg VideoPresetConfig) []string {
+func buildFFmpegH264Args(encoder string, env []string, srcW, srcH, w, h int, cfg VideoPresetConfig) []string {
 	fps := strconv.Itoa(cfg.FPS)
 	gop := strconv.Itoa(cfg.FPS * 2)
 	kbps := strconv.Itoa(cfg.BitrateKbps)
-	maxKbps := strconv.Itoa((cfg.BitrateKbps * 12) / 10)
-	scale := fmt.Sprintf("scale=%d:%d", w, h)
+	maxKbps := strconv.Itoa((cfg.BitrateKbps * 15) / 10)
 
 	var args []string
 	args = append(args, "-loglevel", "error", "-nostdin")
@@ -343,12 +472,16 @@ func buildFFmpegH264Args(encoder string, env []string, w, h int, cfg VideoPreset
 		}
 		args = append(args, "-f", "x11grab", "-framerate", fps, "-i", disp)
 	}
-	args = append(args, "-vf", scale)
+	if w > 0 && h > 0 && (w != evenDim(srcW) || h != evenDim(srcH)) {
+		args = append(args, "-vf", fmt.Sprintf("scale=%d:%d:flags=fast_bilinear", w, h))
+	}
 	if encoder == "h264_videotoolbox" {
 		args = append(args,
 			"-c:v", "h264_videotoolbox",
 			"-realtime", "1",
-			"-profile:v", "baseline",
+			"-prio_speed", "1",
+			"-profile:v", "high",
+			"-bf", "0",
 			"-pix_fmt", "nv12",
 		)
 	} else {
@@ -356,8 +489,11 @@ func buildFFmpegH264Args(encoder string, env []string, w, h int, cfg VideoPreset
 			"-c:v", "libx264",
 			"-preset", "ultrafast",
 			"-tune", "zerolatency",
-			"-profile:v", "baseline",
+			"-profile:v", "high",
+			"-bf", "0",
 			"-pix_fmt", "yuv420p",
+			"-threads", "0",
+			"-x264-params", "repeat-headers=1",
 		)
 	}
 	args = append(args,

@@ -98,8 +98,11 @@ type Engine struct {
 	permMu       sync.Mutex
 	srDenied     bool
 	srChecked    time.Time
-	streamMu     sync.Mutex
-	streamLease  func()
+	streamMu         sync.Mutex
+	streamLease      func()
+	streamLeaseCount int
+	webrtcMu         sync.Mutex
+	webrtcSessions   map[string]*nativeWebRTCSession
 }
 
 func NewEngine() *Engine {
@@ -179,6 +182,7 @@ func (e *Engine) Close() {
 	if e == nil {
 		return
 	}
+	e.closePionSession("")
 	e.releaseStreamLease()
 	if e.host != nil {
 		e.host.Close()
@@ -260,9 +264,10 @@ func (e *Engine) acquireStreamLease() {
 	}
 	e.streamMu.Lock()
 	defer e.streamMu.Unlock()
-	if e.streamLease == nil {
+	if e.streamLeaseCount == 0 {
 		e.streamLease = e.vm.AcquireLease()
 	}
+	e.streamLeaseCount++
 }
 
 func (e *Engine) releaseStreamLease() {
@@ -270,8 +275,14 @@ func (e *Engine) releaseStreamLease() {
 		return
 	}
 	e.streamMu.Lock()
-	rel := e.streamLease
-	e.streamLease = nil
+	var rel func()
+	if e.streamLeaseCount > 0 {
+		e.streamLeaseCount--
+	}
+	if e.streamLeaseCount == 0 {
+		rel = e.streamLease
+		e.streamLease = nil
+	}
 	e.streamMu.Unlock()
 	if rel != nil {
 		rel()
@@ -284,11 +295,13 @@ func (e *Engine) Status(ctx context.Context) (*HostStatus, error) {
 	if e.vm != nil {
 		vst = e.vm.Status()
 	}
+	_, hasFFmpeg := exec.LookPath("ffmpeg")
+	nativeStreamReady := nativeCaptureAvailable() || hasFFmpeg == nil
 	linuxSupported := runtime.GOOS == "linux" && (e.host.Available() || (vst.UsingNative && hasAgentDesktop()) || (vst.Virtual && vst.VirtualReady && hasAgentDesktop()))
 	st := &HostStatus{
 		Platform:        runtime.GOOS,
 		Supported:       runtime.GOOS == "darwin" || runtime.GOOS == "windows" || linuxSupported,
-		WebRTCAvailable: e.host.Available(),
+		WebRTCAvailable: e.host.Available() || nativeStreamReady,
 		Backend:         "fallback",
 		LogicalX:        b.X,
 		LogicalY:        b.Y,
@@ -301,6 +314,11 @@ func (e *Engine) Status(ctx context.Context) (*HostStatus, error) {
 		MissingDeps:     vst.MissingDeps,
 		InstallCommand:  vst.InstallCommand,
 		DisplayServer:   vst.DisplayServer,
+	}
+	if nativeCaptureAvailable() {
+		st.Backend = "native (ScreenCaptureKit)"
+	} else if hasFFmpeg == nil {
+		st.Backend = "native (ffmpeg)"
 	}
 	if runtime.GOOS == "linux" && hasAgentDesktop() && !e.host.Available() {
 		st.Backend = "agent-desktop"
@@ -475,25 +493,26 @@ func (e *Engine) SendInput(ctx context.Context, ev UnifiedInput) error {
 }
 
 func (e *Engine) StreamOffer(ctx context.Context, sdp, target string, fps, maxDim, bitrate int) (*StreamOfferResult, error) {
+	if fps <= 0 {
+		fps = 60
+	}
+	if maxDim <= 0 {
+		maxDim = 3840
+	}
+	if bitrate <= 0 {
+		bitrate = 35_000_000
+	}
+	// Prefer embedded Pion WebRTC + native ScreenCaptureKit/ffmpeg for full-screen streams.
+	if strings.TrimSpace(target) == "" || !e.host.Available() {
+		return e.startPionWebRTC(ctx, sdp, fps, maxDim, bitrate)
+	}
 	if err := e.prepareActive(ctx); err != nil {
 		return nil, err
-	}
-	if !e.host.Available() {
-		return nil, errors.New("bot-host unavailable; using JPEG stream")
 	}
 	if e.isScreenRecordingDenied(ctx) {
 		return nil, ErrScreenRecordingDenied
 	}
 	e.wakeMacDisplay(false)
-	if fps <= 0 {
-		fps = 30
-	}
-	if maxDim <= 0 {
-		maxDim = 1600
-	}
-	if bitrate <= 0 {
-		bitrate = 3_000_000
-	}
 	params := map[string]any{
 		"sdp":     sdp,
 		"fps":     fps,
@@ -518,6 +537,13 @@ func (e *Engine) StreamOffer(ctx context.Context, sdp, target string, fps, maxDi
 }
 
 func (e *Engine) StreamClose(ctx context.Context, session string) error {
+	if strings.HasPrefix(session, "rtc_") {
+		e.closePionSession(session)
+		return nil
+	}
+	if session == "" {
+		e.closePionSession("")
+	}
 	e.releaseStreamLease()
 	if !e.host.Available() {
 		return nil

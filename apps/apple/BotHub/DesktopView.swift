@@ -14,12 +14,13 @@ struct DesktopView: View {
     var initialBotId: String? = nil
 
     @State private var target: String
-    @State private var preset: String = "auto"
     @State private var streaming = true
     @State private var error = ""
     @State private var showText = false
     @State private var draft = ""
     @State private var pressStart = Date()
+    @State private var isDragging = false
+    @State private var lastDragSent = Date.distantPast
     @State private var streamCtrl = H264StreamController()
     @State private var showChat = false
     @State private var chatBotId: String
@@ -75,9 +76,11 @@ struct DesktopView: View {
                 .presentationDetents([.medium, .large])
         }
         .task { _ = try? await hub.refreshDesktopTargets() }
-        .task(id: target) { await pollState() }
         .task(id: "\(target)-\(streaming)") {
-            if streaming, let req = hub.makeDesktopWSRequest(target: target, preset: preset) {
+            await pollState()
+        }
+        .task(id: "\(target)-\(streaming)-ws") {
+            if streaming, let req = hub.makeDesktopWSRequest(target: target) {
                 streamCtrl.start(request: req)
             } else {
                 streamCtrl.stop()
@@ -143,28 +146,6 @@ struct DesktopView: View {
                         .padding(.horizontal, 12).frame(height: 32)
                         .background(pillBg, in: Capsule())
                     }
-                }
-
-                Menu {
-                    ForEach(["auto", "high", "medium", "low"], id: \.self) { pKey in
-                        let labelKey = pKey == "auto" ? "deskPresetAuto" : pKey == "high" ? "deskPresetHigh" : pKey == "medium" ? "deskPresetMedium" : "deskPresetLow"
-                        Button {
-                            preset = pKey
-                            streamCtrl.setPreset(pKey)
-                        } label: {
-                            Label(hub.t(labelKey), systemImage: preset == pKey ? "checkmark" : "slider.horizontal.3")
-                        }
-                    }
-                } label: {
-                    let curKey = preset == "auto" ? "deskPresetAuto" : preset == "high" ? "deskPresetHigh" : preset == "medium" ? "deskPresetMedium" : "deskPresetLow"
-                    HStack(spacing: 4) {
-                        Text(hub.t(curKey))
-                        Image(systemName: "chevron.down").font(.system(size: 11))
-                    }
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(pillText)
-                    .padding(.horizontal, 12).frame(height: 32)
-                    .background(pillBg, in: Capsule())
                 }
 
                 if streamCtrl.connected {
@@ -236,6 +217,17 @@ struct DesktopView: View {
                         ProgressView().tint(p.accent)
                         Text(displayErr.isEmpty ? hub.t("deskH264Connecting") : displayErr)
                             .font(.system(size: 15)).foregroundStyle(pillMute).multilineTextAlignment(.center)
+                        if !displayErr.isEmpty {
+                            Button(hub.t("retryConnect")) {
+                                error = ""
+                                if let req = hub.makeDesktopWSRequest(target: target) {
+                                    streaming = true
+                                    streamCtrl.start(request: req)
+                                }
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.small)
+                        }
                     }
                     .padding(20)
                 }
@@ -252,9 +244,30 @@ struct DesktopView: View {
             .contentShape(Rectangle())
             .gesture(
                 DragGesture(minimumDistance: 0)
-                    .onChanged { v in if v.translation == .zero { pressStart = Date() } }
+                    .onChanged { v in
+                        if v.translation == .zero {
+                            pressStart = Date()
+                            isDragging = false
+                        } else if !isDragging, hypot(v.translation.width, v.translation.height) >= 10 {
+                            isDragging = true
+                            if let startPt = map(v.startLocation, in: geo.size) {
+                                send(["kind": "down", "x": startPt.x, "y": startPt.y, "button": "left"])
+                            }
+                        } else if isDragging, Date().timeIntervalSince(lastDragSent) >= 0.016 {
+                            lastDragSent = Date()
+                            if let pt = map(v.location, in: geo.size) {
+                                send(["kind": "move", "x": pt.x, "y": pt.y])
+                            }
+                        }
+                    }
                     .onEnded { v in
-                        guard hypot(v.translation.width, v.translation.height) < 10 else { return }
+                        if isDragging {
+                            isDragging = false
+                            if let pt = map(v.location, in: geo.size) {
+                                send(["kind": "up", "x": pt.x, "y": pt.y, "button": "left"])
+                            }
+                            return
+                        }
                         let kind = Date().timeIntervalSince(pressStart) > 0.5 ? "right_click" : "click"
                         if let pt = map(v.location, in: geo.size) { send(["kind": kind, "x": pt.x, "y": pt.y]) }
                     }
@@ -326,10 +339,14 @@ struct DesktopView: View {
     }
 
     private func pollState() async {
-        while !Task.isCancelled {
-            if let st = try? await hub.fetchDesktopState(target), st.status?.screenRecording == "denied" {
-                streaming = false
-                error = hub.t("deskScreenRecordingDenied")
+        while !Task.isCancelled && streaming {
+            if let st = try? await hub.fetchDesktopState(target) {
+                if st.status?.screenRecording == "denied" {
+                    streaming = false
+                    error = hub.t("deskScreenRecordingDenied")
+                } else if error == hub.t("deskScreenRecordingDenied") {
+                    error = ""
+                }
             }
             try? await Task.sleep(nanoseconds: 2_000_000_000)
         }

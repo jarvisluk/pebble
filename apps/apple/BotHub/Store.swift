@@ -716,13 +716,13 @@ final class HubStore {
         try await api.call("/api/desktop/frame?target=\(enc(target))&windowId=&maxDim=1280&quality=72")
     }
 
-    func makeDesktopWSRequest(target: String, preset: String) -> URLRequest? {
+    func makeDesktopWSRequest(target: String) -> URLRequest? {
         guard var comps = URLComponents(string: baseURL) else { return nil }
         comps.scheme = (comps.scheme?.lowercased() == "https") ? "wss" : "ws"
         comps.path = "/api/desktop/stream/ws"
         comps.queryItems = [
             URLQueryItem(name: "target", value: target),
-            URLQueryItem(name: "preset", value: preset),
+            URLQueryItem(name: "codec", value: "hevc"),
         ]
         guard let url = comps.url else { return nil }
         var req = URLRequest(url: url)

@@ -41,6 +41,22 @@ require (
 	github.com/mdlayher/socket v0.7.0 // indirect
 	github.com/mitchellh/go-ps v1.0.0 // indirect
 	github.com/ncruces/go-strftime v1.1.0 // indirect
+	github.com/pion/datachannel v1.6.4 // indirect
+	github.com/pion/dtls/v3 v3.1.16 // indirect
+	github.com/pion/ice/v4 v4.4.9 // indirect
+	github.com/pion/interceptor v0.1.51 // indirect
+	github.com/pion/logging v0.2.4 // indirect
+	github.com/pion/mdns/v2 v2.2.2 // indirect
+	github.com/pion/randutil v0.1.0 // indirect
+	github.com/pion/rtcp v1.2.20 // indirect
+	github.com/pion/rtp v1.10.6 // indirect
+	github.com/pion/sctp v1.12.1 // indirect
+	github.com/pion/sdp/v3 v3.0.20 // indirect
+	github.com/pion/srtp/v3 v3.1.3 // indirect
+	github.com/pion/stun/v4 v4.0.1 // indirect
+	github.com/pion/transport/v5 v5.1.5 // indirect
+	github.com/pion/turn/v5 v5.1.3 // indirect
+	github.com/pion/webrtc/v4 v4.2.29 // indirect
 	github.com/pires/go-proxyproto v0.15.0 // indirect
 	github.com/pkg/sftp v1.13.11 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
@@ -53,6 +69,7 @@ require (
 	github.com/tailscale/web-client-prebuilt v0.0.0-20260917222731-e0ed2d0d0fea // indirect
 	github.com/tailscale/wireguard-go v0.0.0-20260924224943-0a83b87f7908 // indirect
 	github.com/u-root/u-root v0.16.0 // indirect
+	github.com/wlynxg/anet v0.0.5 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	go4.org/mem v0.0.0-20240501181205-ae6ca9944745 // indirect
 	go4.org/netipx v0.0.0-20260823151212-3075585bcbeb // indirect

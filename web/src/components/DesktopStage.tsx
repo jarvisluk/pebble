@@ -60,7 +60,6 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
   const [fps, setFps] = useState(0);
   const [rtt, setRtt] = useState(0);
   const [resLabel, setResLabel] = useState('—');
-  const [preset, setPreset] = useState<'auto' | 'high' | 'medium' | 'low'>('auto');
   const [activePreset, setActivePreset] = useState('');
   const [bitrateKbps, setBitrateKbps] = useState(0);
   const [screen, setScreen] = useState<ScreenState>({ target: 'local', owner: 'idle' });
@@ -84,7 +83,6 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
   const modeRef = useRef(mode);
   const openRef = useRef(open);
   const targetRef = useRef(target);
-  const presetRef = useRef(preset);
   const selectedWindowIdRef = useRef(selectedWindowId);
   const windowsRef = useRef(windows);
   const lastMoveRef = useRef(0);
@@ -94,7 +92,6 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
   modeRef.current = mode;
   openRef.current = open;
   targetRef.current = target;
-  presetRef.current = preset;
   selectedWindowIdRef.current = selectedWindowId;
   windowsRef.current = windows;
 
@@ -108,6 +105,11 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
     if (statsTimerRef.current) {
       window.clearInterval(statsTimerRef.current);
       statsTimerRef.current = null;
+    }
+    if (wheelTimerRef.current) {
+      window.clearTimeout(wheelTimerRef.current);
+      wheelTimerRef.current = null;
+      wheelAccRef.current = { dx: 0, dy: 0 };
     }
     if (wsRef.current) {
       try {
@@ -172,7 +174,7 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
     }
   }, []);
 
-  const startWsH264Stream = useCallback(() => {
+  const startWsH264Stream = useCallback(async () => {
     if (!openRef.current) return;
     stopStreams();
     if (typeof VideoDecoder === 'undefined') {
@@ -183,10 +185,20 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
       return;
     }
 
+    let preferHevc = false;
+    try {
+      const sup = await VideoDecoder.isConfigSupported({
+        codec: 'hev1.1.6.L153.B0',
+        hardwareAcceleration: 'prefer-hardware',
+      });
+      preferHevc = Boolean(sup?.supported);
+    } catch {}
+    if (!openRef.current) return;
+
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsURL = `${proto}//${window.location.host}/api/desktop/stream/ws?target=${encodeURIComponent(
       targetRef.current
-    )}&preset=${encodeURIComponent(presetRef.current)}`;
+    )}&codec=${preferHevc ? 'hevc' : 'h264'}`;
 
     const ws = new WebSocket(wsURL);
     ws.binaryType = 'arraybuffer';
@@ -196,8 +208,57 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
     let frameCount = 0;
     let tsCounter = 0;
     let hadFrame = false;
+    let streamFps = 60;
+    let streamCodec: 'h264' | 'hevc' = preferHevc ? 'hevc' : 'h264';
+    let curCodec = '';
+    let curWidth = 0;
+    let curHeight = 0;
 
-    const ensureDecoder = (width: number, height: number) => {
+    const requestKeyframe = (congested = false) => {
+      needKeyframe = true;
+      if (ws.readyState === WebSocket.OPEN) {
+        try {
+          ws.send(JSON.stringify({ type: 'keyframe' }));
+          if (congested) {
+            ws.send(JSON.stringify({ type: 'congestion' }));
+          }
+        } catch {}
+      }
+    };
+
+    const extractAvcCodecFromAnnexB = (data: Uint8Array): string | null => {
+      const n = data.length;
+      for (let i = 0; i + 4 < n; i++) {
+        let scLen = 0;
+        if (data[i] === 0 && data[i + 1] === 0 && data[i + 2] === 1) {
+          scLen = 3;
+        } else if (i + 5 < n && data[i] === 0 && data[i + 1] === 0 && data[i + 2] === 0 && data[i + 3] === 1) {
+          scLen = 4;
+        }
+        if (!scLen) continue;
+        const start = i + scLen;
+        if (start + 3 < n && (data[start] & 0x1f) === 7) {
+          const hex = (b: number) => b.toString(16).padStart(2, '0').toUpperCase();
+          return `avc1.${hex(data[start + 1])}${hex(data[start + 2])}${hex(data[start + 3])}`;
+        }
+        i = start;
+      }
+      return null;
+    };
+
+    const ensureDecoder = (width: number, height: number, codecStr?: string) => {
+      const targetCodec =
+        codecStr ||
+        (streamCodec === 'hevc' ? 'hev1.1.6.L153.B0' : curCodec || 'avc1.640033');
+      if (
+        decoderRef.current &&
+        decoderRef.current.state === 'configured' &&
+        curCodec === targetCodec &&
+        curWidth === width &&
+        curHeight === height
+      ) {
+        return;
+      }
       if (decoderRef.current && decoderRef.current.state !== 'closed') {
         try {
           decoderRef.current.close();
@@ -223,16 +284,20 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
           }
         },
         error: () => {
-          needKeyframe = true;
+          requestKeyframe();
         },
       });
       dec.configure({
-        codec: 'avc1.42E01F',
+        codec: targetCodec,
         codedWidth: width,
         codedHeight: height,
+        hardwareAcceleration: 'prefer-hardware',
         optimizeForLatency: true,
       });
       decoderRef.current = dec;
+      curCodec = targetCodec;
+      curWidth = width;
+      curHeight = height;
       needKeyframe = true;
     };
 
@@ -248,7 +313,9 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
         try {
           const msg = JSON.parse(ev.data) as {
             type?: string;
+            codec?: string;
             preset?: string;
+            fps?: number;
             bitrateKbps?: number;
             imageWidth?: number;
             imageHeight?: number;
@@ -261,6 +328,8 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
             error?: string;
           };
           if (msg.type === 'meta') {
+            streamFps = msg.fps && msg.fps > 0 ? msg.fps : 60;
+            streamCodec = msg.codec === 'hevc' ? 'hevc' : 'h264';
             frameRef.current = {
               jpegBase64: '',
               imageWidth: msg.imageWidth || 1280,
@@ -274,7 +343,14 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
             setActivePreset(msg.preset || '');
             setBitrateKbps(msg.bitrateKbps || 0);
             setMode('ws-h264');
-            ensureDecoder(msg.imageWidth || 1280, msg.imageHeight || 720);
+            ensureDecoder(
+              msg.imageWidth || 1280,
+              msg.imageHeight || 720,
+              streamCodec === 'hevc' ? 'hev1.1.6.L153.B0' : undefined
+            );
+          } else if (msg.type === 'bitrate') {
+            if (typeof msg.preset === 'string') setActivePreset(msg.preset);
+            if (typeof msg.bitrateKbps === 'number') setBitrateKbps(msg.bitrateKbps);
           } else if (msg.type === 'error') {
             setMode('error');
             setCenterText(msg.error || t('deskConnectFailed'));
@@ -289,23 +365,44 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
         const bytes = new Uint8Array(ev.data);
         if (bytes.length < 2) return;
         const kind = bytes[0];
-        if (kind !== 0x02 && kind !== 0x03) return;
-        const isKey = kind === 0x02;
+        if (kind !== 0x02 && kind !== 0x03 && kind !== 0x04 && kind !== 0x05) return;
+        const isKey = kind === 0x02 || kind === 0x04;
+        const isHevcPkt = kind === 0x04 || kind === 0x05;
         if (needKeyframe && !isKey) return;
+        const payload = bytes.subarray(1);
+        if (isKey) {
+          const mw = frameRef.current?.imageWidth || curWidth || 1280;
+          const mh = frameRef.current?.imageHeight || curHeight || 720;
+          if (isHevcPkt) {
+            streamCodec = 'hevc';
+            if (curCodec !== 'hev1.1.6.L153.B0') {
+              ensureDecoder(mw, mh, 'hev1.1.6.L153.B0');
+            }
+          } else {
+            const spsCodec = extractAvcCodecFromAnnexB(payload);
+            if (spsCodec && spsCodec !== curCodec) {
+              ensureDecoder(mw, mh, spsCodec);
+            }
+          }
+        }
         const dec = decoderRef.current;
         if (!dec || dec.state !== 'configured') return;
+        if (!isKey && dec.decodeQueueSize > 3) {
+          requestKeyframe(true);
+          return;
+        }
         needKeyframe = false;
-        tsCounter += 33333;
+        tsCounter += Math.round(1_000_000 / Math.max(1, streamFps));
         try {
           dec.decode(
             new EncodedVideoChunk({
               type: isKey ? 'key' : 'delta',
               timestamp: tsCounter,
-              data: bytes.subarray(1),
+              data: payload,
             })
           );
         } catch {
-          needKeyframe = true;
+          requestKeyframe();
         }
       }
     };
@@ -345,6 +442,7 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
         screen?: ScreenState;
         takeovers?: TakeoverRequest[];
       }>(`/api/desktop/state?target=${encodeURIComponent(targetRef.current)}`);
+      if (!openRef.current) return;
       hostStatusRef.current = st.status || null;
       setHostStatus(st.status || null);
       setInstallCmdHint(st.status?.installCommand || '');
@@ -443,33 +541,72 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
 
       const ans = await api<{ session?: string; sdp: string }>('/api/desktop/stream/offer', {
         method: 'POST',
-        body: { target: targetRef.current, sdp: offerSdp, fps: 30, maxDim: 1600 },
+        body: {
+          target: targetRef.current,
+          scope: selectedWindowIdRef.current,
+          sdp: offerSdp,
+          fps: 60,
+          maxDim: 3840,
+          bitrate: 35_000_000,
+        },
       });
-      if (pcRef.current !== pc) return;
+      if (pcRef.current !== pc || !openRef.current) {
+        if (ans.session) {
+          api('/api/desktop/stream/close', {
+            method: 'POST',
+            body: { target: targetRef.current, session: ans.session },
+          }).catch(() => {});
+        }
+        return;
+      }
       sessionRef.current = ans.session || '';
       await pc.setRemoteDescription({ type: 'answer', sdp: ans.sdp });
 
       let lastFrames = 0;
+      let lastPackets = 0;
+      let lastLost = 0;
       statsTimerRef.current = window.setInterval(async () => {
         if (pcRef.current !== pc) return;
         const stats = await pc.getStats();
+        let curRtt = 0;
+        let curLossPct = 0;
         stats.forEach((r) => {
           if (r.type === 'inbound-rtp' && r.kind === 'video') {
-            const decoded = (r as RTCInboundRtpStreamStats & { framesDecoded?: number }).framesDecoded || 0;
+            const v = r as RTCInboundRtpStreamStats & {
+              framesDecoded?: number;
+              frameWidth?: number;
+              frameHeight?: number;
+              packetsReceived?: number;
+              packetsLost?: number;
+            };
+            const decoded = v.framesDecoded || 0;
             setFps(Math.max(0, decoded - lastFrames));
             lastFrames = decoded;
-            const fw = (r as RTCInboundRtpStreamStats & { frameWidth?: number }).frameWidth;
-            const fh = (r as RTCInboundRtpStreamStats & { frameHeight?: number }).frameHeight;
-            if (fw && fh) setResLabel(`${fw}×${fh}`);
+            if (v.frameWidth && v.frameHeight) setResLabel(`${v.frameWidth}×${v.frameHeight}`);
+            const rx = v.packetsReceived || 0;
+            const lost = v.packetsLost || 0;
+            const dRx = Math.max(0, rx - lastPackets);
+            const dLost = Math.max(0, lost - lastLost);
+            lastPackets = rx;
+            lastLost = lost;
+            if (dRx + dLost > 0) {
+              curLossPct = (dLost * 100) / (dRx + dLost);
+            }
           }
           if (
             r.type === 'candidate-pair' &&
             (r as RTCIceCandidatePairStats).state === 'succeeded' &&
             typeof (r as RTCIceCandidatePairStats).currentRoundTripTime === 'number'
           ) {
-            setRtt(Math.round(((r as RTCIceCandidatePairStats).currentRoundTripTime || 0) * 1000));
+            curRtt = Math.round(((r as RTCIceCandidatePairStats).currentRoundTripTime || 0) * 1000);
+            setRtt(curRtt);
           }
         });
+        if (dc.readyState === 'open') {
+          try {
+            dc.send(JSON.stringify({ type: 'stats', rttMs: curRtt, lossPct: curLossPct }));
+          } catch {}
+        }
       }, 1000);
     } catch {
       startWsH264Stream();
@@ -555,41 +692,41 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
   const mediaHandlers = {
     onMouseDown: (e: React.MouseEvent<HTMLElement>) => {
       e.currentTarget.focus();
-      if (mode !== 'webrtc') return;
+      if (mode !== 'webrtc' && mode !== 'ws-h264') return;
       e.preventDefault();
       const p = mapCoords(e);
       if (p) sendInput({ kind: 'down', x: p.x, y: p.y, button: btnName(e.button) });
     },
     onMouseUp: (e: React.MouseEvent<HTMLElement>) => {
-      if (mode !== 'webrtc') return;
+      if (mode !== 'webrtc' && mode !== 'ws-h264') return;
       e.preventDefault();
       const p = mapCoords(e);
       if (p) sendInput({ kind: 'up', x: p.x, y: p.y, button: btnName(e.button) });
     },
     onMouseMove: (e: React.MouseEvent<HTMLElement>) => {
-      if (mode !== 'webrtc') return;
+      if (mode !== 'webrtc' && mode !== 'ws-h264') return;
       const now = performance.now();
-      if (now - lastMoveRef.current < 20) return;
+      if (now - lastMoveRef.current < 16) return;
       lastMoveRef.current = now;
       const p = mapCoords(e);
       if (p) sendInput({ kind: 'move', x: p.x, y: p.y }, true);
     },
     onClick: (e: React.MouseEvent<HTMLElement>) => {
-      if (mode === 'webrtc') return;
+      if (mode === 'webrtc' || mode === 'ws-h264') return;
       e.preventDefault();
       e.currentTarget.focus();
       const p = mapCoords(e);
       if (p) sendInput({ kind: 'click', x: p.x, y: p.y });
     },
     onDoubleClick: (e: React.MouseEvent<HTMLElement>) => {
-      if (mode === 'webrtc') return;
+      if (mode === 'webrtc' || mode === 'ws-h264') return;
       e.preventDefault();
       const p = mapCoords(e);
       if (p) sendInput({ kind: 'double_click', x: p.x, y: p.y });
     },
     onContextMenu: (e: React.MouseEvent<HTMLElement>) => {
       e.preventDefault();
-      if (mode === 'webrtc') return;
+      if (mode === 'webrtc' || mode === 'ws-h264') return;
       const p = mapCoords(e);
       if (p) sendInput({ kind: 'right_click', x: p.x, y: p.y });
     },
@@ -817,25 +954,6 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
                   </option>
                 ))}
               </select>
-              {mode === 'ws-h264' && (
-                <select
-                  id="deskPreset"
-                  className="d-sel"
-                  value={preset}
-                  onChange={(e) => {
-                    const next = e.target.value as 'auto' | 'high' | 'medium' | 'low';
-                    setPreset(next);
-                    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-                      wsRef.current.send(JSON.stringify({ type: 'profile', preset: next }));
-                    }
-                  }}
-                >
-                  <option value="auto">{t('deskPresetAuto')}</option>
-                  <option value="high">{t('deskPresetHigh')}</option>
-                  <option value="medium">{t('deskPresetMedium')}</option>
-                  <option value="low">{t('deskPresetLow')}</option>
-                </select>
-              )}
             </div>
             <dl id="deskDetails" className="d-details" hidden={!detailsOpen}>
               <dt>{t('deskMode')}</dt>

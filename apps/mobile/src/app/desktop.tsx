@@ -50,7 +50,6 @@ export default function DesktopScreen() {
   const [selectedTarget, setSelectedTarget] = useState(
     typeof initialTarget === 'string' && initialTarget ? initialTarget : 'local'
   );
-  const [preset, setPreset] = useState<'auto' | 'high' | 'medium' | 'low'>('auto');
   const [meta, setMeta] = useState<H264MetaEvent | null>(null);
   const [connected, setConnected] = useState(false);
   const [fps, setFps] = useState(0);
@@ -98,8 +97,8 @@ export default function DesktopScreen() {
   const wsURL = useMemo(() => {
     if (!baseURL) return '';
     const wsBase = baseURL.replace(/^https:\/\//i, 'wss://').replace(/^http:\/\//i, 'ws://');
-    return `${wsBase}/api/desktop/stream/ws?target=${encodeURIComponent(selectedTarget)}&preset=${encodeURIComponent(preset)}`;
-  }, [baseURL, preset, selectedTarget]);
+    return `${wsBase}/api/desktop/stream/ws?target=${encodeURIComponent(selectedTarget)}&codec=hevc`;
+  }, [baseURL, selectedTarget]);
 
   const activeTakeover = useMemo(
     () => takeovers.find((item) => item.target === selectedTarget) || takeovers[0] || null,
@@ -206,26 +205,6 @@ export default function DesktopScreen() {
                 );
               })}
 
-              {(
-                [
-                  { id: 'auto', label: t('deskPresetAuto') },
-                  { id: 'high', label: t('deskPresetHigh') },
-                  { id: 'medium', label: t('deskPresetMedium') },
-                  { id: 'low', label: t('deskPresetLow') },
-                ] as const
-              ).map((p) => {
-                const on = preset === p.id;
-                return (
-                  <Pressable
-                    key={p.id}
-                    onPress={() => setPreset(p.id)}
-                    style={[styles.targetPill, { backgroundColor: on ? theme.sage : '#1f1d1b' }]}
-                  >
-                    <Text style={[styles.targetTxt, { color: on ? theme.sageInk : '#a6a09a' }]}>{p.label}</Text>
-                  </Pressable>
-                );
-              })}
-
               {connected && (
                 <View style={[styles.targetPill, { backgroundColor: '#1f1d1b' }]}>
                   <Text style={[styles.targetTxt, { color: '#a6a09a', fontFamily: MONO_FONT }]}>
@@ -283,7 +262,7 @@ export default function DesktopScreen() {
                   style={styles.stageImage}
                   url={wsURL}
                   token={authToken}
-                  preset={preset}
+                  preset="auto"
                   active={streaming}
                   onMeta={(ev) => {
                     setMeta(ev.nativeEvent);

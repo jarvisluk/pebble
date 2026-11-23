@@ -131,7 +131,7 @@ export interface BothubH264ViewProps extends ViewProps {
   ref?: Ref<BothubH264ViewRef>;
   url: string;
   token: string;
-  preset: 'auto' | 'high' | 'medium' | 'low';
+  preset: 'auto' | 'ultra' | 'high' | 'medium' | 'low';
   active: boolean;
   onMeta?: (e: { nativeEvent: H264MetaEvent }) => void;
   onStatus?: (e: { nativeEvent: H264StatusEvent }) => void;

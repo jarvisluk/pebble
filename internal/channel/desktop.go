@@ -30,10 +30,8 @@ func (s *HTTPServer) localDesk() *desktop.Engine {
 	}
 	s.deskOnce.Do(func() {
 		s.fallbackDesk = desktop.NewCoordinator(nil, nil)
-	})
-	if s.fallbackEngine == nil {
 		s.fallbackEngine = desktop.NewEngine()
-	}
+	})
 	return s.fallbackEngine
 }
 
@@ -68,13 +66,17 @@ func (s *HTTPServer) handleDesktopTargets(w http.ResponseWriter, r *http.Request
 	coord := s.desktopCoord()
 
 	localSt, _ := s.localDesk().Status(ctx)
+	backend := ""
+	if localSt != nil {
+		backend = localSt.Backend
+	}
 	localEntry := map[string]any{
 		"id":              "local",
 		"name":            "本机桌面",
 		"local":           true,
 		"supported":       localSt == nil || localSt.Supported,
 		"webrtcAvailable": localSt != nil && localSt.WebRTCAvailable,
-		"backend":         localSt.Backend,
+		"backend":         backend,
 		"screen":          coord.ScreenState("local"),
 	}
 	if localSt != nil {

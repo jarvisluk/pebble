@@ -1,9 +1,11 @@
 package bothub.tunnel
 
 import android.content.Context
+import android.graphics.Matrix
 import android.graphics.SurfaceTexture
 import android.media.MediaCodec
 import android.media.MediaFormat
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.view.Surface
@@ -46,11 +48,20 @@ class BothubH264View(context: Context, appContext: AppContext) : ExpoView(contex
   private var preset: String = "auto"
   private var active: Boolean = false
 
+  private var vps: ByteArray? = null
   private var sps: ByteArray? = null
   private var pps: ByteArray? = null
+  private var configuredCodec: String = ""
+  private var configuredVps: ByteArray? = null
+  private var configuredSps: ByteArray? = null
+  private var configuredPps: ByteArray? = null
+  private var configuredW = 0
+  private var configuredH = 0
   private var needKeyframe = true
   private var videoW = 0
   private var videoH = 0
+  private var streamFps = 60
+  private var streamCodec = "h264"
   private var ptsUs = 0L
   private val frameCounter = AtomicInteger(0)
 
@@ -110,10 +121,23 @@ class BothubH264View(context: Context, appContext: AppContext) : ExpoView(contex
 
   override fun onSurfaceTextureAvailable(st: SurfaceTexture, width: Int, height: Int) {
     surface = Surface(st)
+    updateTextureTransform(width, height)
     reconnectIfNeeded()
   }
 
-  override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, width: Int, height: Int) {}
+  override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, width: Int, height: Int) {
+    updateTextureTransform(width, height)
+  }
+
+  private fun updateTextureTransform(viewW: Int = textureView.width, viewH: Int = textureView.height) {
+    if (viewW <= 0 || viewH <= 0 || videoW <= 0 || videoH <= 0) return
+    val scale = minOf(viewW.toFloat() / videoW.toFloat(), viewH.toFloat() / videoH.toFloat())
+    val sx = (videoW * scale) / viewW.toFloat()
+    val sy = (videoH * scale) / viewH.toFloat()
+    val m = Matrix()
+    m.setScale(sx, sy, viewW / 2f, viewH / 2f)
+    textureView.setTransform(m)
+  }
 
   override fun onSurfaceTextureDestroyed(st: SurfaceTexture): Boolean {
     disconnect()
@@ -150,8 +174,12 @@ class BothubH264View(context: Context, appContext: AppContext) : ExpoView(contex
             "meta" -> {
               videoW = obj.optInt("imageWidth", 1280)
               videoH = obj.optInt("imageHeight", 720)
+              val nextFps = obj.optInt("fps", 60)
+              streamFps = if (nextFps > 0) nextFps else 60
+              streamCodec = if (obj.optString("codec", "h264") == "hevc") "hevc" else "h264"
               needKeyframe = true
               mainHandler.post {
+                updateTextureTransform()
                 onMeta(mapOf(
                   "imageWidth" to videoW,
                   "imageHeight" to videoH,
@@ -180,11 +208,12 @@ class BothubH264View(context: Context, appContext: AppContext) : ExpoView(contex
         val arr = bytes.toByteArray()
         if (arr.size < 2) return
         val kind = arr[0].toInt() and 0xFF
-        if (kind != 0x02 && kind != 0x03) return
-        val isKey = kind == 0x02
+        if (kind != 0x02 && kind != 0x03 && kind != 0x04 && kind != 0x05) return
+        val isKey = (kind == 0x02 || kind == 0x04)
+        val isHevc = (kind == 0x04 || kind == 0x05)
         if (needKeyframe && !isKey) return
         val payload = arr.copyOfRange(1, arr.size)
-        decodeAnnexB(payload, isKey)
+        decodeAnnexB(payload, isKey, isHevc)
       }
 
       override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
@@ -217,35 +246,91 @@ class BothubH264View(context: Context, appContext: AppContext) : ExpoView(contex
       } catch (_: Exception) {}
       codec = null
     }
+    vps = null
     sps = null
     pps = null
+    configuredVps = null
+    configuredSps = null
+    configuredPps = null
+    configuredCodec = ""
     needKeyframe = true
   }
 
-  private fun decodeAnnexB(data: ByteArray, isKey: Boolean) {
+  private fun requestKeyframe() {
+    needKeyframe = true
+    ws?.send("""{"type":"keyframe"}""")
+  }
+
+  private fun decodeAnnexB(data: ByteArray, isKey: Boolean, isHevc: Boolean) {
     val nalus = splitAnnexB(data)
     if (nalus.isEmpty()) return
     for (n in nalus) {
-      val type = n[0].toInt() and 0x1F
-      if (type == 7) sps = n
-      else if (type == 8) pps = n
+      if (isHevc) {
+        val type = (n[0].toInt() ushr 1) and 0x3F
+        when (type) {
+          32 -> vps = n
+          33 -> sps = n
+          34 -> pps = n
+        }
+      } else {
+        val type = n[0].toInt() and 0x1F
+        if (type == 7) sps = n
+        else if (type == 8) pps = n
+      }
     }
 
+    val targetCodec = if (isHevc) "hevc" else "h264"
     synchronized(codecLock) {
       val surf = surface ?: return
-      if (codec == null) {
-        val curSps = sps ?: return
-        val curPps = pps ?: return
-        val w = if (videoW > 0) videoW else 1280
-        val h = if (videoH > 0) videoH else 720
+      val w = if (videoW > 0) videoW else 1280
+      val h = if (videoH > 0) videoH else 720
+      val curVps = vps
+      val curSps = sps
+      val curPps = pps
+      val paramsChanged = isKey && curSps != null && curPps != null && (!isHevc || curVps != null) && (
+        configuredCodec != targetCodec ||
+          configuredW != w ||
+          configuredH != h ||
+          !curSps.contentEquals(configuredSps) ||
+          !curPps.contentEquals(configuredPps) ||
+          (isHevc && !curVps.contentEquals(configuredVps))
+        )
+      if (codec != null && paramsChanged) {
         try {
-          val format = MediaFormat.createVideoFormat("video/avc", w, h)
-          format.setByteBuffer("csd-0", ByteBuffer.wrap(byteArrayOf(0, 0, 0, 1) + curSps))
-          format.setByteBuffer("csd-1", ByteBuffer.wrap(byteArrayOf(0, 0, 0, 1) + curPps))
-          val mc = MediaCodec.createDecoderByType("video/avc")
+          codec?.stop()
+        } catch (_: Exception) {}
+        try {
+          codec?.release()
+        } catch (_: Exception) {}
+        codec = null
+      }
+      if (codec == null) {
+        val initSps = curSps ?: return
+        val initPps = curPps ?: return
+        val initVps = if (isHevc) (curVps ?: return) else null
+        try {
+          val mime = if (isHevc) MediaFormat.MIMETYPE_VIDEO_HEVC else MediaFormat.MIMETYPE_VIDEO_AVC
+          val format = MediaFormat.createVideoFormat(mime, w, h)
+          if (isHevc && initVps != null) {
+            val sc = byteArrayOf(0, 0, 0, 1)
+            format.setByteBuffer("csd-0", ByteBuffer.wrap(sc + initVps + sc + initSps + sc + initPps))
+          } else {
+            format.setByteBuffer("csd-0", ByteBuffer.wrap(byteArrayOf(0, 0, 0, 1) + initSps))
+            format.setByteBuffer("csd-1", ByteBuffer.wrap(byteArrayOf(0, 0, 0, 1) + initPps))
+          }
+          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            format.setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
+          }
+          val mc = MediaCodec.createDecoderByType(mime)
           mc.configure(format, surf, null, 0)
           mc.start()
           codec = mc
+          configuredCodec = targetCodec
+          configuredVps = initVps?.copyOf()
+          configuredSps = initSps.copyOf()
+          configuredPps = initPps.copyOf()
+          configuredW = w
+          configuredH = h
         } catch (e: Exception) {
           mainHandler.post { onStreamError(mapOf("code" to "", "error" to (e.message ?: "codec error"))) }
           return
@@ -259,7 +344,7 @@ class BothubH264View(context: Context, appContext: AppContext) : ExpoView(contex
           val buf = mc.getInputBuffer(inIdx)
           buf?.clear()
           buf?.put(data)
-          ptsUs += 33_333
+          ptsUs += 1_000_000L / maxOf(1, streamFps)
           val flags = if (isKey) MediaCodec.BUFFER_FLAG_KEY_FRAME else 0
           mc.queueInputBuffer(inIdx, 0, data.size, ptsUs, flags)
         }
@@ -276,7 +361,7 @@ class BothubH264View(context: Context, appContext: AppContext) : ExpoView(contex
           outIdx = mc.dequeueOutputBuffer(info, 0)
         }
       } catch (_: Exception) {
-        needKeyframe = true
+        requestKeyframe()
       }
     }
   }
