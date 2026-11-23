@@ -1,7 +1,7 @@
 export type LangPref = 'system' | 'zh-CN' | 'en';
 export type ResolvedLang = 'zh-CN' | 'en';
 export type ThemePref = 'system' | 'light' | 'dark';
-export type SettingsTab = 'models' | 'remote' | 'general';
+export type SettingsTab = 'general' | 'models' | 'memory' | 'remote';
 
 export interface BotSessionInfo {
   sessionId?: string;
@@ -269,6 +269,9 @@ export interface ConfirmOptions {
   okText?: string;
   okClass?: 'bad' | 'go' | '';
   onOk: () => Promise<void> | void;
+  altText?: string;
+  altClass?: 'bad' | 'go' | '';
+  onAlt?: () => Promise<void> | void;
 }
 
 export interface SettingsDraft {

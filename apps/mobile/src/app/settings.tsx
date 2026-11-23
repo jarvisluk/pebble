@@ -1,7 +1,9 @@
 import { router } from 'expo-router';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
+  BackHandler,
   KeyboardAvoidingView,
   Linking,
   Platform,
@@ -212,15 +214,15 @@ export default function SettingsScreen() {
     sharedUserMd.replace(/\s+$/, '') !== (settings?.sharedUserMd || '').replace(/\s+$/, '');
   const dirty = settingsChanged || botUpdates.length > 0;
 
-  const closeSheet = () => {
+  const doCloseSheet = useCallback(() => {
     if (router.canGoBack()) {
       router.back();
     } else {
       router.replace('/');
     }
-  };
+  }, []);
 
-  const onSave = async () => {
+  const onSave = useCallback(async (closeAfter = false) => {
     setError('');
     setSavedMsg('');
     setSaving(true);
@@ -237,12 +239,36 @@ export default function SettingsScreen() {
       setSharedUserMdTouched(false);
       setBotDrafts({});
       setSavedMsg(t('settingsSaved'));
+      if (closeAfter) {
+        doCloseSheet();
+      }
     } catch (err: any) {
       setError(err?.message || t('saveFailed'));
     } finally {
       setSaving(false);
     }
-  };
+  }, [botUpdates, cleanedDraftPerHarness, defaultModel, doCloseSheet, saveSettings, settingsChanged, sharedUserMd, t]);
+
+  const requestClose = useCallback(() => {
+    if (!dirty) {
+      doCloseSheet();
+      return;
+    }
+    Alert.alert(t('unsavedTitle'), t('unsavedDesc'), [
+      { text: t('cancel'), style: 'cancel' },
+      { text: t('discardChanges'), style: 'destructive', onPress: doCloseSheet },
+      { text: t('saveAndLeave'), onPress: () => void onSave(true) },
+    ]);
+  }, [dirty, doCloseSheet, onSave, t]);
+
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (!dirty) return false;
+      requestClose();
+      return true;
+    });
+    return () => sub.remove();
+  }, [dirty, requestClose]);
 
   const onConnectMagpie = (harnessId: string) => {
     const targetModel = defaultModel.trim() || settings?.harnesses.find((h) => h.id === harnessId)?.defaultModel || '';
@@ -318,9 +344,9 @@ export default function SettingsScreen() {
     <View style={[styles.root, { backgroundColor: theme.page }]}>
       <ModalHeader
         title={t('settings')}
-        onClose={closeSheet}
+        onClose={requestClose}
         rightLabel={t('save')}
-        onRightPress={onSave}
+        onRightPress={() => void onSave(false)}
         rightDisabled={!dirty || saving}
         rightLoading={saving}
       />
@@ -339,6 +365,66 @@ export default function SettingsScreen() {
               <Text style={[styles.msgTxt, { color: theme.sageInk }]}>{savedMsg}</Text>
             </View>
           ) : null}
+
+          <View style={[styles.card, { backgroundColor: theme.card }]}>
+            <Text style={[styles.sectionTitle, { color: theme.text }]}>{t('appearance')}</Text>
+            <View style={styles.segmentRow}>
+              {(
+                [
+                  { key: 'system', label: t('followSystem') },
+                  { key: 'light', label: t('themeLight') },
+                  { key: 'dark', label: t('themeDark') },
+                ] as { key: ThemePreference; label: string }[]
+              ).map((opt) => (
+                <Pressable
+                  key={opt.key}
+                  onPress={() => setThemePref(opt.key)}
+                  style={[
+                    styles.segmentPill,
+                    { backgroundColor: themePref === opt.key ? theme.accentSoft : theme.s1 },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.segmentTxt,
+                      { color: themePref === opt.key ? theme.accent : theme.text2 },
+                    ]}
+                  >
+                    {opt.label}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+
+            <Text style={[styles.subLabel, { color: theme.text2 }]}>{t('language')}</Text>
+            <View style={styles.segmentRow}>
+              {(
+                [
+                  { key: 'system', label: t('followSystem') },
+                  { key: 'zh-CN', label: '简体中文' },
+                  { key: 'en', label: 'English' },
+                ] as { key: LanguagePreference; label: string }[]
+              ).map((opt) => (
+                <Pressable
+                  key={opt.key}
+                  onPress={() => setLangPref(opt.key)}
+                  style={[
+                    styles.segmentPill,
+                    { backgroundColor: langPref === opt.key ? theme.accentSoft : theme.s1 },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.segmentTxt,
+                      { color: langPref === opt.key ? theme.accent : theme.text2 },
+                    ]}
+                  >
+                    {opt.label}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
 
           <View style={[styles.card, { backgroundColor: theme.card }]}>
             <Text style={[styles.sectionTitle, { color: theme.text }]}>{t('hostSection')}</Text>
@@ -529,66 +615,6 @@ export default function SettingsScreen() {
               </View>
             </View>
           )}
-
-          <View style={[styles.card, { backgroundColor: theme.card }]}>
-            <Text style={[styles.sectionTitle, { color: theme.text }]}>{t('appearance')}</Text>
-            <View style={styles.segmentRow}>
-              {(
-                [
-                  { key: 'system', label: t('followSystem') },
-                  { key: 'light', label: t('themeLight') },
-                  { key: 'dark', label: t('themeDark') },
-                ] as { key: ThemePreference; label: string }[]
-              ).map((opt) => (
-                <Pressable
-                  key={opt.key}
-                  onPress={() => setThemePref(opt.key)}
-                  style={[
-                    styles.segmentPill,
-                    { backgroundColor: themePref === opt.key ? theme.accentSoft : theme.s1 },
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.segmentTxt,
-                      { color: themePref === opt.key ? theme.accent : theme.text2 },
-                    ]}
-                  >
-                    {opt.label}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
-
-            <Text style={[styles.subLabel, { color: theme.text2 }]}>{t('language')}</Text>
-            <View style={styles.segmentRow}>
-              {(
-                [
-                  { key: 'system', label: t('followSystem') },
-                  { key: 'zh-CN', label: '简体中文' },
-                  { key: 'en', label: 'English' },
-                ] as { key: LanguagePreference; label: string }[]
-              ).map((opt) => (
-                <Pressable
-                  key={opt.key}
-                  onPress={() => setLangPref(opt.key)}
-                  style={[
-                    styles.segmentPill,
-                    { backgroundColor: langPref === opt.key ? theme.accentSoft : theme.s1 },
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.segmentTxt,
-                      { color: langPref === opt.key ? theme.accent : theme.text2 },
-                    ]}
-                  >
-                    {opt.label}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
-          </View>
 
           <View style={[styles.card, { backgroundColor: theme.card }]}>
             <View style={styles.rowBetween}>

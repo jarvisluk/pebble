@@ -53,7 +53,10 @@ export default function App() {
 
   const [view, setView] = useState<'chat' | 'settings'>('chat');
   const viewTx = useViewTransition(view, VIEW_ORDER);
-  const [settingsTab, setSettingsTab] = useState<SettingsTab>('models');
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>('general');
+  const settingsDirtyRef = useRef(false);
+  const settingsSaveRef = useRef<(() => Promise<boolean>) | null>(null);
+  const settingsResetRef = useRef<(() => void) | null>(null);
   const [sideCollapsed, setSideCollapsed] = useState<boolean>(() => {
     try {
       return localStorage.getItem('bothub.sideCollapsed') === '1' && matchMedia('(min-width: 821px)').matches;
@@ -133,6 +136,29 @@ export default function App() {
       uninstallDrag();
     };
   }, []);
+
+  const leaveSettings = useCallback(() => {
+    if (!settingsDirtyRef.current) {
+      setView('chat');
+      return;
+    }
+    setConfirmOpts({
+      title: t('unsavedTitle'),
+      text: t('unsavedDesc'),
+      altText: t('discardChanges'),
+      altClass: 'bad',
+      onAlt: () => {
+        settingsResetRef.current?.();
+        setView('chat');
+      },
+      okText: t('saveAndLeave'),
+      okClass: 'go',
+      onOk: async () => {
+        const ok = await settingsSaveRef.current?.();
+        if (ok !== false) setView('chat');
+      },
+    });
+  }, [t]);
 
   const closeAllOverlays = useCallback(() => {
     setMobileSideOpen(false);
@@ -440,11 +466,11 @@ export default function App() {
       }
       if ((e.metaKey || e.ctrlKey) && e.key === ',') {
         e.preventDefault();
-        if (viewRef.current === 'settings') setView('chat');
+        if (viewRef.current === 'settings') leaveSettings();
         else {
           closeAllOverlays();
           setDeskOpen(false);
-          setSettingsTab('models');
+          setSettingsTab('general');
           setView('settings');
           void loadSettings();
         }
@@ -455,7 +481,7 @@ export default function App() {
       mq.removeEventListener('change', onMq);
       document.removeEventListener('keydown', onKeyDown);
     };
-  }, [closeAllOverlays, collabPeerId, confirmOpts, createOpen, loadSettings, mobileSideOpen, panelOpen, toggleDesktopSidebar, unboxOpen]);
+  }, [closeAllOverlays, collabPeerId, confirmOpts, createOpen, leaveSettings, loadSettings, mobileSideOpen, panelOpen, toggleDesktopSidebar, unboxOpen]);
 
   const selectBot = async (id: string) => {
     setActiveBotId(id);
@@ -587,16 +613,16 @@ export default function App() {
           }}
           onToggleSettings={() => {
             if (view === 'settings') {
-              setView('chat');
+              leaveSettings();
             } else {
               closeAllOverlays();
               setDeskOpen(false);
-              setSettingsTab('models');
+              setSettingsTab('general');
               setView('settings');
               void loadSettings();
             }
           }}
-          onBackToChat={() => setView('chat')}
+          onBackToChat={leaveSettings}
           onSwitchSettingsTab={(nextTab) => {
             setSettingsTab(nextTab);
             if (matchMedia('(max-width: 820px)').matches) closeAllOverlays();
@@ -745,6 +771,11 @@ export default function App() {
               setUnboxStep(1);
               setUnboxOpen(true);
             }}
+            onDirtyChange={(dirty) => {
+              settingsDirtyRef.current = dirty;
+            }}
+            saveRef={settingsSaveRef}
+            resetRef={settingsResetRef}
           />
           </div>
         </main>

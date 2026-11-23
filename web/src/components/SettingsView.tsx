@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   BotStatus,
   ConfirmOptions,
@@ -41,6 +41,9 @@ interface SettingsViewProps {
   onResetModels: () => void;
   onOpenDesktopTarget: (target: string) => void;
   onReopenUnbox: () => void;
+  onDirtyChange?: (dirty: boolean) => void;
+  saveRef?: React.MutableRefObject<(() => Promise<boolean>) | null>;
+  resetRef?: React.MutableRefObject<(() => void) | null>;
 }
 
 export const SettingsView: React.FC<SettingsViewProps> = ({
@@ -65,6 +68,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   onResetModels,
   onOpenDesktopTarget,
   onReopenUnbox,
+  onDirtyChange,
+  saveRef,
+  resetRef,
 }) => {
   const t = (k: string, vars?: Record<string, string | number>) => translate(lang, k, vars);
 
@@ -160,6 +166,26 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     }
     return false;
   }, [settings, defaultModel, defaultModelsDraft, sharedUserMd, botDrafts, baseline, bots]);
+
+  useEffect(() => {
+    onDirtyChange?.(isDirty);
+  }, [isDirty, onDirtyChange]);
+
+  const resetDraftsToBaseline = useCallback(() => {
+    setDefaultModel(baseline.defaultModel);
+    setDefaultModelsDraft({ ...baseline.defaultModels });
+    setPerHarnessOpen(Object.values(baseline.defaultModels).some(Boolean));
+    setSharedUserMd(baseline.sharedUserMd);
+    setBotDrafts({ ...baseline.bots });
+    setSettingsErr('');
+  }, [baseline]);
+
+  useEffect(() => {
+    if (resetRef) resetRef.current = resetDraftsToBaseline;
+    return () => {
+      if (resetRef) resetRef.current = null;
+    };
+  }, [resetRef, resetDraftsToBaseline]);
 
   useEffect(() => {
     if (!settings) return;
@@ -297,7 +323,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     }
     if (tab === 'remote') {
       refreshRemoteTab();
-    } else if (tab === 'general') {
+    } else if (tab === 'memory') {
       void loadGlobalMemories();
     }
     return () => {
@@ -361,8 +387,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     });
   };
 
-  const handleSaveSettings = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const saveSettingsChanges = useCallback(async (): Promise<boolean> => {
     setSaving(true);
     setSettingsErr('');
     try {
@@ -398,11 +423,25 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       }
       onToast(t('saved'));
       await onReloadBots();
+      return true;
     } catch (err) {
       if (err instanceof Error && err.message !== 'unauthorized') setSettingsErr(err.message);
+      return false;
     } finally {
       setSaving(false);
     }
+  }, [defaultModelsDraft, defaultModel, baseline, sharedUserMd, onSettingsUpdated, bots, botDrafts, onToast, t, onReloadBots]);
+
+  useEffect(() => {
+    if (saveRef) saveRef.current = saveSettingsChanges;
+    return () => {
+      if (saveRef) saveRef.current = null;
+    };
+  }, [saveRef, saveSettingsChanges]);
+
+  const handleSaveSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await saveSettingsChanges();
   };
 
   const prevTabRef = useRef<SettingsTab>(tab);
@@ -416,7 +455,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     return () => window.clearTimeout(id);
   }, [tab, viewState]);
 
-  const titleKey = tab === 'remote' ? 'tabRemote' : tab === 'general' ? 'tabGeneral' : 'tabModels';
+  const titleKey =
+    tab === 'remote'
+      ? 'tabRemote'
+      : tab === 'memory'
+        ? 'tabMemory'
+        : tab === 'general'
+          ? 'tabGeneral'
+          : 'tabModels';
   const mp = settings?.magpie;
   const onlineNodeCount = nodes.filter((n) => n.connected).length;
 
@@ -1562,6 +1608,19 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
             <section className="set-card">
               <div className="set-card-hd">
+                <h2>{t('ubCardTitle')}</h2>
+                <button type="button" id="sReopenUnbox" className="mp" onClick={onReopenUnbox}>
+                  {t('ubReopenBtn')}
+                </button>
+              </div>
+              <p className="set-card-desc">{t('ubCardDesc')}</p>
+            </section>
+          </div>
+
+          {/* Tab 4: Memory */}
+          <div id="sTabMemory" className={`tab-pane${tab === 'memory' && tabAnim ? ' tab-anim' : ''}`} hidden={tab !== 'memory'}>
+            <section className="set-card">
+              <div className="set-card-hd">
                 <h2>{t('globalSharedMem')}</h2>
                 <span className="set-card-desc">{t('globalSharedMemDesc')}</span>
               </div>
@@ -1753,16 +1812,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               <div id="sMemErr" className="msg-err">
                 {memErr}
               </div>
-            </section>
-
-            <section className="set-card">
-              <div className="set-card-hd">
-                <h2>{t('ubCardTitle')}</h2>
-                <button type="button" id="sReopenUnbox" className="mp" onClick={onReopenUnbox}>
-                  {t('ubReopenBtn')}
-                </button>
-              </div>
-              <p className="set-card-desc">{t('ubCardDesc')}</p>
             </section>
           </div>
 
