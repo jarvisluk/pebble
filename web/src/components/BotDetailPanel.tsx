@@ -14,6 +14,7 @@ import { translate } from '../lib/i18n';
 import { botColor, contrastText, formatStamp } from '../lib/theme';
 import { BotAppearancePicker } from './BotAppearancePicker';
 import { BotAvatar } from './BotAvatar';
+import { MagpieInstallBanner } from './MagpieInstallBanner';
 
 interface BotDetailPanelProps {
   open: boolean;
@@ -31,6 +32,7 @@ interface BotDetailPanelProps {
   onReloadBots: () => Promise<void>;
   onLoadModels: (harness: string, force?: boolean) => Promise<unknown>;
   onRefreshDetail: (id: string) => Promise<void>;
+  onSettingsUpdated?: (s: SettingsData) => void;
 }
 
 export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
@@ -49,6 +51,7 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
   onReloadBots,
   onLoadModels,
   onRefreshDetail,
+  onSettingsUpdated,
 }) => {
   const t = (k: string, vars?: Record<string, string | number>) => translate(lang, k, vars);
 
@@ -485,7 +488,21 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
               {memLoading && !memData ? (
                 <div className="set-card-desc">{t('loadingEllipsis')}</div>
               ) : !memData || !memData.installed ? (
-                <div className="set-card-desc">{t('memNotInstalled')}</div>
+                <div className="note">
+                  <MagpieInstallBanner
+                    lang={lang}
+                    hint={t('memNotInstalled')}
+                    installCmds={settings?.magpie?.install}
+                    onToast={onToast}
+                    onInstalled={async () => {
+                      if (onSettingsUpdated) {
+                        const fresh = await api<SettingsData>('/api/settings?fresh=1');
+                        onSettingsUpdated(fresh);
+                      }
+                      await loadMemories(detail.id);
+                    }}
+                  />
+                </div>
               ) : !memData.available ? (
                 <div className="set-card-desc">
                   {t('memUnavailable')}

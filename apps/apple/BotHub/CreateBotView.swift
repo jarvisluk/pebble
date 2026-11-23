@@ -21,7 +21,7 @@ struct CreateBotView: View {
 
     private var harnesses: [HarnessInfo] {
         if let h = hub.settings?.harnesses, !h.isEmpty { return h }
-        return ["opencode", "claude", "pi"].map { HarnessInfo(id: $0, label: $0) }
+        return ["opencode", "codebuddy", "qoder", "codex", "claude", "pi"].map { HarnessInfo(id: $0, label: $0) }
     }
 
     private func slug(_ s: String) -> String {

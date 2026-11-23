@@ -226,6 +226,18 @@ struct BotDetailView: View {
                 ProgressView()
             } else if mem?.installed != true {
                 Text(hub.t("hostNoMagpie")).foregroundStyle(.secondary)
+                Button {
+                    Task {
+                        do {
+                            try await hub.installMagpie()
+                            await loadMem()
+                        } catch {
+                            err = errText(error, hub.t("opFailed"))
+                        }
+                    }
+                } label: {
+                    Text(hub.t("mpInstallOnHost"))
+                }
             } else if mem?.available != true {
                 Text(hub.t("magpieNoResp")).foregroundStyle(p.danger)
             } else {

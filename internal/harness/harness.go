@@ -296,9 +296,13 @@ type Registry struct {
 func NewDefaultRegistry(cfg *config.HubConfig) *Registry {
 	r := &Registry{items: make(map[string]Harness)}
 	r.Register(NewOpenCodeHarness(cfg.OpenCodeServerURL))
+	r.Register(NewCodeBuddyHarness())
+	r.Register(NewQoderHarness())
+	r.Register(NewCodexHarness())
+	r.Register(NewClaudeHarness())
+	r.Register(NewTraeHarness())
 	r.Register(NewPiHarness())
 	r.Register(NewDshHarness())
-	r.Register(NewClaudeHarness())
 	r.Register(NewAgyHarness())
 	return r
 }
@@ -323,7 +327,17 @@ func (r *Registry) Get(kind string) (Harness, error) {
 }
 
 // harnessOrder is the display order; unknown kinds sort after, by name.
-var harnessOrder = map[string]int{"opencode": 1, "pi": 2, "dsh": 3, "claude": 4, "agy": 5}
+var harnessOrder = map[string]int{
+	"opencode":  1,
+	"codebuddy": 2,
+	"qoder":     3,
+	"codex":     4,
+	"claude":    5,
+	"trae":      6,
+	"pi":        7,
+	"dsh":       8,
+	"agy":       9,
+}
 
 // All returns the registered harnesses in display order.
 func (r *Registry) All() []Harness {

@@ -178,13 +178,19 @@ type RotateResult struct {
 
 // HarnessInfo describes one available harness.
 type HarnessInfo struct {
-	ID           string                     `json:"id"`
-	Label        string                     `json:"label"`
-	DefaultModel string                     `json:"defaultModel"`
-	Installed    bool                       `json:"installed"`
-	BinaryPath   string                     `json:"binaryPath,omitempty"`
-	Install      harness.HarnessInstallInfo `json:"install"`
-	Magpie       harness.MagpieStatus       `json:"magpie"`
+	ID             string                     `json:"id"`
+	Label          string                     `json:"label"`
+	DefaultModel   string                     `json:"defaultModel"`
+	Installed      bool                       `json:"installed"`
+	BinaryPath     string                     `json:"binaryPath,omitempty"`
+	AuthStatus     string                     `json:"authStatus,omitempty"` // "ready" | "needs_login" | "unknown"
+	AuthDetail     string                     `json:"authDetail,omitempty"`
+	RequiresLogin  bool                       `json:"requiresLogin,omitempty"`
+	CanAutoInstall bool                       `json:"canAutoInstall,omitempty"`
+	Category       string                     `json:"category,omitempty"` // "recommended" | "advanced"
+	Summary        string                     `json:"summary,omitempty"`
+	Install        harness.HarnessInstallInfo `json:"install"`
+	Magpie         harness.MagpieStatus       `json:"magpie"`
 }
 
 type Event struct {
@@ -1910,13 +1916,23 @@ func (h *Hub) Harnesses(ctx context.Context) []HarnessInfo {
 	var out []HarnessInfo
 	for _, r := range h.registry.All() {
 		installed, binPath := harness.DetectHarness(r.Kind())
+		meta := harness.HarnessInstallMeta(r.Kind())
+		authStatus := "unknown"
+		if installed && !meta.RequiresLogin {
+			authStatus = "ready"
+		}
 		out = append(out, HarnessInfo{
-			ID:           r.Kind(),
-			Label:        r.Label(),
-			DefaultModel: h.cfg.DefaultModelFor(r.Kind()),
-			Installed:    installed,
-			BinaryPath:   binPath,
-			Install:      harness.HarnessInstallMeta(r.Kind()),
+			ID:             r.Kind(),
+			Label:          r.Label(),
+			DefaultModel:   h.cfg.DefaultModelFor(r.Kind()),
+			Installed:      installed,
+			BinaryPath:     binPath,
+			AuthStatus:     authStatus,
+			RequiresLogin:  meta.RequiresLogin,
+			CanAutoInstall: meta.CanAutoInstall,
+			Category:       meta.Category,
+			Summary:        meta.Summary,
+			Install:        meta,
 		})
 	}
 	h.lanesMu.RUnlock()
@@ -1926,6 +1942,9 @@ func (h *Hub) Harnesses(ctx context.Context) []HarnessInfo {
 		go func(hi *HarnessInfo) {
 			defer wg.Done()
 			hi.Magpie = harness.GetMagpieStatus(ctx, hi.ID)
+			if hi.Installed {
+				hi.AuthStatus, hi.AuthDetail = harness.DetectHarnessAuth(ctx, hi.ID)
+			}
 		}(&out[i])
 	}
 	wg.Wait()

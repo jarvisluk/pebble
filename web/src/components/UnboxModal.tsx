@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
-import type { BotStatus, ResolvedLang, SettingsData, TailcatStatus } from '../types';
+import type { BotStatus, HarnessInfo, ResolvedLang, SettingsData, SetupTaskStatus, TailcatStatus } from '../types';
 import { api } from '../lib/api';
 import { translate } from '../lib/i18n';
+import { MagpieInstallBanner } from './MagpieInstallBanner';
 
 interface UnboxModalProps {
   open: boolean;
@@ -41,6 +42,10 @@ export const UnboxModal: React.FC<UnboxModalProps> = ({
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [selectedHarness, setSelectedHarness] = useState('opencode');
   const [expandedInstall, setExpandedInstall] = useState<Set<string>>(() => new Set());
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [installTasks, setInstallTasks] = useState<Record<string, SetupTaskStatus>>({});
+  const [loginTasks, setLoginTasks] = useState<Record<string, SetupTaskStatus>>({});
+
   const [defaultModel, setDefaultModel] = useState('');
   const [provDismissed, setProvDismissed] = useState(false);
   const [addProvOpen, setAddProvOpen] = useState(false);
@@ -62,14 +67,24 @@ export const UnboxModal: React.FC<UnboxModalProps> = ({
   const [copiedId, setCopiedId] = useState('');
 
   const tailcatTimerRef = useRef<number | null>(null);
+  const setupTimersRef = useRef<Record<string, number>>({});
+
+  const clearSetupTimers = () => {
+    for (const tid of Object.values(setupTimersRef.current)) {
+      window.clearTimeout(tid);
+    }
+    setupTimersRef.current = {};
+  };
 
   const pickDefaultHarness = (s: SettingsData | null) => {
     const harnesses = s?.harnesses || [];
     const primary = bots[0];
     if (primary) {
       const match = harnesses.find((h) => h.id === primary.harness);
-      if (match?.installed) return match.id;
+      if (match?.installed && match.authStatus !== 'needs_login') return match.id;
     }
+    const readyInstalled = harnesses.find((h) => h.installed && h.authStatus !== 'needs_login');
+    if (readyInstalled) return readyInstalled.id;
     const firstInstalled = harnesses.find((h) => h.installed);
     if (firstInstalled) return firstInstalled.id;
     return primary?.harness || harnesses[0]?.id || 'opencode';
@@ -78,6 +93,7 @@ export const UnboxModal: React.FC<UnboxModalProps> = ({
   useEffect(() => {
     if (!open) {
       if (tailcatTimerRef.current) window.clearTimeout(tailcatTimerRef.current);
+      clearSetupTimers();
       return;
     }
     setStep(initialStep);
@@ -144,6 +160,110 @@ export const UnboxModal: React.FC<UnboxModalProps> = ({
     }
   };
 
+  const pollHarnessLogin = async (id: string) => {
+    try {
+      const st = await api<SetupTaskStatus>(`/api/harnesses/${encodeURIComponent(id)}/login`);
+      setLoginTasks((prev) => ({ ...prev, [id]: st }));
+      if (st.authStatus === 'ready' || st.state === 'done') {
+        onResetModels();
+        await onLoadSettings(true);
+        setSelectedHarness(id);
+        onToast(t('ubLoginConfirmed'));
+        return;
+      }
+      if (st.state === 'running' && open) {
+        setupTimersRef.current[`login:${id}`] = window.setTimeout(() => {
+          void pollHarnessLogin(id);
+        }, 1500);
+      } else if (st.state === 'error' && st.error) {
+        setErr(st.error);
+      }
+    } catch (e) {
+      if (e instanceof Error && e.message !== 'unauthorized') setErr(e.message);
+    }
+  };
+
+  const startHarnessLogin = async (id: string) => {
+    setErr('');
+    try {
+      const st = await api<SetupTaskStatus>(`/api/harnesses/${encodeURIComponent(id)}/login`, {
+        method: 'POST',
+      });
+      setLoginTasks((prev) => ({ ...prev, [id]: st }));
+      if (st.state === 'done' || st.authStatus === 'ready') {
+        await onLoadSettings(true);
+        setSelectedHarness(id);
+        onToast(t('ubLoginConfirmed'));
+        return;
+      }
+      if (st.state === 'running') {
+        if (setupTimersRef.current[`login:${id}`]) {
+          window.clearTimeout(setupTimersRef.current[`login:${id}`]);
+        }
+        setupTimersRef.current[`login:${id}`] = window.setTimeout(() => {
+          void pollHarnessLogin(id);
+        }, 1200);
+      }
+    } catch (e) {
+      if (e instanceof Error && e.message !== 'unauthorized') setErr(e.message);
+    }
+  };
+
+  const pollHarnessInstall = async (id: string) => {
+    try {
+      const st = await api<SetupTaskStatus>(`/api/harnesses/${encodeURIComponent(id)}/install`);
+      setInstallTasks((prev) => ({ ...prev, [id]: st }));
+      if (st.state === 'running' && open) {
+        setupTimersRef.current[`install:${id}`] = window.setTimeout(() => {
+          void pollHarnessInstall(id);
+        }, 1200);
+        return;
+      }
+      if (st.state === 'done') {
+        onResetModels();
+        const fresh = await onLoadSettings(true);
+        const h = fresh?.harnesses?.find((item) => item.id === id);
+        setSelectedHarness(id);
+        onToast(`${h?.label || id} ${t('ubInstallDone')}`);
+        if (h?.requiresLogin && h.authStatus === 'needs_login') {
+          void startHarnessLogin(id);
+        }
+      } else if (st.state === 'error' && st.error) {
+        setErr(st.error);
+      }
+    } catch (e) {
+      if (e instanceof Error && e.message !== 'unauthorized') setErr(e.message);
+    }
+  };
+
+  const startHarnessInstall = async (id: string) => {
+    setErr('');
+    try {
+      const st = await api<SetupTaskStatus>(`/api/harnesses/${encodeURIComponent(id)}/install`, {
+        method: 'POST',
+      });
+      setInstallTasks((prev) => ({ ...prev, [id]: st }));
+      if (st.state === 'running') {
+        if (setupTimersRef.current[`install:${id}`]) {
+          window.clearTimeout(setupTimersRef.current[`install:${id}`]);
+        }
+        setupTimersRef.current[`install:${id}`] = window.setTimeout(() => {
+          void pollHarnessInstall(id);
+        }, 1200);
+      } else if (st.state === 'done') {
+        onResetModels();
+        const fresh = await onLoadSettings(true);
+        const h = fresh?.harnesses?.find((item) => item.id === id);
+        setSelectedHarness(id);
+        if (h?.requiresLogin && h.authStatus === 'needs_login') {
+          void startHarnessLogin(id);
+        }
+      }
+    } catch (e) {
+      if (e instanceof Error && e.message !== 'unauthorized') setErr(e.message);
+    }
+  };
+
   const persistHarness = async () => {
     const primary = bots[0];
     if (!primary || !selectedHarness || primary.harness === selectedHarness) return;
@@ -169,6 +289,7 @@ export const UnboxModal: React.FC<UnboxModalProps> = ({
 
   const handleSkip = async () => {
     if (tailcatTimerRef.current) window.clearTimeout(tailcatTimerRef.current);
+    clearSetupTimers();
     if (settings && !settings.onboarding?.completed) {
       try {
         const updated = await api<SettingsData>('/api/settings', {
@@ -200,6 +321,7 @@ export const UnboxModal: React.FC<UnboxModalProps> = ({
       await persistHarness();
       await persistModelAndComplete(true);
       if (tailcatTimerRef.current) window.clearTimeout(tailcatTimerRef.current);
+      clearSetupTimers();
       onClose();
       await onReloadBots();
       onToast(t('ubFinishToast'));
@@ -211,7 +333,12 @@ export const UnboxModal: React.FC<UnboxModalProps> = ({
   };
 
   const harnesses = settings?.harnesses || [];
-  const anyInstalled = harnesses.some((h) => h.installed);
+  const installedHarnesses = harnesses.filter((h) => h.installed);
+  const uninstalledHarnesses = harnesses.filter((h) => !h.installed);
+  const recommendedUninstalled = uninstalledHarnesses.filter((h) => h.category !== 'advanced');
+  const advancedUninstalled = uninstalledHarnesses.filter((h) => h.category === 'advanced');
+
+  const anyInstalled = installedHarnesses.length > 0;
   const hInfo = harnesses.find((h) => h.id === selectedHarness);
   const hLabel = hInfo?.label || selectedHarness || 'opencode';
   const mp = settings?.magpie;
@@ -224,6 +351,132 @@ export const UnboxModal: React.FC<UnboxModalProps> = ({
     2: { title: t('ubStep2Title'), sub: t('ubStep2Sub') },
     3: { title: t('ubStep3Title'), sub: t('ubStep3Sub') },
   }[step];
+
+  const renderHarnessRow = (h: HarnessInfo) => {
+    const selected = h.id === selectedHarness;
+    const expanded = expandedInstall.has(h.id);
+    const rawCmd = h.install?.command || '';
+    const isShellCmd = rawCmd.includes(' ') && !rawCmd.startsWith('查看');
+    const cmdText = isShellCmd ? rawCmd : rawCmd ? t('ubManualInstall', { name: h.label }) : '';
+    const url = h.install?.url || '';
+
+    const instTask = installTasks[h.id];
+    const loginTask = loginTasks[h.id];
+    const installing = instTask?.state === 'running';
+    const loggingIn = loginTask?.state === 'running';
+    const needsLogin = Boolean(h.installed && h.authStatus === 'needs_login');
+
+    const lastLog = installing
+      ? instTask?.logs?.[instTask.logs.length - 1]
+      : loggingIn
+        ? loginTask?.logs?.[loginTask.logs.length - 1]
+        : '';
+
+    const sub = h.installed
+      ? [h.summary, h.binaryPath || t('ubReady')].filter(Boolean).join(' · ')
+      : h.summary || t('ubNotDetectedHint');
+
+    const toggleInstall = () => {
+      setExpandedInstall((prev) => {
+        const next = new Set(prev);
+        if (next.has(h.id)) next.delete(h.id);
+        else next.add(h.id);
+        return next;
+      });
+    };
+
+    return (
+      <div key={h.id} className={`unbox-item${selected ? ' on' : ''}`} data-ub-row={h.id}>
+        <div className="unbox-item-hd">
+          <button
+            type="button"
+            className="unbox-item-main"
+            onClick={() => {
+              if (h.installed) {
+                setSelectedHarness(h.id);
+                setErr('');
+              } else {
+                toggleInstall();
+              }
+            }}
+          >
+            <span className="unbox-item-name">{h.label}</span>
+            <span className="unbox-item-path">{lastLog || sub}</span>
+          </button>
+          <div className="unbox-item-acts">
+            {h.installed ? (
+              <>
+                <span className={`mp${needsLogin ? ' bad' : ' ok'}`}>
+                  {needsLogin ? t('ubNeedsLogin') : t('ubReady')}
+                </span>
+                {needsLogin && (
+                  <button
+                    type="button"
+                    className="mp go"
+                    disabled={loggingIn}
+                    onClick={() => void startHarnessLogin(h.id)}
+                  >
+                    {loggingIn ? t('ubLoggingIn') : t('ubLoginBtn')}
+                  </button>
+                )}
+              </>
+            ) : (
+              <>
+                {h.canAutoInstall && (
+                  <button
+                    type="button"
+                    className="mp go"
+                    disabled={installing}
+                    onClick={() => void startHarnessInstall(h.id)}
+                  >
+                    {installing ? t('ubInstalling') : t('ubOneClickInstall')}
+                  </button>
+                )}
+                <button type="button" className="mp" onClick={toggleInstall}>
+                  {expanded ? t('ubHideInstall') : t('ubViewInstall')}
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+
+        {h.installed && needsLogin && (loggingIn || loginTask?.loginUrl) && (
+          <div className="unbox-install">
+            <div className="row-inline row-wrap">
+              {loginTask?.loginUrl && (
+                <a href={loginTask.loginUrl} target="_blank" rel="noopener noreferrer">
+                  {t('ubOpenLoginLink')}
+                </a>
+              )}
+              <button type="button" className="mp" onClick={() => void pollHarnessLogin(h.id)}>
+                {t('ubCheckLogin')}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {!h.installed && expanded && (
+          <div className="unbox-install">
+            {cmdText && (
+              <div className="cmd">
+                <code>{cmdText}</code>
+                {isShellCmd && (
+                  <button type="button" onClick={() => copyText(rawCmd, `ub-inst-${h.id}`)}>
+                    {copiedId === `ub-inst-${h.id}` ? t('copied') : t('copy')}
+                  </button>
+                )}
+              </div>
+            )}
+            {url && (
+              <a href={url} target="_blank" rel="noopener noreferrer">
+                {t('ubViewDocs')}
+              </a>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div id="unboxDlg" className={`dlg-wrap${open ? ' open' : ''}`} aria-label={t('ubAria')}>
@@ -260,113 +513,61 @@ export const UnboxModal: React.FC<UnboxModalProps> = ({
                   {t('ubRecheck')}
                 </button>
               </div>
-              <div id="ubHarnessList" className="unbox-list">
-                {harnesses.length === 0 ? (
-                  <div className="set-card-desc">{t('ubNoHarnesses')}</div>
-                ) : (
-                  harnesses.map((h) => {
-                    const selected = h.id === selectedHarness;
-                    const expanded = expandedInstall.has(h.id);
-                    const rawCmd = h.install?.command || '';
-                    const isShellCmd = rawCmd.includes(' ') && !rawCmd.startsWith('查看');
-                    const cmdText = isShellCmd ? rawCmd : rawCmd ? t('ubManualInstall', { name: h.label }) : '';
-                    const url = h.install?.url || '';
-                    const sub = h.installed ? h.binaryPath || t('ubReady') : t('ubNotDetectedHint');
 
-                    const toggleInstall = () => {
-                      setExpandedInstall((prev) => {
-                        const next = new Set(prev);
-                        if (next.has(h.id)) next.delete(h.id);
-                        else next.add(h.id);
-                        return next;
-                      });
-                    };
+              {harnesses.length === 0 ? (
+                <div className="set-card-desc">{t('ubNoHarnesses')}</div>
+              ) : (
+                <>
+                  <div className="unbox-group-hd">{t('ubInstalledGroup')}</div>
+                  <div id="ubHarnessInstalled" className="unbox-list">
+                    {installedHarnesses.length === 0 ? (
+                      <div className="set-card-desc">{t('ubNoInstalledYet')}</div>
+                    ) : (
+                      installedHarnesses.map(renderHarnessRow)
+                    )}
+                  </div>
 
-                    return (
-                      <div key={h.id} className={`unbox-item${selected ? ' on' : ''}`} data-ub-row={h.id}>
-                        <div className="unbox-item-hd">
+                  {uninstalledHarnesses.length > 0 && (
+                    <>
+                      <div className="unbox-group-hd">{t('ubAvailableGroup')}</div>
+                      <div id="ubHarnessAvailable" className="unbox-list">
+                        {recommendedUninstalled.map(renderHarnessRow)}
+                      </div>
+                      {advancedUninstalled.length > 0 && (
+                        <>
                           <button
                             type="button"
-                            className="unbox-item-main"
-                            onClick={() => {
-                              if (h.installed) {
-                                setSelectedHarness(h.id);
-                                setErr('');
-                              } else {
-                                toggleInstall();
-                              }
-                            }}
+                            className="link-btn unbox-more-btn"
+                            onClick={() => setShowAdvanced((v) => !v)}
                           >
-                            <span className="unbox-item-name">{h.label}</span>
-                            <span className="unbox-item-path">{sub}</span>
+                            {showAdvanced ? t('ubHideMoreEngines') : t('ubMoreEngines')}
                           </button>
-                          <div className="unbox-item-acts">
-                            <span className={`mp${h.installed ? ' ok' : ''}`}>
-                              {h.installed ? t('ubInstalled') : t('ubNotInstalled')}
-                            </span>
-                            {!h.installed && (
-                              <button type="button" className="mp" onClick={toggleInstall}>
-                                {expanded ? t('ubHideInstall') : t('ubViewInstall')}
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                        {expanded && (
-                          <div className="unbox-install">
-                            {cmdText && (
-                              <div className="cmd">
-                                <code>{cmdText}</code>
-                                {isShellCmd && (
-                                  <button type="button" onClick={() => copyText(rawCmd, `ub-inst-${h.id}`)}>
-                                    {copiedId === `ub-inst-${h.id}` ? t('copied') : t('copy')}
-                                  </button>
-                                )}
-                              </div>
-                            )}
-                            {url && (
-                              <a href={url} target="_blank" rel="noopener noreferrer">
-                                {t('ubViewDocs')}
-                              </a>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })
-                )}
-              </div>
+                          {showAdvanced && <div className="unbox-list">{advancedUninstalled.map(renderHarnessRow)}</div>}
+                        </>
+                      )}
+                    </>
+                  )}
+                </>
+              )}
             </div>
           )}
 
           {step === 2 && (
             <div id="ubStep2" className="set-stack">
+              <div className="set-card-desc">{t('ubMagpieOptionalHint')}</div>
               <div id="ubMagpiePanel" className="note">
                 {!mp?.installed ? (
-                  <>
-                    <div className="row-between row-wrap">
-                      <span>{t('ubMagpieNotInstalledPlain', { label: hLabel })}</span>
-                      <button type="button" id="ubRecheck2" className="mp" disabled={busy} onClick={() => void recheck()}>
-                        {t('ubRecheck')}
-                      </button>
-                    </div>
-                    <div>{t('ubMagpieInstallHint')}</div>
-                    {mp?.install?.script && (
-                      <div className="cmd">
-                        <code>{mp.install.script}</code>
-                        <button type="button" onClick={() => copyText(mp.install!.script!, 'ub-mp-script')}>
-                          {copiedId === 'ub-mp-script' ? t('copied') : t('copy')}
-                        </button>
-                      </div>
-                    )}
-                    {mp?.install?.brew && (
-                      <div className="cmd">
-                        <code>{mp.install.brew}</code>
-                        <button type="button" onClick={() => copyText(mp.install!.brew!, 'ub-mp-brew')}>
-                          {copiedId === 'ub-mp-brew' ? t('copied') : t('copy')}
-                        </button>
-                      </div>
-                    )}
-                  </>
+                  <MagpieInstallBanner
+                    lang={lang}
+                    hint={t('ubMagpieNotInstalledPlain', { label: hLabel })}
+                    installCmds={mp?.install}
+                    onToast={onToast}
+                    onInstalled={async () => {
+                      onResetModels();
+                      await onLoadSettings(true);
+                      await onLoadModels(selectedHarness, true);
+                    }}
+                  />
                 ) : (
                   <>
                     <div className="row-between row-wrap">

@@ -106,7 +106,7 @@ struct SettingsView: View {
 
     private var harnesses: [HarnessInfo] {
         if let h = hub.settings?.harnesses, !h.isEmpty { return h }
-        return ["opencode", "claude", "pi"].map { HarnessInfo(id: $0, label: $0) }
+        return ["opencode", "codebuddy", "qoder", "codex", "claude", "pi"].map { HarnessInfo(id: $0, label: $0) }
     }
 
     private var primaryHarness: String { harnesses.first?.id ?? "opencode" }
@@ -341,6 +341,22 @@ struct SettingsView: View {
             Section {
                 if !installed {
                     Text(hub.t("hostNoMagpieGlobal")).foregroundStyle(.secondary)
+                    Button {
+                        run("magpie:install", "opFailed") {
+                            try await hub.installMagpie()
+                            return hub.t("mpInstallDone")
+                        }
+                    } label: {
+                        if busy == "magpie:install" {
+                            HStack(spacing: 8) {
+                                ProgressView().controlSize(.small)
+                                Text(hub.t("mpInstalling"))
+                            }
+                        } else {
+                            Text(hub.t("mpInstallOnHost"))
+                        }
+                    }
+                    .disabled(busy != nil)
                 } else if connectedHarnesses.isEmpty {
                     Text(hub.t("mpNoConnected")).foregroundStyle(.secondary)
                 } else {
@@ -728,6 +744,23 @@ struct SettingsView: View {
             }
             if mem?.installed != true {
                 Text(hub.t("hostNoMagpieGlobal")).foregroundStyle(.secondary)
+                Button {
+                    run("magpie:install", "opFailed") {
+                        try await hub.installMagpie()
+                        await loadMem(memQuery)
+                        return hub.t("mpInstallDone")
+                    }
+                } label: {
+                    if busy == "magpie:install" {
+                        HStack(spacing: 8) {
+                            ProgressView().controlSize(.small)
+                            Text(hub.t("mpInstalling"))
+                        }
+                    } else {
+                        Text(hub.t("mpInstallOnHost"))
+                    }
+                }
+                .disabled(busy != nil)
             } else if mem?.available != true {
                 Text(hub.t("magpieNoResp") + ((mem?.error ?? "").isEmpty ? "" : ": \(mem!.error!)")).foregroundStyle(p.danger)
             } else if (mem?.items ?? []).isEmpty {

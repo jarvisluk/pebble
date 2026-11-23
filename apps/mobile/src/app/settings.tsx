@@ -78,6 +78,7 @@ export default function SettingsScreen() {
     connectMagpie,
     disconnectMagpie,
     openMagpie,
+    installMagpie,
     setDesktopWorker,
     fetchDesktopPermissions,
     requestDesktopPermission,
@@ -245,6 +246,9 @@ export default function SettingsScreen() {
     if (settings?.harnesses?.length) return settings.harnesses;
     return [
       { id: 'opencode', label: 'opencode', defaultModel: '', magpie: { connected: false } },
+      { id: 'codebuddy', label: 'codebuddy', defaultModel: '', magpie: { connected: false } },
+      { id: 'qoder', label: 'qoder', defaultModel: '', magpie: { connected: false } },
+      { id: 'codex', label: 'codex', defaultModel: '', magpie: { connected: false } },
       { id: 'claude', label: 'claude', defaultModel: '', magpie: { connected: false } },
       { id: 'pi', label: 'pi', defaultModel: '', magpie: { connected: false } },
     ];
@@ -626,9 +630,27 @@ export default function SettingsScreen() {
             </View>
 
             {!mp?.installed ? (
-              <Text style={[styles.noteTxt, { color: theme.text2 }]}>
-                {t('hostNoMagpieGlobal')}
-              </Text>
+              <View style={{ gap: 8 }}>
+                <Text style={[styles.noteTxt, { color: theme.text2 }]}>
+                  {t('hostNoMagpieGlobal')}
+                </Text>
+                <Pressable
+                  disabled={busyAction === 'magpie:install'}
+                  onPress={() => {
+                    setError('');
+                    setBusyAction('magpie:install');
+                    void installMagpie()
+                      .then(() => setSavedMsg(t('mpInstallDone')))
+                      .catch((err: any) => setError(err?.message || t('opFailed')))
+                      .finally(() => setBusyAction(''));
+                  }}
+                  style={[styles.smallBtn, { alignSelf: 'flex-start', backgroundColor: theme.accent }]}
+                >
+                  <Text style={[styles.smallBtnTxt, { color: theme.accentText }]}>
+                    {busyAction === 'magpie:install' ? t('mpInstalling') : t('mpInstallOnHost')}
+                  </Text>
+                </Pressable>
+              </View>
             ) : connectedHarnesses.length === 0 ? (
               <Text style={[styles.noteTxt, { color: theme.mute }]}>
                 {t('mpNoConnected')}
@@ -1279,7 +1301,28 @@ export default function SettingsScreen() {
             </View>
 
             {!memData?.installed ? (
-              <Text style={[styles.emptyNote, { color: theme.mute }]}>{t('hostNoMagpieGlobal')}</Text>
+              <View style={{ gap: 8 }}>
+                <Text style={[styles.emptyNote, { color: theme.mute }]}>{t('hostNoMagpieGlobal')}</Text>
+                <Pressable
+                  disabled={busyAction === 'magpie:install'}
+                  onPress={() => {
+                    setError('');
+                    setBusyAction('magpie:install');
+                    void installMagpie()
+                      .then(() => {
+                        setSavedMsg(t('mpInstallDone'));
+                        return loadGlobalMemories(memQuery);
+                      })
+                      .catch((err: any) => setError(err?.message || t('opFailed')))
+                      .finally(() => setBusyAction(''));
+                  }}
+                  style={[styles.smallBtn, { alignSelf: 'flex-start', backgroundColor: theme.accent }]}
+                >
+                  <Text style={[styles.smallBtnTxt, { color: theme.accentText }]}>
+                    {busyAction === 'magpie:install' ? t('mpInstalling') : t('mpInstallOnHost')}
+                  </Text>
+                </Pressable>
+              </View>
             ) : !memData.available ? (
               <Text style={[styles.emptyNote, { color: theme.danger }]}>
                 {t('magpieNoResp')}{memData.error ? `: ${memData.error}` : ''}

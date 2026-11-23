@@ -184,6 +184,7 @@ interface HubContextValue {
   connectMagpie: (harnessId: string, model: string) => Promise<SettingsData>;
   disconnectMagpie: (harnessId: string) => Promise<SettingsData>;
   openMagpie: () => Promise<void>;
+  installMagpie: () => Promise<void>;
   setDesktopWorker: (harness: string, model: string) => Promise<SettingsData>;
   refreshNodes: () => Promise<void>;
   refreshTailcat: () => Promise<TailcatStatus>;
@@ -966,6 +967,27 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
     await apiRequest(baseURLRef.current, authTokenRef.current, '/api/magpie/open', { method: 'POST' });
   }, []);
 
+  const installMagpie = useCallback(async () => {
+    let st = await apiRequest<{ state: string; error?: string }>(
+      baseURLRef.current,
+      authTokenRef.current,
+      '/api/magpie/install',
+      { method: 'POST' }
+    );
+    while (st.state === 'running') {
+      await new Promise((r) => setTimeout(r, 1200));
+      st = await apiRequest<{ state: string; error?: string }>(
+        baseURLRef.current,
+        authTokenRef.current,
+        '/api/magpie/install'
+      );
+    }
+    if (st.state === 'error') {
+      throw new Error(st.error || 'Magpie install failed');
+    }
+    await loadSettings();
+  }, [loadSettings]);
+
   const setDesktopWorker = useCallback(async (harness: string, model: string) => {
     const s = await apiRequest<SettingsData>(baseURLRef.current, authTokenRef.current, '/api/settings', {
       method: 'PUT',
@@ -1205,6 +1227,7 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
         connectMagpie,
         disconnectMagpie,
         openMagpie,
+        installMagpie,
         setDesktopWorker,
         refreshNodes,
         refreshTailcat,

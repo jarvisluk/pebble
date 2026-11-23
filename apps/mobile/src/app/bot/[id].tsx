@@ -88,6 +88,7 @@ export default function BotChatScreen() {
     fetchMemories,
     saveMemory,
     deleteMemory,
+    installMagpie,
     routines,
     fetchRoutines,
     createRoutine,
@@ -1240,7 +1241,21 @@ export default function BotChatScreen() {
                   {botMemLoading ? (
                     <ActivityIndicator size="small" color={botPal.accent} />
                   ) : !botMem?.installed ? (
-                    <Text style={[styles.instructionsTxt, { color: theme.mute }]}>{t('hostNoMagpie')}</Text>
+                    <View style={{ gap: 8 }}>
+                      <Text style={[styles.instructionsTxt, { color: theme.mute }]}>{t('hostNoMagpie')}</Text>
+                      <Pressable
+                        onPress={() => {
+                          void installMagpie()
+                            .then(() => loadBotMemories())
+                            .catch(() => {});
+                        }}
+                        style={{ borderRadius: 999, paddingVertical: 8, paddingHorizontal: 14, alignSelf: 'flex-start', backgroundColor: botPal.accent }}
+                      >
+                        <Text style={{ fontSize: 13, fontWeight: '700', color: botPal.text }}>
+                          {t('mpInstallOnHost')}
+                        </Text>
+                      </Pressable>
+                    </View>
                   ) : !botMem.available ? (
                     <Text style={[styles.instructionsTxt, { color: theme.danger }]}>{t('magpieNoResp')}</Text>
                   ) : (botMem.items || []).length === 0 ? (

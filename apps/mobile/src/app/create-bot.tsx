@@ -71,6 +71,9 @@ export default function CreateBotScreen() {
     if (settings?.harnesses?.length) return settings.harnesses;
     return [
       { id: 'opencode', label: 'opencode', defaultModel: '', magpie: { connected: false } },
+      { id: 'codebuddy', label: 'codebuddy', defaultModel: '', magpie: { connected: false } },
+      { id: 'qoder', label: 'qoder', defaultModel: '', magpie: { connected: false } },
+      { id: 'codex', label: 'codex', defaultModel: '', magpie: { connected: false } },
       { id: 'claude', label: 'claude', defaultModel: '', magpie: { connected: false } },
       { id: 'pi', label: 'pi', defaultModel: '', magpie: { connected: false } },
     ];

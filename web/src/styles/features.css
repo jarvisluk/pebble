@@ -608,7 +608,7 @@
 .qr-box { width: 190px; align-self: center; border-radius: var(--r-row); background: #fff; padding: 8px; }
 
 /* ---------- unbox onboarding wizard ---------- */
-.dlg.unbox { width: min(560px, 100%); }
+.dlg.unbox { width: min(560px, 100%); min-width: 0; max-width: 100%; }
 .unbox-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .unbox-steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 12px; }
 .unbox-step {
@@ -618,14 +618,14 @@
 }
 .unbox-step.on { background: var(--sel); color: var(--text); }
 .unbox-step.done { color: var(--sage-ink); }
-.unbox-list { display: flex; flex-direction: column; gap: 8px; }
+.unbox-list { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .unbox-item {
   background: var(--s1); border-radius: var(--r-row); padding: 10px 12px;
-  display: flex; flex-direction: column; gap: 8px; border: 1px solid transparent;
+  display: flex; flex-direction: column; gap: 8px; min-width: 0; border: 1px solid transparent;
   transition: background var(--dur-fast), border-color var(--dur-fast);
 }
 .unbox-item.on { background: var(--sel); border-color: var(--accent); }
-.unbox-item-hd { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.unbox-item-hd { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; flex-wrap: wrap; }
 .unbox-item-main { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; text-align: left; }
 .unbox-item-name { font-size: var(--fs-base); font-weight: 600; color: var(--text); }
 .unbox-item-path {
@@ -639,6 +639,8 @@
 .unbox-qr { width: 180px; align-self: center; border-radius: 12px; background: #fff; padding: 8px; }
 .unbox-foot { justify-content: space-between; align-items: center; }
 .unbox-foot-r { display: flex; align-items: center; gap: 8px; }
+.unbox-group-hd { font-size: var(--fs-xs); font-weight: 600; color: var(--mute); text-transform: uppercase; letter-spacing: 0.04em; margin-top: 4px; }
+.unbox-more-btn { align-self: flex-start; font-size: var(--fs-xs); padding: 2px 0; }
 
   /* question cards */
   .q-card {

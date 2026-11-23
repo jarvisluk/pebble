@@ -632,6 +632,18 @@ final class HubStore {
         let _: OkResp = try await api.call("/api/magpie/open", method: "POST", body: [:])
     }
 
+    func installMagpie() async throws {
+        var st: SetupTaskStatus = try await api.call("/api/magpie/install", method: "POST", body: [:])
+        while st.state == "running" {
+            try await Task.sleep(nanoseconds: 1_200_000_000)
+            st = try await api.call("/api/magpie/install")
+        }
+        if st.state == "error" {
+            throw NSError(domain: "BotHub", code: 400, userInfo: [NSLocalizedDescriptionKey: st.error ?? "Magpie install failed"])
+        }
+        _ = try await loadSettings()
+    }
+
     func setDesktopWorker(harness: String, model: String) async throws {
         settings = try await api.call("/api/settings", method: "PUT",
                                       body: ["desktopHarness": harness.trimmingCharacters(in: .whitespaces),

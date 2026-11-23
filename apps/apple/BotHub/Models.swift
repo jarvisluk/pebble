@@ -125,6 +125,14 @@ struct MagpieInfo: Codable {
     var webUrl: String?
 }
 
+struct SetupTaskStatus: Codable {
+    var target: String
+    var kind: String
+    var state: String
+    var logs: [String]?
+    var error: String?
+}
+
 struct SettingsData: Codable {
     var magpie: MagpieInfo?
     var desktopHarness: String?

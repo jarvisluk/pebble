@@ -1,6 +1,7 @@
 package harness
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -20,7 +21,7 @@ func TestDetectHarnessAndPreference(t *testing.T) {
 	lookPathFunc = func(string) (string, error) {
 		return "", errors.New("not found")
 	}
-	for _, kind := range []string{"opencode", "claude", "pi", "dsh", "agy"} {
+	for _, kind := range []string{"opencode", "codebuddy", "qoder", "codex", "claude", "trae", "pi", "dsh", "agy"} {
 		if ok, p := DetectHarness(kind); ok || p != "" {
 			t.Fatalf("expected %s not installed, got ok=%v path=%q", kind, ok, p)
 		}
@@ -63,7 +64,23 @@ func TestDetectHarnessAndPreference(t *testing.T) {
 		t.Fatalf("PreferredInstalledHarness = %q, want claude", got)
 	}
 
-	// Case 3: opencode fallback path in ~/.opencode/bin/opencode.
+	// Case 4: qoder fallback binary name "qoder" in ~/.qoder/bin/qoder.
+	qoderDir := filepath.Join(fakeHome, ".qoder", "bin")
+	if err := os.MkdirAll(qoderDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	qoderBin := filepath.Join(qoderDir, "qoder")
+	if err := os.WriteFile(qoderBin, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if ok, p := DetectHarness("qoder"); !ok || p != qoderBin {
+		t.Fatalf("DetectHarness(qoder) = (%v, %q), want %q", ok, p, qoderBin)
+	}
+	if got := PreferredInstalledHarness(); got != "qoder" {
+		t.Fatalf("PreferredInstalledHarness = %q, want qoder", got)
+	}
+
+	// Case 5: opencode fallback path in ~/.opencode/bin/opencode.
 	ocDir := filepath.Join(fakeHome, ".opencode", "bin")
 	if err := os.MkdirAll(ocDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -77,5 +94,73 @@ func TestDetectHarnessAndPreference(t *testing.T) {
 	}
 	if got := PreferredInstalledHarness(); got != "opencode" {
 		t.Fatalf("PreferredInstalledHarness = %q, want opencode", got)
+	}
+}
+
+func TestDetectHarnessAuth(t *testing.T) {
+	origLookPath := lookPathFunc
+	origAuthCheck := runAuthCheckFunc
+	t.Cleanup(func() {
+		lookPathFunc = origLookPath
+		runAuthCheckFunc = origAuthCheck
+	})
+
+	fakeHome := t.TempDir()
+	t.Setenv("HOME", fakeHome)
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("CODEBUDDY_API_KEY", "")
+	t.Setenv("QODER_API_KEY", "")
+
+	lookPathFunc = func(bin string) (string, error) {
+		return "/usr/local/bin/" + bin, nil
+	}
+	runAuthCheckFunc = func(context.Context, string, ...string) (int, string, error) {
+		return 1, "not logged in", errors.New("exit 1")
+	}
+
+	// opencode does not require login.
+	if st, _ := DetectHarnessAuth(context.Background(), "opencode"); st != "ready" {
+		t.Fatalf("opencode auth = %q, want ready", st)
+	}
+
+	// codex needs login initially.
+	if st, _ := DetectHarnessAuth(context.Background(), "codex"); st != "needs_login" {
+		t.Fatalf("codex auth = %q, want needs_login", st)
+	}
+
+	// codex becomes ready when ~/.codex/auth.json exists.
+	codexDir := filepath.Join(fakeHome, ".codex")
+	if err := os.MkdirAll(codexDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(codexDir, "auth.json"), []byte(`{"token":"abc"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := DetectHarnessAuth(context.Background(), "codex"); st != "ready" {
+		t.Fatalf("codex auth with auth.json = %q, want ready", st)
+	}
+
+	// codebuddy becomes ready when ~/.codebuddy/auth.json exists.
+	if st, _ := DetectHarnessAuth(context.Background(), "codebuddy"); st != "needs_login" {
+		t.Fatalf("codebuddy auth = %q, want needs_login", st)
+	}
+	cbDir := filepath.Join(fakeHome, ".codebuddy")
+	if err := os.MkdirAll(cbDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cbDir, "auth.json"), []byte(`{"uid":"1"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := DetectHarnessAuth(context.Background(), "codebuddy"); st != "ready" {
+		t.Fatalf("codebuddy auth with auth.json = %q, want ready", st)
+	}
+
+	// claude becomes ready when auth check exits 0.
+	runAuthCheckFunc = func(context.Context, string, ...string) (int, string, error) {
+		return 0, `{"loggedIn":true}`, nil
+	}
+	if st, _ := DetectHarnessAuth(context.Background(), "claude"); st != "ready" {
+		t.Fatalf("claude auth = %q, want ready", st)
 	}
 }

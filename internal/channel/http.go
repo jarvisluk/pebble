@@ -129,8 +129,14 @@ func NewHTTPServer(h *hub.Hub, cfg config.HTTPConfig) *HTTPServer {
 	mux.HandleFunc("PUT /api/settings", s.handlePutSettings)
 	mux.HandleFunc("GET /api/models", s.handleModels)
 	mux.HandleFunc("POST /api/harnesses/{id}/magpie", s.handleMagpieConnect)
+	mux.HandleFunc("POST /api/harnesses/{id}/install", s.handleHarnessInstallStart)
+	mux.HandleFunc("GET /api/harnesses/{id}/install", s.handleHarnessInstallStatus)
+	mux.HandleFunc("POST /api/harnesses/{id}/login", s.handleHarnessLoginStart)
+	mux.HandleFunc("GET /api/harnesses/{id}/login", s.handleHarnessLoginStatus)
 	mux.HandleFunc("POST /api/magpie/providers", s.handleMagpieProvider)
 	mux.HandleFunc("POST /api/magpie/open", s.handleMagpieOpen)
+	mux.HandleFunc("POST /api/magpie/install", s.handleMagpieInstallStart)
+	mux.HandleFunc("GET /api/magpie/install", s.handleMagpieInstallStatus)
 
 	mux.HandleFunc("GET /api/desktop/targets", s.handleDesktopTargets)
 	mux.HandleFunc("PUT /api/desktop/target", s.handleDesktopTargetSet)
@@ -900,6 +906,67 @@ func (s *HTTPServer) handleMagpieOpen(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (s *HTTPServer) handleHarnessInstallStart(w http.ResponseWriter, r *http.Request) {
+	kind := strings.TrimSpace(r.PathValue("id"))
+	if kind == "" || kind == "magpie" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid harness id"})
+		return
+	}
+	task, err := harness.StartInstall(kind)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, task)
+}
+
+func (s *HTTPServer) handleHarnessInstallStatus(w http.ResponseWriter, r *http.Request) {
+	kind := strings.TrimSpace(r.PathValue("id"))
+	if kind == "" || kind == "magpie" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid harness id"})
+		return
+	}
+	writeJSON(w, http.StatusOK, harness.GetInstallStatus(kind))
+}
+
+func (s *HTTPServer) handleHarnessLoginStart(w http.ResponseWriter, r *http.Request) {
+	kind := strings.TrimSpace(r.PathValue("id"))
+	if kind == "" || kind == "magpie" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid harness id"})
+		return
+	}
+	task, err := harness.StartLogin(kind)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, task)
+}
+
+func (s *HTTPServer) handleHarnessLoginStatus(w http.ResponseWriter, r *http.Request) {
+	kind := strings.TrimSpace(r.PathValue("id"))
+	if kind == "" || kind == "magpie" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid harness id"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	writeJSON(w, http.StatusOK, harness.GetLoginStatus(ctx, kind))
+}
+
+func (s *HTTPServer) handleMagpieInstallStart(w http.ResponseWriter, r *http.Request) {
+	task, err := harness.StartInstall("magpie")
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, task)
+}
+
+func (s *HTTPServer) handleMagpieInstallStatus(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, harness.GetInstallStatus("magpie"))
 }
 
 func (s *HTTPServer) handleMagpieProvider(w http.ResponseWriter, r *http.Request) {

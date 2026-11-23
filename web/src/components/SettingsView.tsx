@@ -22,6 +22,7 @@ import { translate } from '../lib/i18n';
 import { applyThemePref, getThemePref } from '../lib/theme';
 import type { ViewDir, ViewState } from '../lib/useViewTransition';
 import { BotAvatar } from './BotAvatar';
+import { MagpieInstallBanner } from './MagpieInstallBanner';
 
 interface SettingsViewProps {
   hidden: boolean;
@@ -722,23 +723,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
               {mp && !mp.installed && (
                 <div id="sMagpieInstall" className="note">
-                  <div>{t('mpInstallHint')}</div>
-                  {mp.install?.script && (
-                    <div className="cmd">
-                      <code>{mp.install.script}</code>
-                      <button type="button" onClick={() => copyCmd(mp.install!.script!, 'mp-script')}>
-                        {copiedKey === 'mp-script' ? t('copied') : t('copy')}
-                      </button>
-                    </div>
-                  )}
-                  {mp.install?.brew && (
-                    <div className="cmd">
-                      <code>{mp.install.brew}</code>
-                      <button type="button" onClick={() => copyCmd(mp.install!.brew!, 'mp-brew')}>
-                        {copiedKey === 'mp-brew' ? t('copied') : t('copy')}
-                      </button>
-                    </div>
-                  )}
+                  <MagpieInstallBanner
+                    lang={lang}
+                    hint={t('mpInstallHint')}
+                    installCmds={mp.install}
+                    onToast={onToast}
+                    onInstalled={async () => {
+                      const fresh = await api<SettingsData>('/api/settings?fresh=1');
+                      onSettingsUpdated(fresh);
+                      onResetModels();
+                    }}
+                  />
                 </div>
               )}
 
@@ -1969,7 +1964,20 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               </div>
               <div id="sMemList" className="stack6">
                 {!memData || !memData.installed ? (
-                  <div className="set-card-desc">{t('memNotInstalled')}</div>
+                  <div className="note">
+                    <MagpieInstallBanner
+                      lang={lang}
+                      hint={t('memNotInstalled')}
+                      installCmds={mp?.install}
+                      onToast={onToast}
+                      onInstalled={async () => {
+                        const fresh = await api<SettingsData>('/api/settings?fresh=1');
+                        onSettingsUpdated(fresh);
+                        onResetModels();
+                        await loadGlobalMemories();
+                      }}
+                    />
+                  </div>
                 ) : !memData.available ? (
                   <div className="set-card-desc">
                     {t('memUnavailable')}

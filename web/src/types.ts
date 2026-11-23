@@ -74,6 +74,12 @@ export interface HarnessInfo {
   installed?: boolean;
   binaryPath?: string;
   defaultModel?: string;
+  authStatus?: 'ready' | 'needs_login' | 'unknown' | string;
+  authDetail?: string;
+  requiresLogin?: boolean;
+  canAutoInstall?: boolean;
+  category?: 'recommended' | 'advanced' | string;
+  summary?: string;
   install?: {
     command?: string;
     url?: string;
@@ -83,6 +89,18 @@ export interface HarnessInfo {
     model?: string;
     nativeModel?: string;
   };
+}
+
+export interface SetupTaskStatus {
+  target: string;
+  kind: 'install' | 'login' | string;
+  state: 'idle' | 'running' | 'done' | 'error' | string;
+  logs?: string[];
+  error?: string;
+  loginUrl?: string;
+  authStatus?: string;
+  authDetail?: string;
+  updatedAt?: number;
 }
 
 export interface SettingsData {

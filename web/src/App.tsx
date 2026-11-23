@@ -943,6 +943,7 @@ export default function App() {
         onReloadBots={loadBots}
         onLoadModels={loadModels}
         onRefreshDetail={(id) => openPanel(id)}
+        onSettingsUpdated={setSettings}
       />
 
       <CollabPanel
