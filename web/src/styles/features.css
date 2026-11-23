@@ -51,6 +51,15 @@
 .to-banner-txt { flex: 1; min-width: 0; font-size: var(--fs-sm); font-weight: 600; word-break: break-word; }
 .to-banner-acts { display: flex; align-items: center; gap: 8px; flex: none; }
 .to-banner .btn { padding: 0 14px; font-size: var(--fs-sm); background: var(--card); color: var(--text); white-space: nowrap; flex: none; }
+.to-banner.temp-target {
+  background: var(--card);
+  color: var(--text);
+  border: 1px solid var(--line);
+}
+.to-banner.temp-target .btn {
+  background: var(--bg);
+  border: 1px solid var(--line);
+}
 
 /* ---------- remote desktop stage ---------- */
 .desk-stage {
@@ -185,6 +194,7 @@
 }
 .d-pill.top-alert[hidden] { display: none; }
 .d-pill.top-alert.takeover { background: #3b1212; color: #fecaca; }
+.d-pill.top-alert.temp-target { background: rgba(25, 25, 24, .88); color: #f3f1ee; border: 1px solid rgba(255, 255, 255, .14); }
 .d-pill.top-alert .btn { height: 30px; padding: 0 12px; font-size: var(--fs-xs); white-space: nowrap; flex: none; }
 
 .d-pill.br {

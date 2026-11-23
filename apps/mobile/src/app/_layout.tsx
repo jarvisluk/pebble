@@ -1,7 +1,7 @@
 import { router, Stack, usePathname } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { useEffect } from 'react';
-import { Platform } from 'react-native';
+import { Linking, Platform } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
@@ -11,7 +11,29 @@ import { ThemeProvider, useTheme } from '../theme';
 
 function ConnectionGuard() {
   const pathname = usePathname();
-  const { ready, activeServer, connState, bots } = useHub();
+  const { ready, activeServer, connState, bots, interruptBot } = useHub();
+
+  useEffect(() => {
+    const handleUrl = (raw: string | null) => {
+      if (!raw || !raw.startsWith('bothub://')) return;
+      const stripped = raw.slice('bothub://'.length);
+      const [pathPart, queryPart] = stripped.split('?');
+      const segs = pathPart.split('/').filter(Boolean);
+      const head = (segs[0] || '').toLowerCase();
+      if (head === 'bot' && segs[1]) {
+        router.push(`/bot/${encodeURIComponent(segs[1])}`);
+      } else if (head === 'desktop') {
+        const params = new URLSearchParams(queryPart || '');
+        const target = params.get('target') || 'local';
+        router.push(`/desktop?target=${encodeURIComponent(target)}`);
+      } else if (head === 'interrupt' && segs[1]) {
+        interruptBot(decodeURIComponent(segs[1])).catch(() => {});
+      }
+    };
+    Linking.getInitialURL().then(handleUrl).catch(() => {});
+    const sub = Linking.addEventListener('url', (ev) => handleUrl(ev.url));
+    return () => sub.remove();
+  }, [interruptBot]);
 
   useEffect(() => {
     if (!ready || pathname === '/') return;

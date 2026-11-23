@@ -248,6 +248,8 @@ struct ServerProfile: Codable, Identifiable, Hashable {
     var label: String
     var address: String
     var token: String
+    var standbyAddress: String?
+    var standbyToken: String?
 }
 
 struct RoutineRun: Codable, Identifiable, Hashable {
@@ -376,7 +378,22 @@ struct ModelsResp: Decodable { var models: [String]? }
 struct TextResp: Decodable { var text: String? }
 struct InterruptResp: Decodable { var interrupted: Bool? }
 struct OkResp: Decodable { var ok: Bool?; var output: String?; var error: String? }
-struct TargetsResp: Decodable { var targets: [DesktopTarget]?; var takeovers: [TakeoverRequest]? }
+struct ActiveDesktopTarget: Codable, Equatable {
+    var target: String
+    var name: String?
+    var temporary: Bool
+    var expiresAt: String?
+}
+
+struct TargetsResp: Decodable {
+    var targets: [DesktopTarget]?
+    var activeTarget: ActiveDesktopTarget?
+    var takeovers: [TakeoverRequest]?
+}
+
+struct ActiveTargetResp: Decodable {
+    var activeTarget: ActiveDesktopTarget?
+}
 struct Empty: Decodable {}
 
 struct SlashCommandItem: Codable, Hashable, Identifiable {

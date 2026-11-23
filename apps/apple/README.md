@@ -24,6 +24,14 @@ cd apps/apple
 xcodebuild -project BotHub.xcodeproj -scheme BotHub -destination 'generic/platform=iOS Simulator' build
 ```
 
+## 个人账号打包与推送配置
+
+仓库内的 `Config/Signing.xcconfig` 仅包含开源占位签名（无个人 Team ID 与正式 Bundle ID）。
+
+1. 复制 `apps/apple/Config/Signing.local.xcconfig.example` 为 `apps/apple/Config/Signing.local.xcconfig`（已在 `.gitignore` 中忽略）。
+2. 在其中填入你自己的 `DEVELOPMENT_TEAM` 和正式 `APP_BUNDLE_ID`。
+3. 真机或 App Store 打包时，在 Xcode Signing & Capabilities 中确保主 App 已开启 **Push Notifications** 与 **App Groups**（`group.$(APP_BUNDLE_ID)`），并在 `BotHub` 服务端 `.env` 配置自己的 `.p8` APNs 密钥或中继地址。
+
 ## 联调
 
 按 `AGENTS.md` 在临时目录用独立配置与非默认端口启动服务（例如 `3801`），再在 App 里填 `http://127.0.0.1:3801` 与令牌，或在模拟器里打开：

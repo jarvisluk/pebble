@@ -1,0 +1,6 @@
+// 复制本文件为 Signing.local.xcconfig（已加入 .gitignore，不会提交到 Git）。
+// 填入你的 Apple Developer Team ID 与正式 Bundle ID，即可打包真机 / TestFlight / App Store：
+//
+// DEVELOPMENT_TEAM = YOUR_TEAM_ID
+// APP_BUNDLE_ID = com.yourname.bothub
+// APP_GROUP_ID = group.$(APP_BUNDLE_ID)

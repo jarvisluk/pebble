@@ -97,6 +97,42 @@ struct ChatView: View {
         VStack(spacing: 0) {
             thread(pal)
                 .safeAreaInset(edge: .top, spacing: 0) {
+                    VStack(spacing: 0) {
+                        if !inDesktopSidebar && hub.usingStandby {
+                            HStack(spacing: 8) {
+                                Label(hub.t("standbyActiveBanner"), systemImage: "arrow.triangle.2.circlepath")
+                                    .font(.system(size: 14, weight: .medium)).foregroundStyle(p.text).lineLimit(1)
+                                Spacer(minLength: 4)
+                                Button(hub.t("retryPrimary")) {
+                                    Task { await hub.reconnect() }
+                                }
+                                .buttonStyle(.bordered)
+                            }
+                            .controlSize(.small)
+                            .padding(.horizontal, 16).padding(.vertical, 8)
+                            .background(.bar)
+                        }
+                        if !inDesktopSidebar && hub.activeDesktopTarget.temporary {
+                            HStack(spacing: 8) {
+                                Label(
+                                    hub.t("tempDesktopBanner", ["name": hub.activeDesktopTarget.name ?? hub.activeDesktopTarget.target]),
+                                    systemImage: "desktopcomputer"
+                                )
+                                .font(.system(size: 14, weight: .medium)).foregroundStyle(p.text).lineLimit(1)
+                                Spacer(minLength: 4)
+                                Button(hub.t("desktopShort")) {
+                                    router.openDesktop(hub.activeDesktopTarget.target)
+                                }
+                                .buttonStyle(.bordered)
+                                Button(hub.t("switchBackLocal")) {
+                                    Task { try? await hub.setActiveDesktopTarget("local") }
+                                }
+                                .buttonStyle(.bordered)
+                            }
+                            .controlSize(.small)
+                            .padding(.horizontal, 16).padding(.vertical, 8)
+                            .background(.bar)
+                        }
                     if let to = hub.takeovers.first {
                         HStack(spacing: 8) {
                             Label(hub.t("takeoverInline", ["reason": to.reason ?? ""]), systemImage: "hand.raised.fill")
@@ -112,6 +148,7 @@ struct ChatView: View {
                         .background(.bar)
                     }
                 }
+            }
             composer(pal)
                 .background(p.page)
         }

@@ -117,10 +117,41 @@ func (s *HTTPServer) handleDesktopTargets(w http.ResponseWriter, r *http.Request
 		})
 	}
 
+	activeTarget := hub.ActiveDesktopTarget{Target: "local", Temporary: false}
+	if s.hub != nil {
+		activeTarget = s.hub.ActiveDesktopTarget()
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
-		"targets":   targets,
-		"takeovers": coord.ListTakeovers(),
+		"targets":      targets,
+		"activeTarget": activeTarget,
+		"takeovers":    coord.ListTakeovers(),
 	})
+}
+
+func (s *HTTPServer) handleDesktopTargetSet(w http.ResponseWriter, r *http.Request) {
+	if s.hub == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "hub unavailable"})
+		return
+	}
+	var body struct {
+		Target     string `json:"target"`
+		TTLMinutes int    `json:"ttlMinutes"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<12)).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json body"})
+		return
+	}
+	var ttl time.Duration
+	if body.TTLMinutes > 0 {
+		ttl = time.Duration(body.TTLMinutes) * time.Minute
+	}
+	snap, err := s.hub.SetActiveDesktopTarget(body.Target, ttl)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"activeTarget": snap})
 }
 
 func (s *HTTPServer) handleDesktopState(w http.ResponseWriter, r *http.Request) {

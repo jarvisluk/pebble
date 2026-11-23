@@ -173,6 +173,13 @@ export interface DesktopTarget {
   screen: ScreenState;
 }
 
+export interface ActiveDesktopTarget {
+  target: string;
+  name?: string;
+  temporary: boolean;
+  expiresAt?: string;
+}
+
 export interface DesktopFrame {
   jpegBase64: string;
   imageWidth: number;
@@ -190,6 +197,8 @@ export interface ServerProfile {
   label: string;
   address: string;
   token: string;
+  standbyAddress?: string;
+  standbyToken?: string;
 }
 
 export interface HostTailscaleStatus {

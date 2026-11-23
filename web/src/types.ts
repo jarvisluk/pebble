@@ -264,6 +264,13 @@ export interface DesktopTarget {
   screen?: ScreenState;
 }
 
+export interface ActiveDesktopTarget {
+  target: string;
+  name?: string;
+  temporary: boolean;
+  expiresAt?: string;
+}
+
 export interface DesktopWindow {
   id: string;
   app?: string;

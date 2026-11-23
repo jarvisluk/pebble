@@ -428,3 +428,72 @@ func TestUpdateMessageMeta(t *testing.T) {
 		t.Fatalf("expected missing=false err=nil for unknown id, got ok=%v err=%v", missing, err)
 	}
 }
+
+func TestPushDeviceStore(t *testing.T) {
+	store, err := NewStore(filepath.Join(t.TempDir(), "sessions.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	if err := store.UpsertPushDevice(PushDevice{
+		DeviceID:               "dev-1",
+		Platform:               "ios",
+		Env:                    "sandbox",
+		BundleID:               "local.bothub.mobile",
+		PushToken:              "tok-push-1",
+		LiveActivityStartToken: "tok-start-1",
+		Enabled:                true,
+	}); err != nil {
+		t.Fatalf("UpsertPushDevice: %v", err)
+	}
+
+	if err := store.SetPushActivityToken("dev-1", "bot:alpha", "tok-act-1"); err != nil {
+		t.Fatalf("SetPushActivityToken: %v", err)
+	}
+
+	got, ok, err := store.GetPushDevice("dev-1")
+	if err != nil || !ok {
+		t.Fatalf("GetPushDevice: ok=%v err=%v", ok, err)
+	}
+	if got.PushToken != "tok-push-1" || got.LiveActivityStartToken != "tok-start-1" || got.ActivityTokens["bot:alpha"] != "tok-act-1" {
+		t.Fatalf("unexpected device: %+v", got)
+	}
+
+	// Upsert again without tokens preserves existing tokens while updating enabled flag.
+	if err := store.UpsertPushDevice(PushDevice{
+		DeviceID: "dev-1",
+		Platform: "ios",
+		Env:      "sandbox",
+		Enabled:  true,
+	}); err != nil {
+		t.Fatalf("UpsertPushDevice preserve: %v", err)
+	}
+	got2, _, _ := store.GetPushDevice("dev-1")
+	if got2.PushToken != "tok-push-1" || got2.ActivityTokens["bot:alpha"] != "tok-act-1" {
+		t.Fatalf("expected preserved tokens, got %+v", got2)
+	}
+
+	if err := store.ClearInvalidPushToken("dev-1", "activity", "bot:alpha"); err != nil {
+		t.Fatalf("ClearInvalidPushToken activity: %v", err)
+	}
+	if err := store.ClearInvalidPushToken("dev-1", "push", ""); err != nil {
+		t.Fatalf("ClearInvalidPushToken push: %v", err)
+	}
+	got3, _, _ := store.GetPushDevice("dev-1")
+	if got3.PushToken != "" || got3.ActivityTokens["bot:alpha"] != "" {
+		t.Fatalf("expected cleared tokens, got %+v", got3)
+	}
+
+	list, err := store.ListPushDevices()
+	if err != nil || len(list) != 1 {
+		t.Fatalf("ListPushDevices: len=%d err=%v", len(list), err)
+	}
+
+	if err := store.DeletePushDevice("dev-1"); err != nil {
+		t.Fatalf("DeletePushDevice: %v", err)
+	}
+	if _, ok, err := store.GetPushDevice("dev-1"); err != nil || ok {
+		t.Fatalf("expected deleted device, got ok=%v err=%v", ok, err)
+	}
+}
