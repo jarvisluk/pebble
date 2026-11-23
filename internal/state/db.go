@@ -119,7 +119,6 @@ CREATE TABLE IF NOT EXISTS routine_runs (
 );
 CREATE INDEX IF NOT EXISTS idx_routine_runs_bot_routine ON routine_runs(bot_id, routine_id, started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_routine_runs_pending     ON routine_runs(bot_id, delivery, status, injected_at);
-CREATE INDEX IF NOT EXISTS idx_routine_runs_slot_key    ON routine_runs(slot_key);
 
 CREATE TABLE IF NOT EXISTS push_devices (
   device_id                 TEXT PRIMARY KEY,
@@ -189,6 +188,7 @@ func ensureRoutineRunsSlotKeyColumn(db *sql.DB) error {
 		return err
 	}
 	defer rows.Close()
+	hasSlotKey := false
 	for rows.Next() {
 		var (
 			cid        int
@@ -201,14 +201,16 @@ func ensureRoutineRunsSlotKeyColumn(db *sql.DB) error {
 			return err
 		}
 		if name == "slot_key" {
-			return nil
+			hasSlotKey = true
 		}
 	}
 	if err := rows.Err(); err != nil {
 		return err
 	}
-	if _, err = db.Exec(`ALTER TABLE routine_runs ADD COLUMN slot_key TEXT NOT NULL DEFAULT ''`); err != nil {
-		return err
+	if !hasSlotKey {
+		if _, err = db.Exec(`ALTER TABLE routine_runs ADD COLUMN slot_key TEXT NOT NULL DEFAULT ''`); err != nil {
+			return err
+		}
 	}
 	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_routine_runs_slot_key ON routine_runs(slot_key)`)
 	return err

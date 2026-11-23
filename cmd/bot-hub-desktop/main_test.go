@@ -1,7 +1,11 @@
 package main
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -54,5 +58,36 @@ func TestChromiumExecutableFromHandlers(t *testing.T) {
 	got = chromiumExecutableFromHandlers(nil, "/Users/u", func(string) bool { return false })
 	if got != "" {
 		t.Fatalf("expected empty when no Chromium installed, got %q", got)
+	}
+}
+
+func TestServeSetupAssetsAndAPI(t *testing.T) {
+	d := &desktop{dir: t.TempDir()}
+
+	reqPage := httptest.NewRequest(http.MethodGet, "/desktop-setup", nil)
+	recPage := httptest.NewRecorder()
+	d.serveSetup(recPage, reqPage)
+	if recPage.Code != http.StatusOK {
+		t.Fatalf("GET /desktop-setup status = %d, want 200", recPage.Code)
+	}
+	if ct := recPage.Header().Get("Content-Type"); !strings.Contains(ct, "text/html") {
+		t.Fatalf("GET /desktop-setup Content-Type = %q, want text/html", ct)
+	}
+	if !strings.Contains(recPage.Body.String(), `<div id="root"></div>`) {
+		t.Fatalf("GET /desktop-setup expected React index.html root mount")
+	}
+
+	reqAPI := httptest.NewRequest(http.MethodGet, "/api/desktop", nil)
+	recAPI := httptest.NewRecorder()
+	d.serveSetup(recAPI, reqAPI)
+	if recAPI.Code != http.StatusOK {
+		t.Fatalf("GET /api/desktop status = %d, want 200", recAPI.Code)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(recAPI.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode /api/desktop json: %v", err)
+	}
+	if body["dataDir"] != d.dir {
+		t.Fatalf("dataDir = %v, want %q", body["dataDir"], d.dir)
 	}
 }
