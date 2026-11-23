@@ -158,7 +158,7 @@ interface HubContextValue {
   createBot: (body: { id: string; name: string; description?: string; avatar?: string; color?: string; harness?: string; model?: string; instructions?: string; privateSessions?: boolean }) => Promise<BotStatus>;
   updateBot: (botId: string, body: { name?: string; description?: string; avatar?: string; color?: string; instructions?: string; privateSessions?: boolean }) => Promise<BotStatus>;
   deleteBot: (botId: string) => Promise<void>;
-  fetchMemories: (opts: { scope?: 'global' | 'project' | 'all'; botId?: string; query?: string; limit?: number }) => Promise<MagpieMemoryList>;
+  fetchMemories: (opts: { scope?: 'global' | 'project' | 'all'; botId?: string; query?: string; kind?: string; limit?: number }) => Promise<MagpieMemoryList>;
   saveMemory: (body: { scope?: 'global' | 'project'; botId?: string; kind?: string; text: string; tags?: string[] }) => Promise<void>;
   deleteMemory: (id: string) => Promise<void>;
   routines: Record<string, RoutineItem[]>;
@@ -751,11 +751,12 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
   );
 
   const fetchMemories = useCallback(
-    async (opts: { scope?: 'global' | 'project' | 'all'; botId?: string; query?: string; limit?: number }) => {
+    async (opts: { scope?: 'global' | 'project' | 'all'; botId?: string; query?: string; kind?: string; limit?: number }) => {
       const q = new URLSearchParams();
       if (opts.scope) q.set('scope', opts.scope);
       if (opts.botId) q.set('botId', opts.botId);
       if (opts.query?.trim()) q.set('query', opts.query.trim());
+      if (opts.kind?.trim()) q.set('kind', opts.kind.trim());
       if (opts.limit) q.set('limit', String(opts.limit));
       return apiRequest<MagpieMemoryList>(
         baseURLRef.current,

@@ -113,6 +113,7 @@ var (
 	healthCache    = ttlCache[bool]{ttl: 30 * time.Second}
 	providersCache = ttlCache[[]MagpieProvider]{ttl: 30 * time.Second}
 	presetsCache   = ttlCache[[]MagpiePreset]{ttl: 10 * time.Minute}
+	dataDirsCache  = ttlCache[[2]string]{ttl: 10 * time.Minute}
 	statusCachesMu sync.Mutex
 	statusCaches   = make(map[string]*ttlCache[MagpieStatus])
 
@@ -195,6 +196,7 @@ func InvalidateMagpieCache() {
 	healthCache.invalidate()
 	providersCache.invalidate()
 	presetsCache.invalidate()
+	dataDirsCache.invalidate()
 	statusCachesMu.Lock()
 	for _, c := range statusCaches {
 		c.invalidate()
@@ -586,12 +588,22 @@ type MagpieMemoryItem struct {
 	Text      string   `json:"text"`
 }
 
+// MagpieMemorySemanticStatus describes whether Magpie Memory's local semantic embedding search is enabled and ready.
+type MagpieMemorySemanticStatus struct {
+	Enabled    bool   `json:"enabled"`
+	ModelReady bool   `json:"modelReady"`
+	IndexReady bool   `json:"indexReady"`
+	Active     bool   `json:"active"`
+	Model      string `json:"model,omitempty"`
+}
+
 // MagpieMemoryList is the response returned for memory queries.
 type MagpieMemoryList struct {
-	Installed bool               `json:"installed"`
-	Available bool               `json:"available"`
-	Error     string             `json:"error,omitempty"`
-	Items     []MagpieMemoryItem `json:"items"`
+	Installed bool                        `json:"installed"`
+	Available bool                        `json:"available"`
+	Error     string                      `json:"error,omitempty"`
+	Semantic  *MagpieMemorySemanticStatus `json:"semantic,omitempty"`
+	Items     []MagpieMemoryItem          `json:"items"`
 }
 
 // MagpieMemorySaveReq describes a memory create/update request passed to `magpie tool memory_save`.
@@ -786,6 +798,89 @@ func parseMemoryEntryLine(entry string) (MagpieMemoryItem, bool) {
 	return item, true
 }
 
+const magpieSemanticModelName = "paraphrase-multilingual-MiniLM-L12-v2"
+
+func parseMagpieDataDirs(raw string) (filesDir, cacheDir string) {
+	for _, line := range strings.Split(raw, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if after, ok := strings.CutPrefix(trimmed, "files:"); ok {
+			filesDir = strings.TrimSpace(after)
+		} else if after, ok := strings.CutPrefix(trimmed, "cache:"); ok {
+			cacheDir = strings.TrimSpace(after)
+		}
+	}
+	return filesDir, cacheDir
+}
+
+func defaultMagpieDataDirs() (filesDir, cacheDir string) {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return "", ""
+	}
+	return filepath.Join(home, ".config", "magpie"), filepath.Join(home, ".cache", "magpie")
+}
+
+func magpieDataDirs(ctx context.Context) (string, string) {
+	defFiles, defCache := defaultMagpieDataDirs()
+	if !magpieInstalled() {
+		return defFiles, defCache
+	}
+	pair := dataDirsCache.get(func() ([2]string, bool) {
+		out, err := runMagpieOutput(ctx, "data")
+		if err != nil {
+			return [2]string{defFiles, defCache}, false
+		}
+		f, c := parseMagpieDataDirs(string(out))
+		if f == "" {
+			f = defFiles
+		}
+		if c == "" {
+			c = defCache
+		}
+		return [2]string{f, c}, true
+	})
+	if pair[0] == "" {
+		pair[0] = defFiles
+	}
+	if pair[1] == "" {
+		pair[1] = defCache
+	}
+	return pair[0], pair[1]
+}
+
+func detectMagpieMemorySemanticStatus(filesDir, cacheDir string) *MagpieMemorySemanticStatus {
+	st := &MagpieMemorySemanticStatus{}
+	if filesDir != "" {
+		if data, err := os.ReadFile(filepath.Join(filesDir, "memory-semantic.json")); err == nil {
+			var cfg struct {
+				On bool `json:"on"`
+			}
+			if json.Unmarshal(data, &cfg) == nil {
+				st.Enabled = cfg.On
+			}
+		}
+	}
+	if cacheDir != "" {
+		modelDir := filepath.Join(cacheDir, magpieSemanticModelName)
+		if matches, err := filepath.Glob(filepath.Join(modelDir, "*", "model_int8.onnx")); err == nil && len(matches) > 0 {
+			st.ModelReady = true
+		}
+		if matches, err := filepath.Glob(filepath.Join(modelDir, "*", "vectors.bin")); err == nil && len(matches) > 0 {
+			st.IndexReady = true
+		}
+	}
+	if st.Enabled || st.ModelReady {
+		st.Model = magpieSemanticModelName
+	}
+	st.Active = st.Enabled && st.ModelReady
+	return st
+}
+
+func getMagpieMemorySemanticStatus(ctx context.Context) *MagpieMemorySemanticStatus {
+	filesDir, cacheDir := magpieDataDirs(ctx)
+	return detectMagpieMemorySemanticStatus(filesDir, cacheDir)
+}
+
 // MagpieMemorySearch queries memories via `magpie tool memory_search`.
 // When botID is non-empty, it scopes to projectDir AND enforces tag `bot:<botID>`
 // so multiple bots sharing a git repo root remain isolated.
@@ -793,18 +888,18 @@ func MagpieMemorySearch(ctx context.Context, scope, projectDir, botID, query, ki
 	if !magpieInstalled() {
 		return MagpieMemoryList{Installed: false, Available: false, Items: []MagpieMemoryItem{}}
 	}
+	semantic := getMagpieMemorySemanticStatus(ctx)
 	scope = strings.TrimSpace(scope)
 	botID = strings.TrimSpace(botID)
 	if botID != "" {
 		scope = "project"
 		if strings.TrimSpace(projectDir) == "" {
-			return MagpieMemoryList{Installed: true, Available: true, Items: []MagpieMemoryItem{}}
+			return MagpieMemoryList{Installed: true, Available: true, Semantic: semantic, Items: []MagpieMemoryItem{}}
 		}
 		if info, err := os.Stat(projectDir); err != nil || !info.IsDir() {
-			return MagpieMemoryList{Installed: true, Available: true, Items: []MagpieMemoryItem{}}
+			return MagpieMemoryList{Installed: true, Available: true, Semantic: semantic, Items: []MagpieMemoryItem{}}
 		}
-	}
-	if scope == "" {
+	} else if scope != "all" {
 		scope = "global"
 	}
 	if limit <= 0 {
@@ -835,6 +930,7 @@ func MagpieMemorySearch(ctx context.Context, scope, projectDir, botID, query, ki
 			Installed: true,
 			Available: false,
 			Error:     err.Error(),
+			Semantic:  semantic,
 			Items:     []MagpieMemoryItem{},
 		}
 	}
@@ -851,6 +947,7 @@ func MagpieMemorySearch(ctx context.Context, scope, projectDir, botID, query, ki
 	return MagpieMemoryList{
 		Installed: true,
 		Available: true,
+		Semantic:  semantic,
 		Items:     items,
 	}
 }

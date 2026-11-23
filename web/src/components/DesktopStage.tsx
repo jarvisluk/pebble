@@ -925,7 +925,7 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
               >
                 {targets.map((tr) => (
                   <option key={tr.id} value={tr.id}>
-                    {tr.name}
+                    {tr.id === 'local' ? t('localDesktopName') : tr.name}
                   </option>
                 ))}
               </select>

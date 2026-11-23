@@ -70,10 +70,19 @@ struct MemoryItem: Codable, Identifiable, Hashable {
     var text: String?
 }
 
+struct MemorySemanticStatus: Codable, Hashable {
+    var enabled: Bool?
+    var modelReady: Bool?
+    var indexReady: Bool?
+    var active: Bool?
+    var model: String?
+}
+
 struct MemoryList: Codable {
     var installed: Bool?
     var available: Bool?
     var error: String?
+    var semantic: MemorySemanticStatus?
     var items: [MemoryItem]?
 }
 

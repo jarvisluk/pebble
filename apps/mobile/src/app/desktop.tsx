@@ -199,7 +199,7 @@ export default function DesktopScreen() {
                     ]}
                   >
                     <Text style={[styles.targetTxt, { color: active ? theme.accentText : '#f3f1ee' }]}>
-                      {item.name}
+                      {item.id === 'local' ? t('localDesktopName') : item.name}
                     </Text>
                   </Pressable>
                 );

@@ -261,3 +261,79 @@ func TestMagpieCacheAndInvalidation(t *testing.T) {
 	}
 	mu.Unlock()
 }
+
+func TestParseMagpieDataDirs(t *testing.T) {
+	raw := "files: /Users/test/.config/magpie\ncache: /Users/test/.cache/magpie\n"
+	files, cache := parseMagpieDataDirs(raw)
+	if files != "/Users/test/.config/magpie" || cache != "/Users/test/.cache/magpie" {
+		t.Fatalf("unexpected parsed dirs: files=%q cache=%q", files, cache)
+	}
+}
+
+func TestDetectMagpieMemorySemanticStatus(t *testing.T) {
+	t.Run("missing config", func(t *testing.T) {
+		tmp := t.TempDir()
+		st := detectMagpieMemorySemanticStatus(filepath.Join(tmp, "files"), filepath.Join(tmp, "cache"))
+		if st.Enabled || st.ModelReady || st.IndexReady || st.Active || st.Model != "" {
+			t.Fatalf("expected all false for missing config, got %+v", st)
+		}
+	})
+
+	t.Run("disabled", func(t *testing.T) {
+		tmp := t.TempDir()
+		files := filepath.Join(tmp, "files")
+		cache := filepath.Join(tmp, "cache")
+		if err := os.MkdirAll(files, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(files, "memory-semantic.json"), []byte(`{"on":false}`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		st := detectMagpieMemorySemanticStatus(files, cache)
+		if st.Enabled || st.Active {
+			t.Fatalf("expected disabled status, got %+v", st)
+		}
+	})
+
+	t.Run("enabled without model", func(t *testing.T) {
+		tmp := t.TempDir()
+		files := filepath.Join(tmp, "files")
+		cache := filepath.Join(tmp, "cache")
+		if err := os.MkdirAll(files, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(files, "memory-semantic.json"), []byte(`{"on":true}`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		st := detectMagpieMemorySemanticStatus(files, cache)
+		if !st.Enabled || st.ModelReady || st.IndexReady || st.Active || st.Model != magpieSemanticModelName {
+			t.Fatalf("unexpected enabled-without-model status: %+v", st)
+		}
+	})
+
+	t.Run("enabled and ready", func(t *testing.T) {
+		tmp := t.TempDir()
+		files := filepath.Join(tmp, "files")
+		cache := filepath.Join(tmp, "cache")
+		revDir := filepath.Join(cache, magpieSemanticModelName, "abc123")
+		if err := os.MkdirAll(files, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(revDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(files, "memory-semantic.json"), []byte(`{"on":true}`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(revDir, "model_int8.onnx"), []byte("onnx"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(revDir, "vectors.bin"), []byte("vec"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		st := detectMagpieMemorySemanticStatus(files, cache)
+		if !st.Enabled || !st.ModelReady || !st.IndexReady || !st.Active || st.Model != magpieSemanticModelName {
+			t.Fatalf("expected active ready status, got %+v", st)
+		}
+	})
+}

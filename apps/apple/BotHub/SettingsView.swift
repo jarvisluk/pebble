@@ -28,6 +28,8 @@ struct SettingsView: View {
     @State private var showUnsavedAlert = false
 
     @State private var mem: MemoryList?
+    @State private var memScope = "global"
+    @State private var memFilterKind = ""
     @State private var memQuery = ""
     @State private var memAdd = false
     @State private var memKind = "fact"
@@ -566,16 +568,81 @@ struct SettingsView: View {
 
     // MARK: 全局记忆
 
-    private func loadMem(_ q: String) async {
-        do { mem = try await hub.fetchMemories(scope: "global", query: q, limit: 30) } catch { self.error = errText(error, hub.t("opFailed")) }
+    private func permText(_ key: String, _ fallback: String) -> String {
+        let val = hub.t(key)
+        return val == key ? fallback : val
+    }
+
+    private func loadMem(_ q: String, scope: String? = nil, kind: String? = nil) async {
+        let sc = scope ?? memScope
+        let kd = kind ?? memFilterKind
+        do { mem = try await hub.fetchMemories(scope: sc, query: q, kind: kd, limit: 30) } catch { self.error = errText(error, hub.t("opFailed")) }
     }
 
     private var memorySection: some View {
         Section {
+            if mem?.installed == true, let sem = mem?.semantic {
+                HStack(spacing: 8) {
+                    Tag(
+                        text: hub.t(sem.active == true ? "memSemanticOn" : "memSemanticOff"),
+                        bg: sem.active == true ? p.sage : p.s1,
+                        fg: sem.active == true ? p.sageInk : .secondary
+                    )
+                    Spacer()
+                    if sem.active != true {
+                        Button(hub.t("openMagpie")) {
+                            run("magpie:open", "opFailed") { try await hub.openMagpie(); return nil }
+                        }
+                        .font(.system(size: 13, weight: .medium))
+                    }
+                }
+                if sem.active != true {
+                    Text(hub.t("memSemanticHintOff"))
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Picker("Scope", selection: Binding(
+                get: { memScope },
+                set: { next in
+                    memScope = next
+                    Task { await loadMem(memQuery, scope: next) }
+                }
+            )) {
+                Text(hub.t("memScopeGlobal")).tag("global")
+                Text(hub.t("memScopeAll")).tag("all")
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            Picker(hub.t("memType"), selection: Binding(
+                get: { memFilterKind },
+                set: { next in
+                    memFilterKind = next
+                    Task { await loadMem(memQuery, kind: next) }
+                }
+            )) {
+                Text(hub.t("memKindAll")).tag("")
+                ForEach(["fact", "preference", "rule", "reference", "profile", "procedure", "episode"], id: \.self) {
+                    Text($0).tag($0)
+                }
+            }
             HStack {
-                TextField(hub.t("search"), text: $memQuery, prompt: Text(hub.t("searchGlobalMemPh")))
+                TextField(
+                    hub.t("search"),
+                    text: $memQuery,
+                    prompt: Text(hub.t(mem?.semantic?.active == true ? "searchSemanticMemPh" : "searchGlobalMemPh"))
+                )
                     .labelsHidden()
                     .onSubmit { Task { await loadMem(memQuery) } }
+                if !memQuery.isEmpty {
+                    Button {
+                        memQuery = ""
+                        Task { await loadMem("") }
+                    } label: {
+                        Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.borderless)
+                }
                 Button { Task { await loadMem(memQuery) } } label: { Label(hub.t("search"), systemImage: "magnifyingglass").labelStyle(.iconOnly) }
                     .buttonStyle(.borderless)
             }
@@ -587,7 +654,7 @@ struct SettingsView: View {
                 Text(hub.t("noGlobalMem")).foregroundStyle(.secondary)
             } else {
                 ForEach(mem?.items ?? []) { it in
-                    MemoryRow(item: it, showTags: true) {
+                    MemoryRow(item: it, showTags: true, showScope: memScope == "all") {
                         confirm = ConfirmItem(title: hub.t("deleteMemTitle"), message: hub.t("deleteMemConfirm")) {
                             do {
                                 try await hub.deleteMemory(it.id)
@@ -661,11 +728,11 @@ struct SettingsView: View {
                     let fg: Color = item.status == "granted" ? p.sageInk : item.status == "denied" ? p.danger : .secondary
                     VStack(alignment: .leading, spacing: 6) {
                         HStack(spacing: 8) {
-                            Text(item.name).font(.system(size: 16, weight: .semibold))
+                            Text(permText("deskPermName_\(item.id)", item.name)).font(.system(size: 16, weight: .semibold))
                             Spacer()
                             Tag(text: stLabel, bg: bg, fg: fg)
                         }
-                        Text(item.description).font(.system(size: 13)).foregroundStyle(.secondary)
+                        Text(permText("deskPermDesc_\(item.id)", item.description)).font(.system(size: 13)).foregroundStyle(.secondary)
                         if (item.canPrompt == true && item.status != "granted") || item.canOpenSettings == true {
                             HStack(spacing: 8) {
                                 if item.canPrompt == true && item.status != "granted" {

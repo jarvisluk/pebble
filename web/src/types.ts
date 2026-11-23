@@ -182,15 +182,25 @@ export interface TailscaleStatus {
 export interface MemoryItem {
   id: string;
   kind?: string;
+  scope?: string;
   tags?: string[];
   text: string;
   updatedAt?: string;
+}
+
+export interface MemorySemanticStatus {
+  enabled?: boolean;
+  modelReady?: boolean;
+  indexReady?: boolean;
+  active?: boolean;
+  model?: string;
 }
 
 export interface MemoryResponse {
   installed?: boolean;
   available?: boolean;
   error?: string;
+  semantic?: MemorySemanticStatus;
   items?: MemoryItem[];
 }
 

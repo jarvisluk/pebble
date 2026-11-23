@@ -227,12 +227,18 @@ struct MemoryRow: View {
     @Environment(\.palette) private var p
     var item: MemoryItem
     var showTags = false
+    var showScope = false
     var onDelete: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
                 Text(item.kind ?? "memory").font(.system(size: 13, weight: .semibold)).foregroundStyle(p.sageInk)
+                if showScope, let sc = item.scope, !sc.isEmpty {
+                    Text(sc == "everywhere" || sc == "global" ? hub.t("memScopeEverywhere") : hub.t("memScopeProject"))
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
                 if showTags {
                     ForEach((item.tags ?? []).filter { !$0.hasPrefix("bot:") }, id: \.self) { tag in
                         Text("#\(tag)").font(.system(size: 13)).foregroundStyle(.secondary)

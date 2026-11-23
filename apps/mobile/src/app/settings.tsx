@@ -111,6 +111,8 @@ export default function SettingsScreen() {
 
   const [memData, setMemData] = useState<MagpieMemoryList | null>(null);
   const [memLoading, setMemLoading] = useState(false);
+  const [memScope, setMemScope] = useState<'global' | 'all'>('global');
+  const [memFilterKind, setMemFilterKind] = useState('');
   const [memQuery, setMemQuery] = useState('');
   const [memShowAdd, setMemShowAdd] = useState(false);
   const [memKind, setMemKind] = useState<'fact' | 'preference' | 'rule' | 'reference'>('fact');
@@ -123,10 +125,15 @@ export default function SettingsScreen() {
   const [deskModel, setDeskModel] = useState('');
   const [deskTouched, setDeskTouched] = useState(false);
 
-  const loadGlobalMemories = async (q = memQuery) => {
+  const permText = (key: string, fallback: string) => {
+    const val = t(key as any);
+    return val === key ? fallback : val;
+  };
+
+  const loadGlobalMemories = async (q = memQuery, sc = memScope, kd = memFilterKind) => {
     setMemLoading(true);
     try {
-      const res = await fetchMemories({ scope: 'global', query: q, limit: 30 });
+      const res = await fetchMemories({ scope: sc, query: q, kind: kd, limit: 30 });
       setMemData(res);
     } catch (err: any) {
       setError(err?.message || t('opFailed'));
@@ -1034,6 +1041,77 @@ export default function SettingsScreen() {
               </View>
             </View>
 
+            {memData?.installed && memData.semantic && (
+              <View style={[styles.rowBetween, { gap: 8 }]}>
+                <View
+                  style={[
+                    styles.smallBtn,
+                    { backgroundColor: memData.semantic.active ? theme.sage : theme.s1 },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.smallBtnTxt,
+                      { color: memData.semantic.active ? theme.sageInk : theme.mute },
+                    ]}
+                  >
+                    {t(memData.semantic.active ? 'memSemanticOn' : 'memSemanticOff')}
+                  </Text>
+                </View>
+                {!memData.semantic.active && (
+                  <Pressable
+                    onPress={() => void openMagpie().catch((err: any) => setError(err?.message || t('opFailed')))}
+                    style={[styles.smallBtn, { backgroundColor: theme.s1 }]}
+                  >
+                    <Text style={[styles.smallBtnTxt, { color: theme.text2 }]}>{t('openMagpie')}</Text>
+                  </Pressable>
+                )}
+              </View>
+            )}
+            {memData?.installed && memData.semantic && !memData.semantic.active && (
+              <Text style={[styles.noteTxt, { color: theme.mute }]}>{t('memSemanticHintOff')}</Text>
+            )}
+
+            <View style={styles.wrapRow}>
+              {(['global', 'all'] as const).map((sc) => (
+                <Pressable
+                  key={sc}
+                  onPress={() => {
+                    setMemScope(sc);
+                    void loadGlobalMemories(memQuery, sc, memFilterKind);
+                  }}
+                  style={[
+                    styles.pill,
+                    { backgroundColor: memScope === sc ? theme.accentSoft : theme.s1 },
+                  ]}
+                >
+                  <Text style={[styles.pillTxt, { color: memScope === sc ? theme.accent : theme.text2 }]}>
+                    {t(sc === 'global' ? 'memScopeGlobal' : 'memScopeAll')}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+
+            <View style={styles.wrapRow}>
+              {(['', 'fact', 'preference', 'rule', 'reference', 'profile', 'procedure', 'episode'] as const).map((kd) => (
+                <Pressable
+                  key={kd || 'all'}
+                  onPress={() => {
+                    setMemFilterKind(kd);
+                    void loadGlobalMemories(memQuery, memScope, kd);
+                  }}
+                  style={[
+                    styles.pill,
+                    { backgroundColor: memFilterKind === kd ? theme.accentSoft : theme.s1 },
+                  ]}
+                >
+                  <Text style={[styles.pillTxt, { color: memFilterKind === kd ? theme.accent : theme.text2 }]}>
+                    {kd === '' ? t('memKindAll') : kd}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+
             {memShowAdd && (
               <View style={[styles.addProvBox, { backgroundColor: theme.s1 }]}>
                 <View style={styles.wrapRow}>
@@ -1110,11 +1188,22 @@ export default function SettingsScreen() {
                 value={memQuery}
                 onChangeText={setMemQuery}
                 onSubmitEditing={() => void loadGlobalMemories(memQuery)}
-                placeholder={t('searchGlobalMemPh')}
+                placeholder={memData?.semantic?.active ? t('searchSemanticMemPh') : t('searchGlobalMemPh')}
                 placeholderTextColor={theme.mute}
                 returnKeyType="search"
                 style={[styles.input, { flex: 1, backgroundColor: theme.s1, color: theme.text }]}
               />
+              {memQuery.trim() !== '' && (
+                <Pressable
+                  onPress={() => {
+                    setMemQuery('');
+                    void loadGlobalMemories('');
+                  }}
+                  style={[styles.magpieBtn, { backgroundColor: theme.s1 }]}
+                >
+                  <Text style={[styles.magpieBtnTxt, { color: theme.text2 }]}>{t('memClearSearch')}</Text>
+                </Pressable>
+              )}
               <Pressable
                 onPress={() => void loadGlobalMemories(memQuery)}
                 style={[styles.magpieBtn, { backgroundColor: theme.s1 }]}
@@ -1140,6 +1229,15 @@ export default function SettingsScreen() {
                         {it.kind ? (
                           <View style={[styles.smallBtn, { backgroundColor: theme.sage }]}>
                             <Text style={[styles.smallBtnTxt, { color: theme.sageInk }]}>{it.kind}</Text>
+                          </View>
+                        ) : null}
+                        {memScope === 'all' && it.scope ? (
+                          <View style={[styles.smallBtn, { backgroundColor: theme.card }]}>
+                            <Text style={[styles.smallBtnTxt, { color: theme.text2 }]}>
+                              {it.scope === 'everywhere' || it.scope === 'global'
+                                ? t('memScopeEverywhere')
+                                : t('memScopeProject')}
+                            </Text>
                           </View>
                         ) : null}
                         {(it.tags || [])
@@ -1221,12 +1319,16 @@ export default function SettingsScreen() {
                   return (
                     <View key={perm.id} style={[styles.magpieRow, { flexDirection: 'column', alignItems: 'stretch', gap: 6 }]}>
                       <View style={styles.rowBetween}>
-                        <Text style={[styles.magpieName, { color: theme.text, flex: 1 }]}>{perm.name}</Text>
+                        <Text style={[styles.magpieName, { color: theme.text, flex: 1 }]}>
+                          {permText(`deskPermName_${perm.id}`, perm.name)}
+                        </Text>
                         <View style={[styles.smallBtn, { backgroundColor: badgeBg }]}>
                           <Text style={[styles.smallBtnTxt, { color: badgeColor }]}>{stLabel}</Text>
                         </View>
                       </View>
-                      <Text style={[styles.noteTxt, { color: theme.mute }]}>{perm.description}</Text>
+                      <Text style={[styles.noteTxt, { color: theme.mute }]}>
+                        {permText(`deskPermDesc_${perm.id}`, perm.description)}
+                      </Text>
                       {((perm.canPrompt && perm.status !== 'granted') || perm.canOpenSettings) && (
                         <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
                           {perm.canPrompt && perm.status !== 'granted' && (

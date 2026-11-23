@@ -139,12 +139,19 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [memData, setMemData] = useState<MemoryResponse | null>(null);
   const [memStatus, setMemStatus] = useState('');
   const [memStatusClass, setMemStatusClass] = useState('');
+  const [memScope, setMemScope] = useState<'global' | 'all'>('global');
+  const [memFilterKind, setMemFilterKind] = useState('');
   const [memQuery, setMemQuery] = useState('');
   const [memAddOpen, setMemAddOpen] = useState(false);
   const [memKind, setMemKind] = useState('fact');
   const [memTags, setMemTags] = useState('');
   const [memText, setMemText] = useState('');
   const [memErr, setMemErr] = useState('');
+
+  const permText = (key: string, fallback: string) => {
+    const val = t(key);
+    return val === key ? fallback : val;
+  };
 
   const remoteTimerRef = useRef<number | null>(null);
   const tsTimerRef = useRef<number | null>(null);
@@ -349,15 +356,18 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       });
   };
 
-  const loadGlobalMemories = async () => {
+  const loadGlobalMemories = async (override?: { scope?: 'global' | 'all'; kind?: string; query?: string }) => {
     setMemErr('');
     setMemStatus(t('loading'));
     setMemStatusClass('');
     try {
-      const q = memQuery.trim();
-      const d = await api<MemoryResponse>(
-        `/api/memory?scope=global&limit=30${q ? `&query=${encodeURIComponent(q)}` : ''}`
-      );
+      const sc = override?.scope ?? memScope;
+      const kd = override?.kind !== undefined ? override.kind : memFilterKind;
+      const q = (override?.query !== undefined ? override.query : memQuery).trim();
+      const params = new URLSearchParams({ scope: sc, limit: '30' });
+      if (q) params.set('query', q);
+      if (kd) params.set('kind', kd);
+      const d = await api<MemoryResponse>(`/api/memory?${params.toString()}`);
       setMemData(d);
       if (!d.installed) {
         setMemStatus(t('notLoaded'));
@@ -366,7 +376,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         setMemStatus(t('notConnected'));
         setMemStatusClass('bad');
       } else {
-        setMemStatus(t('itemsCount', { n: (d.items || []).length }));
+        const count = (d.items || []).length;
+        setMemStatus(q && d.semantic?.active ? t('memSemanticMatches', { n: count }) : t('itemsCount', { n: count }));
         setMemStatusClass('ok');
       }
     } catch (e) {
@@ -1756,6 +1767,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               <div className="set-card-hd">
                 <h2>{t('magpieGlobalMem')}</h2>
                 <div className="row-inline-sm row-wrap">
+                  {memData?.installed && memData.semantic && (
+                    <span id="sMemSemanticBadge" className={`mp ${memData.semantic.active ? 'ok' : ''}`}>
+                      {t(memData.semantic.active ? 'memSemanticOn' : 'memSemanticOff')}
+                    </span>
+                  )}
                   <span id="sMemStatus" className={`mp ${memStatusClass}`}>
                     {memStatus || t('notLoaded')}
                   </span>
@@ -1773,6 +1789,24 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 </div>
               </div>
               <p className="set-card-desc">{t('magpieGlobalMemDesc')}</p>
+              {memData?.installed && memData.semantic && !memData.semantic.active && (
+                <div className="mem-semantic-hint">
+                  <span>{t('memSemanticHintOff')}</span>
+                  <button
+                    type="button"
+                    className="mp"
+                    onClick={async () => {
+                      try {
+                        await api('/api/magpie/open', { method: 'POST' });
+                      } catch (e) {
+                        if (e instanceof Error && e.message !== 'unauthorized') setMemErr(e.message);
+                      }
+                    }}
+                  >
+                    {t('openMagpie')}
+                  </button>
+                </div>
+              )}
               {memAddOpen && (
                 <div id="sMemAddBox" className="add-prov mem-add">
                   <div className="two">
@@ -1857,11 +1891,56 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 </div>
               )}
 
+              <div className="mem-filters">
+                <div className="mem-scope-seg" role="group" aria-label="Memory scope">
+                  <button
+                    type="button"
+                    id="sMemScopeGlobal"
+                    className={`mp${memScope === 'global' ? ' on' : ''}`}
+                    onClick={() => {
+                      setMemScope('global');
+                      void loadGlobalMemories({ scope: 'global' });
+                    }}
+                  >
+                    {t('memScopeGlobal')}
+                  </button>
+                  <button
+                    type="button"
+                    id="sMemScopeAll"
+                    className={`mp${memScope === 'all' ? ' on' : ''}`}
+                    onClick={() => {
+                      setMemScope('all');
+                      void loadGlobalMemories({ scope: 'all' });
+                    }}
+                  >
+                    {t('memScopeAll')}
+                  </button>
+                </div>
+                <select
+                  id="sMemFilterKind"
+                  aria-label={t('memType')}
+                  value={memFilterKind}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setMemFilterKind(next);
+                    void loadGlobalMemories({ kind: next });
+                  }}
+                >
+                  <option value="">{t('memKindAll')}</option>
+                  <option value="fact">{t('kindFact')}</option>
+                  <option value="preference">{t('kindPreference')}</option>
+                  <option value="rule">{t('kindRule')}</option>
+                  <option value="reference">{t('kindReference')}</option>
+                  <option value="profile">{t('kindProfile')}</option>
+                  <option value="procedure">{t('kindProcedure')}</option>
+                  <option value="episode">{t('kindEpisode')}</option>
+                </select>
+              </div>
               <div className="mem-bar">
                 <input
                   id="sMemQuery"
                   className="note-in"
-                  placeholder={t('searchGlobalMemPh')}
+                  placeholder={memData?.semantic?.active ? t('searchSemanticMemPh') : t('searchGlobalMemPh')}
                   value={memQuery}
                   onChange={(e) => setMemQuery(e.target.value)}
                   onKeyDown={(e) => {
@@ -1871,6 +1950,19 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     }
                   }}
                 />
+                {memQuery.trim() !== '' && (
+                  <button
+                    type="button"
+                    id="sMemClearBtn"
+                    className="mp"
+                    onClick={() => {
+                      setMemQuery('');
+                      void loadGlobalMemories({ query: '' });
+                    }}
+                  >
+                    {t('memClearSearch')}
+                  </button>
+                )}
                 <button type="button" id="sMemSearchBtn" className="mp" onClick={() => void loadGlobalMemories()}>
                   {t('search')}
                 </button>
@@ -1894,6 +1986,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                         <div className="mem-top">
                           <div className="mem-meta">
                             {it.kind && <span className="mp ok">{it.kind}</span>}
+                            {memScope === 'all' && it.scope && (
+                              <span className="mp">
+                                {it.scope === 'everywhere' || it.scope === 'global'
+                                  ? t('memScopeEverywhere')
+                                  : t('memScopeProject')}
+                              </span>
+                            )}
                             {tags.map((tg) => (
                               <span key={tg} className="mp">
                                 #{tg}
@@ -1949,7 +2048,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     >
                       {permTargets.map((tr) => (
                         <option key={tr.id} value={tr.id}>
-                          {tr.name}
+                          {tr.id === 'local' ? t('localDesktopName') : tr.name}
                         </option>
                       ))}
                     </select>
@@ -1987,11 +2086,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   const statusClass =
                     perm.status === 'granted' ? ' ok' : perm.status === 'denied' ? ' bad' : '';
                   const isBusy = permBusyId === perm.id;
+                  const permName = permText(`deskPermName_${perm.id}`, perm.name);
+                  const permDesc = permText(`deskPermDesc_${perm.id}`, perm.description);
                   return (
                     <div key={perm.id} className="node-row">
                       <div>
-                        <div className="nm">{perm.name}</div>
-                        <div className="meta">{perm.description}</div>
+                        <div className="nm">{permName}</div>
+                        <div className="meta">{permDesc}</div>
                       </div>
                       <div className="row-inline-sm row-wrap">
                         <span className={`mp${statusClass}`}>{statusLabel}</span>

@@ -133,12 +133,13 @@ struct DesktopView: View {
                             Button {
                                 target = tr.id
                             } label: {
-                                Label(tr.name ?? tr.id, systemImage: tr.id == target ? "checkmark" : "desktopcomputer")
+                                Label(tr.id == "local" ? hub.t("localDesktopName") : (tr.name ?? tr.id), systemImage: tr.id == target ? "checkmark" : "desktopcomputer")
                             }
                         }
                     } label: {
                         HStack(spacing: 4) {
-                            Text(targets.first(where: { $0.id == target })?.name ?? target)
+                            let activeTarget = targets.first(where: { $0.id == target })
+                            Text(target == "local" ? hub.t("localDesktopName") : (activeTarget?.name ?? target))
                             Image(systemName: "chevron.down").font(.system(size: 11))
                         }
                         .font(.system(size: 13, weight: .semibold))

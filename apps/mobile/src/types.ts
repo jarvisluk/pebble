@@ -30,10 +30,19 @@ export interface MagpieMemoryItem {
   text: string;
 }
 
+export interface MagpieMemorySemanticStatus {
+  enabled?: boolean;
+  modelReady?: boolean;
+  indexReady?: boolean;
+  active?: boolean;
+  model?: string;
+}
+
 export interface MagpieMemoryList {
   installed: boolean;
   available: boolean;
   error?: string;
+  semantic?: MagpieMemorySemanticStatus;
   items: MagpieMemoryItem[];
 }
 

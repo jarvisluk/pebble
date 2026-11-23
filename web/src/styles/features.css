@@ -570,8 +570,13 @@
 .add-prov { background: var(--s1); border-radius: var(--r-row); padding: 10px; display: flex; flex-direction: column; gap: 8px; }
 .add-prov .fld input, .add-prov .fld textarea, .add-prov .fld select { background-color: var(--card); }
 .add-prov[hidden] { display: none; }
-.mem-bar { display: flex; gap: 8px; align-items: center; }
-.mem-bar input { flex: 1; min-width: 0; }
+.mem-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.mem-bar input { flex: 1; min-width: 180px; }
+.mem-filters { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.mem-scope-seg { display: inline-flex; align-items: center; gap: 4px; background: var(--s1); padding: 3px; border-radius: var(--r-ctl); }
+.mem-scope-seg .mp { background: transparent; border: none; }
+.mem-scope-seg .mp.on { background: var(--card); color: var(--text); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08); }
+.mem-semantic-hint { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 8px 10px; border-radius: var(--r-row); background: var(--s1); font-size: var(--fs-xs); color: var(--text-2); }
 .mem-row { padding: 4px 0; display: flex; flex-direction: column; gap: 6px; }
 .mem-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
 .mem-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
