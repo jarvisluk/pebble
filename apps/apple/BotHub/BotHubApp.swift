@@ -2,6 +2,7 @@ import SwiftUI
 
 @main
 struct BotHubApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var hub = HubStore()
 
     var body: some Scene {
@@ -232,14 +233,47 @@ struct RootView: View {
             }
         }
         .onChange(of: phase) { old, new in
-            if new == .active, old == .background { Task { await hub.resume() } }
+            if new == .active {
+                if old == .background { Task { await hub.resume() } }
+                if let pendingBotId = BotHubSharedStore.consumePendingInterrupt() {
+                    Task { _ = try? await hub.interruptBot(pendingBotId) }
+                }
+            }
+        }
+        .onAppear {
+            PushManager.shared.onDeepLink = { url in
+                handleDeepLink(url)
+            }
         }
         .onOpenURL { url in
-            // bothub://connect?link=<tailcat 或 http 链接>
+            handleDeepLink(url)
+        }
+    }
+
+    private func handleDeepLink(_ url: URL) {
+        guard url.scheme?.lowercased() == "bothub" else { return }
+        let host = (url.host ?? "").lowercased()
+        let parts = url.pathComponents.filter { $0 != "/" }
+        switch host {
+        case "connect":
             if let q = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems,
                let link = q.first(where: { $0.name == "link" })?.value, !link.isEmpty {
                 Task { try? await hub.addAndConnectServer(label: "", address: link, token: "") }
             }
+        case "bot":
+            if let botId = parts.first, !botId.isEmpty {
+                router.openBot(botId)
+            }
+        case "desktop":
+            let target = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                .queryItems?.first(where: { $0.name == "target" })?.value ?? "local"
+            router.openDesktop(target)
+        case "interrupt":
+            if let botId = parts.first, !botId.isEmpty {
+                Task { _ = try? await hub.interruptBot(botId) }
+            }
+        default:
+            break
         }
     }
 }

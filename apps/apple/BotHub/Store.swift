@@ -255,9 +255,14 @@ final class HubStore {
             if let st = decodeAny(p, as: BotStatus.self) {
                 upsertBot(st)
                 if !st.isBusy { tools[st.id] = nil }
+                LiveActivityManager.shared.handleBotStatus(st)
             }
         case "tool_use":
-            if let bid = p["botId"] as? String { tools[bid] = (p["tool"] as? String) ?? "" }
+            if let bid = p["botId"] as? String {
+                let tool = (p["tool"] as? String) ?? ""
+                tools[bid] = tool
+                LiveActivityManager.shared.handleToolUse(botId: bid, tool: tool)
+            }
         case "bot_created":
             if let st = decodeAny(p, as: BotStatus.self), !bots.contains(where: { $0.id == st.id }) { bots.append(st) }
         case "bot_deleted":
@@ -267,7 +272,10 @@ final class HubStore {
         case "desktop_target":
             if let at = decodeAny(p, as: ActiveDesktopTarget.self) { activeDesktopTarget = at }
         case "takeover":
-            if let arr = p["items"], let list = decodeAny(arr, as: [TakeoverRequest].self) { takeovers = list }
+            if let arr = p["items"], let list = decodeAny(arr, as: [TakeoverRequest].self) {
+                takeovers = list
+                LiveActivityManager.shared.handleTakeovers(list)
+            }
         case "questions":
             if let arr = p["items"], let list = decodeAny(arr, as: [PendingQuestion].self) { questions = list }
         case "routine_updated", "routine_run":
@@ -387,6 +395,9 @@ final class HubStore {
                 }
             }
             Task { if let q: QuestionsResp = try? await client.call("/api/questions"), seq == connSeq { questions = q.items ?? [] } }
+            PushManager.shared.activeChatBotId = { [weak self] in self?.activeChat }
+            PushManager.shared.configureConnection(base: url, token: tok)
+            LiveActivityManager.shared.startObservingTokens()
             startStream(url, tok)
         } catch {
             guard seq == connSeq else { throw error }

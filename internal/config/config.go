@@ -391,6 +391,25 @@ func (s *SyncConfig) WebDAVReadOnly() bool {
 	return s.WebDAV.IsReadOnly()
 }
 
+type APNsConfig struct {
+	KeyPath    string `json:"keyPath,omitempty"`
+	KeyPEM     string `json:"keyPem,omitempty"`
+	KeyID      string `json:"keyId,omitempty"`
+	TeamID     string `json:"teamId,omitempty"`
+	BundleID   string `json:"bundleId,omitempty"`
+	DefaultEnv string `json:"defaultEnv,omitempty"` // "production" | "sandbox"
+}
+
+type PushConfig struct {
+	Enabled  *bool      `json:"enabled,omitempty"` // default: true
+	RelayURL string     `json:"relayUrl,omitempty"`
+	APNs     APNsConfig `json:"apns,omitempty"`
+}
+
+func (p PushConfig) IsEnabled() bool {
+	return p.Enabled == nil || *p.Enabled
+}
+
 type HubConfig struct {
 	ProjectRoot string `json:"-"`
 	ConfigPath  string `json:"-"`
@@ -413,6 +432,7 @@ type HubConfig struct {
 	MessagesDir       string      `json:"messagesDir,omitempty"`
 	HTTP              HTTPConfig  `json:"http,omitempty"`
 	Sync              *SyncConfig `json:"sync,omitempty"`
+	Push              PushConfig  `json:"push,omitempty"`
 	Bots              []BotConfig `json:"bots"`
 }
 
@@ -616,6 +636,16 @@ func Load(projectRoot, explicitPath string) (*HubConfig, string, error) {
 			cfg.Sync.Git.Branch = strings.TrimSpace(cfg.Sync.Git.Branch)
 		}
 	}
+	cfg.Push.RelayURL = strings.TrimSpace(expandEnv(cfg.Push.RelayURL))
+	cfg.Push.APNs.KeyPath = strings.TrimSpace(expandEnv(cfg.Push.APNs.KeyPath))
+	if cfg.Push.APNs.KeyPath != "" && !filepath.IsAbs(cfg.Push.APNs.KeyPath) {
+		cfg.Push.APNs.KeyPath = absFrom(projectRoot, cfg.Push.APNs.KeyPath)
+	}
+	cfg.Push.APNs.KeyPEM = strings.TrimSpace(expandEnv(cfg.Push.APNs.KeyPEM))
+	cfg.Push.APNs.KeyID = strings.TrimSpace(expandEnv(cfg.Push.APNs.KeyID))
+	cfg.Push.APNs.TeamID = strings.TrimSpace(expandEnv(cfg.Push.APNs.TeamID))
+	cfg.Push.APNs.BundleID = strings.TrimSpace(expandEnv(cfg.Push.APNs.BundleID))
+	cfg.Push.APNs.DefaultEnv = strings.ToLower(strings.TrimSpace(expandEnv(cfg.Push.APNs.DefaultEnv)))
 
 	if cfg.SharedDir == "" {
 		cfg.SharedDir = "./workspaces/_shared"

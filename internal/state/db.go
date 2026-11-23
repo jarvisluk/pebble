@@ -120,6 +120,18 @@ CREATE TABLE IF NOT EXISTS routine_runs (
 CREATE INDEX IF NOT EXISTS idx_routine_runs_bot_routine ON routine_runs(bot_id, routine_id, started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_routine_runs_pending     ON routine_runs(bot_id, delivery, status, injected_at);
 CREATE INDEX IF NOT EXISTS idx_routine_runs_slot_key    ON routine_runs(slot_key);
+
+CREATE TABLE IF NOT EXISTS push_devices (
+  device_id                 TEXT PRIMARY KEY,
+  platform                  TEXT NOT NULL,
+  env                       TEXT NOT NULL DEFAULT 'production',
+  bundle_id                 TEXT NOT NULL DEFAULT '',
+  push_token                TEXT NOT NULL DEFAULT '',
+  live_activity_start_token TEXT NOT NULL DEFAULT '',
+  activity_tokens_json      TEXT NOT NULL DEFAULT '{}',
+  enabled                   INTEGER NOT NULL DEFAULT 1,
+  updated_at                TEXT NOT NULL
+);
 `
 
 func openSQLite(dbPath string) (*sql.DB, error) {

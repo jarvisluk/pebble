@@ -28,6 +28,7 @@ const SETTINGS_TABS: Array<{ id: SettingsTab; labelKey: string }> = [
 import { BotAvatar } from '../components/BotAvatar';
 import { ModalHeader } from '../components/ModalHeader';
 import { confirmAction } from '../confirm';
+import { hasNotificationPermission, requestNotificationPermission } from '../../modules/bothub-notifications';
 import { useI18n } from '../i18n';
 import { resolveDefaultModel, useHub } from '../store';
 import { MONO_FONT, useTheme, useThemePref } from '../theme';
@@ -133,6 +134,7 @@ export default function SettingsScreen() {
   const [memTags, setMemTags] = useState('');
   const [deskPerms, setDeskPerms] = useState<DesktopPermissionItem[]>([]);
   const [deskPermsLoading, setDeskPermsLoading] = useState(false);
+  const [notifPerm, setNotifPerm] = useState(() => hasNotificationPermission());
 
   const [deskHarness, setDeskHarness] = useState('');
   const [deskModel, setDeskModel] = useState('');
@@ -562,6 +564,27 @@ export default function SettingsScreen() {
                   </Text>
                 </Pressable>
               ))}
+            </View>
+          </View>
+          )}
+
+          {tab === 'general' && Platform.OS === 'android' && (
+          <View style={[styles.card, { backgroundColor: theme.card }]}>
+            <Text style={[styles.sectionTitle, { color: theme.text }]}>{t('pushSection')}</Text>
+            <View style={styles.rowBetween}>
+              <Text style={[styles.hostTxt, { color: theme.text }]}>{t('pushSystemPerm')}</Text>
+              {notifPerm ? (
+                <Text style={[styles.hostTxt, { color: theme.accent }]}>{t('pushGranted')}</Text>
+              ) : (
+                <Pressable
+                  onPress={async () => {
+                    const granted = await requestNotificationPermission();
+                    setNotifPerm(granted);
+                  }}
+                >
+                  <Text style={[styles.hostTxt, { color: theme.accent }]}>{t('pushEnable')}</Text>
+                </Pressable>
+              )}
             </View>
           </View>
           )}
