@@ -192,6 +192,12 @@ export interface DesktopFrame {
   timestamp: number;
 }
 
+export interface FallbackHost {
+  label?: string;
+  address: string;
+  token?: string;
+}
+
 export interface ServerProfile {
   id: string;
   label: string;
@@ -199,6 +205,7 @@ export interface ServerProfile {
   token: string;
   standbyAddress?: string;
   standbyToken?: string;
+  fallbackHosts?: FallbackHost[];
 }
 
 export interface HostTailscaleStatus {

@@ -303,19 +303,35 @@ final class HubStore {
             try await connectEndpoint(profile: profile, rawAddress: profile.address, rawToken: profile.token, isStandby: false, seq: seq)
         } catch {
             guard seq == connSeq else { return }
-            let isUnauth = (error as? HubError)?.unauthorized == true
+            if (error as? HubError)?.unauthorized == true {
+                handleConnectError(error)
+                return
+            }
+            var candidates: [(String, String)] = []
             let sbAddr = (profile.standbyAddress ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            if !isUnauth && !sbAddr.isEmpty {
+            if !sbAddr.isEmpty {
+                candidates.append((sbAddr, profile.standbyToken ?? ""))
+            }
+            for fb in (profile.fallbackHosts ?? []) {
+                let addr = fb.address.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !addr.isEmpty && addr != sbAddr {
+                    candidates.append((addr, fb.token ?? ""))
+                }
+            }
+            var lastErr: Error = error
+            for (addr, tok) in candidates {
                 do {
-                    try await connectEndpoint(profile: profile, rawAddress: sbAddr, rawToken: profile.standbyToken ?? "", isStandby: true, seq: seq)
+                    try await connectEndpoint(profile: profile, rawAddress: addr, rawToken: tok, isStandby: true, seq: seq)
                     return
                 } catch {
                     guard seq == connSeq else { return }
-                    handleConnectError(error)
-                    return
+                    lastErr = error
+                    if (error as? HubError)?.unauthorized == true {
+                        break
+                    }
                 }
             }
-            handleConnectError(error)
+            handleConnectError(lastErr)
         }
     }
 
@@ -431,11 +447,21 @@ final class HubStore {
         if norm.cleanAddress.isEmpty { throw HubError(message: L.t("enterValidAddr")) }
         let tok = (token.isEmpty ? norm.token : token).trimmingCharacters(in: .whitespaces)
         let lbl = label.trimmingCharacters(in: .whitespaces)
-        let sbRaw = (standbyAddress ?? "").trimmingCharacters(in: .whitespaces)
-        let sbNorm = sbRaw.isEmpty ? nil : normalizeAddress(sbRaw)
-        let sbAddr = sbNorm?.cleanAddress
         let sbTokTrim = (standbyToken ?? "").trimmingCharacters(in: .whitespaces)
-        let sbTok = !sbTokTrim.isEmpty ? sbTokTrim : (sbNorm?.token.isEmpty == false ? sbNorm?.token : nil)
+        let sbParts = (standbyAddress ?? "")
+            .split { $0 == "," || $0 == "\n" }
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        var fallbacks: [FallbackHost] = []
+        for part in sbParts {
+            let fn = normalizeAddress(part)
+            if !fn.cleanAddress.isEmpty {
+                let ft = !sbTokTrim.isEmpty ? sbTokTrim : (fn.token.isEmpty ? nil : fn.token)
+                fallbacks.append(FallbackHost(label: nil, address: fn.cleanAddress, token: ft))
+            }
+        }
+        let sbAddr = fallbacks.first?.address
+        let sbTok = fallbacks.first?.token
 
         var target: ServerProfile
         if let i = servers.firstIndex(where: { $0.address == norm.cleanAddress }) {
@@ -444,6 +470,7 @@ final class HubStore {
             if !tok.isEmpty { target.token = tok }
             if let sbAddr, !sbAddr.isEmpty { target.standbyAddress = sbAddr }
             if let sbTok, !sbTok.isEmpty { target.standbyToken = sbTok }
+            if !fallbacks.isEmpty { target.fallbackHosts = fallbacks }
             servers[i] = target
         } else {
             let def = norm.isTailcat ? L.t("remoteHostDefault")
@@ -451,7 +478,8 @@ final class HubStore {
             target = ServerProfile(id: "\(Int(Date().timeIntervalSince1970 * 1000))", label: lbl.isEmpty ? def : lbl,
                                    address: norm.cleanAddress, token: tok,
                                    standbyAddress: (sbAddr?.isEmpty == false ? sbAddr : nil),
-                                   standbyToken: sbTok)
+                                   standbyToken: sbTok,
+                                   fallbackHosts: fallbacks.isEmpty ? nil : fallbacks)
             servers.insert(target, at: 0)
         }
         activeServerId = target.id

@@ -66,12 +66,15 @@ func New(cfg *config.HubConfig) *Syncer {
 	return NewWithStore(cfg, nil)
 }
 
-// NewWithStore creates a Syncer bound to cfg and an optional SQLite store for delta sync.
+// NewWithStore creates a Syncer bound to cfg and an optional SQLite store for delta & vector-clock sync.
 func NewWithStore(cfg *config.HubConfig, store *state.Store) *Syncer {
 	host, _ := os.Hostname()
 	host = strings.TrimSpace(host)
 	if host == "" {
 		host = "bot-hub"
+	}
+	if store != nil {
+		host = store.GetOrCreateHostID(host)
 	}
 	return &Syncer{
 		cfg:    cfg,
@@ -83,6 +86,9 @@ func NewWithStore(cfg *config.HubConfig, store *state.Store) *Syncer {
 func (s *Syncer) SetStore(store *state.Store) {
 	s.mu.Lock()
 	s.store = store
+	if store != nil {
+		s.hostID = store.GetOrCreateHostID(s.hostID)
+	}
 	s.mu.Unlock()
 }
 
@@ -155,7 +161,7 @@ func (s *Syncer) PullFromPeer(ctx context.Context, client *http.Client, peerBase
 		s.recordErr(err)
 		return SyncSummary{}, fmt.Errorf("fetch peer manifest: %w", err)
 	}
-	localManifest, err := BuildManifest(s.cfg.ProjectRoot, s.hostID, true)
+	localManifest, err := BuildManifestWithStore(s.cfg.ProjectRoot, s.hostID, s.store, true)
 	if err != nil {
 		s.recordErr(err)
 		return SyncSummary{}, err
@@ -168,21 +174,38 @@ func (s *Syncer) PullFromPeer(ctx context.Context, client *http.Client, peerBase
 	var synced int
 	var conflicts []string
 	for _, rf := range remoteManifest.Files {
-		if lf, ok := localMap[rf.Path]; ok && lf.SHA256 == rf.SHA256 {
+		if rf.UpdatedBy == "" {
+			rf.UpdatedBy = remoteManifest.HostID
+		}
+		if lf, ok := localMap[rf.Path]; ok {
+			if len(rf.VC) > 0 && len(lf.VC) > 0 {
+				ord := lf.VC.Compare(rf.VC)
+				if ord == VCEqual || ord == VCAfter {
+					continue
+				}
+			} else if !rf.Deleted && !lf.Deleted && lf.SHA256 == rf.SHA256 {
+				continue
+			}
+		} else if rf.Deleted && s.store == nil {
 			continue
 		}
-		data, err := fetchPeerFile(ctx, cli, base, tok, rf.Path)
+
+		applied, conflict, err := ApplyRemoteFileEntry(
+			s.cfg.ProjectRoot,
+			s.hostID,
+			s.store,
+			rf,
+			func() ([]byte, error) {
+				return fetchPeerFile(ctx, cli, base, tok, rf.Path)
+			},
+		)
 		if err != nil {
 			s.recordErr(err)
-			return SyncSummary{}, fmt.Errorf("fetch %s: %w", rf.Path, err)
+			return SyncSummary{}, fmt.Errorf("apply %s: %w", rf.Path, err)
 		}
-		modTime := time.Unix(rf.ModTimeUnix, 0)
-		conflict, err := WriteSyncedFile(s.cfg.ProjectRoot, rf.Path, remoteManifest.HostID, data, modTime)
-		if err != nil {
-			s.recordErr(err)
-			return SyncSummary{}, fmt.Errorf("write %s: %w", rf.Path, err)
+		if applied || conflict != "" {
+			synced++
 		}
-		synced++
 		if conflict != "" {
 			conflicts = append(conflicts, conflict)
 		}
@@ -229,7 +252,7 @@ func (s *Syncer) PushToPeer(ctx context.Context, client *http.Client, peerBaseUR
 		return SyncSummary{}, fmt.Errorf("push portable config: %w", err)
 	}
 
-	localManifest, err := BuildManifest(s.cfg.ProjectRoot, s.hostID, true)
+	localManifest, err := BuildManifestWithStore(s.cfg.ProjectRoot, s.hostID, s.store, true)
 	if err != nil {
 		s.recordErr(err)
 		return SyncSummary{}, err
@@ -247,14 +270,28 @@ func (s *Syncer) PushToPeer(ctx context.Context, client *http.Client, peerBaseUR
 	var synced int
 	var conflicts []string
 	for _, lf := range localManifest.Files {
-		if rf, ok := remoteMap[lf.Path]; ok && rf.SHA256 == lf.SHA256 {
+		if rf, ok := remoteMap[lf.Path]; ok {
+			if len(lf.VC) > 0 && len(rf.VC) > 0 {
+				ord := rf.VC.Compare(lf.VC)
+				if ord == VCEqual || ord == VCAfter {
+					continue
+				}
+			} else if !lf.Deleted && !rf.Deleted && rf.SHA256 == lf.SHA256 {
+				continue
+			}
+		} else if lf.Deleted && s.store == nil {
 			continue
 		}
-		data, entry, err := ReadSyncedFile(s.cfg.ProjectRoot, lf.Path)
-		if err != nil {
-			continue
+
+		var data []byte
+		if !lf.Deleted {
+			var rErr error
+			data, _, rErr = ReadSyncedFile(s.cfg.ProjectRoot, lf.Path)
+			if rErr != nil {
+				continue
+			}
 		}
-		conflict, err := pushPeerFile(ctx, cli, base, tok, s.hostID, entry, data)
+		conflict, err := pushPeerFile(ctx, cli, base, tok, s.hostID, lf, data)
 		if err != nil {
 			s.recordErr(err)
 			return SyncSummary{}, fmt.Errorf("push %s: %w", lf.Path, err)
@@ -513,6 +550,15 @@ func pushPeerFile(ctx context.Context, cli *http.Client, base, token, hostID str
 	q.Set("path", entry.Path)
 	q.Set("host", hostID)
 	q.Set("mtime", strconv.FormatInt(entry.ModTimeUnix, 10))
+	if entry.Deleted {
+		q.Set("deleted", "1")
+	}
+	if entry.SHA256 != "" {
+		q.Set("sha256", entry.SHA256)
+	}
+	if len(entry.VC) > 0 {
+		q.Set("vc", entry.VC.MarshalJSONString())
+	}
 	u := base + "/api/sync/file?" + q.Encode()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, u, bytes.NewReader(data))

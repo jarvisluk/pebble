@@ -10,13 +10,17 @@ import (
 // PortableBotConfig contains only cross-machine portable bot fields.
 // Machine-local runtime settings (harness, model, workspace path, env) are excluded.
 type PortableBotConfig struct {
-	ID              string           `json:"id"`
-	Name            string           `json:"name"`
-	Description     string           `json:"description,omitempty"`
-	Avatar          string           `json:"avatar,omitempty"`
-	Color           string           `json:"color,omitempty"`
-	PrivateSessions bool             `json:"privateSessions,omitempty"`
-	Schedules       []ScheduleConfig `json:"schedules,omitempty"`
+	ID               string           `json:"id"`
+	Name             string           `json:"name"`
+	Description      string           `json:"description,omitempty"`
+	Avatar           string           `json:"avatar,omitempty"`
+	Color            string           `json:"color,omitempty"`
+	PrivateSessions  bool             `json:"privateSessions,omitempty"`
+	Schedules        []ScheduleConfig `json:"schedules,omitempty"`
+	Deleted          bool             `json:"deleted,omitempty"`
+	DeletedSchedules []string         `json:"deletedSchedules,omitempty"`
+	UpdatedAt        string           `json:"updatedAt,omitempty"`
+	UpdatedBy        string           `json:"updatedBy,omitempty"`
 }
 
 // PortableBundle is the versioned portable snapshot exchanged across hosts or
@@ -73,27 +77,38 @@ func ApplyPortable(cfg *HubConfig, bundle PortableBundle) (changed bool, added [
 		if id == "" || !botIDRe.MatchString(id) {
 			continue
 		}
+		if pb.Deleted {
+			if idx, exists := byID[id]; exists {
+				cfg.Bots = append(cfg.Bots[:idx], cfg.Bots[idx+1:]...)
+				delete(byID, id)
+				for i, b := range cfg.Bots {
+					byID[b.ID] = i
+				}
+				changed = true
+				updated = append(updated, id)
+			}
+			continue
+		}
 		name := strings.TrimSpace(pb.Name)
 		if name == "" {
 			name = id
 		}
-		scheds := make([]ScheduleConfig, len(pb.Schedules))
-		copy(scheds, pb.Schedules)
 
 		if idx, exists := byID[id]; exists {
 			cur := cfg.Bots[idx]
+			mergedScheds := mergeSchedules(cur.Schedules, pb.Schedules, pb.DeletedSchedules)
 			if cur.Name != name ||
 				cur.Description != pb.Description ||
 				cur.Avatar != pb.Avatar ||
 				cur.Color != pb.Color ||
 				cur.PrivateSessions != pb.PrivateSessions ||
-				!reflect.DeepEqual(cur.Schedules, scheds) {
+				!reflect.DeepEqual(cur.Schedules, mergedScheds) {
 				cur.Name = name
 				cur.Description = pb.Description
 				cur.Avatar = pb.Avatar
 				cur.Color = pb.Color
 				cur.PrivateSessions = pb.PrivateSessions
-				cur.Schedules = scheds
+				cur.Schedules = mergedScheds
 				cfg.Bots[idx] = cur
 				changed = true
 				updated = append(updated, id)
@@ -101,6 +116,7 @@ func ApplyPortable(cfg *HubConfig, bundle PortableBundle) (changed bool, added [
 			continue
 		}
 
+		scheds := mergeSchedules(nil, pb.Schedules, pb.DeletedSchedules)
 		ws := "./workspaces/" + id
 		if cfg.ProjectRoot != "" {
 			ws = filepath.Join(cfg.ProjectRoot, "workspaces", id)
@@ -139,12 +155,20 @@ func ApplyPortable(cfg *HubConfig, bundle PortableBundle) (changed bool, added [
 			if id == "" || !botIDRe.MatchString(id) {
 				continue
 			}
+			if pb.Deleted {
+				if idx, ok := rawIdx[id]; ok {
+					raw.Bots = append(raw.Bots[:idx], raw.Bots[idx+1:]...)
+					delete(rawIdx, id)
+					for i, b := range raw.Bots {
+						rawIdx[b.ID] = i
+					}
+				}
+				continue
+			}
 			name := strings.TrimSpace(pb.Name)
 			if name == "" {
 				name = id
 			}
-			scheds := make([]ScheduleConfig, len(pb.Schedules))
-			copy(scheds, pb.Schedules)
 			if idx, ok := rawIdx[id]; ok {
 				cur := raw.Bots[idx]
 				cur.Name = name
@@ -152,7 +176,7 @@ func ApplyPortable(cfg *HubConfig, bundle PortableBundle) (changed bool, added [
 				cur.Avatar = pb.Avatar
 				cur.Color = pb.Color
 				cur.PrivateSessions = pb.PrivateSessions
-				cur.Schedules = scheds
+				cur.Schedules = mergeSchedules(cur.Schedules, pb.Schedules, pb.DeletedSchedules)
 				raw.Bots[idx] = cur
 			} else {
 				rawIdx[id] = len(raw.Bots)
@@ -164,11 +188,43 @@ func ApplyPortable(cfg *HubConfig, bundle PortableBundle) (changed bool, added [
 					Color:           pb.Color,
 					Workspace:       "./workspaces/" + id,
 					PrivateSessions: pb.PrivateSessions,
-					Schedules:       scheds,
+					Schedules:       mergeSchedules(nil, pb.Schedules, pb.DeletedSchedules),
 				})
 			}
 		}
 		return nil
 	})
 	return changed, added, updated, err
+}
+
+func mergeSchedules(local, remote []ScheduleConfig, deletedIDs []string) []ScheduleConfig {
+	deleted := make(map[string]bool, len(deletedIDs))
+	for _, id := range deletedIDs {
+		if id = strings.TrimSpace(id); id != "" {
+			deleted[id] = true
+		}
+	}
+	var out []ScheduleConfig
+	idxByID := make(map[string]int)
+	for _, s := range local {
+		id := s.EffectiveID()
+		if deleted[id] {
+			continue
+		}
+		idxByID[id] = len(out)
+		out = append(out, s)
+	}
+	for _, s := range remote {
+		id := s.EffectiveID()
+		if deleted[id] {
+			continue
+		}
+		if idx, exists := idxByID[id]; exists {
+			out[idx] = s
+		} else {
+			idxByID[id] = len(out)
+			out = append(out, s)
+		}
+	}
+	return out
 }

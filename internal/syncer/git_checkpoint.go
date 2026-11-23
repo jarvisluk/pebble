@@ -190,9 +190,19 @@ func CheckpointPull(ctx context.Context, cfg *config.HubConfig) (PullResult, err
 				return res, err
 			}
 		} else {
-			if _, err := runGit(ctx, root, "pull", "--rebase", "--autostash", "origin", branch); err != nil {
+			_, pullErr := runGit(ctx, root, "pull", "--rebase", "--autostash", "origin", branch)
+			if resolveErr := resolveRebaseConflicts(ctx, root); resolveErr != nil {
 				_, _ = runGit(ctx, root, "rebase", "--abort")
-				return res, err
+				if pullErr != nil {
+					return res, fmt.Errorf("%w (auto-resolve: %v)", pullErr, resolveErr)
+				}
+				return res, resolveErr
+			} else if pullErr != nil {
+				// If pullErr failed for a non-conflict reason (no unmerged files were found), propagate it.
+				if _, rebaseHeadErr := os.Stat(filepath.Join(root, ".git", "rebase-merge")); rebaseHeadErr == nil {
+					_, _ = runGit(ctx, root, "rebase", "--abort")
+					return res, pullErr
+				}
 			}
 		}
 		res.Pulled = true
@@ -253,6 +263,87 @@ func ensureGitRepo(ctx context.Context, root, branch, repoURL string) error {
 func hasOriginRemote(ctx context.Context, root string) bool {
 	out, err := runGit(ctx, root, "remote", "get-url", "origin")
 	return err == nil && strings.TrimSpace(out) != ""
+}
+
+func resolveRebaseConflicts(ctx context.Context, root string) error {
+	for step := 0; step < 10; step++ {
+		out, err := runGit(ctx, root, "diff", "--name-only", "--diff-filter=U")
+		if err != nil {
+			return err
+		}
+		var conflicted []string
+		for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+			if f := strings.TrimSpace(line); f != "" {
+				conflicted = append(conflicted, f)
+			}
+		}
+		if len(conflicted) == 0 {
+			return nil
+		}
+		for _, rel := range conflicted {
+			ours, errOurs := runGitBytes(ctx, root, "show", ":2:"+rel)
+			theirs, errTheirs := runGitBytes(ctx, root, "show", ":3:"+rel)
+			if errOurs == nil {
+				if abs, sErr := safeJoinAllowConfig(root, rel); sErr == nil {
+					_ = atomicWriteFile(abs, ours, 0o644, time.Time{})
+				}
+			} else if errTheirs == nil {
+				if abs, sErr := safeJoinAllowConfig(root, rel); sErr == nil {
+					_ = atomicWriteFile(abs, theirs, 0o644, time.Time{})
+				}
+			}
+			if errOurs == nil && errTheirs == nil && !bytes.Equal(ours, theirs) {
+				conflictRel := conflictRelPath(rel, "checkpoint")
+				if cAbs, sErr := safeJoinAllowConfig(root, conflictRel); sErr == nil {
+					_ = atomicWriteFile(cAbs, theirs, 0o644, time.Time{})
+				}
+			}
+			if _, addErr := runGit(ctx, root, "add", rel); addErr != nil {
+				return addErr
+			}
+		}
+		if _, err := os.Stat(filepath.Join(root, ".git", "rebase-merge")); os.IsNotExist(err) {
+			if _, err2 := os.Stat(filepath.Join(root, ".git", "rebase-apply")); os.IsNotExist(err2) {
+				// Resolved an autostash pop conflict outside rebase; unstage clean main file and drop stash.
+				_, _ = runGit(ctx, root, "reset", "HEAD")
+				_, _ = runGit(ctx, root, "stash", "drop")
+				return nil
+			}
+		}
+		cmd := exec.CommandContext(ctx, "git", "rebase", "--continue")
+		cmd.Dir = root
+		cmd.Env = append(os.Environ(), "GIT_EDITOR=true")
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+		if contErr := cmd.Run(); contErr == nil {
+			return nil
+		}
+	}
+	return errors.New("exceeded max rebase conflict resolution steps")
+}
+
+func safeJoinAllowConfig(root, rel string) (string, error) {
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return "", err
+	}
+	absTarget := filepath.Join(absRoot, filepath.FromSlash(filepath.Clean(rel)))
+	if absTarget != absRoot && !strings.HasPrefix(absTarget, absRoot+string(filepath.Separator)) {
+		return "", fmt.Errorf("path escapes root: %q", rel)
+	}
+	return absTarget, nil
+}
+
+func runGitBytes(ctx context.Context, dir string, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Dir = dir
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return nil, err
+	}
+	return stdout.Bytes(), nil
 }
 
 func runGit(ctx context.Context, dir string, args ...string) (string, error) {
