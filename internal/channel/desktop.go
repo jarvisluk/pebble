@@ -155,6 +155,73 @@ func (s *HTTPServer) handleDesktopState(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
+func (s *HTTPServer) handleDesktopPermissions(w http.ResponseWriter, r *http.Request) {
+	target := s.resolveDesktopTarget(r, "")
+	ctx, cancel := context.WithTimeout(r.Context(), 6*time.Second)
+	defer cancel()
+
+	var resp desktop.PermissionsResponse
+	if target == "local" {
+		lp, err := s.localDesk().Permissions(ctx)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
+		if lp != nil {
+			resp = *lp
+		}
+	} else {
+		if err := s.callRemoteDesktop(ctx, target, "desktop_permissions", map[string]any{}, 6*time.Second, &resp); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
+	}
+	resp.Target = target
+	if resp.Items == nil {
+		resp.Items = []desktop.PermissionItem{}
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (s *HTTPServer) handleDesktopPermissionRequest(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Target       string `json:"target"`
+		Permission   string `json:"permission"`
+		OpenSettings bool   `json:"openSettings"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body); err != nil || strings.TrimSpace(body.Permission) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "permission is required"})
+		return
+	}
+	target := s.resolveDesktopTarget(r, body.Target)
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	var res desktop.PermissionRequestResult
+	if target == "local" {
+		rp, err := s.localDesk().RequestPermission(ctx, body.Permission, body.OpenSettings)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
+		if rp != nil {
+			res = *rp
+		}
+	} else {
+		if err := s.callRemoteDesktop(ctx, target, "desktop_permission_request", map[string]any{
+			"permission":   body.Permission,
+			"openSettings": body.OpenSettings,
+		}, 10*time.Second, &res); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
+	}
+	if res.Items == nil {
+		res.Items = []desktop.PermissionItem{}
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
 func (s *HTTPServer) handleDesktopWindows(w http.ResponseWriter, r *http.Request) {
 	target := s.resolveDesktopTarget(r, "")
 	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)

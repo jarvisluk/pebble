@@ -1,7 +1,7 @@
 export type LangPref = 'system' | 'zh-CN' | 'en';
 export type ResolvedLang = 'zh-CN' | 'en';
 export type ThemePref = 'system' | 'light' | 'dark';
-export type SettingsTab = 'general' | 'models' | 'memory' | 'remote';
+export type SettingsTab = 'general' | 'models' | 'memory' | 'desktop' | 'remote';
 
 export interface BotSessionInfo {
   sessionId?: string;
@@ -286,6 +286,29 @@ export interface DesktopFrame {
   logicalY?: number;
   logicalWidth?: number;
   logicalHeight?: number;
+}
+
+export interface DesktopPermissionItem {
+  id: string;
+  name: string;
+  description: string;
+  status: 'granted' | 'denied' | 'not_determined' | 'unsupported' | string;
+  canPrompt?: boolean;
+  canOpenSettings?: boolean;
+}
+
+export interface DesktopPermissionsResponse {
+  target?: string;
+  platform: string;
+  items: DesktopPermissionItem[];
+}
+
+export interface DesktopPermissionRequestResponse {
+  ok: boolean;
+  prompted?: boolean;
+  openedSettings?: boolean;
+  item: DesktopPermissionItem;
+  items: DesktopPermissionItem[];
 }
 
 export interface ConfirmOptions {

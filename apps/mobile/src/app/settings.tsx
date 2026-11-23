@@ -22,7 +22,7 @@ import { useI18n } from '../i18n';
 import { resolveDefaultModel, useHub } from '../store';
 import { MONO_FONT, useTheme, useThemePref } from '../theme';
 import type { LanguagePreference, ThemePreference } from '../storage';
-import type { MagpieMemoryList } from '../types';
+import type { DesktopPermissionItem, MagpieMemoryList } from '../types';
 
 interface BotDraft {
   harness: string;
@@ -66,6 +66,8 @@ export default function SettingsScreen() {
     disconnectMagpie,
     openMagpie,
     setDesktopWorker,
+    fetchDesktopPermissions,
+    requestDesktopPermission,
     fetchMemories,
     saveMemory,
     deleteMemory,
@@ -113,6 +115,8 @@ export default function SettingsScreen() {
   const [memKind, setMemKind] = useState<'fact' | 'preference' | 'rule' | 'reference'>('fact');
   const [memText, setMemText] = useState('');
   const [memTags, setMemTags] = useState('');
+  const [deskPerms, setDeskPerms] = useState<DesktopPermissionItem[]>([]);
+  const [deskPermsLoading, setDeskPermsLoading] = useState(false);
 
   const [deskHarness, setDeskHarness] = useState('');
   const [deskModel, setDeskModel] = useState('');
@@ -130,11 +134,41 @@ export default function SettingsScreen() {
     }
   };
 
+  const loadPerms = useCallback(async () => {
+    setDeskPermsLoading(true);
+    try {
+      const res = await fetchDesktopPermissions('local');
+      setDeskPerms(res.items || []);
+    } catch {
+      setDeskPerms([]);
+    } finally {
+      setDeskPermsLoading(false);
+    }
+  }, [fetchDesktopPermissions]);
+
+  const handleReqPerm = async (id: string, openSettings: boolean) => {
+    setBusyAction(`perm:${id}`);
+    setError('');
+    setSavedMsg('');
+    try {
+      const res = await requestDesktopPermission('local', id, openSettings);
+      if (res.items) setDeskPerms(res.items);
+      if (res.openedSettings) setSavedMsg(t('deskPermOpened'));
+      else if (res.prompted) setSavedMsg(t('deskPermPrompted'));
+      setTimeout(() => { void loadPerms(); }, 1500);
+    } catch (err: any) {
+      setError(err?.message || t('opFailed'));
+    } finally {
+      setBusyAction('');
+    }
+  };
+
   useEffect(() => {
     loadSettings().catch(() => {});
     refreshBots().catch(() => {});
     void loadGlobalMemories('');
-  }, [loadSettings, refreshBots]);
+    void loadPerms();
+  }, [loadSettings, refreshBots, loadPerms]);
 
   useEffect(() => {
     if (settings && !defaultHarnessTouched) {
@@ -1102,6 +1136,82 @@ export default function SettingsScreen() {
                     </Text>
                   </View>
                 ))}
+              </View>
+            )}
+          </View>
+
+          <View style={[styles.card, { backgroundColor: theme.card }]}>
+            <View style={styles.rowBetween}>
+              <Text style={[styles.sectionTitle, { color: theme.text }]}>{t('deskPermsTitle')}</Text>
+              <View style={styles.magpieActs}>
+                <Pressable
+                  onPress={() => void loadPerms()}
+                  disabled={deskPermsLoading}
+                  style={[styles.smallBtn, { backgroundColor: theme.s1 }]}
+                >
+                  <Text style={[styles.smallBtnTxt, { color: theme.text2 }]}>
+                    {deskPermsLoading ? t('refreshing') : t('refresh')}
+                  </Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => router.push('/desktop?target=local')}
+                  style={[styles.smallBtn, { backgroundColor: theme.accentSoft }]}
+                >
+                  <Text style={[styles.smallBtnTxt, { color: theme.accent }]}>{t('openDesktop')}</Text>
+                </Pressable>
+              </View>
+            </View>
+            <Text style={[styles.noteTxt, { color: theme.mute }]}>{t('deskPermsDesc')}</Text>
+            {deskPerms.length > 0 && (
+              <View style={styles.magpieList}>
+                {deskPerms.map((perm) => {
+                  const stLabel =
+                    perm.status === 'granted'
+                      ? t('deskPermGranted')
+                      : perm.status === 'denied'
+                        ? t('deskPermDenied')
+                        : perm.status === 'unsupported'
+                          ? t('deskPermUnsupported')
+                          : t('deskPermNotDetermined');
+                  const badgeBg =
+                    perm.status === 'granted' ? theme.sage : perm.status === 'denied' ? theme.pink : theme.s1;
+                  const badgeColor =
+                    perm.status === 'granted' ? theme.sageInk : perm.status === 'denied' ? theme.danger : theme.mute;
+                  const busy = busyAction === `perm:${perm.id}`;
+                  return (
+                    <View key={perm.id} style={[styles.magpieRow, { flexDirection: 'column', alignItems: 'stretch', gap: 6 }]}>
+                      <View style={styles.rowBetween}>
+                        <Text style={[styles.magpieName, { color: theme.text, flex: 1 }]}>{perm.name}</Text>
+                        <View style={[styles.smallBtn, { backgroundColor: badgeBg }]}>
+                          <Text style={[styles.smallBtnTxt, { color: badgeColor }]}>{stLabel}</Text>
+                        </View>
+                      </View>
+                      <Text style={[styles.noteTxt, { color: theme.mute }]}>{perm.description}</Text>
+                      {((perm.canPrompt && perm.status !== 'granted') || perm.canOpenSettings) && (
+                        <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+                          {perm.canPrompt && perm.status !== 'granted' && (
+                            <Pressable
+                              disabled={busy}
+                              onPress={() => void handleReqPerm(perm.id, false)}
+                              style={[styles.smallBtn, { backgroundColor: theme.accent }]}
+                            >
+                              <Text style={[styles.smallBtnTxt, { color: theme.accentText }]}>{t('deskPermRequest')}</Text>
+                            </Pressable>
+                          )}
+                          {perm.canOpenSettings && (
+                            <Pressable
+                              disabled={busy}
+                              onPress={() => void handleReqPerm(perm.id, true)}
+                              style={[styles.smallBtn, { backgroundColor: theme.card }]}
+                            >
+                              <Text style={[styles.smallBtnTxt, { color: theme.text2 }]}>{t('deskPermOpenSettings')}</Text>
+                            </Pressable>
+                          )}
+                        </View>
+                      )}
+                    </View>
+                  );
+                })}
               </View>
             )}
           </View>

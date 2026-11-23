@@ -1,0 +1,269 @@
+//go:build darwin && cgo
+
+package desktop
+
+/*
+#cgo CFLAGS: -x objective-c
+#cgo LDFLAGS: -framework CoreGraphics -framework ApplicationServices -framework CoreFoundation -framework IOKit
+#import <CoreGraphics/CoreGraphics.h>
+#import <ApplicationServices/ApplicationServices.h>
+#import <CoreFoundation/CoreFoundation.h>
+#import <IOKit/hidsystem/IOHIDLib.h>
+
+static int bhScreenRecordingGranted(void) {
+	return CGPreflightScreenCaptureAccess() ? 1 : 0;
+}
+
+static int bhRequestScreenRecording(void) {
+	return CGRequestScreenCaptureAccess() ? 1 : 0;
+}
+
+static int bhAccessibilityGranted(void) {
+	return AXIsProcessTrusted() ? 1 : 0;
+}
+
+static int bhRequestAccessibility(void) {
+	const void *keys[] = { kAXTrustedCheckOptionPrompt };
+	const void *vals[] = { kCFBooleanTrue };
+	CFDictionaryRef opts = CFDictionaryCreate(
+		kCFAllocatorDefault,
+		keys,
+		vals,
+		1,
+		&kCFTypeDictionaryKeyCallBacks,
+		&kCFTypeDictionaryValueCallBacks
+	);
+	Boolean ok = AXIsProcessTrustedWithOptions(opts);
+	if (opts != NULL) {
+		CFRelease(opts);
+	}
+	return ok ? 1 : 0;
+}
+
+// Returns: 1 = granted, 0 = denied, -1 = not_determined/unknown
+static int bhInputMonitoringStatus(void) {
+	IOHIDAccessType t = IOHIDCheckAccess(kIOHIDRequestTypeListenEvent);
+	if (t == kIOHIDAccessTypeGranted) return 1;
+	if (t == kIOHIDAccessTypeDenied) return 0;
+	return -1;
+}
+
+static int bhRequestInputMonitoring(void) {
+	return IOHIDRequestAccess(kIOHIDRequestTypeListenEvent) ? 1 : 0;
+}
+
+// Returns: 0 = noErr (granted), -1743 = errAEEventNotPermitted (denied), -1744 = errAEEventWouldRequireUserConsent (not_determined), other = error
+static int bhAutomationSystemEventsStatus(int askIfNeeded) {
+	const char *bundleId = "com.apple.systemevents";
+	AEAddressDesc target;
+	OSStatus err = AECreateDesc(typeApplicationBundleID, bundleId, strlen(bundleId), &target);
+	if (err != noErr) {
+		return (int)err;
+	}
+	OSStatus st = AEDeterminePermissionToAutomateTarget(&target, typeWildCard, typeWildCard, askIfNeeded ? true : false);
+	AEDisposeDesc(&target);
+	return (int)st;
+}
+*/
+import "C"
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"time"
+)
+
+const (
+	macPrivacyScreenCapture = "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
+	macPrivacyAccessibility = "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+	macPrivacyListenEvent   = "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"
+	macPrivacyAutomation    = "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation"
+	macPrivacyAllFiles      = "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"
+)
+
+func checkFullDiskAccessStatus() string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return "not_determined"
+	}
+	for _, rel := range []string{
+		filepath.Join("Library", "Application Support", "com.apple.TCC", "TCC.db"),
+		filepath.Join("Library", "Mail"),
+	} {
+		p := filepath.Join(home, rel)
+		info, statErr := os.Stat(p)
+		if statErr != nil {
+			continue
+		}
+		if info.IsDir() {
+			if _, rerr := os.ReadDir(p); rerr == nil {
+				return "granted"
+			}
+			return "denied"
+		}
+		f, oerr := os.Open(p)
+		if oerr == nil {
+			_ = f.Close()
+			return "granted"
+		}
+		return "denied"
+	}
+	return "not_determined"
+}
+
+func mapAutomationStatus(code int) string {
+	switch code {
+	case 0:
+		return "granted"
+	case -1743:
+		return "denied"
+	case -1744:
+		return "not_determined"
+	default:
+		return "not_determined"
+	}
+}
+
+func platformPermissions(_ context.Context) []PermissionItem {
+	sr := "denied"
+	if C.bhScreenRecordingGranted() == 1 {
+		sr = "granted"
+	}
+	ax := "denied"
+	if C.bhAccessibilityGranted() == 1 {
+		ax = "granted"
+	}
+	im := "not_determined"
+	switch C.bhInputMonitoringStatus() {
+	case 1:
+		im = "granted"
+	case 0:
+		im = "denied"
+	}
+	auto := mapAutomationStatus(int(C.bhAutomationSystemEventsStatus(0)))
+	fda := checkFullDiskAccessStatus()
+
+	return []PermissionItem{
+		{
+			ID:              "screen_recording",
+			Name:            "屏幕录制",
+			Description:     "用于采集本机桌面画面并在远程桌面中实时预览。",
+			Status:          sr,
+			CanPrompt:       true,
+			CanOpenSettings: true,
+		},
+		{
+			ID:              "accessibility",
+			Name:            "辅助功能",
+			Description:     "用于远程鼠标点击、滚轮、键盘输入以及桌面窗口识别与控制。",
+			Status:          ax,
+			CanPrompt:       true,
+			CanOpenSettings: true,
+		},
+		{
+			ID:              "input_monitoring",
+			Name:            "输入监控",
+			Description:     "用于远程键盘事件注入与快捷键透传。",
+			Status:          im,
+			CanPrompt:       true,
+			CanOpenSettings: true,
+		},
+		{
+			ID:              "automation",
+			Name:            "自动化 (System Events)",
+			Description:     "用于切换焦点应用、列出桌面窗口与执行 AppleScript 自动化。",
+			Status:          auto,
+			CanPrompt:       true,
+			CanOpenSettings: true,
+		},
+		{
+			ID:              "full_disk_access",
+			Name:            "完全磁盘访问",
+			Description:     "可选权限；用于访问受保护的系统目录或沙盒应用数据。",
+			Status:          fda,
+			CanPrompt:       false,
+			CanOpenSettings: true,
+		},
+	}
+}
+
+func openMacSystemSettings(uri string) error {
+	cmd := exec.Command("/usr/bin/open", uri)
+	return cmd.Start()
+}
+
+func requestPlatformPermission(ctx context.Context, id string, openSettings bool) (*PermissionRequestResult, error) {
+	var uri string
+	switch id {
+	case "screen_recording":
+		uri = macPrivacyScreenCapture
+	case "accessibility":
+		uri = macPrivacyAccessibility
+	case "input_monitoring":
+		uri = macPrivacyListenEvent
+	case "automation":
+		uri = macPrivacyAutomation
+	case "full_disk_access":
+		uri = macPrivacyAllFiles
+	default:
+		return nil, fmt.Errorf("unknown permission id %q", id)
+	}
+
+	prompted := false
+	opened := false
+	if !openSettings {
+		switch id {
+		case "screen_recording":
+			C.bhRequestScreenRecording()
+			prompted = true
+		case "accessibility":
+			C.bhRequestAccessibility()
+			prompted = true
+		case "input_monitoring":
+			C.bhRequestInputMonitoring()
+			prompted = true
+		case "automation":
+			// Trigger consent dialog asynchronously if needed so HTTP request returns promptly.
+			done := make(chan struct{})
+			go func() {
+				_ = C.bhAutomationSystemEventsStatus(1)
+				close(done)
+			}()
+			select {
+			case <-done:
+			case <-time.After(300 * time.Millisecond):
+			}
+			prompted = true
+		case "full_disk_access":
+			if err := openMacSystemSettings(uri); err != nil {
+				return nil, err
+			}
+			opened = true
+		}
+	} else {
+		if err := openMacSystemSettings(uri); err != nil {
+			return nil, err
+		}
+		opened = true
+	}
+
+	items := platformPermissions(ctx)
+	var cur PermissionItem
+	for _, it := range items {
+		if strings.EqualFold(it.ID, id) {
+			cur = it
+			break
+		}
+	}
+	return &PermissionRequestResult{
+		OK:             true,
+		Prompted:       prompted,
+		OpenedSettings: opened,
+		Item:           cur,
+		Items:          items,
+	}, nil
+}

@@ -125,6 +125,7 @@ interface ChatViewProps {
   takeovers: TakeoverRequest[];
   questions: PendingQuestion[];
   deskOpen: boolean;
+  inDesktopSidebar?: boolean;
   lang: ResolvedLang;
   inputRef: React.RefObject<HTMLTextAreaElement | null>;
   onOpenMenu: () => void;
@@ -135,9 +136,10 @@ interface ChatViewProps {
   onOpenDetail: () => void;
   onOpenCollab?: (peerId: string) => void;
   onOpenCreate: () => void;
+  onSelectBot?: (id: string) => void;
+  onCloseDesktopChat?: () => void;
   onSendMessage: (text: string, mediaIds?: string[]) => Promise<void>;
   onInterrupt: () => Promise<void>;
-  children?: React.ReactNode;
 }
 
 export const ChatView: React.FC<ChatViewProps> = ({
@@ -153,6 +155,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
   takeovers,
   questions,
   deskOpen,
+  inDesktopSidebar = false,
   lang,
   inputRef,
   onOpenMenu,
@@ -163,9 +166,10 @@ export const ChatView: React.FC<ChatViewProps> = ({
   onOpenDetail,
   onOpenCollab,
   onOpenCreate,
+  onSelectBot,
+  onCloseDesktopChat,
   onSendMessage,
   onInterrupt,
-  children,
 }) => {
   const t = (k: string, vars?: Record<string, string | number>) => translate(lang, k, vars);
   const [draft, setDraft] = useState('');
@@ -510,75 +514,114 @@ export const ChatView: React.FC<ChatViewProps> = ({
 
   return (
     <div
-      id="chatView"
-      className="main-pane view-pane"
-      hidden={hidden}
-      aria-hidden={viewState !== 'active'}
-      data-view-state={viewState}
-      data-view-dir={viewDir}
-      data-view-anim={viewAnim ? '1' : '0'}
+      id={inDesktopSidebar ? 'deskChatView' : 'chatView'}
+      className={`main-pane${inDesktopSidebar ? ' desk-chat-pane' : ' view-pane'}`}
+      hidden={inDesktopSidebar ? false : hidden}
+      aria-hidden={inDesktopSidebar ? false : viewState !== 'active'}
+      data-view-state={inDesktopSidebar ? 'active' : viewState}
+      data-view-dir={inDesktopSidebar ? undefined : viewDir}
+      data-view-anim={inDesktopSidebar ? '0' : viewAnim ? '1' : '0'}
       style={botAccentStyle}
     >
       <div className="chat-hd">
-        <button
-          id="menuBtn"
-          type="button"
-          className="ghost menu"
-          aria-label={t('expandSide')}
-          title={t('expandSideTitle')}
-          onClick={onOpenMenu}
-        >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-            <path d="M4 7h16M4 12h16M4 17h10" />
-          </svg>
-        </button>
-        <div id="hdAv">{activeBot ? <BotAvatar id={activeBot.id} bots={bots} /> : null}</div>
+        {!inDesktopSidebar && (
+          <button
+            id="menuBtn"
+            type="button"
+            className="ghost menu"
+            aria-label={t('expandSide')}
+            title={t('expandSideTitle')}
+            onClick={onOpenMenu}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <path d="M4 7h16M4 12h16M4 17h10" />
+            </svg>
+          </button>
+        )}
+        <div id={inDesktopSidebar ? undefined : 'hdAv'}>
+          {activeBot ? <BotAvatar id={activeBot.id} bots={bots} /> : null}
+        </div>
         <div className="who">
-          <h1 id="hdName">{activeBot ? activeBot.name : 'Pebble'}</h1>
+          {inDesktopSidebar && bots.length > 0 ? (
+            <select
+              id="deskChatBotSel"
+              className="desk-chat-bot-sel"
+              aria-label={t('deskSwitchBot')}
+              value={activeBot?.id || ''}
+              onChange={(e) => {
+                if (e.target.value) onSelectBot?.(e.target.value);
+              }}
+            >
+              {bots.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.name}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <h1 id={inDesktopSidebar ? undefined : 'hdName'}>{activeBot ? activeBot.name : 'Pebble'}</h1>
+          )}
         </div>
         <div className="hd-acts">
-          <button
-            id="deskBtn"
-            type="button"
-            className={`ghost${deskOpen ? ' active' : ''}`}
-            aria-label={t('remoteDesktop')}
-            title={t('remoteDesktop')}
-            onClick={onToggleDesktop}
-          >
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.9"
-              strokeLinecap="round"
-              strokeLinejoin="round"
+          {inDesktopSidebar ? (
+            <button
+              id="deskChatCloseBtn"
+              type="button"
+              className="ghost"
+              aria-label={t('close')}
+              title={t('close')}
+              onClick={onCloseDesktopChat}
             >
-              <rect x="2" y="4" width="20" height="14" rx="2.5" />
-              <path d="M8 21h8M12 18v3" />
-            </svg>
-            <span id="deskDot" className="desk-dot" hidden={takeovers.length === 0} />
-          </button>
-          <button
-            id="detailBtn"
-            type="button"
-            className="ghost"
-            aria-label={t('details')}
-            title={t('details')}
-            disabled={!activeBot}
-            onClick={onOpenDetail}
-          >
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.9"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
-              <path d="M14 3v5h5M9 13h6M9 17h4" />
-            </svg>
-          </button>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                <path d="M6 6l12 12M18 6 6 18" />
+              </svg>
+            </button>
+          ) : (
+            <>
+              <button
+                id="deskBtn"
+                type="button"
+                className={`ghost${deskOpen ? ' active' : ''}`}
+                aria-label={t('remoteDesktop')}
+                title={t('remoteDesktop')}
+                onClick={onToggleDesktop}
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.9"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <rect x="2" y="4" width="20" height="14" rx="2.5" />
+                  <path d="M8 21h8M12 18v3" />
+                </svg>
+                <span id="deskDot" className="desk-dot" hidden={takeovers.length === 0} />
+              </button>
+              <button
+                id="detailBtn"
+                type="button"
+                className="ghost"
+                aria-label={t('details')}
+                title={t('details')}
+                disabled={!activeBot}
+                onClick={onOpenDetail}
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.9"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
+                  <path d="M14 3v5h5M9 13h6M9 17h4" />
+                </svg>
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -614,8 +657,8 @@ export const ChatView: React.FC<ChatViewProps> = ({
 
       <div className="main-split">
         <div className="chat-col">
-          <div ref={scrollRef} id="scroll" className="scroll">
-            <div id="thread" className="thread">
+          <div ref={scrollRef} id={inDesktopSidebar ? undefined : 'scroll'} className="scroll">
+            <div id={inDesktopSidebar ? undefined : 'thread'} className="thread">
               {!activeBot ? (
                 <div className="hello">
                   <h2>{t('emptyBotsTitle')}</h2>
@@ -1008,7 +1051,6 @@ export const ChatView: React.FC<ChatViewProps> = ({
             </div>
           </div>
         </div>
-        {children}
       </div>
       {previewImg && (
         <div

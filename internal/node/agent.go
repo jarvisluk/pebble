@@ -484,7 +484,8 @@ func (a *Agent) execute(ctx context.Context, cmd Command) Result {
 		return a.runOSAScript(ctx, cmd.Args)
 	case "open":
 		return a.openTarget(ctx, cmd.Args)
-	case "desktop_status", "desktop_windows", "desktop_focus",
+	case "desktop_status", "desktop_permissions", "desktop_permission_request",
+		"desktop_windows", "desktop_focus",
 		"desktop_frame", "desktop_input", "desktop_stream_offer",
 		"desktop_stream_close", "desktop_stream_set_input",
 		"desktop_setup", "desktop_power":
@@ -511,6 +512,19 @@ func (a *Agent) execDesktop(ctx context.Context, action string, raw json.RawMess
 	case "desktop_status":
 		st, err := eng.Status(ctx)
 		return jsonOut(st, err)
+	case "desktop_permissions":
+		res, err := eng.Permissions(ctx)
+		return jsonOut(res, err)
+	case "desktop_permission_request":
+		var args struct {
+			Permission   string `json:"permission"`
+			OpenSettings bool   `json:"openSettings"`
+		}
+		if err := json.Unmarshal(raw, &args); err != nil || strings.TrimSpace(args.Permission) == "" {
+			return Result{OK: false, Error: "permission is required"}
+		}
+		res, err := eng.RequestPermission(ctx, args.Permission, args.OpenSettings)
+		return jsonOut(res, err)
 	case "desktop_windows":
 		wins, err := eng.Windows(ctx)
 		if wins == nil {

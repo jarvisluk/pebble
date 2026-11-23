@@ -305,3 +305,26 @@ export interface PendingAttachment {
   uploading?: boolean;
   error?: string;
 }
+
+export interface DesktopPermissionItem {
+  id: string;
+  name: string;
+  description: string;
+  status: 'granted' | 'denied' | 'not_determined' | 'unsupported' | string;
+  canPrompt?: boolean;
+  canOpenSettings?: boolean;
+}
+
+export interface DesktopPermissionsResponse {
+  target?: string;
+  platform: string;
+  items: DesktopPermissionItem[];
+}
+
+export interface DesktopPermissionRequestResponse {
+  ok: boolean;
+  prompted?: boolean;
+  openedSettings?: boolean;
+  item: DesktopPermissionItem;
+  items: DesktopPermissionItem[];
+}

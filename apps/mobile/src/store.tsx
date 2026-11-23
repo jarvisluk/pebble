@@ -18,6 +18,8 @@ import type {
   BotStatus,
   ChatMessage,
   DesktopFrame,
+  DesktopPermissionRequestResponse,
+  DesktopPermissionsResponse,
   DesktopTarget,
   HostTailscaleStatus,
   MagpieMemoryList,
@@ -192,6 +194,8 @@ interface HubContextValue {
     takeovers: TakeoverRequest[];
     status?: { screenRecording?: string; accessibility?: string };
   }>;
+  fetchDesktopPermissions: (target?: string) => Promise<DesktopPermissionsResponse>;
+  requestDesktopPermission: (target: string, permission: string, openSettings?: boolean) => Promise<DesktopPermissionRequestResponse>;
   fetchDesktopFrame: (target: string, windowId?: string) => Promise<DesktopFrame>;
   sendDesktopInput: (body: Record<string, unknown>) => Promise<void>;
   resolveTakeover: (id: string, note?: string) => Promise<void>;
@@ -1040,6 +1044,23 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
     return d;
   }, []);
 
+  const fetchDesktopPermissions = useCallback(async (target = 'local') => {
+    return apiRequest<DesktopPermissionsResponse>(
+      baseURLRef.current,
+      authTokenRef.current,
+      `/api/desktop/permissions?target=${encodeURIComponent(target || 'local')}`
+    );
+  }, []);
+
+  const requestDesktopPermission = useCallback(async (target: string, permission: string, openSettings = false) => {
+    return apiRequest<DesktopPermissionRequestResponse>(
+      baseURLRef.current,
+      authTokenRef.current,
+      '/api/desktop/permissions/request',
+      { method: 'POST', body: { target: target || 'local', permission, openSettings } }
+    );
+  }, []);
+
   const fetchDesktopFrame = useCallback(async (target: string, windowId = '') => {
     return apiRequest<DesktopFrame>(
       baseURLRef.current,
@@ -1146,6 +1167,8 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
         logoutTailscale,
         refreshDesktopTargets,
         fetchDesktopState,
+        fetchDesktopPermissions,
+        requestDesktopPermission,
         fetchDesktopFrame,
         sendDesktopInput,
         resolveTakeover,

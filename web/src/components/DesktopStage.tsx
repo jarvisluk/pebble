@@ -17,10 +17,14 @@ interface DesktopStageProps {
   screenUpdateSeq: number;
   liveScreen: ScreenState | null;
   takeovers: TakeoverRequest[];
+  chatOpen: boolean;
+  activeBotName?: string;
   lang: ResolvedLang;
   onChangeTarget: (target: string) => void;
   onTakeoversChange: (items: TakeoverRequest[]) => void;
   onResolveTakeover: (to: TakeoverRequest) => Promise<void>;
+  onToggleChat: () => void;
+  onOpenPermissions?: () => void;
   onClose: () => void;
 }
 
@@ -30,10 +34,14 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
   screenUpdateSeq,
   liveScreen,
   takeovers,
+  chatOpen,
+  activeBotName,
   lang,
   onChangeTarget,
   onTakeoversChange,
   onResolveTakeover,
+  onToggleChat,
+  onOpenPermissions,
   onClose,
 }) => {
   const t = (k: string, vars?: Record<string, string | number>) => translate(lang, k, vars);
@@ -737,13 +745,26 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
               )}
             </div>
           )}
-          <button type="button" id="deskRetryBtn" className="btn" hidden={!showRetry} onClick={() => void startStream()}>
-            {t('retryConnect')}
-          </button>
+          <div className="row-inline-sm row-wrap">
+            {hostStatus?.screenRecording === 'denied' && onOpenPermissions && (
+              <button
+                type="button"
+                id="deskGoPermsBtn"
+                className="btn go"
+                onClick={onOpenPermissions}
+              >
+                {t('deskGoPermissions')}
+              </button>
+            )}
+            <button type="button" id="deskRetryBtn" className="btn" hidden={!showRetry} onClick={() => void startStream()}>
+              {t('retryConnect')}
+            </button>
+          </div>
         </div>
 
         <div className="d-top-stack">
-          <div className="d-pill tl">
+          <div className="d-top-row">
+            <div className="d-pill tl">
             <div className="d-tl-row">
               <button
                 type="button"
@@ -845,6 +866,35 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
               )}
             </dl>
           </div>
+
+          <div className="d-pill tr">
+            <div className="d-tools">
+              <button
+                type="button"
+                id="deskChatBtn"
+                className={`d-btn d-chat-btn${chatOpen ? ' on' : ''}`}
+                title={t('deskChatSidebarTitle')}
+                onClick={onToggleChat}
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                </svg>
+                <span>{activeBotName ? activeBotName : t('deskChatSidebar')}</span>
+              </button>
+              <button
+                type="button"
+                id="deskCloseTopBtn"
+                className="d-btn"
+                title={t('closeDesktop')}
+                onClick={onClose}
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                  <path d="M6 6l12 12M18 6 6 18" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        </div>
 
           {activeTakeover && (
             <div id="deskAlert" className="d-pill top-alert takeover">

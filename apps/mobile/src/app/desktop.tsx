@@ -10,15 +10,18 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
   BothubH264View,
   type BothubH264ViewRef,
   type H264MetaEvent,
 } from '../../modules/bothub-tunnel';
-import { ModalHeader } from '../components/ModalHeader';
+import { DesktopChatSidebar } from '../components/DesktopChatSidebar';
+import { XIcon } from '../components/Icons';
 import { useI18n } from '../i18n';
 import { useHub } from '../store';
 import { MONO_FONT, useTheme } from '../theme';
@@ -28,9 +31,14 @@ export default function DesktopScreen() {
   const { target: initialTarget } = useLocalSearchParams<{ target?: string }>();
   const theme = useTheme();
   const { t } = useI18n();
+  const insets = useSafeAreaInsets();
+  const { width: winWidth } = useWindowDimensions();
+  const isWide = winWidth >= 768;
+
   const {
     baseURL,
     authToken,
+    bots,
     desktopTargets,
     takeovers,
     refreshDesktopTargets,
@@ -52,16 +60,18 @@ export default function DesktopScreen() {
   const [boxSize, setBoxSize] = useState({ width: 0, height: 0 });
   const [textDraft, setTextDraft] = useState('');
   const [showTextBar, setShowTextBar] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatBotId, setChatBotId] = useState('');
 
-  const mountedRef = useRef(true);
   const h264Ref = useRef<BothubH264ViewRef | null>(null);
 
+  const resolvedBotId = useMemo(() => {
+    if (chatBotId && bots.some((b) => b.id === chatBotId)) return chatBotId;
+    return bots[0]?.id || '';
+  }, [bots, chatBotId]);
+
   useEffect(() => {
-    mountedRef.current = true;
     void refreshDesktopTargets().catch(() => {});
-    return () => {
-      mountedRef.current = false;
-    };
   }, [refreshDesktopTargets]);
 
   useEffect(() => {
@@ -83,7 +93,7 @@ export default function DesktopScreen() {
       stop = true;
       clearInterval(timer);
     };
-  }, [fetchDesktopState, selectedTarget]);
+  }, [fetchDesktopState, selectedTarget, t]);
 
   const wsURL = useMemo(() => {
     if (!baseURL) return '';
@@ -162,209 +172,258 @@ export default function DesktopScreen() {
   };
 
   return (
-    <View style={[styles.root, { backgroundColor: theme.page }]}>
-      <ModalHeader
-        title={t('remoteDesktop')}
-        onClose={closeSheet}
-        rightLabel={streaming ? t('pause') : t('resume')}
-        onRightPress={() => setStreaming((v) => !v)}
-      />
+    <View style={[styles.root, { backgroundColor: '#111110' }]}>
+      <View style={styles.mainArea}>
+        <KeyboardAvoidingView
+          style={[styles.stageCol, { paddingTop: insets.top + 6, paddingBottom: insets.bottom }]}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
+          <View style={styles.topStrip}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.targetRow}>
+              <Pressable onPress={closeSheet} style={[styles.pillBtn, { backgroundColor: '#1f1d1b' }]}>
+                <XIcon size={16} color="#f3f1ee" />
+              </Pressable>
 
-      <KeyboardAvoidingView
-        style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
-        <View style={styles.topStrip}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.targetRow}>
-            {targets.map((item) => {
-              const active = selectedTarget === item.id;
-              return (
-                <Pressable
-                  key={item.id}
-                  onPress={() => {
-                    setSelectedTarget(item.id);
-                    setMeta(null);
-                    setConnected(false);
-                  }}
-                  style={[
-                    styles.targetPill,
-                    { backgroundColor: active ? theme.accentSoft : theme.card },
-                  ]}
-                >
-                  <Text style={[styles.targetTxt, { color: active ? theme.accent : theme.text2 }]}>
-                    {item.name}
+              {targets.map((item) => {
+                const active = selectedTarget === item.id;
+                return (
+                  <Pressable
+                    key={item.id}
+                    onPress={() => {
+                      setSelectedTarget(item.id);
+                      setMeta(null);
+                      setConnected(false);
+                    }}
+                    style={[
+                      styles.targetPill,
+                      { backgroundColor: active ? theme.accent : '#1f1d1b' },
+                    ]}
+                  >
+                    <Text style={[styles.targetTxt, { color: active ? theme.accentText : '#f3f1ee' }]}>
+                      {item.name}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+
+              {(
+                [
+                  { id: 'auto', label: t('deskPresetAuto') },
+                  { id: 'high', label: t('deskPresetHigh') },
+                  { id: 'medium', label: t('deskPresetMedium') },
+                  { id: 'low', label: t('deskPresetLow') },
+                ] as const
+              ).map((p) => {
+                const on = preset === p.id;
+                return (
+                  <Pressable
+                    key={p.id}
+                    onPress={() => setPreset(p.id)}
+                    style={[styles.targetPill, { backgroundColor: on ? theme.sage : '#1f1d1b' }]}
+                  >
+                    <Text style={[styles.targetTxt, { color: on ? theme.sageInk : '#a6a09a' }]}>{p.label}</Text>
+                  </Pressable>
+                );
+              })}
+
+              {connected && (
+                <View style={[styles.targetPill, { backgroundColor: '#1f1d1b' }]}>
+                  <Text style={[styles.targetTxt, { color: '#a6a09a', fontFamily: MONO_FONT }]}>
+                    {`H.264 · ${fps} fps`}
                   </Text>
-                </Pressable>
-              );
-            })}
-            {(
-              [
-                { id: 'auto', label: t('deskPresetAuto') },
-                { id: 'high', label: t('deskPresetHigh') },
-                { id: 'medium', label: t('deskPresetMedium') },
-                { id: 'low', label: t('deskPresetLow') },
-              ] as const
-            ).map((p) => {
-              const on = preset === p.id;
-              return (
-                <Pressable
-                  key={p.id}
-                  onPress={() => setPreset(p.id)}
-                  style={[styles.targetPill, { backgroundColor: on ? theme.sage : theme.card }]}
-                >
-                  <Text style={[styles.targetTxt, { color: on ? theme.sageInk : theme.text2 }]}>{p.label}</Text>
-                </Pressable>
-              );
-            })}
-            {connected && (
-              <View style={[styles.targetPill, { backgroundColor: theme.card }]}>
-                <Text style={[styles.targetTxt, { color: theme.text2, fontFamily: MONO_FONT }]}>
-                  {`H.264 · ${fps} fps`}
+                </View>
+              )}
+
+              <Pressable
+                onPress={() => setStreaming((v) => !v)}
+                style={[styles.targetPill, { backgroundColor: '#1f1d1b' }]}
+              >
+                <Text style={[styles.targetTxt, { color: '#f3f1ee' }]}>
+                  {streaming ? t('pause') : t('resume')}
                 </Text>
-              </View>
-            )}
-          </ScrollView>
-        </View>
+              </Pressable>
 
-        {activeTakeover ? (
-          <View style={[styles.alertCard, { backgroundColor: theme.pink }]}>
-            <Text style={[styles.alertTxt, { color: theme.pinkInk }]}>
-              {t('takeoverBanner', { bot: activeTakeover.botName || activeTakeover.botId, reason: activeTakeover.reason })}
-            </Text>
-            <Pressable
-              onPress={() => void resolveTakeover(activeTakeover.id)}
-              style={[styles.alertBtn, { backgroundColor: theme.accent }]}
-            >
-              <Text style={[styles.alertBtnTxt, { color: theme.accentText }]}>{t('doneResumeAI')}</Text>
-            </Pressable>
+              <Pressable
+                onPress={() => setChatOpen((v) => !v)}
+                style={[
+                  styles.targetPill,
+                  { backgroundColor: chatOpen ? theme.accent : '#1f1d1b' },
+                ]}
+              >
+                <Text style={[styles.targetTxt, { color: chatOpen ? theme.accentText : '#f3f1ee' }]}>
+                  {t('deskChatSidebar')}
+                </Text>
+              </Pressable>
+            </ScrollView>
           </View>
-        ) : null}
 
-        <View style={styles.stageWrap} onLayout={onStageLayout}>
-          {Platform.OS !== 'web' && wsURL ? (
-            <Pressable
-              style={styles.touchLayer}
-              onPress={(e) => onTapScreen(e.nativeEvent.locationX, e.nativeEvent.locationY, 'click')}
-              onLongPress={(e) => onTapScreen(e.nativeEvent.locationX, e.nativeEvent.locationY, 'right_click')}
-            >
-              <BothubH264View
-                ref={h264Ref as any}
-                style={styles.stageImage}
-                url={wsURL}
-                token={authToken}
-                preset={preset}
-                active={streaming}
-                onMeta={(ev) => {
-                  setMeta(ev.nativeEvent);
-                  setError('');
-                }}
-                onStatus={(ev) => {
-                  setConnected(ev.nativeEvent.connected);
-                  setFps(ev.nativeEvent.fps);
-                }}
-                onStreamError={(ev) => {
-                  const msg = ev.nativeEvent.error || t('captureFailed');
-                  setError(msg);
-                  if (ev.nativeEvent.code === 'screen_recording_denied') {
-                    setStreaming(false);
-                  }
-                }}
-              />
-            </Pressable>
-          ) : (
-            <View style={styles.centerBox}>
-              <ActivityIndicator size="small" color={theme.accent} />
-              <Text style={styles.waitTxt}>{error || t('deskH264Connecting')}</Text>
-            </View>
-          )}
-          {!connected && Platform.OS !== 'web' && (
-            <View style={[styles.centerBox, StyleSheet.absoluteFill]} pointerEvents="none">
-              <ActivityIndicator size="small" color={theme.accent} />
-              <Text style={styles.waitTxt}>{error || t('deskH264Connecting')}</Text>
-            </View>
-          )}
-          {connected && error ? (
-            <View style={styles.errFloat}>
-              <Text style={styles.errFloatTxt}>{error}</Text>
+          {activeTakeover ? (
+            <View style={[styles.alertCard, { backgroundColor: theme.pink }]}>
+              <Text style={[styles.alertTxt, { color: theme.pinkInk }]}>
+                {t('takeoverBanner', { bot: activeTakeover.botName || activeTakeover.botId, reason: activeTakeover.reason })}
+              </Text>
+              <Pressable
+                onPress={() => void resolveTakeover(activeTakeover.id)}
+                style={[styles.alertBtn, { backgroundColor: theme.accent }]}
+              >
+                <Text style={[styles.alertBtnTxt, { color: theme.accentText }]}>{t('doneResumeAI')}</Text>
+              </Pressable>
             </View>
           ) : null}
-        </View>
 
-        <View style={[styles.controlsBar, { backgroundColor: theme.card }]}>
-          {showTextBar && (
-            <View style={styles.typeRow}>
-              <TextInput
-                value={textDraft}
-                onChangeText={setTextDraft}
-                placeholder={t('typeDesktopPh')}
-                placeholderTextColor={theme.mute}
-                onSubmitEditing={() => void onSendText()}
-                style={[styles.typeInput, { backgroundColor: theme.s1, color: theme.text }]}
-              />
+          <View style={styles.stageWrap} onLayout={onStageLayout}>
+            {Platform.OS !== 'web' && wsURL ? (
               <Pressable
-                onPress={() => void onSendText()}
-                style={[styles.keyBtn, { backgroundColor: theme.accent }]}
+                style={styles.touchLayer}
+                onPress={(e) => onTapScreen(e.nativeEvent.locationX, e.nativeEvent.locationY, 'click')}
+                onLongPress={(e) => onTapScreen(e.nativeEvent.locationX, e.nativeEvent.locationY, 'right_click')}
               >
-                <Text style={[styles.keyTxt, { color: theme.accentText }]}>{t('send')}</Text>
+                <BothubH264View
+                  ref={h264Ref as any}
+                  style={styles.stageImage}
+                  url={wsURL}
+                  token={authToken}
+                  preset={preset}
+                  active={streaming}
+                  onMeta={(ev) => {
+                    setMeta(ev.nativeEvent);
+                    setError('');
+                  }}
+                  onStatus={(ev) => {
+                    setConnected(ev.nativeEvent.connected);
+                    setFps(ev.nativeEvent.fps);
+                  }}
+                  onStreamError={(ev) => {
+                    const msg = ev.nativeEvent.error || t('captureFailed');
+                    setError(msg);
+                    if (ev.nativeEvent.code === 'screen_recording_denied') {
+                      setStreaming(false);
+                    }
+                  }}
+                />
               </Pressable>
-            </View>
-          )}
+            ) : (
+              <View style={styles.centerBox}>
+                <ActivityIndicator size="small" color={theme.accent} />
+                <Text style={styles.waitTxt}>{error || t('deskH264Connecting')}</Text>
+              </View>
+            )}
+            {!connected && Platform.OS !== 'web' && (
+              <View style={[styles.centerBox, StyleSheet.absoluteFill]} pointerEvents="none">
+                <ActivityIndicator size="small" color={theme.accent} />
+                <Text style={styles.waitTxt}>{error || t('deskH264Connecting')}</Text>
+              </View>
+            )}
+            {connected && error ? (
+              <View style={styles.errFloat}>
+                <Text style={styles.errFloatTxt}>{error}</Text>
+              </View>
+            ) : null}
+          </View>
 
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.keysRow}>
-            <Pressable
-              onPress={() => setShowTextBar((v) => !v)}
-              style={[styles.keyBtn, { backgroundColor: showTextBar ? theme.accentSoft : theme.s1 }]}
-            >
-              <Text style={[styles.keyTxt, { color: showTextBar ? theme.accent : theme.text }]}>{t('aaInput')}</Text>
-            </Pressable>
-            {[
-              { label: t('keyEnter'), body: { kind: 'key', key: 'Return' } },
-              { label: t('keyBackspace'), body: { kind: 'key', key: 'Backspace' } },
-              { label: 'Esc', body: { kind: 'key', key: 'Escape' } },
-              { label: 'Tab', body: { kind: 'key', key: 'Tab' } },
-              { label: t('keyScrollUp'), body: { kind: 'scroll', deltaY: 8 } },
-              { label: t('keyScrollDown'), body: { kind: 'scroll', deltaY: -8 } },
-            ].map((item) => (
+          <View style={[styles.controlsBar, { backgroundColor: '#1f1d1b' }]}>
+            {showTextBar && (
+              <View style={styles.typeRow}>
+                <TextInput
+                  value={textDraft}
+                  onChangeText={setTextDraft}
+                  placeholder={t('typeDesktopPh')}
+                  placeholderTextColor="#a6a09a"
+                  onSubmitEditing={() => void onSendText()}
+                  style={[styles.typeInput, { backgroundColor: '#2c2926', color: '#f3f1ee' }]}
+                />
+                <Pressable
+                  onPress={() => void onSendText()}
+                  style={[styles.keyBtn, { backgroundColor: theme.accent }]}
+                >
+                  <Text style={[styles.keyTxt, { color: theme.accentText }]}>{t('send')}</Text>
+                </Pressable>
+              </View>
+            )}
+
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.keysRow}>
               <Pressable
-                key={item.label}
-                onPress={() => void sendInput(item.body)}
-                style={[styles.keyBtn, { backgroundColor: theme.s1 }]}
+                onPress={() => setShowTextBar((v) => !v)}
+                style={[styles.keyBtn, { backgroundColor: showTextBar ? theme.accent : '#2c2926' }]}
               >
-                <Text style={[styles.keyTxt, { color: theme.text2, fontFamily: MONO_FONT }]}>{item.label}</Text>
+                <Text style={[styles.keyTxt, { color: showTextBar ? theme.accentText : '#f3f1ee' }]}>{t('aaInput')}</Text>
               </Pressable>
-            ))}
-          </ScrollView>
+              {[
+                { label: t('keyEnter'), body: { kind: 'key', key: 'Return' } },
+                { label: t('keyBackspace'), body: { kind: 'key', key: 'Backspace' } },
+                { label: 'Esc', body: { kind: 'key', key: 'Escape' } },
+                { label: 'Tab', body: { kind: 'key', key: 'Tab' } },
+                { label: t('keyScrollUp'), body: { kind: 'scroll', deltaY: 8 } },
+                { label: t('keyScrollDown'), body: { kind: 'scroll', deltaY: -8 } },
+              ].map((item) => (
+                <Pressable
+                  key={item.label}
+                  onPress={() => void sendInput(item.body)}
+                  style={[styles.keyBtn, { backgroundColor: '#2c2926' }]}
+                >
+                  <Text style={[styles.keyTxt, { color: '#ccc7c1', fontFamily: MONO_FONT }]}>{item.label}</Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+          </View>
+        </KeyboardAvoidingView>
+
+        {isWide && chatOpen && resolvedBotId ? (
+          <View style={styles.sideInline}>
+            <DesktopChatSidebar
+              botId={resolvedBotId}
+              onSelectBot={setChatBotId}
+              onClose={() => setChatOpen(false)}
+            />
+          </View>
+        ) : null}
+      </View>
+
+      {!isWide && chatOpen && resolvedBotId ? (
+        <View style={[StyleSheet.absoluteFill, styles.drawerWrap]}>
+          <Pressable style={styles.drawerShade} onPress={() => setChatOpen(false)} />
+          <View style={[styles.drawerPanel, { width: Math.min(380, winWidth * 0.9) }]}>
+            <DesktopChatSidebar
+              botId={resolvedBotId}
+              onSelectBot={setChatBotId}
+              onClose={() => setChatOpen(false)}
+            />
+          </View>
         </View>
-      </KeyboardAvoidingView>
+      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  flex: { flex: 1 },
-  topStrip: { paddingHorizontal: 14, paddingBottom: 8 },
-  targetRow: { gap: 8 },
-  targetPill: { borderRadius: 999, paddingHorizontal: 13, paddingVertical: 7 },
-  targetTxt: { fontSize: 15, fontWeight: '700' },
+  mainArea: { flex: 1, flexDirection: 'row' },
+  stageCol: { flex: 1, minWidth: 0 },
+  sideInline: { width: 360 },
+  drawerWrap: { flexDirection: 'row', justifyContent: 'flex-end', zIndex: 20 },
+  drawerShade: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, backgroundColor: 'rgba(0,0,0,0.45)' },
+  drawerPanel: { height: '100%' },
+  topStrip: { paddingHorizontal: 10, paddingBottom: 6 },
+  targetRow: { gap: 8, alignItems: 'center' },
+  pillBtn: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
+  targetPill: { borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
+  targetTxt: { fontSize: 13.5, fontWeight: '700' },
   alertCard: {
-    marginHorizontal: 14,
+    marginHorizontal: 12,
     marginBottom: 8,
-    borderRadius: 16,
+    borderRadius: 14,
     paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingVertical: 8,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 10,
   },
-  alertTxt: { flex: 1, fontSize: 15, fontWeight: '600' },
-  alertBtn: { borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
-  alertBtnTxt: { fontSize: 13.5, fontWeight: '700' },
+  alertTxt: { flex: 1, fontSize: 14, fontWeight: '600' },
+  alertBtn: { borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6 },
+  alertBtnTxt: { fontSize: 13, fontWeight: '700' },
   stageWrap: {
     flex: 1,
-    marginHorizontal: 12,
-    borderRadius: 20,
     backgroundColor: '#111110',
     overflow: 'hidden',
     position: 'relative',
@@ -384,16 +443,16 @@ const styles = StyleSheet.create({
   },
   errFloatTxt: { color: '#fecaca', fontSize: 13 },
   controlsBar: {
-    marginTop: 8,
-    marginHorizontal: 12,
-    marginBottom: 14,
-    borderRadius: 20,
-    padding: 10,
+    marginTop: 6,
+    marginHorizontal: 10,
+    marginBottom: 8,
+    borderRadius: 18,
+    padding: 8,
     gap: 8,
   },
   typeRow: { flexDirection: 'row', gap: 8, alignItems: 'center' },
-  typeInput: { flex: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8, fontSize: 17 },
+  typeInput: { flex: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8, fontSize: 16 },
   keysRow: { gap: 8, alignItems: 'center' },
   keyBtn: { borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
-  keyTxt: { fontSize: 13.5, fontWeight: '600' },
+  keyTxt: { fontSize: 13, fontWeight: '600' },
 });

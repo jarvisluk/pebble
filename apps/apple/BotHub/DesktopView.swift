@@ -7,7 +7,11 @@ struct DesktopView: View {
     @Environment(HubStore.self) private var hub
     @Environment(Router.self) private var router
     @Environment(\.palette) private var p
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.horizontalSizeClass) private var hsc
+
     var initialTarget: String
+    var initialBotId: String? = nil
 
     @State private var target: String
     @State private var preset: String = "auto"
@@ -17,12 +21,19 @@ struct DesktopView: View {
     @State private var draft = ""
     @State private var pressStart = Date()
     @State private var streamCtrl = H264StreamController()
+    @State private var showChat = false
+    @State private var chatBotId: String
 
     private let stage = Color(hex: "#111110")
+    private let pillBg = Color(hex: "#1f1d1b")
+    private let pillText = Color(hex: "#f3f1ee")
+    private let pillMute = Color(hex: "#a6a09a")
 
-    init(initialTarget: String) {
+    init(initialTarget: String, initialBotId: String? = nil) {
         self.initialTarget = initialTarget
+        self.initialBotId = initialBotId
         _target = State(initialValue: initialTarget.isEmpty ? "local" : initialTarget)
+        _chatBotId = State(initialValue: initialBotId ?? "")
     }
 
     private var targets: [DesktopTarget] {
@@ -33,60 +44,35 @@ struct DesktopView: View {
         hub.takeovers.first { $0.target == target } ?? hub.takeovers.first
     }
 
+    private var resolvedBotId: String? {
+        if !chatBotId.isEmpty, hub.bots.contains(where: { $0.id == chatBotId }) { return chatBotId }
+        if let sel = router.selected, hub.bots.contains(where: { $0.id == sel }) { return sel }
+        return hub.bots.first?.id
+    }
+
+    private var isWide: Bool { hsc != .compact }
+
     var body: some View {
-        VStack(spacing: 10) {
-            if targets.count > 1 {
-                Picker(hub.t("remoteDesktop"), selection: Binding(get: { target }, set: { target = $0 })) {
-                    ForEach(targets) { Text($0.name ?? $0.id).tag($0.id) }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .padding(.horizontal, 12)
+        HStack(spacing: 0) {
+            desktopColumn
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(stage)
+
+            if isWide, showChat {
+                Divider()
+                sidebarChatView
+                    .frame(width: 360)
+                    .transition(.move(edge: .trailing))
             }
-            Picker("", selection: Binding(get: { preset }, set: { next in
-                preset = next
-                streamCtrl.setPreset(next)
-            })) {
-                Text(hub.t("deskPresetAuto")).tag("auto")
-                Text(hub.t("deskPresetHigh")).tag("high")
-                Text(hub.t("deskPresetMedium")).tag("medium")
-                Text(hub.t("deskPresetLow")).tag("low")
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .padding(.horizontal, 12)
-            if let to = activeTakeover {
-                HStack(spacing: 10) {
-                    Label(hub.t("takeoverBanner", ["bot": to.botName ?? to.botId ?? "Bot", "reason": to.reason ?? ""]), systemImage: "hand.raised.fill")
-                        .font(.system(size: 15)).foregroundStyle(p.pinkInk)
-                    Spacer(minLength: 4)
-                    Button(hub.t("doneResumeAI")) { Task { try? await hub.resolveTakeover(to.id) } }
-                        .buttonStyle(.borderedProminent).controlSize(.small)
-                }
-                .padding(12)
-                .background(p.pink, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .padding(.horizontal, 12)
-            }
-            stageView
-            controls
         }
-        .padding(.top, 8)
-        .navigationTitle(hub.t("remoteDesktop"))
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            SheetToolbar()
-            ToolbarItem(placement: .primaryAction) {
-                HStack(spacing: 8) {
-                    if streamCtrl.connected {
-                        Text("H.264 · \(streamCtrl.fps) fps")
-                            .font(.system(size: 12, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                    }
-                    Button { streaming.toggle() } label: {
-                        Label(streaming ? hub.t("pause") : hub.t("resume"), systemImage: streaming ? "pause.fill" : "play.fill")
-                    }
-                }
-            }
+        .animation(.easeOut(duration: 0.22), value: showChat)
+        .background(stage.ignoresSafeArea())
+        .sheet(isPresented: Binding(
+            get: { !isWide && showChat },
+            set: { if !$0 { showChat = false } }
+        )) {
+            sidebarChatView
+                .presentationDetents([.medium, .large])
         }
         .task { _ = try? await hub.refreshDesktopTargets() }
         .task(id: target) { await pollState() }
@@ -106,6 +92,139 @@ struct DesktopView: View {
         }
     }
 
+    private var desktopColumn: some View {
+        VStack(spacing: 8) {
+            topBar
+            if let to = activeTakeover {
+                HStack(spacing: 10) {
+                    Label(hub.t("takeoverBanner", ["bot": to.botName ?? to.botId ?? "Bot", "reason": to.reason ?? ""]), systemImage: "hand.raised.fill")
+                        .font(.system(size: 14)).foregroundStyle(p.pinkInk)
+                    Spacer(minLength: 4)
+                    Button(hub.t("doneResumeAI")) { Task { try? await hub.resolveTakeover(to.id) } }
+                        .buttonStyle(.borderedProminent).controlSize(.small)
+                }
+                .padding(10)
+                .background(p.pink, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .padding(.horizontal, 12)
+            }
+            stageView
+            controls
+        }
+        .padding(.top, 8)
+    }
+
+    private var topBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                Button { dismiss() } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(pillText)
+                        .frame(width: 32, height: 32)
+                        .background(pillBg, in: Circle())
+                }
+
+                if targets.count > 1 {
+                    Menu {
+                        ForEach(targets) { tr in
+                            Button {
+                                target = tr.id
+                            } label: {
+                                Label(tr.name ?? tr.id, systemImage: tr.id == target ? "checkmark" : "desktopcomputer")
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text(targets.first(where: { $0.id == target })?.name ?? target)
+                            Image(systemName: "chevron.down").font(.system(size: 11))
+                        }
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(pillText)
+                        .padding(.horizontal, 12).frame(height: 32)
+                        .background(pillBg, in: Capsule())
+                    }
+                }
+
+                Menu {
+                    ForEach(["auto", "high", "medium", "low"], id: \.self) { pKey in
+                        let labelKey = pKey == "auto" ? "deskPresetAuto" : pKey == "high" ? "deskPresetHigh" : pKey == "medium" ? "deskPresetMedium" : "deskPresetLow"
+                        Button {
+                            preset = pKey
+                            streamCtrl.setPreset(pKey)
+                        } label: {
+                            Label(hub.t(labelKey), systemImage: preset == pKey ? "checkmark" : "slider.horizontal.3")
+                        }
+                    }
+                } label: {
+                    let curKey = preset == "auto" ? "deskPresetAuto" : preset == "high" ? "deskPresetHigh" : preset == "medium" ? "deskPresetMedium" : "deskPresetLow"
+                    HStack(spacing: 4) {
+                        Text(hub.t(curKey))
+                        Image(systemName: "chevron.down").font(.system(size: 11))
+                    }
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(pillText)
+                    .padding(.horizontal, 12).frame(height: 32)
+                    .background(pillBg, in: Capsule())
+                }
+
+                if streamCtrl.connected {
+                    Text("H.264 · \(streamCtrl.fps) fps")
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundStyle(pillMute)
+                        .padding(.horizontal, 10).frame(height: 32)
+                        .background(pillBg, in: Capsule())
+                }
+
+                Button { streaming.toggle() } label: {
+                    Image(systemName: streaming ? "pause.fill" : "play.fill")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(pillText)
+                        .frame(width: 32, height: 32)
+                        .background(pillBg, in: Circle())
+                }
+
+                Button { showChat.toggle() } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "bubble.left.and.bubble.right")
+                            .font(.system(size: 13, weight: .semibold))
+                        Text(hub.t("deskChatSidebar"))
+                            .font(.system(size: 13, weight: .semibold))
+                    }
+                    .foregroundStyle(showChat ? p.accentText : pillText)
+                    .padding(.horizontal, 12).frame(height: 32)
+                    .background(showChat ? p.accent : pillBg, in: Capsule())
+                }
+            }
+            .padding(.horizontal, 12)
+        }
+    }
+
+    @ViewBuilder
+    private var sidebarChatView: some View {
+        NavigationStack {
+            if let bid = resolvedBotId {
+                ChatView(
+                    botId: bid,
+                    inDesktopSidebar: true,
+                    onSelectBot: { nextId in
+                        chatBotId = nextId
+                    },
+                    onCloseSidebar: {
+                        showChat = false
+                    }
+                )
+                .id(bid)
+            } else {
+                ContentUnavailableView(hub.t("noBotsYet"), systemImage: "bubble.left.and.bubble.right")
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button(hub.t("close")) { showChat = false }
+                        }
+                    }
+            }
+        }
+    }
+
     private var stageView: some View {
         GeometryReader { geo in
             let displayErr = !error.isEmpty ? error : streamCtrl.error
@@ -116,16 +235,16 @@ struct DesktopView: View {
                     VStack(spacing: 10) {
                         ProgressView().tint(p.accent)
                         Text(displayErr.isEmpty ? hub.t("deskH264Connecting") : displayErr)
-                            .font(.system(size: 15)).foregroundStyle(Color(hex: "#a6a09a")).multilineTextAlignment(.center)
+                            .font(.system(size: 15)).foregroundStyle(pillMute).multilineTextAlignment(.center)
                     }
                     .padding(20)
                 }
                 if streamCtrl.connected, !displayErr.isEmpty {
                     VStack {
                         Spacer()
-                        Text(displayErr).font(.system(size: 13)).foregroundStyle(Color(hex: "#f3f1ee"))
+                        Text(displayErr).font(.system(size: 13)).foregroundStyle(pillText)
                             .padding(.horizontal, 12).padding(.vertical, 6)
-                            .background(Color(hex: "#1f1d1b"), in: Capsule())
+                            .background(pillBg, in: Capsule())
                             .padding(10)
                     }
                 }
@@ -141,8 +260,6 @@ struct DesktopView: View {
                     }
             )
         }
-        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .padding(.horizontal, 12)
     }
 
     private var controls: some View {
@@ -176,7 +293,7 @@ struct DesktopView: View {
                 .padding(.horizontal, 12)
             }
         }
-        .padding(.bottom, 10)
+        .padding(.bottom, 8)
     }
 
     private func map(_ loc: CGPoint, in box: CGSize) -> CGPoint? {

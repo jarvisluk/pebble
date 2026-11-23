@@ -91,6 +91,14 @@
   gap: 8px;
   pointer-events: none;
 }
+.d-top-row {
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
 .d-pill {
   position: relative;
   pointer-events: auto;
@@ -102,6 +110,34 @@
   max-width: 100%;
 }
 .d-pill.tl { padding: 6px 10px; }
+.d-pill.tr { padding: 4px; flex: none; }
+.d-chat-btn { gap: 6px; padding: 0 10px; max-width: 180px; }
+.d-chat-btn span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.desk-chat-pane .chat-hd { padding: 0 12px; border-bottom: 1px solid var(--s2); }
+.desk-chat-pane .thread { padding: 12px 16px; }
+.desk-chat-pane .composer-wrap { padding: 0 12px 12px; }
+.desk-chat-pane .hello { padding: 24px 16px; }
+.desk-chat-bot-sel {
+  height: 32px;
+  max-width: 100%;
+  background-color: transparent;
+  font-size: var(--fs-md);
+  font-weight: 700;
+  color: var(--text);
+  padding: 0 22px 0 4px;
+  border-radius: 8px;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, var(--mute) 50%), linear-gradient(135deg, var(--mute) 50%, transparent 50%);
+  background-position: calc(100% - 11px) 50%, calc(100% - 7px) 50%;
+  background-size: 4px 4px;
+  background-repeat: no-repeat;
+  outline: none;
+}
+.desk-chat-bot-sel:hover { background-color: var(--s1); }
+.desk-chat-bot-sel option { background: var(--card); color: var(--text); }
 .d-tl-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .d-status-btn { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; color: var(--stage-text); white-space: nowrap; }
 .d-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--stage-mute); }
@@ -178,6 +214,7 @@
 }
 .d-btn:hover { background: rgba(255, 255, 255, .12); color: var(--stage-text); }
 .d-btn.on { background: var(--accent); color: var(--accent-text); }
+.desk-fs-shell .d-btn.on { background: var(--stage-text); color: #171717; }
 .d-btn svg { width: 15px; height: 15px; }
 
 .d-type-pop {

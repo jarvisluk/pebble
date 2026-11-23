@@ -16,7 +16,6 @@ enum SheetRoute: Identifiable, Equatable {
     case createBot
     case settings
     case devices
-    case desktop(target: String)
 
     var id: String {
         switch self {
@@ -24,9 +23,13 @@ enum SheetRoute: Identifiable, Equatable {
         case .createBot: return "create"
         case .settings: return "settings"
         case .devices: return "devices"
-        case let .desktop(t): return "desktop-\(t)"
         }
     }
+}
+
+struct DesktopPresentation: Identifiable, Equatable {
+    let id = UUID()
+    var target: String
 }
 
 @MainActor
@@ -36,6 +39,7 @@ final class Router {
     var preferredColumn: NavigationSplitViewColumn = .sidebar
     var sheet: SheetRoute?
     var detailOpen = false
+    var desktop: DesktopPresentation?
 
     func openBot(_ id: String) {
         selected = id
@@ -46,6 +50,12 @@ final class Router {
         detailOpen = false
         selected = nil
         preferredColumn = .sidebar
+    }
+
+    func openDesktop(_ target: String = "local") {
+        let resolved = target.trimmingCharacters(in: .whitespacesAndNewlines)
+        sheet = nil
+        desktop = DesktopPresentation(target: resolved.isEmpty ? "local" : resolved)
     }
 }
 
@@ -126,9 +136,20 @@ struct RootView: View {
         .onChange(of: router.selected) { _, id in
             if id == nil { router.detailOpen = false }
         }
+        .fullScreenCover(item: $r.desktop) { pres in
+            DesktopView(initialTarget: pres.target, initialBotId: router.selected)
+                .environment(\.palette, palette)
+                .environment(router)
+                .environment(hub)
+                .tint(palette.accent)
+                .buttonBorderShape(.capsule)
+                .font(.system(size: 16))
+                .preferredColorScheme(scheme0)
+        }
         .onChange(of: showGate) { _, gate in
             if gate {
                 router.sheet = nil
+                router.desktop = nil
                 router.closeBot()
             }
         }
@@ -155,7 +176,6 @@ struct SheetHost: View {
             case .createBot: CreateBotView()
             case .settings: SettingsView()
             case .devices: DevicesView()
-            case let .desktop(target): DesktopView(initialTarget: target)
             }
         }
         .wideSheet(route.isWide)
@@ -171,7 +191,6 @@ extension View {
 
 extension SheetRoute {
     var isWide: Bool {
-        if case .desktop = self { return true }
         if case .settings = self { return true }
         return false
     }

@@ -80,6 +80,7 @@ export default function App() {
 
   const [deskOpen, setDeskOpen] = useState(false);
   const [deskTarget, setDeskTarget] = useState('local');
+  const [deskChatOpen, setDeskChatOpen] = useState(false);
 
   const [panelOpen, setPanelOpen] = useState(false);
   const [panelDetail, setPanelDetail] = useState<BotDetail | null>(null);
@@ -106,6 +107,7 @@ export default function App() {
   const loginOpenRef = useRef(loginOpen);
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const deskInputRef = useRef<HTMLTextAreaElement>(null);
   const filterInputRef = useRef<HTMLInputElement>(null);
 
   activeBotIdRef.current = activeBotId;
@@ -536,6 +538,59 @@ export default function App() {
   const activeBot = bots.find((b) => b.id === activeBotId);
   const shadeOpen = mobileSideOpen || panelOpen || Boolean(collabPeerId);
 
+  const handleSendMessage = useCallback(
+    async (text: string, mediaIds?: string[]) => {
+      if (!activeBotId) return;
+      const pushLocal = (from: string, msgText: string) => {
+        const msg: ChatMessage = {
+          id: `${from}_${Date.now()}`,
+          botId: activeBotId,
+          role: 'system',
+          from,
+          text: msgText,
+          createdAt: new Date().toISOString(),
+        };
+        setMsgsMap((prev) => ({ ...prev, [activeBotId]: [...(prev[activeBotId] || []), msg] }));
+      };
+      try {
+        const body: Record<string, unknown> = { message: text, source: 'web' };
+        if (mediaIds && mediaIds.length > 0) {
+          body.mediaIds = mediaIds;
+        }
+        const data = await api<{ text?: string }>(
+          `/api/bots/${encodeURIComponent(activeBotId)}/message`,
+          { method: 'POST', body }
+        );
+        if (/^\/(bots|status|reset)$/.test(text) && data.text) {
+          pushLocal('command', data.text);
+        }
+        if (text === '/reset') void loadBots();
+      } catch (e) {
+        if (
+          e instanceof Error &&
+          e.message !== 'unauthorized' &&
+          !/interrupted$/.test(e.message)
+        ) {
+          pushLocal('error', e.message);
+        }
+      }
+    },
+    [activeBotId, loadBots]
+  );
+
+  const handleInterrupt = useCallback(async () => {
+    if (!activeBotId) return;
+    try {
+      const r = await api<{ interrupted?: boolean }>(
+        `/api/bots/${encodeURIComponent(activeBotId)}/interrupt`,
+        { method: 'POST' }
+      );
+      if (!r.interrupted) showToast(t('notRunning'));
+    } catch (e) {
+      if (e instanceof Error && e.message !== 'unauthorized') showToast(e.message);
+    }
+  }, [activeBotId, showToast, t]);
+
   const handleSideResizeStart = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
       if (e.button !== 0) return;
@@ -679,68 +734,9 @@ export default function App() {
               closeAllOverlays();
               setCreateOpen(true);
             }}
-            onSendMessage={async (text, mediaIds) => {
-              if (!activeBotId) return;
-              const pushLocal = (from: string, msgText: string) => {
-                const msg: ChatMessage = {
-                  id: `${from}_${Date.now()}`,
-                  botId: activeBotId,
-                  role: 'system',
-                  from,
-                  text: msgText,
-                  createdAt: new Date().toISOString(),
-                };
-                setMsgsMap((prev) => ({ ...prev, [activeBotId]: [...(prev[activeBotId] || []), msg] }));
-              };
-              try {
-                const body: Record<string, unknown> = { message: text, source: 'web' };
-                if (mediaIds && mediaIds.length > 0) {
-                  body.mediaIds = mediaIds;
-                }
-                const data = await api<{ text?: string }>(
-                  `/api/bots/${encodeURIComponent(activeBotId)}/message`,
-                  { method: 'POST', body }
-                );
-                if (/^\/(bots|status|reset)$/.test(text) && data.text) {
-                  pushLocal('command', data.text);
-                }
-                if (text === '/reset') void loadBots();
-              } catch (e) {
-                if (
-                  e instanceof Error &&
-                  e.message !== 'unauthorized' &&
-                  !/interrupted$/.test(e.message)
-                ) {
-                  pushLocal('error', e.message);
-                }
-              }
-            }}
-            onInterrupt={async () => {
-              if (!activeBotId) return;
-              try {
-                const r = await api<{ interrupted?: boolean }>(
-                  `/api/bots/${encodeURIComponent(activeBotId)}/interrupt`,
-                  { method: 'POST' }
-                );
-                if (!r.interrupted) showToast(t('notRunning'));
-              } catch (e) {
-                if (e instanceof Error && e.message !== 'unauthorized') showToast(e.message);
-              }
-            }}
-          >
-            <DesktopStage
-              open={deskOpen}
-              target={deskTarget}
-              screenUpdateSeq={screenSeq}
-              liveScreen={liveScreen}
-              takeovers={takeovers}
-              lang={lang}
-              onChangeTarget={setDeskTarget}
-              onTakeoversChange={setTakeovers}
-              onResolveTakeover={handleResolveTakeover}
-              onClose={() => setDeskOpen(false)}
-            />
-          </ChatView>
+            onSendMessage={handleSendMessage}
+            onInterrupt={handleInterrupt}
+          />
 
           <SettingsView
             hidden={viewTx.stateOf('settings') === 'hidden'}
@@ -783,6 +779,80 @@ export default function App() {
           />
           </div>
         </main>
+      </div>
+
+      <div
+        id="deskShell"
+        className={`desk-fs-shell${deskChatOpen ? ' chat-open' : ''}`}
+        hidden={!deskOpen}
+      >
+        <div className="desk-fs-main">
+          <DesktopStage
+            open={deskOpen}
+            target={deskTarget}
+            screenUpdateSeq={screenSeq}
+            liveScreen={liveScreen}
+            takeovers={takeovers}
+            chatOpen={deskChatOpen}
+            activeBotName={activeBot?.name}
+            lang={lang}
+            onChangeTarget={setDeskTarget}
+            onTakeoversChange={setTakeovers}
+            onResolveTakeover={handleResolveTakeover}
+            onToggleChat={() => setDeskChatOpen((v) => !v)}
+            onOpenPermissions={() => {
+              setDeskOpen(false);
+              setSettingsTab('desktop');
+              setView('settings');
+              void loadSettings();
+            }}
+            onClose={() => setDeskOpen(false)}
+          />
+        </div>
+        {deskChatOpen && (
+          <div className="desk-chat-shade" onClick={() => setDeskChatOpen(false)} />
+        )}
+        <aside id="deskChatSide" className="desk-chat-side" hidden={!deskChatOpen}>
+          {deskChatOpen && (
+            <ChatView
+              hidden={false}
+              viewState="active"
+              viewDir="forward"
+              viewAnim={false}
+              bots={bots}
+              activeBot={activeBot}
+              messages={activeBotId ? msgsMap[activeBotId] || [] : []}
+              seenIds={seenIdsRef.current}
+              toolName={activeBotId ? toolMap[activeBotId] : undefined}
+              takeovers={takeovers}
+              questions={activeBotId ? questions.filter((q) => q.botId === activeBotId) : []}
+              deskOpen={deskOpen}
+              inDesktopSidebar
+              lang={lang}
+              inputRef={deskInputRef}
+              onReplyQuestion={handleReplyQuestion}
+              onOpenMenu={() => {}}
+              onToggleDesktop={() => {}}
+              onOpenDesktopTarget={(target) => {
+                setDeskTarget(target || 'local');
+              }}
+              onResolveTakeover={(to) => void handleResolveTakeover(to)}
+              onOpenDetail={() => {}}
+              onOpenCollab={(peerId) => {
+                setCollabPeerId(peerId);
+              }}
+              onOpenCreate={() => {
+                setDeskOpen(false);
+                closeAllOverlays();
+                setCreateOpen(true);
+              }}
+              onSelectBot={(id) => void selectBot(id)}
+              onCloseDesktopChat={() => setDeskChatOpen(false)}
+              onSendMessage={handleSendMessage}
+              onInterrupt={handleInterrupt}
+            />
+          )}
+        </aside>
       </div>
 
       <div id="shade" className={`shade${shadeOpen ? ' open' : ''}`} onClick={closeAllOverlays} />
