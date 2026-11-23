@@ -389,3 +389,42 @@ func TestStoreMediaInternalAndCollab(t *testing.T) {
 		t.Fatalf("unexpected ListCollabMessages: %+v", collab)
 	}
 }
+
+func TestUpdateMessageMeta(t *testing.T) {
+	store, err := NewStore(filepath.Join(t.TempDir(), "hub.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	sess, err := store.EnsureActiveSession("alpha", "opencode", "m1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved, err := store.AppendMessage(ChatMessage{
+		BotID: "alpha", SessionID: sess.ID, Turn: 1, Role: "assistant", From: "bot:alpha", Text: "reply",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	updated, ok, err := store.UpdateMessageMeta(saved.ID, []string{"bash×3", "edit"}, 4200, 0.0123, 100, 50)
+	if err != nil || !ok {
+		t.Fatalf("UpdateMessageMeta failed: ok=%v err=%v", ok, err)
+	}
+	if len(updated.Tools) != 2 || updated.Tools[0] != "bash×3" || updated.DurationMs != 4200 || updated.CostUSD != 0.0123 || updated.InputTokens != 100 || updated.OutputTokens != 50 {
+		t.Fatalf("unexpected updated message: %+v", updated)
+	}
+
+	msgs, err := store.ListMessages("alpha", 10)
+	if err != nil || len(msgs) != 1 {
+		t.Fatalf("ListMessages failed: len=%d err=%v", len(msgs), err)
+	}
+	if len(msgs[0].Tools) != 2 || msgs[0].Tools[0] != "bash×3" || msgs[0].DurationMs != 4200 || msgs[0].CostUSD != 0.0123 {
+		t.Fatalf("expected persisted meta from ListMessages, got %+v", msgs[0])
+	}
+
+	if _, missing, err := store.UpdateMessageMeta("nonexistent", []string{"bash"}, 100, 0, 0, 0); err != nil || missing {
+		t.Fatalf("expected missing=false err=nil for unknown id, got ok=%v err=%v", missing, err)
+	}
+}

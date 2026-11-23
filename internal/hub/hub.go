@@ -203,6 +203,7 @@ type botLane struct {
 	turnMu          sync.Mutex
 	activeSessionID string
 	activeTurn      int
+	turnLastMsgID   string
 
 	rotateMu       sync.Mutex
 	pendingRotate  bool
@@ -463,6 +464,21 @@ func (h *Hub) appendMessage(msg state.ChatMessage) state.ChatMessage {
 		Payload: saved,
 	})
 	return saved
+}
+
+func (h *Hub) updateMessageMeta(msgID string, tools []string, durationMs int64, costUSD float64, inTok, outTok int) {
+	if msgID == "" || h.store == nil {
+		return
+	}
+	updated, ok, err := h.store.UpdateMessageMeta(msgID, tools, durationMs, costUSD, inTok, outTok)
+	if err != nil || !ok {
+		return
+	}
+	h.broadcast(Event{
+		Type:    "message_updated",
+		BotID:   updated.BotID,
+		Payload: updated,
+	})
 }
 
 func (h *Hub) appendInternalMessage(msg state.ChatMessage) state.ChatMessage {
@@ -759,6 +775,9 @@ func (h *Hub) SendOutboundMessage(botID, text string, images []OutboundImage, fi
 		Text:      text,
 		Media:     media,
 	})
+	lane.turnMu.Lock()
+	lane.turnLastMsgID = saved.ID
+	lane.turnMu.Unlock()
 	lane.turnSentCount.Add(1)
 	return saved, nil
 }
@@ -1518,6 +1537,7 @@ func (h *Hub) executeTurn(ctx context.Context, lane *botLane, bot config.BotConf
 		lane.turnMu.Lock()
 		lane.activeSessionID = sess.ID
 		lane.activeTurn = turnNum
+		lane.turnLastMsgID = ""
 		lane.turnMu.Unlock()
 
 		res, err := runner.RunTurn(ctx, harness.RunOptions{
@@ -1687,20 +1707,27 @@ func (h *Hub) executeTurn(ctx context.Context, lane *botLane, bot config.BotConf
 					OutputTokens: res.Usage.OutputTokens,
 				})
 			}
-		} else if strings.TrimSpace(res.Text) != "" {
-			h.appendInternalMessage(state.ChatMessage{
-				BotID:        bot.ID,
-				SessionID:    sess.ID,
-				Turn:         turnNum,
-				From:         "bot:" + bot.ID,
-				Text:         res.Text,
-				Tools:        tools,
-				DurationMs:   res.DurationMs,
-				CostUSD:      res.Usage.CostUSD,
-				InputTokens:  res.Usage.InputTokens,
-				OutputTokens: res.Usage.OutputTokens,
-			})
-			if lane.turnSentCount.Load() == 0 && isUserDirectSource(opts) {
+		} else {
+			if strings.TrimSpace(res.Text) != "" {
+				h.appendInternalMessage(state.ChatMessage{
+					BotID:        bot.ID,
+					SessionID:    sess.ID,
+					Turn:         turnNum,
+					From:         "bot:" + bot.ID,
+					Text:         res.Text,
+					Tools:        tools,
+					DurationMs:   res.DurationMs,
+					CostUSD:      res.Usage.CostUSD,
+					InputTokens:  res.Usage.InputTokens,
+					OutputTokens: res.Usage.OutputTokens,
+				})
+			}
+			if lane.turnSentCount.Load() > 0 {
+				lane.turnMu.Lock()
+				lastMsgID := lane.turnLastMsgID
+				lane.turnMu.Unlock()
+				h.updateMessageMeta(lastMsgID, tools, res.DurationMs, res.Usage.CostUSD, res.Usage.InputTokens, res.Usage.OutputTokens)
+			} else if strings.TrimSpace(res.Text) != "" && isUserDirectSource(opts) {
 				h.appendMessage(state.ChatMessage{
 					BotID:        bot.ID,
 					SessionID:    sess.ID,

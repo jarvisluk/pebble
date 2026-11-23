@@ -54,6 +54,7 @@ struct ChatMessage: Codable, Identifiable, Hashable {
     var text: String?
     var media: [MessageMedia]?
     var createdAt: String?
+    var tools: [String]?
     var durationMs: Double?
     var costUsd: Double?
 

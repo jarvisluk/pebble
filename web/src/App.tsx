@@ -297,6 +297,20 @@ export default function App() {
       }
     });
 
+    on('message_updated', ({ payload: m }: { payload?: ChatMessage }) => {
+      if (!m?.botId || !m.id) return;
+      setMsgsMap((prev) => {
+        const list = prev[m.botId];
+        if (!list) return prev;
+        const idx = list.findIndex((x) => x.id === m.id);
+        if (idx < 0) return prev;
+        const copy = [...list];
+        copy[idx] = m;
+        return { ...prev, [m.botId]: copy };
+      });
+      setLastMap((prev) => (prev[m.botId]?.id === m.id ? { ...prev, [m.botId]: m } : prev));
+    });
+
     on('bot_status', ({ payload: st }: { payload?: BotStatus }) => {
       if (!st) return;
       setBots((prev) => {

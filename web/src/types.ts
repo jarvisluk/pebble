@@ -48,6 +48,7 @@ export interface ChatMessage {
   text: string;
   media?: MessageMedia[];
   createdAt: string;
+  tools?: string[];
   durationMs?: number;
   costUsd?: number;
 }
