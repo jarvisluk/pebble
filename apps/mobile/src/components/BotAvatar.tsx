@@ -1,16 +1,9 @@
 import React, { useEffect, useRef } from 'react';
 import { Animated, StyleSheet, View } from 'react-native';
-import Svg, { Ellipse, G, Path } from 'react-native-svg';
+import Svg, { Ellipse, G, Path, Rect } from 'react-native-svg';
 
+import { pebbleFrame, pebbleParams, usePebbleClock } from '../lib/pebbleAvatar';
 import { getBotColor, useTheme } from '../theme';
-
-function fnv1a(s: string): number {
-  let h = 2166136261;
-  for (let i = 0; i < s.length; i++) {
-    h = Math.imul(h ^ s.charCodeAt(i), 16777619);
-  }
-  return h >>> 0;
-}
 
 interface BotAvatarProps {
   id: string;
@@ -25,12 +18,16 @@ interface BotAvatarProps {
 export function BotAvatar({ id, size, index = -1, avatar, color, busy = false, ringColor }: BotAvatarProps) {
   const theme = useTheme();
   const shape = (avatar || '').trim().toLowerCase() || 'blob';
-  const h = fnv1a(id || '?');
   const blob = getBotColor(id, index, color);
-  const tilt = ((h >>> 4) % 25) - 12;
-  const gx = ((h >>> 9) % 7) - 3;
-  const gy = ((h >>> 12) % 5) - 2;
-  const lean = (h >>> 15) % 2 ? -14 : 12;
+  const isDefaultBlob =
+    shape !== 'squircle' &&
+    shape !== 'cat' &&
+    shape !== 'bear' &&
+    shape !== 'cloud' &&
+    shape !== 'ghost' &&
+    shape !== 'star' &&
+    shape !== 'sprout';
+  const clock = usePebbleClock(isDefaultBlob);
 
   const pulse = useRef(new Animated.Value(1)).current;
   useEffect(() => {
@@ -110,14 +107,38 @@ export function BotAvatar({ id, size, index = -1, avatar, color, busy = false, r
             <Ellipse cx={61} cy={59} rx={5.2} ry={8.8} fill={theme.eye} />
           </>
         );
-      default:
+      default: {
+        const f = pebbleFrame(pebbleParams(id || '?'), clock, busy);
         return (
-          <G transform={`rotate(${tilt} 50 50)`}>
-            <Path d="M52 9C80 9 95 28 93 55C91 81 72 93 47 91C21 89 5 72 7 46C9 22 26 9 52 9Z" fill={blob} />
-            <Ellipse cx={39 + gx} cy={45 + gy} rx={6} ry={10.5} transform={`rotate(${lean} ${39 + gx} ${45 + gy})`} fill={theme.eye} />
-            <Ellipse cx={62 + gx} cy={43 + gy} rx={6} ry={10.5} transform={`rotate(${lean} ${62 + gx} ${43 + gy})`} fill={theme.eye} />
-          </G>
+          <>
+            <G rotation={f.bodyRotDeg} originX={50} originY={50}>
+              <Path d={f.pathD} fill={blob} />
+            </G>
+            <Rect
+              x={f.eyes[0].x}
+              y={f.eyes[0].y}
+              width={f.eyes[0].width}
+              height={f.eyes[0].height}
+              rx={f.eyes[0].rx}
+              rotation={f.eyes[0].lean}
+              originX={f.eyes[0].cx}
+              originY={f.eyes[0].cy}
+              fill={theme.eye}
+            />
+            <Rect
+              x={f.eyes[1].x}
+              y={f.eyes[1].y}
+              width={f.eyes[1].width}
+              height={f.eyes[1].height}
+              rx={f.eyes[1].rx}
+              rotation={f.eyes[1].lean}
+              originX={f.eyes[1].cx}
+              originY={f.eyes[1].cy}
+              fill={theme.eye}
+            />
+          </>
         );
+      }
     }
   };
 
