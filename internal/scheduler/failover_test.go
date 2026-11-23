@@ -114,3 +114,44 @@ func TestStandbyFailoverPolicyAndSlotDedupe(t *testing.T) {
 		t.Fatalf("expected duplicate slot skipped, got run=%+v err=%v", run2, err)
 	}
 }
+
+func TestThreeNodePriorityLadderFailover(t *testing.T) {
+	h := newTestFailoverHub(t, "standby", 60)
+	h.Config().Sync.Priority = 30
+	h.Config().Sync.Peers = []config.SyncPeerConfig{
+		{ID: "mac-mini", URL: "http://p10", Priority: 10},
+		{ID: "macbook", URL: "http://p20", Priority: 20},
+	}
+
+	s := New(h)
+	now := time.Date(2026, 11, 24, 3, 0, 0, 0, time.UTC)
+	s.nowFn = func() time.Time { return now }
+
+	alive := map[string]bool{"http://p10": false, "http://p20": true}
+	s.SetPeerProbe(func(_ context.Context, peerURL string) bool {
+		return alive[peerURL]
+	})
+
+	sched := config.ScheduleConfig{
+		ID:             "sync-check",
+		Name:           "Sync Check",
+		EveryMinutes:   5,
+		Prompt:         "check",
+		FailoverPolicy: config.RoutineFailoverAuto,
+	}
+
+	// P10 is down, but P20 is alive -> P30 must NOT run!
+	run, err := s.executeWithSlot(context.Background(), "ops", sched, "schedule", "", now)
+	if err != nil || run != nil {
+		t.Fatalf("expected P30 to defer to P20, got run=%+v err=%v", run, err)
+	}
+
+	// Both P10 and P20 go down; after timeout, P30 takes over.
+	alive["http://p20"] = false
+	_, _ = s.executeWithSlot(context.Background(), "ops", sched, "schedule", "", now)
+	now = now.Add(65 * time.Second)
+	run, err = s.executeWithSlot(context.Background(), "ops", sched, "schedule", "", now)
+	if err != nil || run == nil {
+		t.Fatalf("expected P30 to take over when P10 and P20 are down, got run=%+v err=%v", run, err)
+	}
+}

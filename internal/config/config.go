@@ -348,13 +348,71 @@ func (w SyncWebDAVConfig) IsReadOnly() bool {
 	return w.ReadOnly == nil || *w.ReadOnly
 }
 
+type SyncPeerConfig struct {
+	ID       string `json:"id,omitempty"`
+	Label    string `json:"label,omitempty"`
+	URL      string `json:"url"`
+	Token    string `json:"token,omitempty"`
+	Priority int    `json:"priority,omitempty"` // smaller number = higher priority (e.g. 10 primary, 20 standby)
+}
+
 type SyncConfig struct {
-	Role               string            `json:"role,omitempty"` // "primary" (default) | "standby"
+	Role               string            `json:"role,omitempty"`     // "primary" (default) | "standby"
+	Priority           int               `json:"priority,omitempty"` // default: primary=10, standby=20
 	PeerURL            string            `json:"peerUrl,omitempty"`
 	PeerToken          string            `json:"peerToken,omitempty"`
+	Peers              []SyncPeerConfig  `json:"peers,omitempty"`
 	FailoverTimeoutSec int               `json:"failoverTimeoutSec,omitempty"` // default: 90
 	Git                *SyncGitConfig    `json:"git,omitempty"`
 	WebDAV             *SyncWebDAVConfig `json:"webdav,omitempty"`
+}
+
+func (s *SyncConfig) EffectivePriority() int {
+	if s != nil && s.Priority > 0 {
+		return s.Priority
+	}
+	if s.EffectiveRole() == "standby" {
+		return 20
+	}
+	return 10
+}
+
+// HigherPriorityPeers returns all configured peers whose priority is strictly
+// higher (smaller number) than the local host's effective priority.
+func (s *SyncConfig) HigherPriorityPeers() []SyncPeerConfig {
+	if s == nil {
+		return nil
+	}
+	selfPrio := s.EffectivePriority()
+	var out []SyncPeerConfig
+	seen := make(map[string]bool)
+	for _, p := range s.Peers {
+		u := strings.TrimRight(strings.TrimSpace(p.URL), "/")
+		if u == "" || seen[u] {
+			continue
+		}
+		prio := p.Priority
+		if prio <= 0 {
+			prio = 10
+		}
+		if prio < selfPrio {
+			p.URL = u
+			p.Priority = prio
+			seen[u] = true
+			out = append(out, p)
+		}
+	}
+	if len(out) == 0 && s.EffectiveRole() == "standby" {
+		if u := strings.TrimRight(strings.TrimSpace(s.PeerURL), "/"); u != "" {
+			out = append(out, SyncPeerConfig{
+				ID:       "primary",
+				URL:      u,
+				Token:    s.PeerToken,
+				Priority: 10,
+			})
+		}
+	}
+	return out
 }
 
 func (s *SyncConfig) EffectiveFailoverTimeout() time.Duration {
@@ -631,6 +689,10 @@ func Load(projectRoot, explicitPath string) (*HubConfig, string, error) {
 	if cfg.Sync != nil {
 		cfg.Sync.PeerURL = strings.TrimRight(strings.TrimSpace(expandEnv(cfg.Sync.PeerURL)), "/")
 		cfg.Sync.PeerToken = strings.TrimSpace(expandEnv(cfg.Sync.PeerToken))
+		for i := range cfg.Sync.Peers {
+			cfg.Sync.Peers[i].URL = strings.TrimRight(strings.TrimSpace(expandEnv(cfg.Sync.Peers[i].URL)), "/")
+			cfg.Sync.Peers[i].Token = strings.TrimSpace(expandEnv(cfg.Sync.Peers[i].Token))
+		}
 		if cfg.Sync.Git != nil {
 			cfg.Sync.Git.RepoURL = strings.TrimSpace(expandEnv(cfg.Sync.Git.RepoURL))
 			cfg.Sync.Git.Branch = strings.TrimSpace(cfg.Sync.Git.Branch)

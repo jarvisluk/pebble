@@ -132,6 +132,17 @@ CREATE TABLE IF NOT EXISTS push_devices (
   enabled                   INTEGER NOT NULL DEFAULT 1,
   updated_at                TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS sync_files (
+  path       TEXT PRIMARY KEY,
+  sha256     TEXT NOT NULL DEFAULT '',
+  size       INTEGER NOT NULL DEFAULT 0,
+  mtime_unix INTEGER NOT NULL DEFAULT 0,
+  deleted    INTEGER NOT NULL DEFAULT 0,
+  vc_json    TEXT NOT NULL DEFAULT '{}',
+  updated_by TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL DEFAULT ''
+);
 `
 
 func openSQLite(dbPath string) (*sql.DB, error) {

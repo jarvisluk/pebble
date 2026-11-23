@@ -69,7 +69,8 @@ type Scheduler struct {
 
 	probeMu          sync.Mutex
 	primaryProbe     func(context.Context) bool
-	lastPrimaryAlive time.Time
+	peerProbe        func(context.Context, string) bool
+	lastHigherAlive  time.Time
 	nowFn            func() time.Time
 }
 
@@ -86,6 +87,13 @@ func New(h *hub.Hub) *Scheduler {
 func (s *Scheduler) SetPrimaryProbe(fn func(context.Context) bool) {
 	s.probeMu.Lock()
 	s.primaryProbe = fn
+	s.probeMu.Unlock()
+}
+
+// SetPeerProbe overrides the per-peer liveness probe used when checking higher-priority hosts.
+func (s *Scheduler) SetPeerProbe(fn func(context.Context, string) bool) {
+	s.probeMu.Lock()
+	s.peerProbe = fn
 	s.probeMu.Unlock()
 }
 
@@ -313,13 +321,14 @@ func (s *Scheduler) runJob(ctx context.Context, job *scheduledJob, intervalNext,
 				cronNext = cronSched.Next(firedAt.In(time.Local))
 			}
 			// Run asynchronously so a slow LLM turn never delays the timer loop.
+			scheduledAt := next
 			s.wg.Add(1)
-			go func(spec config.ScheduleConfig) {
+			go func(spec config.ScheduleConfig, schedAt time.Time) {
 				defer s.wg.Done()
-				if _, err := s.execute(ctx, job.botID, spec, "schedule", ""); err != nil && !errors.Is(err, ErrRoutineAlreadyRunning) && ctx.Err() == nil {
+				if _, err := s.executeWithSlot(ctx, job.botID, spec, "schedule", "", schedAt); err != nil && !errors.Is(err, ErrRoutineAlreadyRunning) && ctx.Err() == nil {
 					log.Printf("[scheduler] failed %s/%s: %v", job.botID, spec.EffectiveID(), err)
 				}
-			}(job.spec)
+			}(job.spec, scheduledAt)
 
 			now := time.Now()
 			dailyNext = time.Time{}
@@ -353,6 +362,10 @@ func (s *Scheduler) finishRun(key string) {
 }
 
 func (s *Scheduler) execute(ctx context.Context, botID string, sched config.ScheduleConfig, trigger, webhookPayload string) (*state.RoutineRun, error) {
+	return s.executeWithSlot(ctx, botID, sched, trigger, webhookPayload, time.Time{})
+}
+
+func (s *Scheduler) executeWithSlot(ctx context.Context, botID string, sched config.ScheduleConfig, trigger, webhookPayload string, scheduledAt time.Time) (*state.RoutineRun, error) {
 	rid := sched.EffectiveID()
 	key := jobKey(botID, rid)
 	if !s.tryStartRun(key) {
@@ -365,10 +378,13 @@ func (s *Scheduler) execute(ctx context.Context, botID string, sched config.Sche
 		return nil, fmt.Errorf("bot %q not found: %w", botID, hub.ErrBotNotFound)
 	}
 
-	now := s.currentTime()
+	slotAt := scheduledAt
+	if slotAt.IsZero() {
+		slotAt = s.currentTime()
+	}
 	slotKey := ""
 	if trigger == "schedule" {
-		slotKey = fmt.Sprintf("%s:%s:%s", botID, rid, now.UTC().Format("2006-01-02T15:04"))
+		slotKey = fmt.Sprintf("%s:%s:%s", botID, rid, slotAt.UTC().Format("2006-01-02T15:04"))
 		if !s.shouldRunScheduled(ctx, sched, slotKey) {
 			return nil, nil
 		}
@@ -481,7 +497,11 @@ func (s *Scheduler) execute(ctx context.Context, botID string, sched config.Sche
 
 func (s *Scheduler) shouldRunScheduled(ctx context.Context, sched config.ScheduleConfig, slotKey string) bool {
 	cfg := s.hub.Config()
-	if cfg == nil || cfg.Sync.EffectiveRole() != "standby" {
+	if cfg == nil {
+		return true
+	}
+	higherPeers := cfg.Sync.HigherPriorityPeers()
+	if cfg.Sync.EffectiveRole() != "standby" && len(higherPeers) == 0 {
 		return true
 	}
 	if sched.EffectiveFailoverPolicy() != config.RoutineFailoverAuto {
@@ -494,45 +514,58 @@ func (s *Scheduler) shouldRunScheduled(ctx context.Context, sched config.Schedul
 	}
 
 	s.probeMu.Lock()
-	probe := s.primaryProbe
+	peerProbe := s.peerProbe
+	primaryProbe := s.primaryProbe
 	s.probeMu.Unlock()
-	if probe == nil {
-		probe = s.defaultPrimaryProbe
-	}
 
 	pctx, cancel := context.WithTimeout(ctx, 4*time.Second)
-	alive := probe(pctx)
+	anyHigherAlive := false
+	if peerProbe != nil && len(higherPeers) > 0 {
+		for _, peer := range higherPeers {
+			if peerProbe(pctx, peer.URL) {
+				anyHigherAlive = true
+				break
+			}
+		}
+	} else if primaryProbe != nil {
+		anyHigherAlive = primaryProbe(pctx)
+	} else if len(higherPeers) > 0 {
+		for _, peer := range higherPeers {
+			if probeHealthz(pctx, peer.URL) {
+				anyHigherAlive = true
+				break
+			}
+		}
+	} else if cfg.Sync != nil && cfg.Sync.PeerURL != "" {
+		anyHigherAlive = probeHealthz(pctx, cfg.Sync.PeerURL)
+	}
 	cancel()
 
 	now := s.currentTime()
 	s.probeMu.Lock()
-	if alive {
-		s.lastPrimaryAlive = now
+	if anyHigherAlive {
+		s.lastHigherAlive = now
 		s.probeMu.Unlock()
 		return false
 	}
-	if s.lastPrimaryAlive.IsZero() {
-		s.lastPrimaryAlive = now
+	if s.lastHigherAlive.IsZero() {
+		s.lastHigherAlive = now
 		s.probeMu.Unlock()
 		log.Printf("[scheduler] standby waiting for failover timeout before taking over %s", sched.EffectiveID())
 		return false
 	}
-	elapsed := now.Sub(s.lastPrimaryAlive)
+	elapsed := now.Sub(s.lastHigherAlive)
 	s.probeMu.Unlock()
 
 	if elapsed < cfg.Sync.EffectiveFailoverTimeout() {
 		return false
 	}
-	log.Printf("[scheduler] standby taking over routine %s (primary unreachable for %s)", sched.EffectiveID(), elapsed.Round(time.Second))
+	log.Printf("[scheduler] host taking over routine %s (higher-priority peers unreachable for %s)", sched.EffectiveID(), elapsed.Round(time.Second))
 	return true
 }
 
-func (s *Scheduler) defaultPrimaryProbe(ctx context.Context) bool {
-	cfg := s.hub.Config()
-	if cfg == nil || cfg.Sync == nil {
-		return false
-	}
-	peerURL := strings.TrimSpace(cfg.Sync.PeerURL)
+func probeHealthz(ctx context.Context, peerURL string) bool {
+	peerURL = strings.TrimSpace(peerURL)
 	if peerURL == "" {
 		return false
 	}

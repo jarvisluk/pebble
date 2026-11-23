@@ -15,16 +15,21 @@ import (
 	"time"
 
 	"bot-hub/internal/config"
+	"bot-hub/internal/state"
 )
 
 const MaxSyncFileSize = 25 * 1024 * 1024 // 25 MiB
 
-// FileEntry describes a single syncable file inside workspaces/ or media/.
+// FileEntry describes a single syncable file or deletion tombstone inside workspaces/ or media/.
 type FileEntry struct {
-	Path        string `json:"path"`
-	Size        int64  `json:"size"`
-	ModTimeUnix int64  `json:"modTimeUnix"`
-	SHA256      string `json:"sha256"`
+	Path        string      `json:"path"`
+	Size        int64       `json:"size"`
+	ModTimeUnix int64       `json:"modTimeUnix"`
+	SHA256      string      `json:"sha256"`
+	Deleted     bool        `json:"deleted,omitempty"`
+	VC          VectorClock `json:"vc,omitempty"`
+	UpdatedBy   string      `json:"updatedBy,omitempty"`
+	UpdatedAt   string      `json:"updatedAt,omitempty"`
 }
 
 // Manifest is the snapshot of all syncable files on a host.
@@ -151,6 +156,281 @@ func BuildManifest(projectRoot, hostID string, includeMedia bool) (*Manifest, er
 		GeneratedAt: time.Now().UTC().Format(time.RFC3339),
 		Files:       files,
 	}, nil
+}
+
+// BuildManifestWithStore scans disk files and reconciles them against store.sync_files
+// so local edits advance the vector clock and deleted files become tombstones.
+func BuildManifestWithStore(projectRoot, hostID string, store *state.Store, includeMedia bool) (*Manifest, error) {
+	m, err := BuildManifest(projectRoot, hostID, includeMedia)
+	if err != nil || store == nil {
+		return m, err
+	}
+	nowStr := time.Now().UTC().Format(time.RFC3339)
+	diskMap := make(map[string]FileEntry, len(m.Files))
+	for _, f := range m.Files {
+		diskMap[f.Path] = f
+	}
+
+	tracked, err := store.ListSyncFiles()
+	if err != nil {
+		return nil, err
+	}
+	trackedMap := make(map[string]state.SyncFileRecord, len(tracked))
+	for _, rec := range tracked {
+		trackedMap[rec.Path] = rec
+	}
+
+	var out []FileEntry
+	for _, f := range m.Files {
+		rec, exists := trackedMap[f.Path]
+		vc := ParseVectorClock(rec.VCJSON)
+		if !exists || rec.Deleted || rec.SHA256 != f.SHA256 {
+			vc.Increment(hostID)
+			rec = state.SyncFileRecord{
+				Path:      f.Path,
+				SHA256:    f.SHA256,
+				Size:      f.Size,
+				MTimeUnix: f.ModTimeUnix,
+				Deleted:   false,
+				VCJSON:    vc.MarshalJSONString(),
+				UpdatedBy: hostID,
+				UpdatedAt: nowStr,
+			}
+			_ = store.UpsertSyncFile(rec)
+		}
+		f.Deleted = false
+		f.VC = vc
+		f.UpdatedBy = rec.UpdatedBy
+		f.UpdatedAt = rec.UpdatedAt
+		out = append(out, f)
+	}
+
+	// Emit tombstones for tracked files that are no longer on disk.
+	for _, rec := range tracked {
+		if _, onDisk := diskMap[rec.Path]; onDisk {
+			continue
+		}
+		if !ShouldSyncPath(rec.Path) {
+			continue
+		}
+		if !includeMedia && strings.HasPrefix(rec.Path, "media/") {
+			continue
+		}
+		vc := ParseVectorClock(rec.VCJSON)
+		if !rec.Deleted {
+			vc.Increment(hostID)
+			rec = state.SyncFileRecord{
+				Path:      rec.Path,
+				SHA256:    "",
+				Size:      0,
+				MTimeUnix: time.Now().Unix(),
+				Deleted:   true,
+				VCJSON:    vc.MarshalJSONString(),
+				UpdatedBy: hostID,
+				UpdatedAt: nowStr,
+			}
+			_ = store.UpsertSyncFile(rec)
+		}
+		out = append(out, FileEntry{
+			Path:        rec.Path,
+			Size:        0,
+			ModTimeUnix: rec.MTimeUnix,
+			SHA256:      "",
+			Deleted:     true,
+			VC:          vc,
+			UpdatedBy:   rec.UpdatedBy,
+			UpdatedAt:   rec.UpdatedAt,
+		})
+	}
+
+	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
+	m.Files = out
+	return m, nil
+}
+
+// ApplyRemoteFileEntry merges a remote file or tombstone into projectRoot + store using vector clocks.
+func ApplyRemoteFileEntry(
+	projectRoot, localHostID string,
+	store *state.Store,
+	remote FileEntry,
+	fetchData func() ([]byte, error),
+) (applied bool, conflictPath string, err error) {
+	if !ShouldSyncPath(remote.Path) {
+		return false, "", fmt.Errorf("path %q is not syncable", remote.Path)
+	}
+	abs, err := safeJoin(projectRoot, remote.Path)
+	if err != nil {
+		return false, "", err
+	}
+	if store == nil {
+		if remote.Deleted {
+			if rmErr := os.Remove(abs); rmErr == nil || os.IsNotExist(rmErr) {
+				return rmErr == nil, "", nil
+			}
+			return false, "", nil
+		}
+		data, fErr := fetchData()
+		if fErr != nil {
+			return false, "", fErr
+		}
+		cPath, wErr := WriteSyncedFile(projectRoot, remote.Path, remote.UpdatedBy, data, time.Unix(remote.ModTimeUnix, 0))
+		return true, cPath, wErr
+	}
+
+	rec, exists, err := store.GetSyncFile(remote.Path)
+	if err != nil {
+		return false, "", err
+	}
+	localVC := ParseVectorClock(rec.VCJSON)
+	remoteVC := remote.VC.Clone()
+	if len(remoteVC) == 0 {
+		// Backward-compatible fallback if peer didn't send a vector clock.
+		remoteVC.Increment(remote.UpdatedBy)
+	}
+
+	var ord VCOrder
+	if !exists {
+		ord = VCBefore
+	} else {
+		ord = localVC.Compare(remoteVC)
+	}
+
+	switch ord {
+	case VCEqual, VCAfter:
+		return false, "", nil
+
+	case VCBefore:
+		if remote.Deleted {
+			_ = os.Remove(abs)
+			_ = store.UpsertSyncFile(state.SyncFileRecord{
+				Path:      remote.Path,
+				SHA256:    "",
+				Size:      0,
+				MTimeUnix: remote.ModTimeUnix,
+				Deleted:   true,
+				VCJSON:    remoteVC.MarshalJSONString(),
+				UpdatedBy: remote.UpdatedBy,
+				UpdatedAt: remote.UpdatedAt,
+			})
+			return true, "", nil
+		}
+		data, fErr := fetchData()
+		if fErr != nil {
+			return false, "", fErr
+		}
+		if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+			return false, "", err
+		}
+		if err := atomicWriteFile(abs, data, 0o644, time.Unix(remote.ModTimeUnix, 0)); err != nil {
+			return false, "", err
+		}
+		_ = store.UpsertSyncFile(state.SyncFileRecord{
+			Path:      remote.Path,
+			SHA256:    remote.SHA256,
+			Size:      int64(len(data)),
+			MTimeUnix: remote.ModTimeUnix,
+			Deleted:   false,
+			VCJSON:    remoteVC.MarshalJSONString(),
+			UpdatedBy: remote.UpdatedBy,
+			UpdatedAt: remote.UpdatedAt,
+		})
+		return true, "", nil
+
+	default: // VCConcurrent
+		mergedVC := localVC.Merge(remoteVC)
+		// Same state on both sides (both deleted or identical content): converge clocks without conflict.
+		if (rec.Deleted && remote.Deleted) || (!rec.Deleted && !remote.Deleted && rec.SHA256 != "" && rec.SHA256 == remote.SHA256) {
+			rec.VCJSON = mergedVC.MarshalJSONString()
+			_ = store.UpsertSyncFile(rec)
+			return false, "", nil
+		}
+		// Delete vs Edit: edit always wins so newly written work is never lost.
+		if rec.Deleted && !remote.Deleted {
+			data, fErr := fetchData()
+			if fErr != nil {
+				return false, "", fErr
+			}
+			if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+				return false, "", err
+			}
+			if err := atomicWriteFile(abs, data, 0o644, time.Unix(remote.ModTimeUnix, 0)); err != nil {
+				return false, "", err
+			}
+			mergedVC.Increment(localHostID)
+			_ = store.UpsertSyncFile(state.SyncFileRecord{
+				Path:      remote.Path,
+				SHA256:    remote.SHA256,
+				Size:      int64(len(data)),
+				MTimeUnix: remote.ModTimeUnix,
+				Deleted:   false,
+				VCJSON:    mergedVC.MarshalJSONString(),
+				UpdatedBy: remote.UpdatedBy,
+				UpdatedAt: remote.UpdatedAt,
+			})
+			return true, "", nil
+		}
+		if !rec.Deleted && remote.Deleted {
+			mergedVC.Increment(localHostID)
+			rec.VCJSON = mergedVC.MarshalJSONString()
+			_ = store.UpsertSyncFile(rec)
+			return false, "", nil
+		}
+
+		// Both sides edited different content -> deterministic winner + .conflict-<loser> copy.
+		data, fErr := fetchData()
+		if fErr != nil {
+			return false, "", fErr
+		}
+		if remoteWinsConflict(rec, localVC, remote, remoteVC) {
+			if localData, rErr := os.ReadFile(abs); rErr == nil {
+				conflictRel := conflictRelPath(remote.Path, sanitizeHostTag(rec.UpdatedBy))
+				if conflictAbs, cErr := safeJoin(projectRoot, conflictRel); cErr == nil {
+					_ = atomicWriteFile(conflictAbs, localData, 0o644, time.Unix(rec.MTimeUnix, 0))
+					conflictPath = conflictRel
+				}
+			}
+			if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+				return false, "", err
+			}
+			if err := atomicWriteFile(abs, data, 0o644, time.Unix(remote.ModTimeUnix, 0)); err != nil {
+				return false, "", err
+			}
+			_ = store.UpsertSyncFile(state.SyncFileRecord{
+				Path:      remote.Path,
+				SHA256:    remote.SHA256,
+				Size:      int64(len(data)),
+				MTimeUnix: remote.ModTimeUnix,
+				Deleted:   false,
+				VCJSON:    mergedVC.MarshalJSONString(),
+				UpdatedBy: remote.UpdatedBy,
+				UpdatedAt: remote.UpdatedAt,
+			})
+			return true, conflictPath, nil
+		}
+
+		// Local wins -> save remote copy as .conflict-<remoteHost> and merge clocks.
+		conflictRel := conflictRelPath(remote.Path, sanitizeHostTag(remote.UpdatedBy))
+		if conflictAbs, cErr := safeJoin(projectRoot, conflictRel); cErr == nil {
+			if err := atomicWriteFile(conflictAbs, data, 0o644, time.Unix(remote.ModTimeUnix, 0)); err != nil {
+				return false, "", err
+			}
+			conflictPath = conflictRel
+		}
+		rec.VCJSON = mergedVC.MarshalJSONString()
+		_ = store.UpsertSyncFile(rec)
+		return false, conflictPath, nil
+	}
+}
+
+func remoteWinsConflict(localRec state.SyncFileRecord, localVC VectorClock, remote FileEntry, remoteVC VectorClock) bool {
+	lm, rm := localVC.MaxClock(), remoteVC.MaxClock()
+	if rm != lm {
+		return rm > lm
+	}
+	if remote.ModTimeUnix != localRec.MTimeUnix {
+		return remote.ModTimeUnix > localRec.MTimeUnix
+	}
+	return remote.UpdatedBy > localRec.UpdatedBy
 }
 
 // ReadSyncedFile safely reads a syncable file under projectRoot.

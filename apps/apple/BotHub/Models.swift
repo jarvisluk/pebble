@@ -243,6 +243,12 @@ struct DesktopState: Codable {
     var status: DesktopStatus?
 }
 
+struct FallbackHost: Codable, Hashable {
+    var label: String?
+    var address: String
+    var token: String?
+}
+
 struct ServerProfile: Codable, Identifiable, Hashable {
     var id: String
     var label: String
@@ -250,6 +256,7 @@ struct ServerProfile: Codable, Identifiable, Hashable {
     var token: String
     var standbyAddress: String?
     var standbyToken: String?
+    var fallbackHosts: [FallbackHost]?
 }
 
 struct RoutineRun: Codable, Identifiable, Hashable {

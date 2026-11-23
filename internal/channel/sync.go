@@ -2,6 +2,8 @@ package channel
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"net"
@@ -82,7 +84,7 @@ func (s *HTTPServer) handleSyncManifest(w http.ResponseWriter, r *http.Request) 
 	}
 	includeMedia := r.URL.Query().Get("media") == "1" || strings.EqualFold(r.URL.Query().Get("media"), "true")
 	svc := s.syncService()
-	m, err := syncer.BuildManifest(s.hub.Config().ProjectRoot, svc.HostID(), includeMedia)
+	m, err := syncer.BuildManifestWithStore(s.hub.Config().ProjectRoot, svc.HostID(), s.hub.Store(), includeMedia)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
 		return
@@ -119,22 +121,49 @@ func (s *HTTPServer) handleSyncFilePut(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	host := strings.TrimSpace(r.URL.Query().Get("host"))
-	var modTime time.Time
+	deleted := r.URL.Query().Get("deleted") == "1" || strings.EqualFold(r.URL.Query().Get("deleted"), "true")
+	mtimeSec := int64(0)
 	if rawMtime := strings.TrimSpace(r.URL.Query().Get("mtime")); rawMtime != "" {
 		if sec, err := strconv.ParseInt(rawMtime, 10, 64); err == nil && sec > 0 {
-			modTime = time.Unix(sec, 0)
+			mtimeSec = sec
 		}
 	}
-	data, err := io.ReadAll(io.LimitReader(r.Body, syncer.MaxSyncFileSize+1))
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
-		return
+	var data []byte
+	if !deleted {
+		var rErr error
+		data, rErr = io.ReadAll(io.LimitReader(r.Body, syncer.MaxSyncFileSize+1))
+		if rErr != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": rErr.Error()})
+			return
+		}
+		if len(data) > syncer.MaxSyncFileSize {
+			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]any{"error": "file exceeds max sync size"})
+			return
+		}
 	}
-	if len(data) > syncer.MaxSyncFileSize {
-		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]any{"error": "file exceeds max sync size"})
-		return
+	sha := strings.TrimSpace(r.URL.Query().Get("sha256"))
+	if !deleted && sha == "" {
+		sum := sha256.Sum256(data)
+		sha = hex.EncodeToString(sum[:])
 	}
-	conflict, err := syncer.WriteSyncedFile(s.hub.Config().ProjectRoot, rel, host, data, modTime)
+	entry := syncer.FileEntry{
+		Path:        rel,
+		Size:        int64(len(data)),
+		ModTimeUnix: mtimeSec,
+		SHA256:      sha,
+		Deleted:     deleted,
+		VC:          syncer.ParseVectorClock(r.URL.Query().Get("vc")),
+		UpdatedBy:   host,
+		UpdatedAt:   time.Now().UTC().Format(time.RFC3339),
+	}
+	svc := s.syncService()
+	_, conflict, err := syncer.ApplyRemoteFileEntry(
+		s.hub.Config().ProjectRoot,
+		svc.HostID(),
+		s.hub.Store(),
+		entry,
+		func() ([]byte, error) { return data, nil },
+	)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
 		return

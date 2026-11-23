@@ -28,6 +28,7 @@ import type {
   DesktopPermissionRequestResponse,
   DesktopPermissionsResponse,
   DesktopTarget,
+  FallbackHost,
   HostTailscaleStatus,
   MagpieMemoryList,
   NodeInfo,
@@ -564,31 +565,41 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
         await tryEndpoint(profile.address, profile.token, false);
       } catch (err: any) {
         if (seq !== connSeqRef.current) return;
+        if (err instanceof UnauthorizedError) {
+          setUsingStandby(false);
+          setConnState('unauthorized');
+          setConnError(err.message);
+          return;
+        }
+        const candidates: { address: string; token: string }[] = [];
         const sbAddr = (profile.standbyAddress || '').trim();
-        if (!(err instanceof UnauthorizedError) && sbAddr) {
+        if (sbAddr) {
+          candidates.push({ address: sbAddr, token: profile.standbyToken || '' });
+        }
+        for (const fb of profile.fallbackHosts || []) {
+          const addr = (fb.address || '').trim();
+          if (addr && addr !== sbAddr) {
+            candidates.push({ address: addr, token: fb.token || '' });
+          }
+        }
+        let lastErr: any = err;
+        for (const c of candidates) {
           try {
-            await tryEndpoint(sbAddr, profile.standbyToken || '', true);
+            await tryEndpoint(c.address, c.token, true);
             return;
-          } catch (sbErr: any) {
+          } catch (fbErr: any) {
             if (seq !== connSeqRef.current) return;
-            setUsingStandby(false);
-            if (sbErr instanceof UnauthorizedError) {
-              setConnState('unauthorized');
-              setConnError(sbErr.message);
-            } else {
-              setConnState('error');
-              setConnError(sbErr?.message || tStatic('connFailed'));
-            }
-            return;
+            lastErr = fbErr;
+            if (fbErr instanceof UnauthorizedError) break;
           }
         }
         setUsingStandby(false);
-        if (err instanceof UnauthorizedError) {
+        if (lastErr instanceof UnauthorizedError) {
           setConnState('unauthorized');
-          setConnError(err.message);
+          setConnError(lastErr.message);
         } else {
           setConnState('error');
-          setConnError(err?.message || tStatic('connFailed'));
+          setConnError(lastErr?.message || tStatic('connFailed'));
         }
       }
     },
@@ -659,10 +670,20 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
       const norm = normalizeAddress(input.address);
       if (!norm.cleanAddress) throw new Error(tStatic('enterValidAddr'));
       const tok = (input.token || norm.token || '').trim();
-      const sbRaw = (input.standbyAddress || '').trim();
-      const sbNorm = sbRaw ? normalizeAddress(sbRaw) : null;
-      const sbAddr = sbNorm?.cleanAddress || undefined;
-      const sbTok = (input.standbyToken || sbNorm?.token || '').trim() || undefined;
+      const sbParts = (input.standbyAddress || '')
+        .split(/[,\n]/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+      const fallbacks: FallbackHost[] = [];
+      for (const part of sbParts) {
+        const fn = normalizeAddress(part);
+        if (fn.cleanAddress) {
+          const ft = (input.standbyToken || fn.token || '').trim() || undefined;
+          fallbacks.push({ address: fn.cleanAddress, token: ft });
+        }
+      }
+      const sbAddr = fallbacks[0]?.address;
+      const sbTok = fallbacks[0]?.token;
       const existing = serversRef.current.find((s) => s.address === norm.cleanAddress);
       const label = (input.label || '').trim() || (norm.isTailcat ? tStatic('remoteHostDefault') : norm.cleanAddress.replace(/^https?:\/\//, ''));
       const target: ServerProfile = existing
@@ -672,6 +693,7 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
             token: tok || existing.token,
             standbyAddress: sbAddr ?? existing.standbyAddress,
             standbyToken: sbTok ?? existing.standbyToken,
+            fallbackHosts: fallbacks.length > 0 ? fallbacks : existing.fallbackHosts,
           }
         : {
             id: `${Date.now()}`,
@@ -680,6 +702,7 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
             token: tok,
             standbyAddress: sbAddr,
             standbyToken: sbTok,
+            fallbackHosts: fallbacks.length > 0 ? fallbacks : undefined,
           };
 
       const nextList = existing
