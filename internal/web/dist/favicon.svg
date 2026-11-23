@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <style>
+    .bg { fill: #efece8; }
+    .eye { fill: rgba(28, 20, 14, 0.90); }
+    @media (prefers-color-scheme: dark) {
+      .bg { fill: #171717; }
+      .eye { fill: rgba(20, 16, 13, 0.92); }
+    }
+  </style>
+  <defs>
+    <linearGradient id="celadon" x1="15%" y1="12%" x2="85%" y2="88%">
+      <stop offset="0%" stop-color="#83b4a2" />
+      <stop offset="55%" stop-color="#7aaa98" />
+      <stop offset="100%" stop-color="#6d9e8b" />
+    </linearGradient>
+  </defs>
+  <rect class="bg" width="100" height="100" rx="24" />
+  <g transform="translate(50 50) scale(0.72) translate(-50 -50)">
+    <g transform="rotate(-8.0 50 50)">
+      <path d="M85.73 56.25Q85.43 83.23 56.79 83.63L42.47 83.83Q13.82 84.23 14.47 57.25L14.79 43.76Q15.44 16.77 43.73 16.37L57.88 16.17Q86.18 15.77 85.88 42.75Z" fill="url(#celadon)" />
+    </g>
+    <rect class="eye" x="40.0" y="36.5" width="10.0" height="19.0" rx="5.0" transform="rotate(-14.0 45.0 46.0)" />
+    <rect class="eye" x="59.0" y="36.5" width="10.0" height="19.0" rx="5.0" transform="rotate(-14.0 64.0 46.0)" />
+  </g>
+</svg>

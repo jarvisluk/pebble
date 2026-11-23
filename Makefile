@@ -16,6 +16,7 @@ CODESIGN_IDENTITY ?=
 app: desktop
 	rm -rf "$(APP)" && mkdir -p "$(APP)/Contents/MacOS" "$(RES_BIN)"
 	cp build/darwin/Info.plist "$(APP)/Contents/"
+	cp build/darwin/AppIcon.icns "$(APP)/Contents/Resources/"
 	cp -R build/darwin/*.lproj "$(APP)/Contents/Resources/"
 	cp bin/bot-hub-desktop "$(APP)/Contents/MacOS/"
 	ln -sf ../MacOS/bot-hub-desktop "$(RES_BIN)/bot-hub"
