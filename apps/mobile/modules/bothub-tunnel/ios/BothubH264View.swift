@@ -9,6 +9,7 @@ public class BothubH264View: ExpoView {
   let onStreamError = EventDispatcher()
 
   private let displayLayer = AVSampleBufferDisplayLayer()
+  private let decodeQueue = DispatchQueue(label: "bothub.h264.decode")
   private var wsTask: URLSessionWebSocketTask?
   private var receiveTask: Task<Void, Never>?
   private var fpsTimer: Timer?
@@ -20,9 +21,11 @@ public class BothubH264View: ExpoView {
   private var isActive: Bool = false
 
   private var formatDesc: CMVideoFormatDescription?
+  private var vpsData: Data?
   private var spsData: Data?
   private var ppsData: Data?
   private var needKeyframe = true
+  private var streamFps: Int = 60
   private var ptsCounter: Int64 = 0
 
   required init(appContext: AppContext? = nil) {
@@ -36,6 +39,19 @@ public class BothubH264View: ExpoView {
   public override func layoutSubviews() {
     super.layoutSubviews()
     displayLayer.frame = bounds
+  }
+
+  public override func willMove(toWindow newWindow: UIWindow?) {
+    super.willMove(toWindow: newWindow)
+    if newWindow == nil {
+      disconnect()
+    }
+  }
+
+  deinit {
+    fpsTimer?.invalidate()
+    receiveTask?.cancel()
+    wsTask?.cancel(with: .goingAway, reason: nil)
   }
 
   func setUrl(_ value: String) {
@@ -90,16 +106,23 @@ public class BothubH264View: ExpoView {
     }
     let ws = URLSession.shared.webSocketTask(with: req)
     wsTask = ws
-    needKeyframe = true
-    frameCounter = 0
+    decodeQueue.async { [weak self] in
+      self?.needKeyframe = true
+      self?.frameCounter = 0
+    }
     ws.resume()
 
     DispatchQueue.main.async { [weak self] in
       self?.fpsTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
         guard let self else { return }
-        let f = self.frameCounter
-        self.frameCounter = 0
-        self.onStatus(["connected": !self.needKeyframe, "fps": f])
+        self.decodeQueue.async {
+          let f = self.frameCounter
+          self.frameCounter = 0
+          let isConnected = !self.needKeyframe
+          DispatchQueue.main.async {
+            self.onStatus(["connected": isConnected, "fps": f])
+          }
+        }
       }
     }
 
@@ -136,10 +159,14 @@ public class BothubH264View: ExpoView {
     receiveTask = nil
     wsTask?.cancel(with: .goingAway, reason: nil)
     wsTask = nil
-    formatDesc = nil
-    spsData = nil
-    ppsData = nil
-    needKeyframe = true
+    decodeQueue.async { [weak self] in
+      self?.formatDesc = nil
+      self?.vpsData = nil
+      self?.spsData = nil
+      self?.ppsData = nil
+      self?.needKeyframe = true
+      self?.frameCounter = 0
+    }
     DispatchQueue.main.async { [weak self] in
       self?.displayLayer.sampleBufferRenderer.flush(removingDisplayedImage: true, completionHandler: nil)
     }
@@ -150,7 +177,11 @@ public class BothubH264View: ExpoView {
           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
           let type = obj["type"] as? String else { return }
     if type == "meta" {
-      needKeyframe = true
+      let nextFps = max(1, (obj["fps"] as? NSNumber)?.intValue ?? 60)
+      decodeQueue.async { [weak self] in
+        self?.streamFps = nextFps
+        self?.needKeyframe = true
+      }
       DispatchQueue.main.async { [weak self] in
         self?.onMeta([
           "imageWidth": obj["imageWidth"] ?? 0,
@@ -174,22 +205,79 @@ public class BothubH264View: ExpoView {
   }
 
   private func handleBinary(_ packet: Data) {
+    decodeQueue.async { [weak self] in
+      self?.processBinaryPacket(packet)
+    }
+  }
+
+  private func processBinaryPacket(_ packet: Data) {
     guard packet.count > 2 else { return }
     let kind = packet[packet.startIndex]
-    guard kind == 0x02 || kind == 0x03 else { return }
-    let isKey = (kind == 0x02)
+    guard kind == 0x02 || kind == 0x03 || kind == 0x04 || kind == 0x05 else { return }
+    let isKey = (kind == 0x02 || kind == 0x04)
+    let isHEVC = (kind == 0x04 || kind == 0x05)
     if needKeyframe && !isKey { return }
 
     let nalus = splitAnnexB(packet.dropFirst())
     var slices: [Data] = []
+    var vpsChanged = false
+    var spsChanged = false
+    var ppsChanged = false
     for n in nalus {
       guard let f = n.first else { continue }
-      let t = f & 0x1F
-      if t == 7 { spsData = n }
-      else if t == 8 { ppsData = n }
-      else if t == 5 || t == 1 { slices.append(n) }
+      if isHEVC {
+        let t = (f >> 1) & 0x3F
+        if t == 32 {
+          if vpsData != n { vpsData = n; vpsChanged = true }
+        } else if t == 33 {
+          if spsData != n { spsData = n; spsChanged = true }
+        } else if t == 34 {
+          if ppsData != n { ppsData = n; ppsChanged = true }
+        } else if (t <= 9) || (t >= 16 && t <= 21) {
+          slices.append(n)
+        }
+      } else {
+        let t = f & 0x1F
+        if t == 7 {
+          if spsData != n { spsData = n; spsChanged = true }
+        } else if t == 8 {
+          if ppsData != n { ppsData = n; ppsChanged = true }
+        } else if t == 5 || t == 1 {
+          slices.append(n)
+        }
+      }
     }
-    if isKey, let sps = spsData, let pps = ppsData {
+    if isHEVC {
+      if isKey, (formatDesc == nil || vpsChanged || spsChanged || ppsChanged),
+         let vps = vpsData, let sps = spsData, let pps = ppsData {
+        var desc: CMVideoFormatDescription?
+        _ = vps.withUnsafeBytes { vBuf in
+          sps.withUnsafeBytes { sBuf in
+            pps.withUnsafeBytes { pBuf in
+              let ptrs = [vBuf.bindMemory(to: UInt8.self).baseAddress!, sBuf.bindMemory(to: UInt8.self).baseAddress!, pBuf.bindMemory(to: UInt8.self).baseAddress!]
+              let sizes = [vps.count, sps.count, pps.count]
+              return CMVideoFormatDescriptionCreateFromHEVCParameterSets(
+                allocator: kCFAllocatorDefault,
+                parameterSetCount: 3,
+                parameterSetPointers: ptrs,
+                parameterSetSizes: sizes,
+                nalUnitHeaderLength: 4,
+                extensions: nil,
+                formatDescriptionOut: &desc
+              )
+            }
+          }
+        }
+        if let desc {
+          if formatDesc != nil {
+            DispatchQueue.main.async { [weak self] in
+              self?.displayLayer.sampleBufferRenderer.flush()
+            }
+          }
+          formatDesc = desc
+        }
+      }
+    } else if isKey, (formatDesc == nil || spsChanged || ppsChanged), let sps = spsData, let pps = ppsData {
       var desc: CMVideoFormatDescription?
       _ = sps.withUnsafeBytes { sBuf in
         pps.withUnsafeBytes { pBuf in
@@ -205,7 +293,14 @@ public class BothubH264View: ExpoView {
           )
         }
       }
-      if let desc { formatDesc = desc }
+      if let desc {
+        if formatDesc != nil {
+          DispatchQueue.main.async { [weak self] in
+            self?.displayLayer.sampleBufferRenderer.flush()
+          }
+        }
+        formatDesc = desc
+      }
     }
     guard !slices.isEmpty, let fmt = formatDesc else { return }
     var avcc = Data()
@@ -226,24 +321,35 @@ public class BothubH264View: ExpoView {
     }
     guard st == noErr, let block else { return }
     ptsCounter += 1
-    var timing = CMSampleTimingInfo(duration: CMTime(value: 1, timescale: 30), presentationTimeStamp: CMTime(value: ptsCounter, timescale: 30), decodeTimeStamp: .invalid)
+    let fpsScale = Int32(max(1, streamFps))
+    var timing = CMSampleTimingInfo(duration: CMTime(value: 1, timescale: fpsScale), presentationTimeStamp: CMTime(value: ptsCounter, timescale: fpsScale), decodeTimeStamp: .invalid)
     var sz = total
     var sample: CMSampleBuffer?
     guard CMSampleBufferCreateReady(allocator: kCFAllocatorDefault, dataBuffer: block, formatDescription: fmt, sampleCount: 1, sampleTimingEntryCount: 1, sampleTimingArray: &timing, sampleSizeEntryCount: 1, sampleSizeArray: &sz, sampleBufferOut: &sample) == noErr, let sample else { return }
     if let arr = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: true) {
       let dict = unsafeBitCast(CFArrayGetValueAtIndex(arr, 0), to: CFMutableDictionary.self)
       CFDictionarySetValue(dict, Unmanaged.passUnretained(kCMSampleAttachmentKey_DisplayImmediately).toOpaque(), Unmanaged.passUnretained(kCFBooleanTrue).toOpaque())
+      if !isKey {
+        CFDictionarySetValue(dict, Unmanaged.passUnretained(kCMSampleAttachmentKey_NotSync).toOpaque(), Unmanaged.passUnretained(kCFBooleanTrue).toOpaque())
+      }
     }
+    let wasNeedingKey = needKeyframe
+    needKeyframe = false
+    frameCounter += 1
+    let currentFrames = frameCounter
     DispatchQueue.main.async { [weak self] in
       guard let self else { return }
       let r = self.displayLayer.sampleBufferRenderer
-      if r.status == .failed { r.flush() }
-      r.enqueue(sample)
-      if self.needKeyframe {
-        self.needKeyframe = false
-        self.onStatus(["connected": true, "fps": self.frameCounter])
+      if r.status == .failed {
+        r.flush()
+        self.decodeQueue.async { self.needKeyframe = true }
+        self.wsTask?.send(.string("{\"type\":\"keyframe\"}")) { _ in }
+        return
       }
-      self.frameCounter += 1
+      r.enqueue(sample)
+      if wasNeedingKey {
+        self.onStatus(["connected": true, "fps": currentFrames])
+      }
     }
   }
 

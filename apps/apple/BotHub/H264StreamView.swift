@@ -12,6 +12,8 @@ struct H264StreamMeta {
     var logicalY: Double = 0
     var logicalWidth: Double = 1440
     var logicalHeight: Double = 900
+    var fps: Int = 60
+    var codec: String = "h264"
     var preset: String = ""
     var bitrateKbps: Int = 0
 }
@@ -58,6 +60,7 @@ final class H264StreamController {
     @ObservationIgnored private var fpsTimer: Task<Void, Never>?
     @ObservationIgnored private var frameCounter = 0
     @ObservationIgnored private var formatDesc: CMVideoFormatDescription?
+    @ObservationIgnored private var vpsData: Data?
     @ObservationIgnored private var spsData: Data?
     @ObservationIgnored private var ppsData: Data?
     @ObservationIgnored private var needKeyframe = true
@@ -101,6 +104,7 @@ final class H264StreamController {
         fps = 0
         frameCounter = 0
         formatDesc = nil
+        vpsData = nil
         spsData = nil
         ppsData = nil
         needKeyframe = true
@@ -113,6 +117,12 @@ final class H264StreamController {
            let txt = String(data: data, encoding: .utf8) {
             ws.send(.string(txt)) { _ in }
         }
+    }
+
+    func requestKeyframe() {
+        needKeyframe = true
+        guard let ws = task else { return }
+        ws.send(.string("{\"type\":\"keyframe\"}")) { _ in }
     }
 
     func sendInput(_ event: [String: Any]) {
@@ -160,6 +170,8 @@ final class H264StreamController {
                 logicalY: (obj["logicalY"] as? NSNumber)?.doubleValue ?? 0,
                 logicalWidth: (obj["logicalWidth"] as? NSNumber)?.doubleValue ?? 1440,
                 logicalHeight: (obj["logicalHeight"] as? NSNumber)?.doubleValue ?? 900,
+                fps: max(1, (obj["fps"] as? NSNumber)?.intValue ?? 60),
+                codec: obj["codec"] as? String ?? "h264",
                 preset: obj["preset"] as? String ?? "",
                 bitrateKbps: (obj["bitrateKbps"] as? NSNumber)?.intValue ?? 0
             )
@@ -179,36 +191,102 @@ final class H264StreamController {
     private func handleBinary(_ packet: Data) {
         guard packet.count > 2 else { return }
         let kind = packet[packet.startIndex]
-        guard kind == 0x02 || kind == 0x03 else { return }
-        let isKey = (kind == 0x02)
+        guard kind == 0x02 || kind == 0x03 || kind == 0x04 || kind == 0x05 else { return }
+        let isKey = (kind == 0x02 || kind == 0x04)
+        let isHEVC = (kind == 0x04 || kind == 0x05)
         if needKeyframe && !isKey { return }
 
         let nalus = parseAnnexBNALUs(packet.dropFirst())
         if nalus.isEmpty { return }
 
         var sliceNALUs: [Data] = []
+        var vpsChanged = false
+        var spsChanged = false
+        var ppsChanged = false
         for nalu in nalus {
             guard let first = nalu.first else { continue }
-            let nalType = first & 0x1F
-            switch nalType {
-            case 7:
-                spsData = nalu
-            case 8:
-                ppsData = nalu
-            case 5, 1:
-                sliceNALUs.append(nalu)
-            default:
-                break
+            if isHEVC {
+                let nalType = (first >> 1) & 0x3F
+                switch nalType {
+                case 32:
+                    if vpsData != nalu { vpsData = nalu; vpsChanged = true }
+                case 33:
+                    if spsData != nalu { spsData = nalu; spsChanged = true }
+                case 34:
+                    if ppsData != nalu { ppsData = nalu; ppsChanged = true }
+                case 0...9, 16...21:
+                    sliceNALUs.append(nalu)
+                default:
+                    break
+                }
+            } else {
+                let nalType = first & 0x1F
+                switch nalType {
+                case 7:
+                    if spsData != nalu { spsData = nalu; spsChanged = true }
+                case 8:
+                    if ppsData != nalu { ppsData = nalu; ppsChanged = true }
+                case 5, 1:
+                    sliceNALUs.append(nalu)
+                default:
+                    break
+                }
             }
         }
-        if isKey, let sps = spsData, let pps = ppsData {
-            rebuildFormatDesc(sps: sps, pps: pps)
+        if isHEVC {
+            if isKey, (formatDesc == nil || vpsChanged || spsChanged || ppsChanged),
+               let vps = vpsData, let sps = spsData, let pps = ppsData {
+                if formatDesc != nil {
+                    displayLayer?.sampleBufferRenderer.flush()
+                }
+                rebuildHEVCFormatDesc(vps: vps, sps: sps, pps: pps)
+            }
+        } else {
+            if isKey, (formatDesc == nil || spsChanged || ppsChanged), let sps = spsData, let pps = ppsData {
+                if formatDesc != nil {
+                    displayLayer?.sampleBufferRenderer.flush()
+                }
+                rebuildFormatDesc(sps: sps, pps: pps)
+            }
         }
         guard !sliceNALUs.isEmpty, let fmt = formatDesc else { return }
         if enqueueAVCC(nalus: sliceNALUs, formatDesc: fmt, isKey: isKey) {
             needKeyframe = false
             connected = true
             frameCounter += 1
+        }
+    }
+
+    private func rebuildHEVCFormatDesc(vps: Data, sps: Data, pps: Data) {
+        var newDesc: CMVideoFormatDescription?
+        let status: OSStatus = vps.withUnsafeBytes { vBuf in
+            sps.withUnsafeBytes { sBuf in
+                pps.withUnsafeBytes { pBuf in
+                    guard let vPtr = vBuf.bindMemory(to: UInt8.self).baseAddress,
+                          let sPtr = sBuf.bindMemory(to: UInt8.self).baseAddress,
+                          let pPtr = pBuf.bindMemory(to: UInt8.self).baseAddress else {
+                        return -1
+                    }
+                    let ptrs = [vPtr, sPtr, pPtr]
+                    let sizes = [vps.count, sps.count, pps.count]
+                    return ptrs.withUnsafeBufferPointer { ptrBuf in
+                        sizes.withUnsafeBufferPointer { sizeBuf in
+                            CMVideoFormatDescriptionCreateFromHEVCParameterSets(
+                                allocator: kCFAllocatorDefault,
+                                parameterSetCount: 3,
+                                parameterSetPointers: ptrBuf.baseAddress!,
+                                parameterSetSizes: sizeBuf.baseAddress!,
+                                nalUnitHeaderLength: 4,
+                                extensions: nil,
+                                formatDescriptionOut: &newDesc
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        if status == noErr, let newDesc {
+            formatDesc = newDesc
         }
     }
 
@@ -276,9 +354,10 @@ final class H264StreamController {
         guard bStatus == noErr, let blockBuf else { return false }
 
         ptsCounter += 1
+        let fpsScale = Int32(max(1, meta?.fps ?? 60))
         var timing = CMSampleTimingInfo(
-            duration: CMTime(value: 1, timescale: 30),
-            presentationTimeStamp: CMTime(value: ptsCounter, timescale: 30),
+            duration: CMTime(value: 1, timescale: fpsScale),
+            presentationTimeStamp: CMTime(value: ptsCounter, timescale: fpsScale),
             decodeTimeStamp: .invalid
         )
         var sampleSize = totalLen
@@ -316,6 +395,8 @@ final class H264StreamController {
         let renderer = layer.sampleBufferRenderer
         if renderer.status == .failed {
             renderer.flush()
+            requestKeyframe()
+            return false
         }
         renderer.enqueue(sampleBuf)
         return true

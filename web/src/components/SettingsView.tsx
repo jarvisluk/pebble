@@ -294,9 +294,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     api<TailscaleStatus>('/api/tailscale')
       .then(applyTailscaleState)
       .catch((err) => applyTailscaleState({ state: 'error', error: err instanceof Error ? err.message : '' }));
-    api<{ status?: { webrtcAvailable?: boolean; supported?: boolean } }>('/api/desktop/state?target=local')
+    api<{ status?: { webrtcAvailable?: boolean; supported?: boolean; backend?: string } }>('/api/desktop/state?target=local')
       .then((st) => {
-        setLocalDeskEngine(st?.status?.webrtcAvailable ? 'bot-host (WebRTC H.264)' : t('jpegStream'));
+        setLocalDeskEngine(st?.status?.backend || (st?.status?.webrtcAvailable ? 'WebRTC / H.265·H.264' : t('unavailable')));
         setLocalDeskSupported(Boolean(st?.status?.supported));
       })
       .catch(() => {
@@ -353,9 +353,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     api<{ targets?: DesktopTarget[] }>('/api/desktop/targets')
       .then((d) => setPermTargets(d.targets || []))
       .catch(() => setPermTargets([]));
-    api<{ status?: { webrtcAvailable?: boolean; supported?: boolean } }>('/api/desktop/state?target=local')
+    api<{ status?: { webrtcAvailable?: boolean; supported?: boolean; backend?: string } }>('/api/desktop/state?target=local')
       .then((st) => {
-        setLocalDeskEngine(st?.status?.webrtcAvailable ? 'bot-host (WebRTC H.264)' : t('jpegStream'));
+        setLocalDeskEngine(st?.status?.backend || (st?.status?.webrtcAvailable ? 'WebRTC / H.265·H.264' : t('unavailable')));
         setLocalDeskSupported(Boolean(st?.status?.supported));
       })
       .catch(() => {
