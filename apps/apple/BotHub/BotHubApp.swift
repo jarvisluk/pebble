@@ -180,11 +180,12 @@ struct SheetToolbar: ToolbarContent {
     var actionTitle: String?
     var actionDisabled = false
     var loading = false
+    var onClose: (() -> Void)? = nil
     var action: (() -> Void)?
 
     var body: some ToolbarContent {
         ToolbarItem(placement: .cancellationAction) {
-            Button(L.t("close")) { router.sheet = nil }
+            Button(L.t("close")) { (onClose ?? { router.sheet = nil })() }
         }
         if let actionTitle, let action {
             ToolbarItem(placement: .confirmationAction) {

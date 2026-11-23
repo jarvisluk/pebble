@@ -22,6 +22,7 @@ struct SettingsView: View {
     @State private var error = ""
     @State private var saved = ""
     @State private var confirm: ConfirmItem?
+    @State private var showUnsavedAlert = false
 
     @State private var mem: MemoryList?
     @State private var memQuery = ""
@@ -69,10 +70,10 @@ struct SettingsView: View {
         Form {
             if !error.isEmpty { Section { StatusText(text: error) } }
             if !saved.isEmpty { Section { StatusText(text: saved, error: false) } }
+            appearanceSection
             hostSection
             magpieSection
             nativeCLISection
-            appearanceSection
             defaultModelSection
             botModelsSection
             Section {
@@ -89,9 +90,26 @@ struct SettingsView: View {
             remoteSection
         }
         .hubForm()
+        .interactiveDismissDisabled(dirty)
         .navigationTitle(hub.t("settings"))
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar { SheetToolbar(actionTitle: hub.t("save"), actionDisabled: !dirty, loading: saving) { save() } }
+        .toolbar {
+            SheetToolbar(
+                actionTitle: hub.t("save"),
+                actionDisabled: !dirty,
+                loading: saving,
+                onClose: {
+                    if dirty { showUnsavedAlert = true } else { router.sheet = nil }
+                }
+            ) { save() }
+        }
+        .alert(hub.t("unsavedTitle"), isPresented: $showUnsavedAlert) {
+            Button(hub.t("saveAndLeave")) { save(closeAfter: true) }
+            Button(hub.t("discardChanges"), role: .destructive) { router.sheet = nil }
+            Button(hub.t("cancel"), role: .cancel) {}
+        } message: {
+            Text(hub.t("unsavedDesc"))
+        }
         .confirmAlert($confirm)
         .task {
             _ = try? await hub.loadSettings()
@@ -124,7 +142,7 @@ struct SettingsView: View {
         }
     }
 
-    private func save() {
+    private func save(closeAfter: Bool = false) {
         error = ""; saved = ""; saving = true
         Task {
             do {
@@ -134,6 +152,7 @@ struct SettingsView: View {
                 drafts = [:]
                 sync()
                 saved = hub.t("settingsSaved")
+                if closeAfter { router.sheet = nil }
             } catch { self.error = errText(error, hub.t("saveFailed")) }
             saving = false
         }

@@ -20,6 +20,10 @@ const DICT = {
     // Common
     cancel: '取消',
     confirm: '确认',
+    unsavedTitle: '有未保存的更改',
+    unsavedDesc: '当前设置尚未保存，退出前要保存吗？',
+    saveAndLeave: '保存并退出',
+    discardChanges: '放弃更改',
     save: '保存',
     saving: '保存中…',
     close: '关闭',
@@ -393,6 +397,10 @@ const DICT = {
   en: {
     cancel: 'Cancel',
     confirm: 'Confirm',
+    unsavedTitle: 'Unsaved Changes',
+    unsavedDesc: 'Your settings have unsaved changes. Save before leaving?',
+    saveAndLeave: 'Save & Leave',
+    discardChanges: 'Discard',
     save: 'Save',
     saving: 'Saving…',
     close: 'Close',

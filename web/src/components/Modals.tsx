@@ -260,6 +260,26 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({ options, lang, onClo
           <button type="button" id="confirmCancel" className="btn" onClick={onClose}>
             {t('cancel')}
           </button>
+          {options?.altText && options?.onAlt && (
+            <button
+              type="button"
+              id="confirmAlt"
+              className={`btn ${options.altClass ?? ''}`.trim()}
+              disabled={running}
+              onClick={async () => {
+                const fn = options.onAlt!;
+                onClose();
+                setRunning(true);
+                try {
+                  await fn();
+                } finally {
+                  setRunning(false);
+                }
+              }}
+            >
+              {options.altText}
+            </button>
+          )}
           <button
             type="button"
             id="confirmOk"

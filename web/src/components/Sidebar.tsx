@@ -243,6 +243,26 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <nav id="settingsTabs" className="list" role="tablist" aria-label={t('settingsTabs')}>
           <button
             type="button"
+            className={`snav-item${settingsTab === 'general' ? ' on' : ''}`}
+            role="tab"
+            aria-selected={settingsTab === 'general'}
+            data-stab="general"
+            onClick={() => onSwitchSettingsTab('general')}
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.9"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M4 7h16M4 17h16M9 5v4M15 15v4" />
+            </svg>
+            <span>{t('tabGeneral')}</span>
+          </button>
+          <button
+            type="button"
             className={`snav-item${settingsTab === 'models' ? ' on' : ''}`}
             role="tab"
             aria-selected={settingsTab === 'models'}
@@ -265,6 +285,26 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </button>
           <button
             type="button"
+            className={`snav-item${settingsTab === 'memory' ? ' on' : ''}`}
+            role="tab"
+            aria-selected={settingsTab === 'memory'}
+            data-stab="memory"
+            onClick={() => onSwitchSettingsTab('memory')}
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.9"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H19a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H6.5a1 1 0 0 1 0-5H20" />
+            </svg>
+            <span>{t('tabMemory')}</span>
+          </button>
+          <button
+            type="button"
             className={`snav-item${settingsTab === 'remote' ? ' on' : ''}`}
             role="tab"
             aria-selected={settingsTab === 'remote'}
@@ -284,26 +324,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <path d="M12 3a14.5 14.5 0 0 0 0 18 14.5 14.5 0 0 0 0-18z" />
             </svg>
             <span>{t('tabRemote')}</span>
-          </button>
-          <button
-            type="button"
-            className={`snav-item${settingsTab === 'general' ? ' on' : ''}`}
-            role="tab"
-            aria-selected={settingsTab === 'general'}
-            data-stab="general"
-            onClick={() => onSwitchSettingsTab('general')}
-          >
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.9"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M4 7h16M4 17h16M9 5v4M15 15v4" />
-            </svg>
-            <span>{t('tabGeneral')}</span>
           </button>
         </nav>
       </div>
