@@ -185,13 +185,14 @@
 
 iOS / iPadOS 共用一个 SwiftUI 工程（macOS 使用 Web/桌面端，不出原生 Mac 版），**结构与控件用系统原生组件，视觉沿用本文件 Token**，整体观感与 Web/桌面端一致：
 
+- **多端一致**：只按 `horizontalSizeClass` 分支，绝不按 `userInterfaceIdiom` 等设备类型分支；列表样式、底色、内容边距必须显式声明，不依赖系统 `automatic` 解析。
 - **启动门禁**（iOS/iPadOS 与 Android 同步）：未连接主机时（无已保存主机、首次连接中、未授权或连接失败且无可用会话）停留在独立全屏连接页，不进入 `Bots` 主界面与顶栏，iPad 宽屏不进入 `NavigationSplitView`（内容居中限宽 `560`）；连接成功后切入主界面。
-- **首页**（Android 同步）：标题「Bots」与图标按钮在同一行（左侧标题，右侧「搜索 / 新建 / 设置」三个图标）；搜索平时收起为图标，点开后在列表顶部出现胶囊搜索框；主机连接状态、切换主机、远程桌面、设备与隧道统一放在「设置 → 主机」分组，首页只保留人工接管提示。
+- **首页**：工具栏左侧为排序菜单、右侧为设置入口；列表顶部放常驻的原生搜索框（顶部到搜索框约 8pt，搜索框到列表卡片约 12pt）；主机连接状态、切换主机、远程桌面、设备与隧道统一放在「设置 → 主机」分组，首页只保留人工接管提示。
 - **字号**：移动端（iOS 原生与 Android）在第 4 节字阶上整体上调一档（正文 16、次要 15、说明 13、标题 17~22），保证手机上的可读性。
 - **语言**：App 文案与系统级文案（网络错误等）同一语言，跟随 App 语言设置；系统错误不直接展示，改用自有文案。
 
-- **导航**：iPhone 用 `NavigationStack`；iPad 用 `NavigationSplitView`（侧栏为 Bot 列表，底色 `--card`，选中行 `--sel` 圆角底）。标题、图标按钮放系统工具栏（SF Symbols）。
-- **表单与弹层**：设置、连接、新建、详情、设备等一律用 `Form`/`List` + 系统 sheet，工具栏左侧「关闭/取消」、右侧「保存/创建/连接」；Bot 详情在 iPad 用 `.inspector` 侧栏（栏内保存按钮放表单顶部，仅有改动时出现），iPhone 用 sheet。远程桌面一律全屏展示（iOS `fullScreenCover` / Android `fullScreenModal`），宽屏下支持右侧展开 Bot 聊天侧边栏，窄屏下支持弹出/抽屉式 Bot 聊天面板。
+- **导航**：iPhone 和 iPad 都用 `NavigationSplitView`（窄宽度时系统自动折叠成栈）；窄宽度下 Bot 列表和设置侧栏用 `.insetGrouped`（页面底 `--page`、行 `--card`、选中 `--s1`），点「设置」以原生 push 进入并支持边缘右滑返回；宽屏侧栏用系统 `.sidebar` 悬浮面板，以便和详情区区分，点「设置」切换到设置分栏并默认选中「通用」。标题、图标按钮放系统工具栏（SF Symbols）。
+- **表单与弹层**：设置、连接、新建、详情、设备等一律用 `Form`/`List` + 系统 sheet，工具栏左侧「关闭/取消」、右侧「保存/创建/连接」；Bot 详情用 `.inspector`，宽屏时是侧栏（栏内保存按钮放表单顶部，仅有改动时出现），窄屏时系统自动变成 sheet。远程桌面一律全屏展示（iOS `fullScreenCover` / Android `fullScreenModal`），宽屏下支持右侧展开 Bot 聊天侧边栏，窄屏下支持弹出/抽屉式 Bot 聊天面板。
 - **控件**：按钮用 `.borderedProminent`（主操作）/`.bordered`/`role: .destructive`，全局 `buttonBorderShape(.capsule)` 保持胶囊形；二选一或少量选项用 `Picker(.segmented)`，其余用默认菜单样式 `Picker`；开关用 `Toggle`；空状态用 `ContentUnavailableView`；确认用系统 `alert`。
 - **颜色**：`Form`/`List` 隐藏系统底色，页面底用 `--page`、行与卡片用 `--card`，`--s1`~`--s3`、文字色均取第 2 节 Token 并随深浅模式切换；全局 `tint` 保持中性墨黑/浅白；Bot 头像色、粉/紫/绿、`--busy`、`--danger` 用于消息气泡、Bot 局部强调与状态，远程桌面舞台保持固定深色底。
 - **保留自绘**：仅 Bot 头像（blob + 双眼）、消息气泡（含图片附件网格与全屏图片预览弹层）、跨 Bot 协作折叠提示条（点击弹出协作记录 sheet/Modal）、空会话建议卡、输入框左侧附件上传按钮（照片图库 / 选择文件）及待发送附件预览条、`/` 与 `@` 自动联想条（iOS 与 Android 同步），以及远程桌面舞台。

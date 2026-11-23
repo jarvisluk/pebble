@@ -25,6 +25,7 @@ struct BotDetailView: View {
     @State private var memLoading = false
     @State private var memText = ""
     @State private var memSaving = false
+    @State private var previewStream = H264StreamController()
 
     private var index: Int { hub.bots.firstIndex { $0.id == botId } ?? -1 }
     private var bot: BotStatus? { index >= 0 ? hub.bots[index] : nil }
@@ -41,6 +42,47 @@ struct BotDetailView: View {
         let pal = p.bot(botId, index, custom: editColor.isEmpty ? active?.color : editColor)
         Form { Group {
             if !err.isEmpty { Section { StatusText(text: err) } }
+            Section {
+                Button {
+                    router.openDesktop(hub.takeovers.first?.target ?? "local")
+                } label: {
+                    ZStack(alignment: .topTrailing) {
+                        ZStack {
+                            Color.black
+                            H264DisplayView(controller: previewStream)
+                            if !previewStream.connected {
+                                VStack(spacing: 6) {
+                                    if !previewStream.error.isEmpty {
+                                        Image(systemName: "display")
+                                            .font(.system(size: 20))
+                                            .foregroundStyle(.secondary)
+                                        Text(previewStream.error)
+                                            .font(.system(size: 12))
+                                            .foregroundStyle(.secondary)
+                                            .multilineTextAlignment(.center)
+                                            .lineLimit(2)
+                                            .padding(.horizontal, 12)
+                                    } else {
+                                        ProgressView()
+                                            .tint(.white)
+                                    }
+                                }
+                            }
+                        }
+                        .aspectRatio(16.0 / 10.0, contentMode: .fit)
+
+                        Image(systemName: "arrow.up.left.and.arrow.down.right")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .padding(7)
+                            .background(.black.opacity(0.55), in: Circle())
+                            .padding(12)
+                    }
+                }
+                .buttonStyle(.plain)
+                .listRowInsets(EdgeInsets())
+                .listRowBackground(Color.black)
+            }
             Section {
                 HStack(spacing: 14) {
                     BotAvatar(id: botId, size: 56, index: index, avatar: editAvatar, color: editColor)
@@ -122,7 +164,13 @@ struct BotDetailView: View {
             }
         }
         .confirmAlert($confirm)
-        .task(id: botId) { await open() }
+        .task(id: botId) {
+            if hub.isConnected, let req = hub.makeDesktopWSRequest(target: hub.takeovers.first?.target ?? "local") {
+                previewStream.start(request: req)
+            }
+            await open()
+        }
+        .onDisappear { previewStream.stop() }
     }
 
     private func open() async {

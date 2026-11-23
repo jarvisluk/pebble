@@ -22,10 +22,12 @@ struct DesktopView: View {
     @State private var isDragging = false
     @State private var lastDragSent = Date.distantPast
     @State private var streamCtrl = H264StreamController()
-    @State private var showChat = false
+    @State private var columnVisibility: NavigationSplitViewVisibility = .detailOnly
+    @State private var showChatSheet = false
     @State private var chatBotId: String
+    @FocusState private var draftFocused: Bool
 
-    private let stage = Color(hex: "#111110")
+    private let stage = Color.black
     private let pillBg = Color(hex: "#1f1d1b")
     private let pillText = Color(hex: "#f3f1ee")
     private let pillMute = Color(hex: "#a6a09a")
@@ -54,27 +56,30 @@ struct DesktopView: View {
     private var isWide: Bool { hsc != .compact }
 
     var body: some View {
-        HStack(spacing: 0) {
-            desktopColumn
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(stage)
-
-            if isWide, showChat {
-                Divider()
-                sidebarChatView
-                    .frame(width: 360)
-                    .transition(.move(edge: .trailing))
+        Group {
+            if isWide {
+                NavigationSplitView(columnVisibility: $columnVisibility) {
+                    sidebarChatView(closable: false)
+                        .navigationSplitViewColumnWidth(min: 320, ideal: 360, max: 420)
+                } detail: {
+                    NavigationStack {
+                        desktopStage
+                    }
+                }
+            } else {
+                NavigationStack {
+                    desktopStage
+                }
+                .sheet(isPresented: $showChatSheet) {
+                    NavigationStack {
+                        sidebarChatView(closable: true)
+                    }
+                    .presentationDetents([.medium, .large])
+                }
             }
         }
-        .animation(.easeOut(duration: 0.22), value: showChat)
-        .background(stage.ignoresSafeArea())
-        .sheet(isPresented: Binding(
-            get: { !isWide && showChat },
-            set: { if !$0 { showChat = false } }
-        )) {
-            sidebarChatView
-                .presentationDetents([.medium, .large])
-        }
+        .tint(Color(hex: "#f3f1ee"))
+        .preferredColorScheme(.dark)
         .task { _ = try? await hub.refreshDesktopTargets() }
         .task(id: "\(target)-\(streaming)") {
             await pollState()
@@ -95,9 +100,8 @@ struct DesktopView: View {
         }
     }
 
-    private var desktopColumn: some View {
-        VStack(spacing: 8) {
-            topBar
+    private var desktopStage: some View {
+        VStack(spacing: 0) {
             if let to = activeTakeover {
                 HStack(spacing: 10) {
                     Label(hub.t("takeoverBanner", ["bot": to.botName ?? to.botId ?? "Bot", "reason": to.reason ?? ""]), systemImage: "hand.raised.fill")
@@ -109,101 +113,140 @@ struct DesktopView: View {
                 .padding(10)
                 .background(p.pink, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .padding(.horizontal, 12)
+                .padding(.top, 8)
             }
+
             stageView
-            controls
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            if showText {
+                desktopTextBar
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+            }
         }
-        .padding(.top, 8)
-    }
-
-    private var topBar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
+        .background(stage.ignoresSafeArea())
+        .navigationTitle(target == "local" ? hub.t("localDesktopName") : (targets.first(where: { $0.id == target })?.name ?? hub.t("remoteDesktop")))
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
                 Button { dismiss() } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(pillText)
-                        .frame(width: 32, height: 32)
-                        .background(pillBg, in: Circle())
+                    Label(hub.t("close"), systemImage: "chevron.backward")
                 }
-
-                if targets.count > 1 {
-                    Menu {
-                        ForEach(targets) { tr in
-                            Button {
-                                target = tr.id
-                            } label: {
-                                Label(tr.id == "local" ? hub.t("localDesktopName") : (tr.name ?? tr.id), systemImage: tr.id == target ? "checkmark" : "desktopcomputer")
-                            }
-                        }
-                    } label: {
-                        HStack(spacing: 4) {
-                            let activeTarget = targets.first(where: { $0.id == target })
-                            Text(target == "local" ? hub.t("localDesktopName") : (activeTarget?.name ?? target))
-                            Image(systemName: "chevron.down").font(.system(size: 11))
-                        }
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(pillText)
-                        .padding(.horizontal, 12).frame(height: 32)
-                        .background(pillBg, in: Capsule())
+            }
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                if !isWide {
+                    Button { showChatSheet = true } label: {
+                        Label(hub.t("deskChatSidebar"), systemImage: "bubble.left.and.bubble.right")
                     }
-                }
-
-                if streamCtrl.connected {
-                    Text("H.264 · \(streamCtrl.fps) fps")
-                        .font(.system(size: 12, design: .monospaced))
-                        .foregroundStyle(pillMute)
-                        .padding(.horizontal, 10).frame(height: 32)
-                        .background(pillBg, in: Capsule())
                 }
 
                 Button { streaming.toggle() } label: {
-                    Image(systemName: streaming ? "pause.fill" : "play.fill")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(pillText)
-                        .frame(width: 32, height: 32)
-                        .background(pillBg, in: Circle())
+                    Label(streaming ? hub.t("collapse") : hub.t("connect"), systemImage: streaming ? "pause.fill" : "play.fill")
                 }
 
-                Button { showChat.toggle() } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: "bubble.left.and.bubble.right")
-                            .font(.system(size: 13, weight: .semibold))
-                        Text(hub.t("deskChatSidebar"))
-                            .font(.system(size: 13, weight: .semibold))
+                Menu {
+                    Toggle(isOn: Binding(
+                        get: { showText },
+                        set: { v in
+                            showText = v
+                            if v { draftFocused = true }
+                        }
+                    )) {
+                        Label(hub.t("aaInput"), systemImage: "keyboard")
                     }
-                    .foregroundStyle(showChat ? Color(hex: "#171717") : pillText)
-                    .padding(.horizontal, 12).frame(height: 32)
-                    .background(showChat ? pillText : pillBg, in: Capsule())
+                    Divider()
+                    Button(hub.t("keyEnter")) { send(["kind": "key", "key": "Return"]) }
+                    Button(hub.t("keyBackspace")) { send(["kind": "key", "key": "Backspace"]) }
+                    Button("Esc") { send(["kind": "key", "key": "Escape"]) }
+                    Button("Tab") { send(["kind": "key", "key": "Tab"]) }
+                    Divider()
+                    Button(hub.t("keyScrollUp")) { send(["kind": "scroll", "deltaY": 8]) }
+                    Button(hub.t("keyScrollDown")) { send(["kind": "scroll", "deltaY": -8]) }
+                } label: {
+                    Label(hub.t("aaInput"), systemImage: "keyboard")
+                }
+
+                Menu {
+                    if streamCtrl.connected {
+                        Section {
+                            Text("H.264 · \(streamCtrl.fps) fps")
+                        }
+                    }
+                    if targets.count > 1 {
+                        Picker("", selection: $target) {
+                            ForEach(targets) { tr in
+                                Text(tr.name ?? tr.id).tag(tr.id)
+                            }
+                        }
+                    }
+                } label: {
+                    Label(hub.t("settings"), systemImage: "slider.horizontal.3")
                 }
             }
-            .padding(.horizontal, 12)
         }
     }
 
     @ViewBuilder
-    private var sidebarChatView: some View {
-        NavigationStack {
-            if let bid = resolvedBotId {
-                ChatView(
-                    botId: bid,
-                    inDesktopSidebar: true,
-                    onSelectBot: { nextId in
-                        chatBotId = nextId
-                    },
-                    onCloseSidebar: {
-                        showChat = false
-                    }
-                )
-                .id(bid)
-            } else {
-                ContentUnavailableView(hub.t("noBotsYet"), systemImage: "bubble.left.and.bubble.right")
-                    .toolbar {
+    private var desktopTextBar: some View {
+        let row = HStack(alignment: .bottom, spacing: 10) {
+            Button {
+                showText = false
+                draftFocused = false
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 15, weight: .semibold))
+                    .frame(width: 28, height: 28)
+            }
+            .composerGlassButton()
+            .accessibilityLabel(hub.t("close"))
+
+            TextField(hub.t("typeDesktopPh"), text: $draft)
+                .textFieldStyle(.plain)
+                .font(.system(size: 16))
+                .focused($draftFocused)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 9)
+                .composerGlassField()
+                .onSubmit { sendText() }
+
+            Button { sendText() } label: {
+                Image(systemName: "arrow.up")
+                    .font(.system(size: 17, weight: .bold))
+                    .frame(width: 28, height: 28)
+            }
+            .composerSendButton(accent: p.accent)
+            .disabled(draft.isEmpty)
+        }
+
+        if #available(iOS 26.0, *) {
+            GlassEffectContainer(spacing: 10) { row }
+        } else {
+            row
+        }
+    }
+
+    @ViewBuilder
+    private func sidebarChatView(closable: Bool) -> some View {
+        if let bid = resolvedBotId {
+            ChatView(
+                botId: bid,
+                inDesktopSidebar: true,
+                onSelectBot: { nextId in
+                    chatBotId = nextId
+                },
+                onCloseSidebar: closable ? { showChatSheet = false } : nil
+            )
+            .id(bid)
+        } else {
+            ContentUnavailableView(hub.t("noBotsYet"), systemImage: "bubble.left.and.bubble.right")
+                .toolbar {
+                    if closable {
                         ToolbarItem(placement: .cancellationAction) {
-                            Button(hub.t("close")) { showChat = false }
+                            Button(hub.t("close")) { showChatSheet = false }
                         }
                     }
-            }
+                }
         }
     }
 
@@ -274,40 +317,6 @@ struct DesktopView: View {
                     }
             )
         }
-    }
-
-    private var controls: some View {
-        VStack(spacing: 8) {
-            if showText {
-                HStack(spacing: 8) {
-                    TextField(hub.t("typeDesktopPh"), text: $draft)
-                        .textFieldStyle(.roundedBorder)
-                        .onSubmit { sendText() }
-                    Button(hub.t("send")) { sendText() }.buttonStyle(.borderedProminent)
-                }
-                .padding(.horizontal, 12)
-            }
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    Toggle(isOn: $showText) { Label(hub.t("aaInput"), systemImage: "keyboard") }
-                        .toggleStyle(.button)
-                    let items: [(String, String, [String: Any])] = [
-                        (hub.t("keyEnter"), "return", ["kind": "key", "key": "Return"]),
-                        (hub.t("keyBackspace"), "delete.left", ["kind": "key", "key": "Backspace"]),
-                        ("Esc", "escape", ["kind": "key", "key": "Escape"]),
-                        ("Tab", "arrow.right.to.line", ["kind": "key", "key": "Tab"]),
-                        (hub.t("keyScrollUp"), "chevron.up", ["kind": "scroll", "deltaY": 8]),
-                        (hub.t("keyScrollDown"), "chevron.down", ["kind": "scroll", "deltaY": -8]),
-                    ]
-                    ForEach(items, id: \.0) { it in
-                        Button { send(it.2) } label: { Label(it.0, systemImage: it.1) }
-                    }
-                }
-                .buttonStyle(.bordered)
-                .padding(.horizontal, 12)
-            }
-        }
-        .padding(.bottom, 8)
     }
 
     private func map(_ loc: CGPoint, in box: CGSize) -> CGPoint? {

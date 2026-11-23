@@ -94,24 +94,27 @@ struct ChatView: View {
 
     var body: some View {
         let pal = p.bot(botId, index, custom: bot?.color)
-        thread(pal)
-            .safeAreaInset(edge: .top, spacing: 0) {
-                if let to = hub.takeovers.first {
-                    HStack(spacing: 8) {
-                        Label(hub.t("takeoverInline", ["reason": to.reason ?? ""]), systemImage: "hand.raised.fill")
-                            .font(.system(size: 15)).foregroundStyle(p.pinkInk).lineLimit(2)
-                        Spacer(minLength: 4)
-                        Button(hub.t("handleAction")) { router.openDesktop(to.target ?? "local") }
-                            .buttonStyle(.bordered)
-                        Button(hub.t("resumeShort")) { Task { try? await hub.resolveTakeover(to.id) } }
-                            .buttonStyle(.borderedProminent).tint(pal.accent)
+        VStack(spacing: 0) {
+            thread(pal)
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    if let to = hub.takeovers.first {
+                        HStack(spacing: 8) {
+                            Label(hub.t("takeoverInline", ["reason": to.reason ?? ""]), systemImage: "hand.raised.fill")
+                                .font(.system(size: 15)).foregroundStyle(p.pinkInk).lineLimit(2)
+                            Spacer(minLength: 4)
+                            Button(hub.t("handleAction")) { router.openDesktop(to.target ?? "local") }
+                                .buttonStyle(.bordered)
+                            Button(hub.t("resumeShort")) { Task { try? await hub.resolveTakeover(to.id) } }
+                                .buttonStyle(.borderedProminent).tint(pal.accent)
+                        }
+                        .controlSize(.small)
+                        .padding(.horizontal, 16).padding(.vertical, 8)
+                        .background(.bar)
                     }
-                    .controlSize(.small)
-                    .padding(.horizontal, 16).padding(.vertical, 8)
-                    .background(.bar)
                 }
-            }
-            .safeAreaInset(edge: .bottom, spacing: 0) { composer(pal) }
+            composer(pal)
+                .background(p.page)
+        }
             .task(id: botId) {
                 pendingAttachments = []
                 mentions = []
@@ -149,7 +152,6 @@ struct ChatView: View {
                 }
             }
             .background(p.page)
-            .toolbarBackground(p.page, for: .navigationBar)
             .sheet(item: $collabPeer) { target in
                 NavigationStack {
                     CollabSheetView(botId: botId, peerId: target.id)
@@ -189,8 +191,10 @@ struct ChatView: View {
                             Button { onCloseSidebar() } label: { Label(hub.t("close"), systemImage: "xmark") }
                         }
                     } else {
-                        Button { router.openDesktop(hub.takeovers.first?.target ?? "local") } label: {
-                            Label(hub.t("remoteDesktop"), systemImage: hub.takeovers.isEmpty ? "display" : "exclamationmark.triangle")
+                        if !router.detailOpen {
+                            Button { router.openDesktop(hub.takeovers.first?.target ?? "local") } label: {
+                                Label(hub.t("remoteDesktop"), systemImage: hub.takeovers.isEmpty ? "display" : "exclamationmark.triangle")
+                            }
                         }
                         Button { router.detailOpen.toggle() } label: { Label(hub.t("botDetails"), systemImage: "info.circle") }
                     }
@@ -265,8 +269,8 @@ struct ChatView: View {
                     if !sendErr.isEmpty { StatusText(text: sendErr) }
                     Color.clear.frame(height: 1).id("bottom")
                 }
-                .frame(maxWidth: 760)
-                .padding(.horizontal, hsc == .compact ? 12 : 24)
+                .frame(maxWidth: 840)
+                .padding(.horizontal, hsc == .compact ? 10 : 14)
                 .padding(.vertical, 12)
                 .frame(maxWidth: .infinity)
             }
@@ -285,33 +289,11 @@ struct ChatView: View {
     }
 
     private func emptyState(_ pal: (accent: Color, text: Color, soft: Color)) -> some View {
-        let cards: [(String, String, Color, Color, () -> Void)] = [
-            (hub.t("sugAskTitle"), hub.t("sugAskSub"), p.pink, p.pinkInk, { send(hub.t("sugAskTitle")) }),
-            (hub.t("statusLabel"), hub.t("sugStatusSub"), p.lilac, p.lilacInk, { send("/status") }),
-            (hub.t("sugCollabTitle"), "/ask ", p.sage, p.sageInk, { input = "/ask "; focused = true }),
-            (hub.t("sugListTitle"), "/bots", pal.soft, pal.accent, { send("/bots") }),
-        ]
-        return VStack(spacing: 10) {
+        VStack(spacing: 10) {
             BotAvatar(id: botId, size: 72, index: index, avatar: bot?.avatar, color: bot?.color)
             Text(name).font(.system(size: 22, weight: .bold))
             Text((bot?.description ?? "").isEmpty ? hub.t("emptyChatHint") : bot!.description!)
                 .font(.system(size: 15)).foregroundStyle(p.text2).multilineTextAlignment(.center)
-            LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
-                ForEach(cards, id: \.0) { c in
-                    Button(action: c.4) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(c.0).font(.system(size: 16, weight: .semibold)).foregroundStyle(c.3)
-                            Text(c.1).font(.system(size: 13)).foregroundStyle(p.text2)
-                        }
-                        .frame(maxWidth: .infinity, minHeight: 56, alignment: .topLeading)
-                        .padding(12)
-                        .background(c.2, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    }
-                    .buttonStyle(PressStyle())
-                }
-            }
-            .frame(maxWidth: 460)
-            .padding(.top, 8)
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 40)
@@ -471,64 +453,75 @@ struct ChatView: View {
                 }
             }
 
-            HStack(alignment: .bottom, spacing: 8) {
-                Menu {
-                    Button { showPhotoPicker = true } label: { Label(hub.t("photoLibrary"), systemImage: "photo") }
-                    Button { showFileImporter = true } label: { Label(hub.t("chooseFile"), systemImage: "doc") }
-                } label: {
-                    Image(systemName: "paperclip")
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(p.text2)
-                        .frame(width: 40, height: 40)
-                        .background(p.s1, in: Circle())
-                }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                TextField(hub.t("msgBotPh", ["name": name]), text: $input, axis: .vertical)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 16))
-                    .lineLimit(1...6)
-                    .focused($focused)
-                    .padding(.vertical, 11)
-                    .onChange(of: input) { _, v in
-                        acDismissed = false
-                        if v.count > 8000 { input = String(v.prefix(8000)) }
-                        mentionTask?.cancel()
-                        if let m = activeMentionRange {
-                            let q = m.query
-                            mentionTask = Task {
-                                try? await Task.sleep(nanoseconds: 120_000_000)
-                                guard !Task.isCancelled else { return }
-                                if let items = try? await hub.fetchMentions(botId, query: q) {
-                                    await MainActor.run { mentions = items }
-                                }
-                            }
-                        } else {
-                            mentions = []
-                        }
-                    }
-                Button {
-                    showStop ? interrupt() : submit()
-                } label: {
-                    Image(systemName: showStop ? "stop.fill" : "arrow.up")
-                        .font(.system(size: showStop ? 13 : 16, weight: .bold))
-                        .foregroundStyle(showStop ? p.page : pal.text)
-                        .frame(width: 40, height: 40)
-                        .background(showStop ? p.text : ((hasContent && !hasUploading) ? pal.accent : p.s2), in: Circle())
-                }
-                .buttonStyle(PressStyle())
-                .disabled(!showStop && (!hasContent || hasUploading || sending))
-                .keyboardShortcut(.return, modifiers: .command)
-                .accessibilityLabel(showStop ? hub.t("stopOutput") : hub.t("sendMsg"))
-            }
-            .padding(6)
-            .background(p.card, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+            composerInputBar(pal)
         }
-        .frame(maxWidth: 760)
-        .padding(.horizontal, hsc == .compact ? 12 : 24)
+        .frame(maxWidth: 840)
+        .padding(.horizontal, hsc == .compact ? 10 : 14)
+        .padding(.top, 6)
         .padding(.bottom, 8)
         .frame(maxWidth: .infinity)
+    }
+
+    @ViewBuilder
+    private func composerInputBar(_ pal: (accent: Color, text: Color, soft: Color)) -> some View {
+        let hasContent = !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !pendingAttachments.isEmpty
+        let hasUploading = pendingAttachments.contains { $0.uploading }
+        let row = HStack(alignment: .bottom, spacing: 10) {
+            Menu {
+                Button { showPhotoPicker = true } label: { Label(hub.t("photoLibrary"), systemImage: "photo") }
+                Button { showFileImporter = true } label: { Label(hub.t("chooseFile"), systemImage: "doc") }
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 17, weight: .semibold))
+                    .frame(width: 28, height: 28)
+            }
+            .composerGlassButton()
+            .accessibilityLabel(hub.t("attachments"))
+
+            TextField(hub.t("msgBotPh", ["name": name]), text: $input, axis: .vertical)
+                .textFieldStyle(.plain)
+                .font(.system(size: 16))
+                .lineLimit(1...6)
+                .focused($focused)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 9)
+                .composerGlassField()
+                .onChange(of: input) { _, v in
+                    acDismissed = false
+                    if v.count > 8000 { input = String(v.prefix(8000)) }
+                    mentionTask?.cancel()
+                    if let m = activeMentionRange {
+                        let q = m.query
+                        mentionTask = Task {
+                            try? await Task.sleep(nanoseconds: 120_000_000)
+                            guard !Task.isCancelled else { return }
+                            if let items = try? await hub.fetchMentions(botId, query: q) {
+                                await MainActor.run { mentions = items }
+                            }
+                        }
+                    } else {
+                        mentions = []
+                    }
+                }
+
+            Button {
+                showStop ? interrupt() : submit()
+            } label: {
+                Image(systemName: showStop ? "stop.fill" : "arrow.up")
+                    .font(.system(size: showStop ? 13 : 17, weight: .bold))
+                    .frame(width: 28, height: 28)
+            }
+            .composerSendButton(accent: showStop ? p.danger : pal.accent)
+            .disabled(!showStop && (!hasContent || hasUploading || sending))
+            .keyboardShortcut(.return, modifiers: .command)
+            .accessibilityLabel(showStop ? hub.t("stopOutput") : hub.t("sendMsg"))
+        }
+
+        if #available(iOS 26.0, *) {
+            GlassEffectContainer(spacing: 10) { row }
+        } else {
+            row
+        }
     }
 
     private func sourceLabel(_ source: String?) -> String {

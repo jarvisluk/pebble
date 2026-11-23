@@ -497,6 +497,9 @@ func buildFFmpegH264Args(encoder string, env []string, srcW, srcH, w, h int, cfg
 		)
 	}
 	args = append(args,
+		"-colorspace", "bt709",
+		"-color_primaries", "bt709",
+		"-color_trc", "bt709",
 		"-g", gop,
 		"-b:v", kbps+"k",
 		"-maxrate", maxKbps+"k",

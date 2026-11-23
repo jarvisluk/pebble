@@ -1,10 +1,72 @@
 import SwiftUI
 
+struct SettingsSidebarView: View {
+    @Environment(HubStore.self) private var hub
+    @Environment(Router.self) private var router
+    @Environment(\.palette) private var p
+
+    var compact = true
+
+    var body: some View {
+        @Bindable var r = router
+        listContent
+            .hubColumnList(compact: compact, page: p.page)
+            .listSectionSpacing(12)
+            .contentMargins(.top, 8, for: .scrollContent)
+            .navigationTitle(hub.t("settings"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                if !compact {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button {
+                            if router.settingsDirty {
+                                router.requestLeaveSettings = true
+                            } else {
+                                router.leaveSettings()
+                            }
+                        } label: {
+                            Label(hub.t("backToChat"), systemImage: "chevron.left")
+                        }
+                    }
+                }
+            }
+    }
+
+    @ViewBuilder
+    private var listContent: some View {
+        @Bindable var r = router
+        if compact {
+            List(SettingsTab.allCases) { tab in
+                NavigationLink(value: tab) {
+                    tabLabel(tab)
+                }
+                .listRowBackground(p.card)
+            }
+            .navigationDestination(for: SettingsTab.self) { tab in
+                SettingsView(tab: tab)
+            }
+        } else {
+            List(SettingsTab.allCases, selection: $r.settingsTab) { tab in
+                NavigationLink(value: tab) {
+                    tabLabel(tab)
+                }
+                .tag(tab)
+            }
+        }
+    }
+
+    private func tabLabel(_ tab: SettingsTab) -> some View {
+        Label(hub.t(tab.titleKey), systemImage: tab.icon)
+    }
+}
+
 struct SettingsView: View {
     @Environment(HubStore.self) private var hub
     @Environment(Router.self) private var router
     @Environment(\.palette) private var p
     @Environment(\.openURL) private var openURL
+
+    var tab: SettingsTab = .general
 
     struct BotDraft: Equatable { var harness: String; var model: String }
 
@@ -89,61 +151,76 @@ struct SettingsView: View {
         Form {
             if !error.isEmpty { Section { StatusText(text: error) } }
             if !saved.isEmpty { Section { StatusText(text: saved, error: false) } }
-            appearanceSection
-            hostSection
-            magpieSection
-            nativeCLISection
-            defaultModelSection
-            botModelsSection
-            Section {
-                TextField(hub.t("globalSharedMem"), text: Binding(
-                    get: { userMd },
-                    set: {
-                        guard $0 != userMd else { return }
-                        userMd = $0; userMdTouched = true; saved = ""
-                    }
-                ),
-                          prompt: Text(hub.t("userMdPh")), axis: .vertical)
-                    .lineLimit(4...20)
-                    .labelsHidden()
-            } header: {
-                Text(hub.t("globalSharedMem"))
-            } footer: {
-                Text("_shared/USER.md").font(.system(size: 13, design: .monospaced))
+            switch tab {
+            case .general:
+                appearanceSection
+            case .models:
+                magpieSection
+                nativeCLISection
+                defaultModelSection
+                botModelsSection
+            case .memory:
+                Section {
+                    TextField(hub.t("globalSharedMem"), text: Binding(
+                        get: { userMd },
+                        set: {
+                            guard $0 != userMd else { return }
+                            userMd = $0; userMdTouched = true; saved = ""
+                        }
+                    ),
+                              prompt: Text(hub.t("userMdPh")), axis: .vertical)
+                        .lineLimit(4...20)
+                        .labelsHidden()
+                } header: {
+                    Text(hub.t("globalSharedMem"))
+                } footer: {
+                    Text("_shared/USER.md").font(.system(size: 13, design: .monospaced))
+                }
+                memorySection
+            case .desktop:
+                desktopPermissionsSection
+                remoteSection
+            case .remote:
+                hostSection
             }
-            memorySection
-            desktopPermissionsSection
-            remoteSection
         }
         .hubForm()
-        .interactiveDismissDisabled(dirty)
-        .navigationTitle(hub.t("settings"))
+        .navigationTitle(hub.t(tab.titleKey))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            SheetToolbar(
-                actionTitle: hub.t("save"),
-                actionDisabled: !dirty,
-                loading: saving,
-                onClose: {
-                    if dirty { showUnsavedAlert = true } else { router.sheet = nil }
+            ToolbarItem(placement: .confirmationAction) {
+                if saving {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Button(hub.t("save")) { save() }.disabled(!dirty)
                 }
-            ) { save() }
+            }
         }
         .alert(hub.t("unsavedTitle"), isPresented: $showUnsavedAlert) {
             Button(hub.t("saveAndLeave")) { save(closeAfter: true) }
-            Button(hub.t("discardChanges"), role: .destructive) { router.sheet = nil }
+            Button(hub.t("discardChanges"), role: .destructive) { router.leaveSettings() }
             Button(hub.t("cancel"), role: .cancel) {}
         } message: {
             Text(hub.t("unsavedDesc"))
         }
         .confirmAlert($confirm)
+        .onChange(of: dirty) { _, v in router.settingsDirty = v }
+        .onChange(of: router.requestLeaveSettings) { _, req in
+            if req {
+                router.requestLeaveSettings = false
+                showUnsavedAlert = true
+            }
+        }
         .task {
             _ = try? await hub.loadSettings()
             try? await hub.refreshBots()
             await loadMem("")
             await loadPerms()
         }
-        .onAppear { sync() }
+        .onAppear {
+            sync()
+            router.settingsDirty = dirty
+        }
         .modifier(SettingsSyncModifier(
             defaultHarness: hub.settings?.defaultHarness,
             harnessIds: (hub.settings?.harnesses ?? []).map(\.id),
@@ -191,7 +268,7 @@ struct SettingsView: View {
                 drafts = [:]
                 sync()
                 saved = hub.t("settingsSaved")
-                if closeAfter { router.sheet = nil }
+                if closeAfter { router.leaveSettings() }
             } catch { self.error = errText(error, hub.t("saveFailed")) }
             saving = false
         }
@@ -562,6 +639,9 @@ struct SettingsView: View {
                     }
                 }
                 .padding(.vertical, 2)
+            }
+            Button { router.sheet = .createBot } label: {
+                Label(hub.t("newBot"), systemImage: "plus")
             }
         }
     }

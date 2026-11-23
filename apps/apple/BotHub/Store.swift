@@ -192,6 +192,14 @@ final class HubStore {
         if let botId { unread[botId] = nil }
     }
 
+    func toggleUnread(_ id: String) {
+        if (unread[id] ?? 0) > 0 {
+            unread[id] = nil
+        } else {
+            unread[id] = 1
+        }
+    }
+
     private func removeBotState(_ id: String) {
         bots.removeAll { $0.id == id }
         msgs[id] = nil
