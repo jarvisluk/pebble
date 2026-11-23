@@ -35,11 +35,11 @@
 | `--sel` | `#eeebe6` | `#262626` | 选中的 Bot 行 / 设置导航行 |
 | `--bot-accent` | Bot 头像色 | Bot 头像色 | 仅作用于当前 Bot 下属页面（对话发送、详情内操作） |
 | `--bot-accent-soft` | `color-mix(--bot-accent 16%, --card)` | `#2a2a2a` | 仅作用于当前 Bot「我的消息」气泡及局部高亮 |
-| `--pink` / `--pink-ink` | `#f7d9d3` / `#b2443a` | `#171717` / `#f0a59b` | 快捷指令 /status |
+| `--pink` / `--pink-ink` | `#fde8e8` / `#dc2626` | `#2c1616` / `#ff6961` | 异常胶囊、快捷指令 /status |
 | `--lilac` / `--lilac-ink` | `#e0dbfb` / `#6a55c9` | `#24203a` / `#b7aaf5` | Bot 协作消息、未读数、/ask |
-| `--sage` / `--sage-ink` | `#e2e9cc` / `#6b8a2a` | `#171717` / `#a9c46a` | /bots、成功 |
-| `--busy` | `#f08a2c` | `#f08a2c` | 工作中圆点、「正在调用…」 |
-| `--danger` | `#d9483b` | `#f0605a` | 错误、危险操作 |
+| `--sage` / `--sage-ink` | `#e6f6ec` / `#16a34a` | `#14261c` / `#30d158` | 成功、运行中（如 Gateway running）、/bots |
+| `--busy` | `#f59e0b` | `#ff9f0a` | 工作中圆点、「正在调用…」、警告状态 |
+| `--danger` | `#dc2626` | `#ff453a` | 删除、拒绝、错误 |
 | `--stage` | `#111110` | `#050505` | 远程桌面舞台固定深色底 |
 | `--stage-pill` | `#1f1d1b` | `#232323` | 远程桌面悬浮胶囊底 |
 | `--stage-text` | `#f3f1ee` | `#f3f1ee` | 远程桌面悬浮胶囊正文 |
