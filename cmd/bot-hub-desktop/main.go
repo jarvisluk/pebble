@@ -7,10 +7,10 @@ package main
 import (
 	"context"
 	"crypto/subtle"
-	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"net"
 	"net/http"
@@ -18,6 +18,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -35,10 +36,8 @@ import (
 	"bot-hub/internal/state"
 	"bot-hub/internal/syncer"
 	"bot-hub/internal/tunnel"
+	webassets "bot-hub/internal/web"
 )
-
-//go:embed setup.html
-var setupHTML []byte
 
 var desktopHarnesses = []struct {
 	id    string
@@ -107,7 +106,7 @@ func (d *desktop) run() {
 		MinWidth:         680,
 		MinHeight:        520,
 		BackgroundColour: application.NewRGB(239, 236, 232),
-		URL:              "/",
+		URL:              "/desktop-setup",
 		JS:               "if(/Mac/.test(navigator.platform)){window.__bothubMacShell=true;document.documentElement.classList.add('mac-app');}",
 		Mac: application.MacWindow{
 			TitleBar: application.MacTitleBarHiddenInset,
@@ -628,7 +627,7 @@ func (d *desktop) reset() {
 	d.save()
 	d.syncTray()
 	d.setStatus("")
-	d.win.SetURL("/")
+	d.win.SetURL("/desktop-setup")
 }
 
 func (d *desktop) setStatus(s string) { d.mu.Lock(); d.status = s; d.mu.Unlock() }
@@ -666,8 +665,21 @@ func (d *desktop) serveSetup(w http.ResponseWriter, r *http.Request) {
 		go d.start(p)
 		writeJSON(w, map[string]any{"ok": true})
 	default:
+		distFS := webassets.DistFS()
+		clean := strings.TrimPrefix(path.Clean("/"+r.URL.Path), "/")
+		if clean != "" && clean != "." {
+			if info, err := fs.Stat(distFS, clean); err == nil && !info.IsDir() {
+				http.FileServer(http.FS(distFS)).ServeHTTP(w, r)
+				return
+			}
+		}
+		raw, err := fs.ReadFile(distFS, "index.html")
+		if err != nil {
+			http.Error(w, "desktop setup assets missing", http.StatusInternalServerError)
+			return
+		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write(setupHTML)
+		_, _ = w.Write(raw)
 	}
 }
 
