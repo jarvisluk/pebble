@@ -6,7 +6,6 @@ struct ConnectView: View {
     @Environment(Router.self) private var router
     @Environment(\.palette) private var p
     @Environment(\.openURL) private var openURL
-    @Environment(\.horizontalSizeClass) private var hsc
     var startScan: Bool
     var isGate = false
 
@@ -39,7 +38,7 @@ struct ConnectView: View {
                 .background(p.page)
             } else {
                 formContent
-                    .frame(maxWidth: isGate && hsc != .compact ? 560 : .infinity)
+                    .frame(maxWidth: isGate ? 560 : .infinity)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(p.page)
             }

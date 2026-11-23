@@ -4,9 +4,12 @@ struct BotListView: View {
     @Environment(HubStore.self) private var hub
     @Environment(Router.self) private var router
     @Environment(\.palette) private var p
+    @Environment(\.horizontalSizeClass) private var hsc
     @State private var query = ""
     @State private var searching = false
     @FocusState private var searchFocused: Bool
+
+    private var isCompact: Bool { hsc == .compact }
 
     private var filtered: [(Int, BotStatus)] {
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
@@ -21,18 +24,15 @@ struct BotListView: View {
     }
 
     var body: some View {
-        Group {
-            if router.compact {
-                List { rows }.navigationDestination(for: String.self) { ChatView(botId: $0) }
-            } else { List { rows } }
-        }
-        .hubList(sidebar: !router.compact)
-        .refreshable {
-            if hub.isConnected { try? await hub.refreshBots() } else { await hub.reconnect() }
-        }
-        .navigationTitle("Bots")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar { toolbar }
+        @Bindable var r = router
+        List(selection: $r.selected) { rows }
+            .hubList(sidebar: !isCompact)
+            .refreshable {
+                if hub.isConnected { try? await hub.refreshBots() } else { await hub.reconnect() }
+            }
+            .navigationTitle("Bots")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { toolbar }
     }
 
     @ViewBuilder
@@ -48,39 +48,34 @@ struct BotListView: View {
             }
             .padding(.horizontal, 12)
             .frame(height: 40)
-            .background(router.compact ? p.card : p.s1, in: Capsule())
+            .background(isCompact ? p.card : p.s1, in: Capsule())
             .listRowSeparator(.hidden)
             .listRowBackground(Color.clear)
+            .selectionDisabled()
         }
         if let to = hub.takeovers.first { takeoverSection(to) }
         Section {
             ForEach(filtered, id: \.1.id) { idx, bot in
-                if router.compact {
-                    NavigationLink(value: bot.id) { BotRow(bot: bot, index: idx) }
-                        .listRowSeparator(.hidden)
-                } else {
-                    Button { router.openBot(bot.id) } label: {
-                        BotRow(bot: bot, index: idx).contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
+                NavigationLink(value: bot.id) { BotRow(bot: bot, index: idx) }
+                    .tag(bot.id)
                     .listRowSeparator(.hidden)
-                    .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 4, trailing: 20))
-                        .listRowBackground(
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .fill(router.selected == bot.id ? p.sel : Color.clear)
-                                .padding(.horizontal, 8)
-                        )
-                }
+                    .listRowBackground(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(!isCompact && router.selected == bot.id ? p.sel : Color.clear)
+                            .padding(.horizontal, 8)
+                    )
             }
         }
         if filtered.isEmpty {
-            Text(query.isEmpty ? hub.t("noBotsYet") : hub.t("noMatchedBots")).foregroundStyle(.secondary)
+            Text(query.isEmpty ? hub.t("noBotsYet") : hub.t("noMatchedBots"))
+                .foregroundStyle(.secondary)
+                .selectionDisabled()
         }
     }
 
     private var title: some View {
         Text("Bots").font(.system(size: 22, weight: .bold)).fixedSize()
-            .padding(.leading, router.compact ? 0 : 8)
+            .padding(.leading, isCompact ? 0 : 8)
     }
 
     @ToolbarContentBuilder

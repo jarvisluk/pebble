@@ -24,12 +24,12 @@ struct ChatView: View {
     @Environment(HubStore.self) private var hub
     @Environment(Router.self) private var router
     @Environment(\.palette) private var p
+    @Environment(\.horizontalSizeClass) private var hsc
     var botId: String
 
     @State private var input = ""
     @State private var sending = false
     @State private var sendErr = ""
-    @State private var detailOpen = false
     @State private var collabPeer: CollabTarget?
     @State private var previewMedia: MessageMedia?
     @State private var commands: [SlashCommandItem] = []
@@ -147,9 +147,6 @@ struct ChatView: View {
             }
             .background(p.page)
             .toolbarBackground(p.page, for: .navigationBar)
-            .detailPanel(isPresented: $detailOpen, compact: router.compact) {
-                BotDetailView(botId: botId, isPresented: $detailOpen, inline: !router.compact)
-            }
             .sheet(item: $collabPeer) { target in
                 NavigationStack {
                     CollabSheetView(botId: botId, peerId: target.id)
@@ -166,7 +163,7 @@ struct ChatView: View {
                     Button { router.sheet = .desktop(target: hub.takeovers.first?.target ?? "local") } label: {
                         Label(hub.t("remoteDesktop"), systemImage: hub.takeovers.isEmpty ? "display" : "exclamationmark.triangle")
                     }
-                    Button { detailOpen.toggle() } label: { Label(hub.t("botDetails"), systemImage: "info.circle") }
+                    Button { router.detailOpen.toggle() } label: { Label(hub.t("botDetails"), systemImage: "info.circle") }
                 }
             }
             .task(id: botId) {
@@ -176,7 +173,6 @@ struct ChatView: View {
             .onDisappear { hub.setActiveChat(nil) }
             .onChange(of: hub.bots.map(\.id)) { _, ids in
                 if !ids.isEmpty, !ids.contains(botId) {
-                    detailOpen = false
                     router.closeBot()
                 }
             }
@@ -240,7 +236,7 @@ struct ChatView: View {
                     Color.clear.frame(height: 1).id("bottom")
                 }
                 .frame(maxWidth: 760)
-                .padding(.horizontal, router.compact ? 12 : 24)
+                .padding(.horizontal, hsc == .compact ? 12 : 24)
                 .padding(.vertical, 12)
                 .frame(maxWidth: .infinity)
             }
@@ -500,7 +496,7 @@ struct ChatView: View {
             .background(p.card, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
         }
         .frame(maxWidth: 760)
-        .padding(.horizontal, router.compact ? 12 : 24)
+        .padding(.horizontal, hsc == .compact ? 12 : 24)
         .padding(.bottom, 8)
         .frame(maxWidth: .infinity)
     }
@@ -918,18 +914,6 @@ struct CollabSheetView: View {
             loading = true
             history = (try? await hub.loadCollabMessages(botId, peerId: peerId)) ?? []
             loading = false
-        }
-    }
-}
-
-extension View {
-    /// 宽屏用 inspector；iPhone 上 inspector 会拆掉已推入的页面，改用 sheet。
-    @ViewBuilder
-    func detailPanel<C: View>(isPresented: Binding<Bool>, compact: Bool, @ViewBuilder content: @escaping () -> C) -> some View {
-        if compact {
-            sheet(isPresented: isPresented) { NavigationStack { content() } }
-        } else {
-            inspector(isPresented: isPresented) { content().inspectorColumnWidth(min: 340, ideal: 380, max: 460) }
         }
     }
 }

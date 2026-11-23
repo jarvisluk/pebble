@@ -32,19 +32,20 @@ enum SheetRoute: Identifiable, Equatable {
 @MainActor
 @Observable
 final class Router {
-    var compact = true
-    var path: [String] = []
     var selected: String?
+    var preferredColumn: NavigationSplitViewColumn = .sidebar
     var sheet: SheetRoute?
+    var detailOpen = false
 
     func openBot(_ id: String) {
         selected = id
-        if compact { path = [id] }
+        preferredColumn = .detail
     }
 
     func closeBot() {
+        detailOpen = false
         selected = nil
-        path = []
+        preferredColumn = .sidebar
     }
 }
 
@@ -52,12 +53,7 @@ struct RootView: View {
     @Environment(HubStore.self) private var hub
     @Environment(\.colorScheme) private var scheme
     @Environment(\.scenePhase) private var phase
-    @Environment(\.horizontalSizeClass) private var hsc
     @State private var router = Router()
-
-    private var isCompact: Bool {
-        return hsc == .compact
-    }
 
     private var scheme0: ColorScheme? { hub.themePref == "light" ? .light : hub.themePref == "dark" ? .dark : nil }
 
@@ -77,12 +73,8 @@ struct RootView: View {
                 NavigationStack {
                     ConnectView(startScan: false, isGate: true)
                 }
-            } else if isCompact {
-                NavigationStack(path: $r.path) {
-                    BotListView()
-                }
             } else {
-                NavigationSplitView {
+                NavigationSplitView(preferredCompactColumn: $r.preferredColumn) {
                     BotListView()
                         .navigationSplitViewColumnWidth(min: 300, ideal: 340, max: 420)
                 } detail: {
@@ -95,6 +87,22 @@ struct RootView: View {
                                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                                 .background(palette.page)
                         }
+                    }
+                }
+                .inspector(isPresented: $r.detailOpen) {
+                    if let id = router.selected, hub.bots.contains(where: { $0.id == id }) {
+                        NavigationStack {
+                            BotDetailView(botId: id, isPresented: $r.detailOpen)
+                        }
+                        .id(id)
+                        .inspectorColumnWidth(min: 340, ideal: 380, max: 460)
+                        .environment(\.palette, palette)
+                        .environment(router)
+                        .environment(hub)
+                        .tint(palette.accent)
+                        .buttonBorderShape(.capsule)
+                        .font(.system(size: 16))
+                        .preferredColorScheme(scheme0)
                     }
                 }
             }
@@ -115,13 +123,8 @@ struct RootView: View {
                 .font(.system(size: 16))
                 .preferredColorScheme(scheme0)
         }
-        .onAppear { router.compact = isCompact }
-        .onChange(of: isCompact) { _, v in
-            router.compact = v
-            if v, let s = router.selected { router.path = [s] }
-        }
-        .onChange(of: router.path) { _, path in
-            if router.compact, path.isEmpty { router.selected = nil }
+        .onChange(of: router.selected) { _, id in
+            if id == nil { router.detailOpen = false }
         }
         .onChange(of: showGate) { _, gate in
             if gate {

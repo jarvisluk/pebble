@@ -6,8 +6,6 @@ struct BotDetailView: View {
     @Environment(\.palette) private var p
     var botId: String
     @Binding var isPresented: Bool
-    /// inspector 栏内工具栏不显示，改为表单内保存按钮。
-    var inline = false
 
     @State private var detail: BotStatus?
     @State private var loading = false
@@ -43,17 +41,6 @@ struct BotDetailView: View {
         let pal = p.bot(botId, index, custom: editColor.isEmpty ? active?.color : editColor)
         Form { Group {
             if !err.isEmpty { Section { StatusText(text: err) } }
-            if inline && dirty {
-                Section {
-                    Button { save() } label: {
-                        HStack { Spacer(); if saving { ProgressView().controlSize(.small) } else { Text(hub.t("save")) }; Spacer() }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(saving || editName.trimmingCharacters(in: .whitespaces).isEmpty)
-                    .listRowBackground(Color.clear)
-                    .listRowInsets(EdgeInsets())
-                }
-            }
             Section {
                 HStack(spacing: 14) {
                     BotAvatar(id: botId, size: 56, index: index, avatar: editAvatar, color: editColor)
@@ -121,10 +108,9 @@ struct BotDetailView: View {
             }
         }.listRowBackground(p.card) }
         .hubForm()
-        .navigationTitle(inline ? "" : hub.t("botDetails"))
+        .navigationTitle(hub.t("botDetails"))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            if !inline {
             ToolbarItem(placement: .cancellationAction) {
                 Button(hub.t("close")) { isPresented = false }
             }
@@ -133,7 +119,6 @@ struct BotDetailView: View {
                     Button(hub.t("save")) { save() }
                         .disabled(!dirty || editName.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
-            }
             }
         }
         .confirmAlert($confirm)
