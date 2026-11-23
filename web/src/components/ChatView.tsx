@@ -1,5 +1,6 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type {
+  ActiveDesktopTarget,
   BotStatus,
   ChatMessage,
   MentionCandidate,
@@ -123,6 +124,7 @@ interface ChatViewProps {
   seenIds: Set<string>;
   toolName?: string;
   takeovers: TakeoverRequest[];
+  activeDeskTarget?: ActiveDesktopTarget;
   questions: PendingQuestion[];
   deskOpen: boolean;
   inDesktopSidebar?: boolean;
@@ -131,6 +133,7 @@ interface ChatViewProps {
   onOpenMenu: () => void;
   onToggleDesktop: () => void;
   onOpenDesktopTarget: (target: string) => void;
+  onSwitchBackLocal?: () => void;
   onResolveTakeover: (to: TakeoverRequest) => void;
   onReplyQuestion: (id: string, answers: Record<string, unknown>, cancelled: boolean) => Promise<void>;
   onOpenDetail: () => void;
@@ -153,6 +156,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
   seenIds,
   toolName,
   takeovers,
+  activeDeskTarget,
   questions,
   deskOpen,
   inDesktopSidebar = false,
@@ -161,6 +165,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
   onOpenMenu,
   onToggleDesktop,
   onOpenDesktopTarget,
+  onSwitchBackLocal,
   onResolveTakeover,
   onReplyQuestion,
   onOpenDetail,
@@ -624,6 +629,30 @@ export const ChatView: React.FC<ChatViewProps> = ({
           )}
         </div>
       </div>
+
+      {!inDesktopSidebar && activeDeskTarget?.temporary && (
+        <div className="to-banner temp-target">
+          <span className="to-banner-txt">
+            {t('tempDesktopBanner', {
+              name: activeDeskTarget.name || activeDeskTarget.target,
+            })}
+          </span>
+          <div className="to-banner-acts">
+            <button
+              type="button"
+              className="btn"
+              onClick={() => onOpenDesktopTarget(activeDeskTarget.target)}
+            >
+              {t('openDesktop')}
+            </button>
+            {onSwitchBackLocal && (
+              <button type="button" className="btn" onClick={onSwitchBackLocal}>
+                {t('switchBackLocal')}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {firstTakeover && (
         <div id="takeoverBanner" className="to-banner">

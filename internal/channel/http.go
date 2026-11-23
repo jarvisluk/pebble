@@ -133,6 +133,8 @@ func NewHTTPServer(h *hub.Hub, cfg config.HTTPConfig) *HTTPServer {
 	mux.HandleFunc("POST /api/magpie/open", s.handleMagpieOpen)
 
 	mux.HandleFunc("GET /api/desktop/targets", s.handleDesktopTargets)
+	mux.HandleFunc("PUT /api/desktop/target", s.handleDesktopTargetSet)
+	mux.HandleFunc("POST /api/desktop/target", s.handleDesktopTargetSet)
 	mux.HandleFunc("GET /api/desktop/state", s.handleDesktopState)
 	mux.HandleFunc("GET /api/desktop/permissions", s.handleDesktopPermissions)
 	mux.HandleFunc("POST /api/desktop/permissions/request", s.handleDesktopPermissionRequest)

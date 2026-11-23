@@ -265,6 +265,11 @@ type Hub struct {
 	desktopTaskMu      sync.Mutex
 	activeDesktopTasks map[string]string // target -> botID
 
+	desktopTargetMu      sync.Mutex
+	activeDesktopTarget  string
+	activeDesktopExpires time.Time
+	activeDesktopTimer   *time.Timer
+
 	schedMu            sync.RWMutex
 	onSchedulesChanged func()
 
@@ -329,6 +334,7 @@ func New(cfg *config.HubConfig, store *state.Store, messages *state.MessageStore
 		inboundAtts:        make(map[string]inboundAttEntry),
 	}
 	h.nodes = node.NewRegistry(func() {
+		h.reconcileActiveDesktopTarget()
 		h.broadcast(Event{
 			Type:    "nodes_changed",
 			Payload: map[string]any{"nodes": h.nodes.List()},
@@ -387,6 +393,12 @@ func (h *Hub) Close() {
 	for _, lane := range lanes {
 		lane.stop()
 	}
+	h.desktopTargetMu.Lock()
+	if h.activeDesktopTimer != nil {
+		h.activeDesktopTimer.Stop()
+		h.activeDesktopTimer = nil
+	}
+	h.desktopTargetMu.Unlock()
 	h.localDesk.Close()
 	h.registry.Close()
 	if h.store != nil {
@@ -3096,6 +3108,175 @@ func (h *Hub) SetMagpieWebURL(raw string) error {
 	return nil
 }
 
+const defaultDesktopTargetTTL = 30 * time.Minute
+
+// ActiveDesktopTarget describes which desktop is currently active for screen sharing
+// and default computer-use tasks.
+type ActiveDesktopTarget struct {
+	Target    string `json:"target"`
+	Name      string `json:"name,omitempty"`
+	Temporary bool   `json:"temporary"`
+	ExpiresAt string `json:"expiresAt,omitempty"`
+}
+
+func (h *Hub) findRemoteDesktopNode(target string) (node.NodeInfo, bool) {
+	if h.nodes == nil {
+		return node.NodeInfo{}, false
+	}
+	for _, n := range h.nodes.List() {
+		if n.ID != target || !n.Connected {
+			continue
+		}
+		for _, p := range n.Permissions {
+			if p == node.PermDesktop {
+				return n, true
+			}
+		}
+	}
+	return node.NodeInfo{}, false
+}
+
+func (h *Hub) resetActiveDesktopTargetLocked() ActiveDesktopTarget {
+	if h.activeDesktopTimer != nil {
+		h.activeDesktopTimer.Stop()
+		h.activeDesktopTimer = nil
+	}
+	h.activeDesktopTarget = "local"
+	h.activeDesktopExpires = time.Time{}
+	return ActiveDesktopTarget{Target: "local", Temporary: false}
+}
+
+// ActiveDesktopTarget returns the currently active desktop target, falling back to
+// "local" if a temporary remote target has expired, disconnected, or lost desktop permission.
+func (h *Hub) ActiveDesktopTarget() ActiveDesktopTarget {
+	h.desktopTargetMu.Lock()
+	cur := strings.TrimSpace(h.activeDesktopTarget)
+	exp := h.activeDesktopExpires
+	if cur == "" || strings.EqualFold(cur, "local") {
+		h.desktopTargetMu.Unlock()
+		return ActiveDesktopTarget{Target: "local", Temporary: false}
+	}
+	expired := !exp.IsZero() && !time.Now().Before(exp)
+	h.desktopTargetMu.Unlock()
+
+	if !expired {
+		if n, ok := h.findRemoteDesktopNode(cur); ok {
+			return ActiveDesktopTarget{
+				Target:    n.ID,
+				Name:      n.Name,
+				Temporary: true,
+				ExpiresAt: exp.UTC().Format(time.RFC3339),
+			}
+		}
+	}
+
+	h.desktopTargetMu.Lock()
+	changed := h.activeDesktopTarget == cur
+	snap := ActiveDesktopTarget{Target: "local", Temporary: false}
+	if changed {
+		snap = h.resetActiveDesktopTargetLocked()
+	} else {
+		curNow := strings.TrimSpace(h.activeDesktopTarget)
+		if curNow != "" && !strings.EqualFold(curNow, "local") {
+			expNow := h.activeDesktopExpires
+			h.desktopTargetMu.Unlock()
+			if n, ok := h.findRemoteDesktopNode(curNow); ok {
+				return ActiveDesktopTarget{
+					Target:    n.ID,
+					Name:      n.Name,
+					Temporary: true,
+					ExpiresAt: expNow.UTC().Format(time.RFC3339),
+				}
+			}
+			return ActiveDesktopTarget{Target: "local", Temporary: false}
+		}
+	}
+	h.desktopTargetMu.Unlock()
+	if changed {
+		h.broadcast(Event{Type: "desktop_target", Payload: snap})
+	}
+	return snap
+}
+
+// SetActiveDesktopTarget switches the active desktop target to "local" or a connected
+// remote node with desktop permission. Non-local targets are temporary and expire after ttl.
+func (h *Hub) SetActiveDesktopTarget(target string, ttl time.Duration) (ActiveDesktopTarget, error) {
+	t := strings.TrimSpace(target)
+	if t == "" || strings.EqualFold(t, "local") {
+		h.desktopTargetMu.Lock()
+		snap := h.resetActiveDesktopTargetLocked()
+		h.desktopTargetMu.Unlock()
+		h.broadcast(Event{Type: "desktop_target", Payload: snap})
+		return snap, nil
+	}
+	n, ok := h.findRemoteDesktopNode(t)
+	if !ok {
+		return ActiveDesktopTarget{}, fmt.Errorf("remote desktop target %q unavailable", t)
+	}
+	if ttl <= 0 {
+		ttl = defaultDesktopTargetTTL
+	}
+	exp := time.Now().Add(ttl)
+
+	h.desktopTargetMu.Lock()
+	if h.activeDesktopTimer != nil {
+		h.activeDesktopTimer.Stop()
+	}
+	h.activeDesktopTarget = n.ID
+	h.activeDesktopExpires = exp
+	h.activeDesktopTimer = time.AfterFunc(ttl, h.reconcileActiveDesktopTarget)
+	h.desktopTargetMu.Unlock()
+
+	snap := ActiveDesktopTarget{
+		Target:    n.ID,
+		Name:      n.Name,
+		Temporary: true,
+		ExpiresAt: exp.UTC().Format(time.RFC3339),
+	}
+	h.broadcast(Event{Type: "desktop_target", Payload: snap})
+	return snap, nil
+}
+
+func (h *Hub) reconcileActiveDesktopTarget() {
+	h.closeMu.Lock()
+	closed := h.closed
+	h.closeMu.Unlock()
+	if closed {
+		return
+	}
+	_ = h.ActiveDesktopTarget()
+}
+
+func (h *Hub) touchActiveDesktopTarget(target string) {
+	if target == "" || strings.EqualFold(target, "local") {
+		return
+	}
+	h.desktopTargetMu.Lock()
+	if h.activeDesktopTarget != target {
+		h.desktopTargetMu.Unlock()
+		return
+	}
+	exp := time.Now().Add(defaultDesktopTargetTTL)
+	if h.activeDesktopTimer != nil {
+		h.activeDesktopTimer.Stop()
+	}
+	h.activeDesktopExpires = exp
+	h.activeDesktopTimer = time.AfterFunc(defaultDesktopTargetTTL, h.reconcileActiveDesktopTarget)
+	h.desktopTargetMu.Unlock()
+
+	if n, ok := h.findRemoteDesktopNode(target); ok {
+		h.broadcast(Event{
+			Type: "desktop_target",
+			Payload: ActiveDesktopTarget{
+				Target:    n.ID,
+				Name:      n.Name,
+				Temporary: true,
+				ExpiresAt: exp.UTC().Format(time.RFC3339),
+			},
+		})
+	}
+}
+
 // ActiveDesktopTaskBot returns the bot ID currently running a computer-use worker on target, if any.
 func (h *Hub) ActiveDesktopTaskBot(target string) string {
 	t := strings.TrimSpace(target)
@@ -3130,22 +3311,12 @@ func (h *Hub) RunDesktopTask(ctx context.Context, req DesktopTaskRequest) (*harn
 
 	target := strings.TrimSpace(req.Target)
 	if target == "" {
-		connected := 0
-		if h.nodes != nil {
-			for _, n := range h.nodes.List() {
-				if n.Connected {
-					connected++
-				}
-			}
-		}
-		if connected == 0 {
-			target = "local"
-		} else {
-			target = "_default"
-		}
+		target = h.ActiveDesktopTarget().Target
 	}
 	if strings.EqualFold(target, "local") {
 		target = "local"
+	} else {
+		h.touchActiveDesktopTarget(target)
 	}
 
 	h.desktopTaskMu.Lock()

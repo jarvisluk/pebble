@@ -40,8 +40,10 @@ export default function DesktopScreen() {
     authToken,
     bots,
     desktopTargets,
+    activeDesktopTarget,
     takeovers,
     refreshDesktopTargets,
+    setActiveDesktopTarget,
     fetchDesktopState,
     sendDesktopInput,
     resolveTakeover,
@@ -72,6 +74,11 @@ export default function DesktopScreen() {
   useEffect(() => {
     void refreshDesktopTargets().catch(() => {});
   }, [refreshDesktopTargets]);
+
+  useEffect(() => {
+    const next = activeDesktopTarget.target || 'local';
+    setSelectedTarget((prev) => (prev === next ? prev : next));
+  }, [activeDesktopTarget.target]);
 
   useEffect(() => {
     let stop = false;
@@ -192,6 +199,9 @@ export default function DesktopScreen() {
                       setSelectedTarget(item.id);
                       setMeta(null);
                       setConnected(false);
+                      void setActiveDesktopTarget(item.id).catch((err: any) => {
+                        setError(err?.message || t('opFailed'));
+                      });
                     }}
                     style={[
                       styles.targetPill,
@@ -235,6 +245,25 @@ export default function DesktopScreen() {
               </Pressable>
             </ScrollView>
           </View>
+
+          {activeDesktopTarget.temporary ? (
+            <View style={[styles.alertCard, { backgroundColor: '#1f1d1b', borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)' }]}>
+              <Text style={[styles.alertTxt, { color: '#f3f1ee' }]} numberOfLines={1}>
+                {t('tempDesktopBanner', { name: activeDesktopTarget.name || activeDesktopTarget.target })}
+              </Text>
+              <Pressable
+                onPress={() => {
+                  setSelectedTarget('local');
+                  setMeta(null);
+                  setConnected(false);
+                  void setActiveDesktopTarget('local').catch(() => {});
+                }}
+                style={[styles.alertBtn, { backgroundColor: '#f3f1ee' }]}
+              >
+                <Text style={[styles.alertBtnTxt, { color: '#111110' }]}>{t('switchBackLocal')}</Text>
+              </Pressable>
+            </View>
+          ) : null}
 
           {activeTakeover ? (
             <View style={[styles.alertCard, { backgroundColor: theme.pink }]}>

@@ -14,6 +14,7 @@ import { apiRequest, connectSSE, normalizeAddress, UnauthorizedError } from './a
 import { tStatic, type ResolvedLang } from './i18n';
 import { loadSavedServers, loadTailscaleBindPref, saveServers, saveTailscaleBindPref } from './storage';
 import type {
+  ActiveDesktopTarget,
   BotDetail,
   BotStatus,
   ChatMessage,
@@ -143,6 +144,8 @@ interface HubContextValue {
   takeovers: TakeoverRequest[];
   questions: PendingQuestion[];
   desktopTargets: DesktopTarget[];
+  activeDesktopTarget: ActiveDesktopTarget;
+  setActiveDesktopTarget: (target: string) => Promise<void>;
   setActiveChatBot: (botId: string | null) => void;
   addAndConnectServer: (input: { label?: string; address: string; token?: string }) => Promise<boolean>;
   selectServer: (id: string) => Promise<void>;
@@ -236,6 +239,10 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
   const [takeovers, setTakeovers] = useState<TakeoverRequest[]>([]);
   const [questions, setQuestions] = useState<PendingQuestion[]>([]);
   const [desktopTargets, setDesktopTargets] = useState<DesktopTarget[]>([]);
+  const [activeDesktopTarget, setActiveDesktopTargetState] = useState<ActiveDesktopTarget>({
+    target: 'local',
+    temporary: false,
+  });
   const [routines, setRoutines] = useState<Record<string, RoutineItem[]>>({});
 
   const activeChatRef = useRef<string | null>(null);
@@ -358,6 +365,13 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
             if (bid) removeBotState(String(bid));
           } else if (type === 'nodes_changed' && Array.isArray(payload?.nodes)) {
             setNodes(payload.nodes);
+          } else if (type === 'desktop_target' && payload?.target) {
+            setActiveDesktopTargetState({
+              target: String(payload.target || 'local'),
+              name: payload.name ? String(payload.name) : undefined,
+              temporary: Boolean(payload.temporary),
+              expiresAt: payload.expiresAt ? String(payload.expiresAt) : undefined,
+            });
           } else if (type === 'takeover' && Array.isArray(payload?.items)) {
             setTakeovers(payload.items);
           } else if (type === 'questions' && Array.isArray(payload?.items)) {
@@ -476,6 +490,17 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
           .catch(() => {});
         apiRequest<{ items: TakeoverRequest[] }>(resolvedURL, resolvedToken, '/api/desktop/takeovers')
           .then((t) => seq === connSeqRef.current && setTakeovers(t.items || []))
+          .catch(() => {});
+        apiRequest<{ targets?: DesktopTarget[]; activeTarget?: ActiveDesktopTarget }>(
+          resolvedURL,
+          resolvedToken,
+          '/api/desktop/targets'
+        )
+          .then((d) => {
+            if (seq !== connSeqRef.current) return;
+            setDesktopTargets(d.targets || []);
+            if (d.activeTarget) setActiveDesktopTargetState(d.activeTarget);
+          })
           .catch(() => {});
         apiRequest<{ items: PendingQuestion[] }>(resolvedURL, resolvedToken, '/api/questions')
           .then((q) => seq === connSeqRef.current && setQuestions(q.items || []))
@@ -1019,15 +1044,34 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const refreshDesktopTargets = useCallback(async () => {
-    const d = await apiRequest<{ targets: DesktopTarget[]; takeovers: TakeoverRequest[] }>(
+    const d = await apiRequest<{
+      targets: DesktopTarget[];
+      activeTarget?: ActiveDesktopTarget;
+      takeovers: TakeoverRequest[];
+    }>(
       baseURLRef.current,
       authTokenRef.current,
       '/api/desktop/targets'
     );
     const list = d.targets || [];
     setDesktopTargets(list);
+    if (d.activeTarget) {
+      setActiveDesktopTargetState(d.activeTarget);
+    }
     setTakeovers(d.takeovers || []);
     return list;
+  }, []);
+
+  const setActiveDesktopTarget = useCallback(async (target: string) => {
+    const res = await apiRequest<{ activeTarget?: ActiveDesktopTarget }>(
+      baseURLRef.current,
+      authTokenRef.current,
+      '/api/desktop/target',
+      { method: 'PUT', body: { target } }
+    );
+    if (res.activeTarget) {
+      setActiveDesktopTargetState(res.activeTarget);
+    }
   }, []);
 
   const fetchDesktopState = useCallback(async (target: string) => {
@@ -1127,6 +1171,8 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
         takeovers,
         questions,
         desktopTargets,
+        activeDesktopTarget,
+        setActiveDesktopTarget,
         setActiveChatBot,
         addAndConnectServer,
         selectServer,

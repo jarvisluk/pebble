@@ -76,6 +76,12 @@ struct DesktopView: View {
                 .presentationDetents([.medium, .large])
         }
         .task { _ = try? await hub.refreshDesktopTargets() }
+        .onChange(of: hub.activeDesktopTarget.target) { _, newTarget in
+            let next = newTarget.isEmpty ? "local" : newTarget
+            if target != next {
+                target = next
+            }
+        }
         .task(id: "\(target)-\(streaming)") {
             await pollState()
         }
@@ -98,6 +104,22 @@ struct DesktopView: View {
     private var desktopColumn: some View {
         VStack(spacing: 8) {
             topBar
+            if hub.activeDesktopTarget.temporary {
+                HStack(spacing: 10) {
+                    Text(hub.t("tempDesktopBanner", ["name": hub.activeDesktopTarget.name ?? hub.activeDesktopTarget.target]))
+                        .font(.system(size: 13, weight: .semibold)).foregroundStyle(pillText)
+                        .lineLimit(1)
+                    Spacer(minLength: 4)
+                    Button(hub.t("switchBackLocal")) {
+                        target = "local"
+                        Task { try? await hub.setActiveDesktopTarget("local") }
+                    }
+                    .buttonStyle(.bordered).controlSize(.small).tint(pillText)
+                }
+                .padding(.horizontal, 12).padding(.vertical, 8)
+                .background(pillBg, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .padding(.horizontal, 12)
+            }
             if let to = activeTakeover {
                 HStack(spacing: 10) {
                     Label(hub.t("takeoverBanner", ["bot": to.botName ?? to.botId ?? "Bot", "reason": to.reason ?? ""]), systemImage: "hand.raised.fill")
@@ -132,6 +154,7 @@ struct DesktopView: View {
                         ForEach(targets) { tr in
                             Button {
                                 target = tr.id
+                                Task { try? await hub.setActiveDesktopTarget(tr.id) }
                             } label: {
                                 Label(tr.name ?? tr.id, systemImage: tr.id == target ? "checkmark" : "desktopcomputer")
                             }

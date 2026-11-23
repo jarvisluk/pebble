@@ -96,19 +96,42 @@ struct ChatView: View {
         let pal = p.bot(botId, index, custom: bot?.color)
         thread(pal)
             .safeAreaInset(edge: .top, spacing: 0) {
-                if let to = hub.takeovers.first {
-                    HStack(spacing: 8) {
-                        Label(hub.t("takeoverInline", ["reason": to.reason ?? ""]), systemImage: "hand.raised.fill")
-                            .font(.system(size: 15)).foregroundStyle(p.pinkInk).lineLimit(2)
-                        Spacer(minLength: 4)
-                        Button(hub.t("handleAction")) { router.openDesktop(to.target ?? "local") }
+                VStack(spacing: 0) {
+                    if !inDesktopSidebar && hub.activeDesktopTarget.temporary {
+                        HStack(spacing: 8) {
+                            Label(
+                                hub.t("tempDesktopBanner", ["name": hub.activeDesktopTarget.name ?? hub.activeDesktopTarget.target]),
+                                systemImage: "desktopcomputer"
+                            )
+                            .font(.system(size: 14, weight: .medium)).foregroundStyle(p.text).lineLimit(1)
+                            Spacer(minLength: 4)
+                            Button(hub.t("desktopShort")) {
+                                router.openDesktop(hub.activeDesktopTarget.target)
+                            }
                             .buttonStyle(.bordered)
-                        Button(hub.t("resumeShort")) { Task { try? await hub.resolveTakeover(to.id) } }
-                            .buttonStyle(.borderedProminent).tint(pal.accent)
+                            Button(hub.t("switchBackLocal")) {
+                                Task { try? await hub.setActiveDesktopTarget("local") }
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                        .controlSize(.small)
+                        .padding(.horizontal, 16).padding(.vertical, 8)
+                        .background(.bar)
                     }
-                    .controlSize(.small)
-                    .padding(.horizontal, 16).padding(.vertical, 8)
-                    .background(.bar)
+                    if let to = hub.takeovers.first {
+                        HStack(spacing: 8) {
+                            Label(hub.t("takeoverInline", ["reason": to.reason ?? ""]), systemImage: "hand.raised.fill")
+                                .font(.system(size: 15)).foregroundStyle(p.pinkInk).lineLimit(2)
+                            Spacer(minLength: 4)
+                            Button(hub.t("handleAction")) { router.openDesktop(to.target ?? "local") }
+                                .buttonStyle(.bordered)
+                            Button(hub.t("resumeShort")) { Task { try? await hub.resolveTakeover(to.id) } }
+                                .buttonStyle(.borderedProminent).tint(pal.accent)
+                        }
+                        .controlSize(.small)
+                        .padding(.horizontal, 16).padding(.vertical, 8)
+                        .background(.bar)
+                    }
                 }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) { composer(pal) }

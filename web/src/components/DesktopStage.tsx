@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type {
+  ActiveDesktopTarget,
   DesktopFrame,
   DesktopHostStatus,
   DesktopTarget,
@@ -14,6 +15,7 @@ import { translate } from '../lib/i18n';
 interface DesktopStageProps {
   open: boolean;
   target: string;
+  activeDeskTarget?: ActiveDesktopTarget;
   screenUpdateSeq: number;
   liveScreen: ScreenState | null;
   takeovers: TakeoverRequest[];
@@ -21,6 +23,7 @@ interface DesktopStageProps {
   activeBotName?: string;
   lang: ResolvedLang;
   onChangeTarget: (target: string) => void;
+  onActiveTargetSync?: (active: ActiveDesktopTarget) => void;
   onTakeoversChange: (items: TakeoverRequest[]) => void;
   onResolveTakeover: (to: TakeoverRequest) => Promise<void>;
   onToggleChat: () => void;
@@ -31,6 +34,7 @@ interface DesktopStageProps {
 export const DesktopStage: React.FC<DesktopStageProps> = ({
   open,
   target,
+  activeDeskTarget,
   screenUpdateSeq,
   liveScreen,
   takeovers,
@@ -38,6 +42,7 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
   activeBotName,
   lang,
   onChangeTarget,
+  onActiveTargetSync,
   onTakeoversChange,
   onResolveTakeover,
   onToggleChat,
@@ -153,15 +158,21 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
 
   const refreshTargets = useCallback(async () => {
     try {
-      const d = await api<{ targets?: DesktopTarget[]; takeovers?: TakeoverRequest[] }>('/api/desktop/targets');
+      const d = await api<{
+        targets?: DesktopTarget[];
+        activeTarget?: ActiveDesktopTarget;
+        takeovers?: TakeoverRequest[];
+      }>('/api/desktop/targets');
       const list = d.targets || [];
       setTargets(list);
-      if (list.length > 0 && !list.some((tr) => tr.id === targetRef.current)) {
+      if (d.activeTarget && onActiveTargetSync) {
+        onActiveTargetSync(d.activeTarget);
+      } else if (list.length > 0 && !list.some((tr) => tr.id === targetRef.current)) {
         onChangeTarget(list[0].id);
       }
       if (d.takeovers) onTakeoversChange(d.takeovers);
     } catch {}
-  }, [onChangeTarget, onTakeoversChange]);
+  }, [onActiveTargetSync, onChangeTarget, onTakeoversChange]);
 
   const refreshWindows = useCallback(async () => {
     try {
@@ -1013,6 +1024,19 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
             </div>
           </div>
         </div>
+
+          {activeDeskTarget?.temporary && (
+            <div className="d-pill top-alert temp-target">
+              <span className="text-wrap-word">
+                {t('tempDesktopBanner', {
+                  name: activeDeskTarget.name || activeDeskTarget.target,
+                })}
+              </span>
+              <button type="button" className="btn" onClick={() => onChangeTarget('local')}>
+                {t('switchBackLocal')}
+              </button>
+            </div>
+          )}
 
           {activeTakeover && (
             <div id="deskAlert" className="d-pill top-alert takeover">

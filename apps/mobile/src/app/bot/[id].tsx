@@ -72,8 +72,10 @@ export default function BotChatScreen() {
     msgs,
     tools,
     takeovers,
+    activeDesktopTarget,
     questions,
     setActiveChatBot,
+    setActiveDesktopTarget,
     loadMessages,
     sendMessage,
     interruptBot,
@@ -888,6 +890,26 @@ export default function BotChatScreen() {
           <DocIcon size={18} color={theme.text2} />
         </Pressable>
       </View>
+
+      {activeDesktopTarget.temporary && (
+        <View style={[styles.errBanner, { backgroundColor: theme.card, borderBottomWidth: 1, borderBottomColor: theme.s2, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 }]}>
+          <Text numberOfLines={1} style={[styles.errTxt, { color: theme.text, flex: 1 }]}>
+            {t('tempDesktopBanner', { name: activeDesktopTarget.name || activeDesktopTarget.target })}
+          </Text>
+          <Pressable
+            onPress={() => router.push(`/desktop?target=${encodeURIComponent(activeDesktopTarget.target || 'local')}`)}
+            style={{ borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5, backgroundColor: theme.s1 }}
+          >
+            <Text style={{ fontSize: 13, fontWeight: '700', color: theme.text }}>{t('desktopShort')}</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => void setActiveDesktopTarget('local')}
+            style={{ borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5, backgroundColor: theme.s1 }}
+          >
+            <Text style={{ fontSize: 13, fontWeight: '700', color: theme.text }}>{t('switchBackLocal')}</Text>
+          </Pressable>
+        </View>
+      )}
 
       {takeovers.length > 0 && (
         <View style={[styles.errBanner, { backgroundColor: theme.pink, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 }]}>
