@@ -134,6 +134,7 @@ struct ChatView: View {
                         .background(.bar)
                     }
                 }
+            }
             composer(pal)
                 .background(p.page)
         }
