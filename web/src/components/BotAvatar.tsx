@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import type { BotStatus } from '../types';
-import { botColor, hashStr } from '../lib/theme';
+import { botColor } from '../lib/theme';
+import { pebbleFrame, pebbleParams, registerPebbleAvatar } from '../lib/pebbleAvatar';
 
 interface BotAvatarProps {
   id: string;
@@ -23,11 +24,58 @@ export const BotAvatar: React.FC<BotAvatarProps> = ({
   const shape = (avatar !== undefined ? avatar : found?.avatar || '').trim().toLowerCase() || 'blob';
   const color = botColor(id, bots, overrideColor);
 
-  const h = hashStr(id || '?');
-  const tilt = ((h >>> 4) % 25) - 12;
-  const gx = ((h >>> 9) % 7) - 3;
-  const gy = ((h >>> 12) % 5) - 2;
-  const lean = (h >>> 15) % 2 ? -14 : 12;
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const fxRef = useRef<SVGGElement>(null);
+  const bodyRef = useRef<SVGGElement>(null);
+  const pathRef = useRef<SVGPathElement>(null);
+  const eyeLRef = useRef<SVGRectElement>(null);
+  const eyeRRef = useRef<SVGRectElement>(null);
+  const handleRef = useRef<ReturnType<typeof registerPebbleAvatar> | null>(null);
+
+  const isDefaultBlob =
+    shape !== 'squircle' &&
+    shape !== 'cat' &&
+    shape !== 'bear' &&
+    shape !== 'cloud' &&
+    shape !== 'ghost' &&
+    shape !== 'star' &&
+    shape !== 'sprout';
+
+  const params = isDefaultBlob ? pebbleParams(id || '?') : null;
+  const initialFrame = params ? pebbleFrame(params, 0, busy) : null;
+
+  useEffect(() => {
+    if (!isDefaultBlob || !params) return;
+    const el = wrapRef.current;
+    const fxGroup = fxRef.current;
+    const bodyGroup = bodyRef.current;
+    const pathEl = pathRef.current;
+    const eyeL = eyeLRef.current;
+    const eyeR = eyeRRef.current;
+    if (!el || !fxGroup || !bodyGroup || !pathEl || !eyeL || !eyeR) return;
+
+    const handle = registerPebbleAvatar({
+      el,
+      fxGroup,
+      bodyGroup,
+      pathEl,
+      eyeL,
+      eyeR,
+      params,
+      color,
+      busy,
+    });
+    handleRef.current = handle;
+    return () => {
+      handle.destroy();
+      handleRef.current = null;
+    };
+  }, [isDefaultBlob, id]);
+
+  useEffect(() => {
+    if (!isDefaultBlob || !params || !handleRef.current) return;
+    handleRef.current.update(params, color, busy);
+  }, [isDefaultBlob, params, color, busy]);
 
   const renderShape = () => {
     switch (shape) {
@@ -110,36 +158,41 @@ export const BotAvatar: React.FC<BotAvatarProps> = ({
             <ellipse cx={61} cy={59} rx={5.2} ry={8.8} fill="var(--eye)" />
           </>
         );
-      default:
+      default: {
+        const f = initialFrame!;
         return (
-          <g transform={`rotate(${tilt} 50 50)`}>
-            <path
-              d="M52 9C80 9 95 28 93 55C91 81 72 93 47 91C21 89 5 72 7 46C9 22 26 9 52 9Z"
-              fill={color}
-            />
-            <ellipse
-              cx={39 + gx}
-              cy={45 + gy}
-              rx={6}
-              ry={10.5}
-              transform={`rotate(${lean} ${39 + gx} ${45 + gy})`}
+          <g ref={fxRef}>
+            <g ref={bodyRef} transform={`rotate(${f.bodyRotDeg.toFixed(1)} 50 50)`}>
+              <path ref={pathRef} d={f.pathD} fill={color} />
+            </g>
+            <rect
+              ref={eyeLRef}
+              x={f.eyes[0].x}
+              y={f.eyes[0].y}
+              width={f.eyes[0].width}
+              height={f.eyes[0].height}
+              rx={f.eyes[0].rx}
+              transform={`rotate(${f.eyes[0].lean} ${f.eyes[0].cx} ${f.eyes[0].cy})`}
               fill="var(--eye)"
             />
-            <ellipse
-              cx={62 + gx}
-              cy={43 + gy}
-              rx={6}
-              ry={10.5}
-              transform={`rotate(${lean} ${62 + gx} ${43 + gy})`}
+            <rect
+              ref={eyeRRef}
+              x={f.eyes[1].x}
+              y={f.eyes[1].y}
+              width={f.eyes[1].width}
+              height={f.eyes[1].height}
+              rx={f.eyes[1].rx}
+              transform={`rotate(${f.eyes[1].lean} ${f.eyes[1].cx} ${f.eyes[1].cy})`}
               fill="var(--eye)"
             />
           </g>
         );
+      }
     }
   };
 
   return (
-    <div className={`av ${className}`.trim()}>
+    <div ref={wrapRef} data-bot-id={id} className={`av ${className}`.trim()}>
       <svg viewBox="0 0 100 100" aria-hidden="true">
         {renderShape()}
       </svg>

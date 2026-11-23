@@ -114,10 +114,184 @@ extension EnvironmentValues {
     }
 }
 
-// MARK: 头像：blob 加两只眼睛，无底色圆。
+// MARK: 头像：Pebble C 参数化动态头像（默认）+ 7 种自定义矢量造型，无底色圆。
+
+private struct Mulberry32 {
+    private var a: UInt32
+    init(seed: UInt32) { self.a = seed }
+    mutating func next() -> Double {
+        a = a &+ 0x6d2b79f5
+        var t = a
+        t = (t ^ (t >> 15)) &* (t | 1)
+        t ^= t &+ ((t ^ (t >> 7)) &* (t | 61))
+        let out = t ^ (t >> 14)
+        return Double(out) / 4294967296.0
+    }
+}
+
+private struct PebbleVert {
+    var s: Double
+    var d: Double
+    var p: Double
+}
+
+private struct PebbleParams {
+    var n: Int
+    var verts: [PebbleVert]
+    var rot0: Double
+    var tilt: Double
+    var sx: Double
+    var corner: Double
+    var side: Double
+    var breath: Double
+    var blinkEvery: Double
+    var blinkOff: Double
+    var lookEvery: Double
+    var lookOff: Double
+    var lookSeed: UInt32
+    var bob: Double
+}
+
+private func pebbleLerp(_ a: Double, _ b: Double, _ t: Double) -> Double { a + (b - a) * t }
+
+private func pebbleParams(for id: String) -> PebbleParams {
+    let key = id.isEmpty ? "?" : id
+    var r = Mulberry32(seed: fnv1a(key))
+    let q = r.next()
+    let n: Int = q < 0.6 ? 4 : (q < 0.85 ? 5 : 6)
+    var verts: [PebbleVert] = []
+    verts.reserveCapacity(n)
+    for _ in 0..<n {
+        verts.append(PebbleVert(
+            s: 0.86 + r.next() * 0.24,
+            d: (r.next() - 0.5) * 0.35,
+            p: r.next() * 6.28
+        ))
+    }
+    _ = r.next() // rr0
+    let sign: Double = r.next() < 0.5 ? -1 : 1
+    let tilt = sign * pebbleLerp(6, 12, r.next()) / 57.3
+    _ = r.next() // sideR
+    return PebbleParams(
+        n: n,
+        verts: verts,
+        rot0: .pi / 2 - .pi / Double(n),
+        tilt: tilt,
+        sx: pebbleLerp(0.95, 1.08, r.next()),
+        corner: pebbleLerp(0.36, 0.44, r.next()),
+        side: -sign,
+        breath: 0.5 + r.next() * 0.4,
+        blinkEvery: 2.8 + r.next() * 3.5,
+        blinkOff: r.next() * 10,
+        lookEvery: 2.2 + r.next() * 3,
+        lookOff: r.next() * 10,
+        lookSeed: fnv1a(key + "#l"),
+        bob: r.next() * 6.28
+    )
+}
+
+private func drawPebble(in ctx: inout GraphicsContext, size: CGSize, params P: PebbleParams, color: Color, eye: Color, t: Double, busy: Bool) {
+    let k = size.width / 100.0
+    let circMap: [Int: Double] = [3: 54, 4: 49, 5: 46, 6: 45]
+    let circ = circMap[P.n] ?? 49
+    let breathe = 1.0 + 0.018 * sin(t * P.breath * .pi * (busy ? 2.6 : 1.0))
+    let bobY = sin(t * 1.2 + P.bob) * (busy ? 1.2 : 0.6)
+    let asym = 0.35
+
+    var pts: [CGPoint] = []
+    pts.reserveCapacity(P.n)
+    var minX = Double.infinity, maxX = -Double.infinity
+    var minY = Double.infinity, maxY = -Double.infinity
+    for i in 0..<P.n {
+        let v = P.verts[i]
+        let a = P.rot0 + (Double(i) / Double(P.n)) * .pi * 2.0 + v.d * asym * 0.5
+        let rr = circ * (1.0 + (v.s - 1.0) * asym) * breathe
+        let px = cos(a) * rr * P.sx
+        let py = sin(a) * rr / P.sx
+        minX = min(minX, px); maxX = max(maxX, px)
+        minY = min(minY, py); maxY = max(maxY, py)
+        pts.append(CGPoint(x: px, y: py))
+    }
+    let ox = 50.0 - (minX + maxX) / 2.0
+    let oy = 50.0 + bobY - (minY + maxY) / 2.0
+    for i in 0..<P.n {
+        pts[i] = CGPoint(x: (pts[i].x + ox) * k, y: (pts[i].y + oy) * k)
+    }
+
+    let c = CGFloat(min(0.5, P.corner))
+    func cut(_ a: CGPoint, _ b: CGPoint) -> CGPoint {
+        CGPoint(x: a.x + (b.x - a.x) * c, y: a.y + (b.y - a.y) * c)
+    }
+    var bodyPath = Path()
+    for i in 0..<P.n {
+        let prev = pts[(i - 1 + P.n) % P.n]
+        let curr = pts[i]
+        let next = pts[(i + 1) % P.n]
+        let p1 = cut(curr, prev)
+        let p2 = cut(curr, next)
+        if i == 0 {
+            bodyPath.move(to: p1)
+        } else {
+            bodyPath.addLine(to: p1)
+        }
+        bodyPath.addQuadCurve(to: p2, control: curr)
+    }
+    bodyPath.closeSubpath()
+
+    let bodyRotDeg = P.tilt * 57.3 + sin(t * 0.6 + P.bob) * (busy ? 3.0 : 1.5)
+    var bodyCtx = ctx
+    bodyCtx.translateBy(x: 50 * k, y: 50 * k)
+    bodyCtx.rotate(by: .degrees(bodyRotDeg))
+    bodyCtx.translateBy(x: -50 * k, y: -50 * k)
+    bodyCtx.fill(bodyPath, with: .color(color))
+
+    let bp = (t + P.blinkOff).truncatingRemainder(dividingBy: P.blinkEvery) / P.blinkEvery
+    let blink = bp > 0.965 ? max(0.12, abs(cos((bp - 0.965) / 0.035 * .pi))) : 1.0
+
+    var lx: Double
+    var ly: Double
+    if busy {
+        lx = sin(t * 4.5) * 7.0
+        ly = -1.0
+    } else {
+        let seg = (t + P.lookOff) / P.lookEvery
+        let idx = Int(floor(seg))
+        let f = seg - Double(idx)
+        func target(_ i: Int) -> (Double, Double) {
+            let seed = P.lookSeed ^ UInt32(truncatingIfNeeded: (i &+ 1) &* 2654435761)
+            var q = Mulberry32(seed: seed)
+            let r1 = q.next()
+            let r2 = q.next()
+            let r3 = q.next()
+            return (P.side * (3.0 + r1 * 6.0) - (r2 < 0.2 ? P.side * 8.0 : 0.0), -2.0 + r3 * 4.0)
+        }
+        let a = target(idx)
+        let b = target(idx + 1)
+        let e = f < 0.85 ? 0.0 : (1.0 - cos((f - 0.85) / 0.15 * .pi)) / 2.0
+        lx = pebbleLerp(a.0, b.0, e)
+        ly = pebbleLerp(a.1, b.1, e)
+    }
+
+    let ew = 5.0
+    let eh = 9.5 * max(0.12, blink)
+    let gap = 19.0
+    let lean = -P.side * 14.0
+    let ex = 50.0 + lx
+    let ey = 47.0 + bobY + ly
+    let rx = min(ew, eh)
+
+    for cx in [ex - gap / 2.0, ex + gap / 2.0] {
+        var eCtx = ctx
+        eCtx.translateBy(x: cx * k, y: ey * k)
+        eCtx.rotate(by: .degrees(lean))
+        let rect = CGRect(x: -ew * k, y: -eh * k, width: ew * 2.0 * k, height: eh * 2.0 * k)
+        eCtx.fill(Path(roundedRect: rect, cornerRadius: rx * k), with: .color(eye))
+    }
+}
 
 struct BotAvatar: View {
     @Environment(\.palette) private var p
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var id: String
     var size: CGFloat
     var index: Int = -1
@@ -125,28 +299,35 @@ struct BotAvatar: View {
     var color: String? = nil
     var busy = false
     @State private var pulse = false
+    @State private var startTime = Date()
 
     var body: some View {
         let shape = (avatar ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let kind = shape.isEmpty ? "blob" : shape
-        let h = fnv1a(id.isEmpty ? "?" : id)
-        let tilt = Double(Int((h >> 4) % 25) - 12)
-        let gx = CGFloat(Int((h >> 9) % 7) - 3)
-        let gy = CGFloat(Int((h >> 12) % 5) - 2)
-        let lean = (h >> 15) % 2 == 1 ? -14.0 : 12.0
         let blob = Color(hex: botColorHex(id, index, custom: color))
-        Canvas { ctx, sz in
-            let k = sz.width / 100
-            func drawEye(cx: CGFloat, cy: CGFloat, rx: CGFloat, ry: CGFloat, rot: Double = 0) {
-                var e = ctx
-                e.translateBy(x: cx * k, y: cy * k)
-                if rot != 0 { e.rotate(by: .degrees(rot)) }
-                e.fill(Path(ellipseIn: CGRect(x: -rx * k, y: -ry * k, width: rx * 2 * k, height: ry * 2 * k)), with: .color(p.eye))
-            }
-            func pt(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: x * k, y: y * k) }
+        let isDefaultBlob = !["squircle", "cat", "bear", "cloud", "ghost", "star", "sprout"].contains(kind)
+        Group {
+            if isDefaultBlob {
+                let params = pebbleParams(for: id)
+                TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: reduceMotion)) { timeline in
+                    let t = reduceMotion ? 0.0 : max(0.0, timeline.date.timeIntervalSince(startTime))
+                    Canvas { ctx, sz in
+                        drawPebble(in: &ctx, size: sz, params: params, color: blob, eye: p.eye, t: t, busy: busy)
+                    }
+                }
+            } else {
+                Canvas { ctx, sz in
+                    let k = sz.width / 100
+                    func drawEye(cx: CGFloat, cy: CGFloat, rx: CGFloat, ry: CGFloat, rot: Double = 0) {
+                        var e = ctx
+                        e.translateBy(x: cx * k, y: cy * k)
+                        if rot != 0 { e.rotate(by: .degrees(rot)) }
+                        e.fill(Path(ellipseIn: CGRect(x: -rx * k, y: -ry * k, width: rx * 2 * k, height: ry * 2 * k)), with: .color(p.eye))
+                    }
+                    func pt(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: x * k, y: y * k) }
 
-            switch kind {
-            case "squircle":
+                    switch kind {
+                    case "squircle":
                 var path = Path()
                 path.move(to: pt(50, 10))
                 path.addCurve(to: pt(90, 50), control1: pt(78, 10), control2: pt(90, 22))
@@ -260,19 +441,9 @@ struct BotAvatar: View {
                 drawEye(cx: 39, cy: 59, rx: 5.2, ry: 8.8)
                 drawEye(cx: 61, cy: 59, rx: 5.2, ry: 8.8)
             default:
-                ctx.translateBy(x: 50 * k, y: 50 * k)
-                ctx.rotate(by: .degrees(tilt))
-                ctx.translateBy(x: -50 * k, y: -50 * k)
-                var path = Path()
-                path.move(to: pt(52, 9))
-                path.addCurve(to: pt(93, 55), control1: pt(80, 9), control2: pt(95, 28))
-                path.addCurve(to: pt(47, 91), control1: pt(91, 81), control2: pt(72, 93))
-                path.addCurve(to: pt(7, 46), control1: pt(21, 89), control2: pt(5, 72))
-                path.addCurve(to: pt(52, 9), control1: pt(9, 22), control2: pt(26, 9))
-                path.closeSubpath()
-                ctx.fill(path, with: .color(blob))
-                drawEye(cx: 39 + gx, cy: 45 + gy, rx: 6, ry: 10.5, rot: lean)
-                drawEye(cx: 62 + gx, cy: 43 + gy, rx: 6, ry: 10.5, rot: lean)
+                break
+            }
+                }
             }
         }
         .frame(width: size, height: size)
