@@ -28,6 +28,7 @@ import (
 	"bot-hub/internal/node"
 	"bot-hub/internal/scheduler"
 	"bot-hub/internal/state"
+	"bot-hub/internal/syncer"
 	"bot-hub/internal/web"
 )
 
@@ -52,6 +53,8 @@ type HTTPServer struct {
 	deskOnce       sync.Once
 	fallbackDesk   *desktop.Coordinator
 	fallbackEngine *desktop.Engine
+	syncOnce       sync.Once
+	syncSvc        *syncer.Syncer
 
 	mediaTicketsMu sync.Mutex
 	mediaTickets   map[string]mediaTicket
@@ -166,6 +169,17 @@ func NewHTTPServer(h *hub.Hub, cfg config.HTTPConfig) *HTTPServer {
 	mux.HandleFunc("POST /api/nodes/result", s.handleNodeResult)
 	mux.HandleFunc("POST /api/nodes/disconnect", s.handleNodeDisconnect)
 	mux.HandleFunc("POST /api/nodes/{id}/call", s.handleNodeCall)
+
+	// Multi-host sync & optional WebDAV
+	mux.HandleFunc("GET /api/sync/status", s.handleSyncStatus)
+	mux.HandleFunc("GET /api/sync/portable", s.handleSyncPortableGet)
+	mux.HandleFunc("POST /api/sync/portable", s.handleSyncPortablePost)
+	mux.HandleFunc("GET /api/sync/manifest", s.handleSyncManifest)
+	mux.HandleFunc("GET /api/sync/file", s.handleSyncFileGet)
+	mux.HandleFunc("PUT /api/sync/file", s.handleSyncFilePut)
+	mux.HandleFunc("POST /api/sync/git/checkpoint", s.handleSyncGitCheckpoint)
+	mux.HandleFunc("POST /api/sync/git/pull", s.handleSyncGitPull)
+	s.mountWebDAVIfEnabled(mux)
 
 	// External Webhooks
 	mux.HandleFunc("POST /hooks/{id}", s.handleWebhook)

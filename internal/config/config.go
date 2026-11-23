@@ -277,6 +277,87 @@ func (d DesktopConfig) ShouldStopOnlyWhenNoWindows() bool {
 	return d.StopOnlyWhenNoWindows == nil || *d.StopOnlyWhenNoWindows
 }
 
+type SyncGitConfig struct {
+	Enabled         bool   `json:"enabled"`
+	RepoURL         string `json:"repoUrl,omitempty"`
+	Branch          string `json:"branch,omitempty"`          // default: "main"
+	IntervalMinutes int    `json:"intervalMinutes,omitempty"` // default: 10
+}
+
+func (g SyncGitConfig) EffectiveBranch() string {
+	if b := strings.TrimSpace(g.Branch); b != "" {
+		return b
+	}
+	return "main"
+}
+
+func (g SyncGitConfig) EffectiveIntervalMinutes() int {
+	if g.IntervalMinutes <= 0 {
+		return 10
+	}
+	return g.IntervalMinutes
+}
+
+type SyncWebDAVConfig struct {
+	Enabled  bool   `json:"enabled"`
+	Prefix   string `json:"prefix,omitempty"`   // default: "/webdav"
+	ReadOnly *bool  `json:"readOnly,omitempty"` // default: true
+}
+
+func (w SyncWebDAVConfig) EffectivePrefix() string {
+	p := strings.TrimSpace(w.Prefix)
+	if p == "" {
+		return "/webdav"
+	}
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
+	p = strings.TrimRight(p, "/")
+	if p == "" {
+		return "/webdav"
+	}
+	return p
+}
+
+func (w SyncWebDAVConfig) IsReadOnly() bool {
+	return w.ReadOnly == nil || *w.ReadOnly
+}
+
+type SyncConfig struct {
+	Role      string            `json:"role,omitempty"` // "primary" (default) | "standby"
+	PeerURL   string            `json:"peerUrl,omitempty"`
+	PeerToken string            `json:"peerToken,omitempty"`
+	Git       *SyncGitConfig    `json:"git,omitempty"`
+	WebDAV    *SyncWebDAVConfig `json:"webdav,omitempty"`
+}
+
+func (s *SyncConfig) EffectiveRole() string {
+	if s == nil {
+		return "primary"
+	}
+	switch strings.ToLower(strings.TrimSpace(s.Role)) {
+	case "standby":
+		return "standby"
+	default:
+		return "primary"
+	}
+}
+
+func (s *SyncConfig) GitEnabled() bool {
+	return s != nil && s.Git != nil && s.Git.Enabled
+}
+
+func (s *SyncConfig) WebDAVEnabled() bool {
+	return s != nil && s.WebDAV != nil && s.WebDAV.Enabled
+}
+
+func (s *SyncConfig) WebDAVReadOnly() bool {
+	if s == nil || s.WebDAV == nil {
+		return true
+	}
+	return s.WebDAV.IsReadOnly()
+}
+
 type HubConfig struct {
 	ProjectRoot string `json:"-"`
 	ConfigPath  string `json:"-"`
@@ -293,12 +374,13 @@ type HubConfig struct {
 	// MagpieWebURL is where `magpie web` is reachable from other devices;
 	// clients away from the host open it instead of the local app.
 	MagpieWebURL      string      `json:"magpieWebUrl,omitempty"`
-	OpenCodeServerURL   string            `json:"opencodeServerUrl,omitempty"`
-	SharedDir         string            `json:"sharedDir,omitempty"`
-	StateFile         string            `json:"stateFile,omitempty"`
-	MessagesDir       string            `json:"messagesDir,omitempty"`
-	HTTP              HTTPConfig        `json:"http,omitempty"`
-	Bots              []BotConfig       `json:"bots"`
+	OpenCodeServerURL string      `json:"opencodeServerUrl,omitempty"`
+	SharedDir         string      `json:"sharedDir,omitempty"`
+	StateFile         string      `json:"stateFile,omitempty"`
+	MessagesDir       string      `json:"messagesDir,omitempty"`
+	HTTP              HTTPConfig  `json:"http,omitempty"`
+	Sync              *SyncConfig `json:"sync,omitempty"`
+	Bots              []BotConfig `json:"bots"`
 }
 
 var (
@@ -492,6 +574,14 @@ func Load(projectRoot, explicitPath string) (*HubConfig, string, error) {
 		cfg.HTTP.Tailscale.Hostname = strings.TrimSpace(cfg.HTTP.Tailscale.Hostname)
 		cfg.HTTP.Tailscale.ControlURL = strings.TrimSpace(expandEnv(cfg.HTTP.Tailscale.ControlURL))
 		cfg.HTTP.Tailscale.AuthKey = strings.TrimSpace(expandEnv(cfg.HTTP.Tailscale.AuthKey))
+	}
+	if cfg.Sync != nil {
+		cfg.Sync.PeerURL = strings.TrimRight(strings.TrimSpace(expandEnv(cfg.Sync.PeerURL)), "/")
+		cfg.Sync.PeerToken = strings.TrimSpace(expandEnv(cfg.Sync.PeerToken))
+		if cfg.Sync.Git != nil {
+			cfg.Sync.Git.RepoURL = strings.TrimSpace(expandEnv(cfg.Sync.Git.RepoURL))
+			cfg.Sync.Git.Branch = strings.TrimSpace(cfg.Sync.Git.Branch)
+		}
 	}
 
 	if cfg.SharedDir == "" {
