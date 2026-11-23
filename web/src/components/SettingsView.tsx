@@ -85,6 +85,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [defaultModelsDraft, setDefaultModelsDraft] = useState<Record<string, string>>({});
   const [sharedUserMd, setSharedUserMd] = useState('');
   const [botDrafts, setBotDrafts] = useState<Record<string, { harness: string; model: string }>>({});
+  const [touchedFields, setTouchedFields] = useState({
+    defaultHarness: false,
+    defaultModel: false,
+    defaultModels: false,
+    sharedUserMd: false,
+  });
+  const [touchedBots, setTouchedBots] = useState<Set<string>>(() => new Set());
   const [saving, setSaving] = useState(false);
   const [settingsErr, setSettingsErr] = useState('');
 
@@ -145,18 +152,20 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   const baseline = useMemo(() => {
     const cleanPer = Object.fromEntries(
-      Object.entries(settings?.defaultModels || {}).filter(([, v]) => Boolean(v))
+      Object.entries(settings?.defaultModels || {})
+        .map(([k, v]) => [k, v.trim()])
+        .filter(([, v]) => Boolean(v))
     );
     const botMap: Record<string, { harness: string; model: string }> = {};
     for (const b of bots) {
       botMap[b.id] = {
         harness: b.harness || 'opencode',
-        model: b.modelInherited ? '' : b.model || '',
+        model: (b.modelInherited ? '' : b.model || '').trim(),
       };
     }
     return {
       defaultHarness: settings?.defaultHarness || settings?.harnesses?.[0]?.id || 'opencode',
-      defaultModel: settings?.defaultModel || '',
+      defaultModel: (settings?.defaultModel || '').trim(),
       defaultModels: cleanPer,
       sharedUserMd: settings?.sharedUserMd || '',
       bots: botMap,
@@ -165,28 +174,40 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   const isDirty = useMemo(() => {
     if (!settings) return false;
-    if (defaultHarness !== baseline.defaultHarness) return true;
-    if (defaultModel.trim() !== baseline.defaultModel) return true;
-    const ka = Object.keys(defaultModelsDraft).filter((k) => defaultModelsDraft[k]?.trim());
-    const kb = Object.keys(baseline.defaultModels).filter((k) => baseline.defaultModels[k]);
-    if (ka.length !== kb.length || !ka.every((k) => defaultModelsDraft[k].trim() === baseline.defaultModels[k])) {
+    if (touchedFields.defaultHarness && defaultHarness !== baseline.defaultHarness) return true;
+    if (touchedFields.defaultModel && defaultModel.trim() !== baseline.defaultModel) return true;
+    if (touchedFields.defaultModels) {
+      const ka = Object.keys(defaultModelsDraft).filter((k) => defaultModelsDraft[k]?.trim());
+      const kb = Object.keys(baseline.defaultModels);
+      if (ka.length !== kb.length || !ka.every((k) => defaultModelsDraft[k].trim() === baseline.defaultModels[k])) {
+        return true;
+      }
+    }
+    if (touchedFields.sharedUserMd && sharedUserMd.replace(/\s+$/, '') !== baseline.sharedUserMd.replace(/\s+$/, '')) {
       return true;
     }
-    if (sharedUserMd.replace(/\s+$/, '') !== baseline.sharedUserMd.replace(/\s+$/, '')) return true;
     for (const b of bots) {
+      if (!touchedBots.has(b.id)) continue;
       const cur = botDrafts[b.id];
       const base = baseline.bots[b.id];
       if (!cur || !base) continue;
       if (cur.harness !== base.harness || cur.model.trim() !== base.model) return true;
     }
     return false;
-  }, [settings, defaultHarness, defaultModel, defaultModelsDraft, sharedUserMd, botDrafts, baseline, bots]);
+  }, [settings, touchedFields, touchedBots, defaultHarness, defaultModel, defaultModelsDraft, sharedUserMd, botDrafts, baseline, bots]);
 
   useEffect(() => {
     onDirtyChange?.(isDirty);
   }, [isDirty, onDirtyChange]);
 
   const resetDraftsToBaseline = useCallback(() => {
+    setTouchedFields({
+      defaultHarness: false,
+      defaultModel: false,
+      defaultModels: false,
+      sharedUserMd: false,
+    });
+    setTouchedBots(new Set());
     setDefaultHarness(baseline.defaultHarness);
     setDefaultModel(baseline.defaultModel);
     setDefaultModelsDraft({ ...baseline.defaultModels });
@@ -205,28 +226,51 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   useEffect(() => {
     if (!settings) return;
-    if (!isDirty) {
-      setDefaultHarness(settings.defaultHarness || settings.harnesses?.[0]?.id || 'opencode');
-      setDefaultModel(settings.defaultModel || '');
-      setDefaultModelsDraft({ ...(settings.defaultModels || {}) });
-      setPerHarnessOpen(Object.values(settings.defaultModels || {}).some(Boolean));
-      setSharedUserMd(settings.sharedUserMd || '');
-      setBotDrafts(
-        Object.fromEntries(
-          bots.map((b) => [
-            b.id,
-            { harness: b.harness || 'opencode', model: b.modelInherited ? '' : b.model || '' },
-          ])
-        )
-      );
+    if (!touchedFields.defaultHarness) setDefaultHarness(baseline.defaultHarness);
+    if (!touchedFields.defaultModel) setDefaultModel(baseline.defaultModel);
+    if (!touchedFields.defaultModels) {
+      setDefaultModelsDraft({ ...baseline.defaultModels });
+      setPerHarnessOpen(Object.values(baseline.defaultModels).some(Boolean));
     }
+    if (!touchedFields.sharedUserMd) setSharedUserMd(baseline.sharedUserMd);
+  }, [settings, baseline, touchedFields]);
+
+  useEffect(() => {
+    if (!settings) return;
     setDeskHarness(settings.desktopHarness || '');
     setDeskModel(settings.desktopModel || '');
     setMpWebUrl(settings.magpie?.webUrl || '');
     settings.harnesses.forEach((h) => {
       void onLoadModels(h.id);
     });
-  }, [settings, bots.length]);
+  }, [settings]);
+
+  useEffect(() => {
+    setBotDrafts((prev) => {
+      const next: Record<string, { harness: string; model: string }> = {};
+      let changed = false;
+      const validIds = new Set(bots.map((b) => b.id));
+      for (const id of Object.keys(prev)) {
+        if (!validIds.has(id)) changed = true;
+      }
+      for (const b of bots) {
+        if (touchedBots.has(b.id) && prev[b.id]) {
+          next[b.id] = prev[b.id];
+          continue;
+        }
+        const target = {
+          harness: b.harness || 'opencode',
+          model: (b.modelInherited ? '' : b.model || '').trim(),
+        };
+        const cur = prev[b.id];
+        if (!cur || cur.harness !== target.harness || cur.model !== target.model) {
+          changed = true;
+        }
+        next[b.id] = target;
+      }
+      return changed ? next : prev;
+    });
+  }, [bots, touchedBots]);
 
   useEffect(() => {
     if (nodesFromEvents) setNodes(nodesFromEvents);
@@ -500,13 +544,20 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       for (const b of bots) {
         const draft = botDrafts[b.id];
         if (!draft) continue;
-        const cur = b.modelInherited ? '' : b.model || '';
+        const cur = (b.modelInherited ? '' : b.model || '').trim();
         if (draft.harness === b.harness && draft.model.trim() === cur) continue;
         await api(`/api/bots/${encodeURIComponent(b.id)}`, {
           method: 'PATCH',
           body: { harness: draft.harness, model: draft.model.trim() },
         });
       }
+      setTouchedFields({
+        defaultHarness: false,
+        defaultModel: false,
+        defaultModels: false,
+        sharedUserMd: false,
+      });
+      setTouchedBots(new Set());
       onToast(t('saved'));
       await onReloadBots();
       return true;
@@ -819,9 +870,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                             disabled={isBusy}
                             value={defaultModelsDraft[h.id] || ''}
                             onFocus={() => void onLoadModels(h.id)}
-                            onChange={(e) =>
-                              setDefaultModelsDraft((prev) => ({ ...prev, [h.id]: e.target.value }))
-                            }
+                            onChange={(e) => {
+                              const nextVal = e.target.value;
+                              if (nextVal === (defaultModelsDraft[h.id] || '')) return;
+                              setTouchedFields((prev) => ({ ...prev, defaultModels: true }));
+                              setDefaultModelsDraft((prev) => ({ ...prev, [h.id]: nextVal }));
+                            }}
                           />
                           <div className="mp-hacts">
                             {mp?.installed && (
@@ -894,7 +948,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 <select
                   id="sDefaultHarness"
                   value={defaultHarness}
-                  onChange={(e) => setDefaultHarness(e.target.value)}
+                  onChange={(e) => {
+                    const nextVal = e.target.value;
+                    if (nextVal === defaultHarness) return;
+                    setTouchedFields((prev) => ({ ...prev, defaultHarness: true }));
+                    setDefaultHarness(nextVal);
+                  }}
                 >
                   {(settings?.harnesses || [{ id: 'opencode', label: 'opencode' }]).map((h) => (
                     <option key={h.id} value={h.id}>
@@ -912,7 +971,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   list="models-global"
                   placeholder={t('globalDefaultPh')}
                   value={defaultModel}
-                  onChange={(e) => setDefaultModel(e.target.value)}
+                  onChange={(e) => {
+                    const nextVal = e.target.value;
+                    if (nextVal === defaultModel) return;
+                    setTouchedFields((prev) => ({ ...prev, defaultModel: true }));
+                    setDefaultModel(nextVal);
+                  }}
                 />
               </div>
               {perHarnessOpen && (
@@ -928,9 +992,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                           placeholder={t('followGlobalPh')}
                           spellCheck={false}
                           value={defaultModelsDraft[h.id] || ''}
-                          onChange={(e) =>
-                            setDefaultModelsDraft((prev) => ({ ...prev, [h.id]: e.target.value }))
-                          }
+                          onChange={(e) => {
+                            const nextVal = e.target.value;
+                            if (nextVal === (defaultModelsDraft[h.id] || '')) return;
+                            setTouchedFields((prev) => ({ ...prev, defaultModels: true }));
+                            setDefaultModelsDraft((prev) => ({ ...prev, [h.id]: nextVal }));
+                          }}
                         />
                       </div>
                     ))}
@@ -951,7 +1018,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   bots.map((b) => {
                     const draft = botDrafts[b.id] || {
                       harness: b.harness || 'opencode',
-                      model: b.modelInherited ? '' : b.model || '',
+                      model: (b.modelInherited ? '' : b.model || '').trim(),
                     };
                     const dm = defaultModelsDraft[draft.harness]?.trim() || '';
                     const def = dm || resolveDefaultModel(defaultModel.trim(), draft.harness);
@@ -965,6 +1032,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                           value={draft.harness}
                           onChange={(e) => {
                             const h = e.target.value;
+                            if (h === draft.harness) return;
+                            setTouchedBots((prev) => {
+                              const next = new Set(prev);
+                              next.add(b.id);
+                              return next;
+                            });
                             setBotDrafts((prev) => ({ ...prev, [b.id]: { harness: h, model: '' } }));
                             void onLoadModels(h);
                           }}
@@ -980,12 +1053,19 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                           spellCheck={false}
                           placeholder={def ? t('defaultModelPh', { model: def }) : t('inheritGlobalPh')}
                           value={draft.model}
-                          onChange={(e) =>
+                          onChange={(e) => {
+                            const nextVal = e.target.value;
+                            if (nextVal === draft.model) return;
+                            setTouchedBots((prev) => {
+                              const next = new Set(prev);
+                              next.add(b.id);
+                              return next;
+                            });
                             setBotDrafts((prev) => ({
                               ...prev,
-                              [b.id]: { ...draft, model: e.target.value },
-                            }))
-                          }
+                              [b.id]: { ...draft, model: nextVal },
+                            }));
+                          }}
                         />
                       </div>
                     );
@@ -1662,7 +1742,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   spellCheck={false}
                   placeholder={t('userMdPh')}
                   value={sharedUserMd}
-                  onChange={(e) => setSharedUserMd(e.target.value)}
+                  onChange={(e) => {
+                    const nextVal = e.target.value;
+                    if (nextVal === sharedUserMd) return;
+                    setTouchedFields((prev) => ({ ...prev, sharedUserMd: true }));
+                    setSharedUserMd(nextVal);
+                  }}
                 />
               </div>
             </section>

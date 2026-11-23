@@ -80,6 +80,7 @@ struct SettingsView: View {
     @State private var userMd = ""
     @State private var userMdTouched = false
     @State private var drafts: [String: BotDraft] = [:]
+    @State private var touchedBots: Set<String> = []
     @State private var loadingModelsFor: Set<String> = []
     @State private var saving = false
     @State private var busy = ""
@@ -108,27 +109,38 @@ struct SettingsView: View {
 
     private var primaryHarness: String { harnesses.first?.id ?? "opencode" }
 
+    private var botSnapshotKeys: [String] {
+        hub.bots.map { "\($0.id)|\($0.harness ?? "")|\($0.model ?? "")|\($0.modelInherited ?? false)" }
+    }
+
+    private var baseDefaultHarness: String {
+        if let dh = hub.settings?.defaultHarness, !dh.isEmpty { return dh }
+        return primaryHarness
+    }
+
     private func clean(_ m: [String: String]?) -> [String: String] {
         (m ?? [:]).compactMapValues { let t = $0.trimmingCharacters(in: .whitespaces); return t.isEmpty ? nil : t }
     }
 
-    private func origModel(_ b: BotStatus) -> String { b.modelInherited == true ? "" : (b.model ?? "") }
+    private func origModel(_ b: BotStatus) -> String {
+        (b.modelInherited == true ? "" : (b.model ?? "")).trimmingCharacters(in: .whitespaces)
+    }
 
     private var botUpdates: [(id: String, harness: String, model: String)] {
         hub.bots.compactMap { b in
-            guard let d = drafts[b.id] else { return nil }
+            guard touchedBots.contains(b.id), let d = drafts[b.id] else { return nil }
             let m = d.model.trimmingCharacters(in: .whitespaces)
             return d.harness != (b.harness ?? "") || m != origModel(b) ? (b.id, d.harness, m) : nil
         }
     }
 
     private var settingsChanged: Bool {
-        let s = hub.settings
+        guard let s = hub.settings else { return false }
         func rtrim(_ x: String) -> String { x.replacingOccurrences(of: "\\s+$", with: "", options: .regularExpression) }
-        return defaultHarness != (s?.defaultHarness ?? primaryHarness)
-            || defaultModel.trimmingCharacters(in: .whitespaces) != (s?.defaultModel ?? "")
-            || clean(perHarness) != clean(s?.defaultModels)
-            || rtrim(userMd) != rtrim(s?.sharedUserMd ?? "")
+        return (defaultHarnessTouched && defaultHarness != baseDefaultHarness)
+            || (defaultTouched && defaultModel.trimmingCharacters(in: .whitespaces) != (s.defaultModel ?? "").trimmingCharacters(in: .whitespaces))
+            || (perTouched && clean(perHarness) != clean(s.defaultModels))
+            || (userMdTouched && rtrim(userMd) != rtrim(s.sharedUserMd ?? ""))
     }
 
     private var dirty: Bool { settingsChanged || !botUpdates.isEmpty }
@@ -147,7 +159,13 @@ struct SettingsView: View {
                 botModelsSection
             case .memory:
                 Section {
-                    TextField(hub.t("globalSharedMem"), text: Binding(get: { userMd }, set: { userMd = $0; userMdTouched = true; saved = "" }),
+                    TextField(hub.t("globalSharedMem"), text: Binding(
+                        get: { userMd },
+                        set: {
+                            guard $0 != userMd else { return }
+                            userMd = $0; userMdTouched = true; saved = ""
+                        }
+                    ),
                               prompt: Text(hub.t("userMdPh")), axis: .vertical)
                         .lineLimit(4...20)
                         .labelsHidden()
@@ -201,18 +219,23 @@ struct SettingsView: View {
             sync()
             router.settingsDirty = dirty
         }
-        .onChange(of: hub.settings?.defaultHarness) { _, _ in sync() }
-        .onChange(of: hub.settings?.defaultModel) { _, _ in sync() }
-        .onChange(of: hub.settings?.sharedUserMd) { _, _ in sync() }
-        .onChange(of: hub.settings?.desktopModel) { _, _ in sync() }
-        .onChange(of: hub.settings?.defaultModels) { _, _ in sync() }
-        .onChange(of: hub.bots.map(\.id)) { _, _ in syncDrafts() }
+        .modifier(SettingsSyncModifier(
+            defaultHarness: hub.settings?.defaultHarness,
+            harnessIds: (hub.settings?.harnesses ?? []).map(\.id),
+            defaultModel: hub.settings?.defaultModel,
+            sharedUserMd: hub.settings?.sharedUserMd,
+            desktopModel: hub.settings?.desktopModel,
+            defaultModels: hub.settings?.defaultModels,
+            botSnapshotKeys: botSnapshotKeys,
+            onSync: sync,
+            onSyncDrafts: syncDrafts
+        ))
     }
 
     private func sync() {
         guard let s = hub.settings else { return }
-        if !defaultHarnessTouched { defaultHarness = s.defaultHarness ?? primaryHarness }
-        if !defaultTouched { defaultModel = s.defaultModel ?? "" }
+        if !defaultHarnessTouched { defaultHarness = baseDefaultHarness }
+        if !defaultTouched { defaultModel = (s.defaultModel ?? "").trimmingCharacters(in: .whitespaces) }
         if !deskTouched { deskHarness = s.desktopHarness ?? ""; deskModel = s.desktopModel ?? "" }
         if !perTouched {
             perHarness = clean(s.defaultModels)
@@ -223,7 +246,11 @@ struct SettingsView: View {
     }
 
     private func syncDrafts() {
-        for b in hub.bots where drafts[b.id] == nil {
+        let validIds = Set(hub.bots.map(\.id))
+        for id in drafts.keys where !validIds.contains(id) {
+            drafts.removeValue(forKey: id)
+        }
+        for b in hub.bots where !touchedBots.contains(b.id) {
             drafts[b.id] = BotDraft(harness: b.harness ?? "", model: origModel(b))
         }
     }
@@ -235,6 +262,7 @@ struct SettingsView: View {
                 try await hub.saveSettings(changed: settingsChanged, defaultHarness: defaultHarness, defaultModel: defaultModel.trimmingCharacters(in: .whitespaces),
                                            defaultModels: clean(perHarness), sharedUserMd: userMd, botUpdates: botUpdates)
                 defaultHarnessTouched = false; defaultTouched = false; perTouched = false; userMdTouched = false
+                touchedBots = []
                 drafts = [:]
                 sync()
                 saved = hub.t("settingsSaved")
@@ -425,7 +453,10 @@ struct SettingsView: View {
             HStack {
                 TextField(h.title, text: Binding(
                     get: { perHarness[h.id] ?? "" },
-                    set: { perHarness[h.id] = $0; perTouched = true; saved = "" }
+                    set: {
+                        guard $0 != (perHarness[h.id] ?? "") else { return }
+                        perHarness[h.id] = $0; perTouched = true; saved = ""
+                    }
                 ), prompt: Text(hub.t("nativeModelPh")))
                     .monoInput()
                     .labelsHidden()
@@ -436,7 +467,10 @@ struct SettingsView: View {
                         }
                     } else {
                         ForEach(Array(cands.prefix(40)), id: \.self) { m in
-                            Button(m) { perHarness[h.id] = m; perTouched = true; saved = "" }
+                            Button(m) {
+                                guard m != (perHarness[h.id] ?? "") else { return }
+                                perHarness[h.id] = m; perTouched = true; saved = ""
+                            }
                         }
                     }
                 } label: {
@@ -505,27 +539,43 @@ struct SettingsView: View {
         Section(hub.t("globalDefaultModel")) {
             Picker(hub.t("defaultHarness"), selection: Binding(
                 get: { defaultHarness },
-                set: { defaultHarness = $0; defaultHarnessTouched = true; saved = "" }
+                set: {
+                    guard $0 != defaultHarness else { return }
+                    defaultHarness = $0; defaultHarnessTouched = true; saved = ""
+                }
             )) {
                 ForEach(harnesses) { Text($0.title).tag($0.id) }
             }
             HStack {
-                TextField(hub.t("globalDefaultModel"), text: Binding(get: { defaultModel }, set: { defaultModel = $0; defaultTouched = true; saved = "" }),
+                TextField(hub.t("globalDefaultModel"), text: Binding(
+                    get: { defaultModel },
+                    set: {
+                        guard $0 != defaultModel else { return }
+                        defaultModel = $0; defaultTouched = true; saved = ""
+                    }
+                ),
                           prompt: Text("magpie/claude-sonnet-4"))
                     .monoInput()
                     .labelsHidden()
                 modelMenu(for: primaryHarness, current: defaultModel) { m in
+                    guard m != defaultModel else { return }
                     defaultModel = m; defaultTouched = true; saved = ""
                 }
             }
             DisclosureGroup(hub.t("perHarnessTitle"), isExpanded: $perOpen) {
                 ForEach(harnesses) { h in
                     HStack {
-                        TextField(h.title, text: Binding(get: { perHarness[h.id] ?? "" },
-                                                        set: { perHarness[h.id] = $0; perTouched = true; saved = "" }),
+                        TextField(h.title, text: Binding(
+                            get: { perHarness[h.id] ?? "" },
+                            set: {
+                                guard $0 != (perHarness[h.id] ?? "") else { return }
+                                perHarness[h.id] = $0; perTouched = true; saved = ""
+                            }
+                        ),
                                   prompt: Text(hub.t("followGlobalPh")))
                             .monoInput()
                         modelMenu(for: h.id, current: perHarness[h.id] ?? "") { m in
+                            guard m != (perHarness[h.id] ?? "") else { return }
                             perHarness[h.id] = m; perTouched = true; saved = ""
                         }
                     }
@@ -562,7 +612,8 @@ struct SettingsView: View {
                         }
                         Spacer()
                         Picker(hub.t("statHarness"), selection: Binding(get: { d.harness }, set: {
-                            var n = d; n.harness = $0; drafts[b.id] = n; saved = ""
+                            guard $0 != d.harness else { return }
+                            var n = d; n.harness = $0; drafts[b.id] = n; touchedBots.insert(b.id); saved = ""
                             if (hub.models[$0] ?? []).isEmpty, hub.isConnected { loadCands(for: $0) }
                         })) {
                             if !harnesses.contains(where: { $0.id == d.harness }) { Text(d.harness.isEmpty ? "-" : d.harness).tag(d.harness) }
@@ -572,12 +623,16 @@ struct SettingsView: View {
                         .fixedSize()
                     }
                     HStack {
-                        TextField(hub.t("statModel"), text: Binding(get: { d.model }, set: { var n = d; n.model = $0; drafts[b.id] = n; saved = "" }),
+                        TextField(hub.t("statModel"), text: Binding(get: { d.model }, set: {
+                            guard $0 != d.model else { return }
+                            var n = d; n.model = $0; drafts[b.id] = n; touchedBots.insert(b.id); saved = ""
+                        }),
                                   prompt: Text(ph.isEmpty ? hub.t("inheritDefaultPh") : ph))
                             .monoInput()
                             .labelsHidden()
                         modelMenu(for: d.harness, current: d.model) { m in
-                            var n = d; n.model = m; drafts[b.id] = n; saved = ""
+                            guard m != d.model else { return }
+                            var n = d; n.model = m; drafts[b.id] = n; touchedBots.insert(b.id); saved = ""
                         }
                     }
                 }
@@ -747,5 +802,28 @@ struct SettingsView: View {
                 .disabled(!deskTouched || busy == "desk")
             }
         }
+    }
+}
+
+private struct SettingsSyncModifier: ViewModifier {
+    let defaultHarness: String?
+    let harnessIds: [String]?
+    let defaultModel: String?
+    let sharedUserMd: String?
+    let desktopModel: String?
+    let defaultModels: [String: String]?
+    let botSnapshotKeys: [String]
+    let onSync: () -> Void
+    let onSyncDrafts: () -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: defaultHarness) { _, _ in onSync() }
+            .onChange(of: harnessIds) { _, _ in onSync() }
+            .onChange(of: defaultModel) { _, _ in onSync() }
+            .onChange(of: sharedUserMd) { _, _ in onSync() }
+            .onChange(of: desktopModel) { _, _ in onSync() }
+            .onChange(of: defaultModels) { _, _ in onSync() }
+            .onChange(of: botSnapshotKeys) { _, _ in onSyncDrafts() }
     }
 }
