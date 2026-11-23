@@ -312,13 +312,16 @@ func TestDesktopConfigDefaults(t *testing.T) {
 }
 
 func TestBotAvatarAndColorValidation(t *testing.T) {
-	for _, av := range []string{"", "blob", " CAT ", "sprout"} {
+	for _, av := range []string{"", "blob", "pebble-1", "pebble-7", " CAT ", "sprout"} {
 		got, err := NormalizeBotAvatar(av)
 		if err != nil {
 			t.Fatalf("NormalizeBotAvatar(%q) unexpected error: %v", av, err)
 		}
-		if av == " CAT " && got != "cat" {
-			t.Fatalf("expected cat, got %q", got)
+		if av == " CAT " && got != "pebble-2" {
+			t.Fatalf("expected pebble-2, got %q", got)
+		}
+		if av == "sprout" && got != "pebble-7" {
+			t.Fatalf("expected pebble-7, got %q", got)
 		}
 	}
 	if _, err := NormalizeBotAvatar("robot"); err == nil {

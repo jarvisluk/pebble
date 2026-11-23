@@ -2,8 +2,26 @@ import type { BotStatus, ResolvedLang, ThemePref } from '../types';
 import { translate } from './i18n';
 
 export const BOT_COLORS = ['#f08a2c', '#8a7ad8', '#86a33a', '#b85a4a', '#7a7465', '#e0685a'];
-export const BOT_AVATARS = ['blob', 'squircle', 'cat', 'bear', 'cloud', 'ghost', 'star', 'sprout'] as const;
+export const BOT_AVATARS = ['blob', 'pebble-1', 'pebble-2', 'pebble-3', 'pebble-4', 'pebble-5', 'pebble-6', 'pebble-7'] as const;
 export type BotAvatarKind = (typeof BOT_AVATARS)[number];
+
+const LEGACY_AVATAR_MAP: Record<string, BotAvatarKind> = {
+  squircle: 'pebble-1',
+  cat: 'pebble-2',
+  bear: 'pebble-3',
+  cloud: 'pebble-4',
+  ghost: 'pebble-5',
+  star: 'pebble-6',
+  sprout: 'pebble-7',
+};
+
+export function normalizeBotAvatar(avatar?: string): BotAvatarKind {
+  const s = String(avatar || '').trim().toLowerCase();
+  if (!s || s === 'blob') return 'blob';
+  if (s in LEGACY_AVATAR_MAP) return LEGACY_AVATAR_MAP[s];
+  if ((BOT_AVATARS as readonly string[]).includes(s)) return s as BotAvatarKind;
+  return 'blob';
+}
 
 export function hashStr(s: string): number {
   let h = 2166136261;

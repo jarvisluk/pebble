@@ -285,7 +285,7 @@ func savePNG(_ rep: NSBitmapImageRep, to path: String) throws {
     try data.write(to: url)
 }
 
-func renderFullBleedIcon(size: Int, variant: Variant, heroFraction: CGFloat = 0.70, circleMask: Bool = false) -> NSBitmapImageRep {
+func renderFullBleedIcon(size: Int, variant: Variant, heroFraction: CGFloat = 0.82, circleMask: Bool = false) -> NSBitmapImageRep {
     let (rep, ctx) = makeBitmapContext(size: size)
     let rect = CGRect(x: 0, y: 0, width: size, height: size)
 
@@ -342,7 +342,7 @@ func renderMacOSSquircleIcon(size: Int) -> NSBitmapImageRep {
     drawBackground(ctx: ctx, rect: cardRect, dark: false)
 
     ctx.translateBy(x: cardPad, y: cardPad)
-    drawBot(ctx: ctx, canvasSize: cardSize, heroFraction: 0.68, variant: .light, withShadow: true)
+    drawBot(ctx: ctx, canvasSize: cardSize, heroFraction: 0.82, variant: .light, withShadow: true)
     ctx.restoreGState()
 
     // Crisp subtle inner edge highlight
@@ -419,7 +419,7 @@ let svg = """
     </linearGradient>
   </defs>
   <rect class="bg" width="100" height="100" rx="24" />
-  <g transform="translate(50 50) scale(0.72) translate(-50 -50)">
+  <g transform="translate(50 50) scale(0.84) translate(-50 -50)">
     <g transform="rotate(\(PebbleSpec.bodyRotDeg) 50 50)">
       <path d="\(pathD)" fill="url(#celadon)" />
     </g>
@@ -434,10 +434,10 @@ try svg.write(toFile: "\(webPublicDir)/favicon.svg", atomically: true, encoding:
 // 4. Expo / Mobile assets
 try savePNG(renderFullBleedIcon(size: 1024, variant: .light), to: "\(mobileAssetsDir)/icon.png")
 try savePNG(renderFullBleedIcon(size: 64, variant: .light), to: "\(mobileAssetsDir)/favicon.png")
-try savePNG(renderFullBleedIcon(size: 1024, variant: .splash, heroFraction: 0.68), to: "\(mobileAssetsDir)/splash-icon.png")
-try savePNG(renderFullBleedIcon(size: 1024, variant: .splash, heroFraction: 0.56), to: "\(mobileAssetsDir)/android-icon-foreground.png")
+try savePNG(renderFullBleedIcon(size: 1024, variant: .splash, heroFraction: 0.80), to: "\(mobileAssetsDir)/splash-icon.png")
+try savePNG(renderFullBleedIcon(size: 1024, variant: .splash, heroFraction: 0.68), to: "\(mobileAssetsDir)/android-icon-foreground.png")
 try savePNG(renderBackgroundOnly(size: 1024, dark: false), to: "\(mobileAssetsDir)/android-icon-background.png")
-try savePNG(renderFullBleedIcon(size: 1024, variant: .monochrome, heroFraction: 0.56), to: "\(mobileAssetsDir)/android-icon-monochrome.png")
+try savePNG(renderFullBleedIcon(size: 1024, variant: .monochrome, heroFraction: 0.68), to: "\(mobileAssetsDir)/android-icon-monochrome.png")
 
 // 5. Android mipmap PNG staging + splashscreen_logo.png
 try? FileManager.default.removeItem(atPath: androidTmpDir)
@@ -454,11 +454,11 @@ for d in dpis {
     let nightDir = "\(androidTmpDir)/mipmap-night-\(d.name)"
     try savePNG(renderFullBleedIcon(size: d.legacy, variant: .light), to: "\(dir)/ic_launcher.png")
     try savePNG(renderFullBleedIcon(size: d.legacy, variant: .light, circleMask: true), to: "\(dir)/ic_launcher_round.png")
-    try savePNG(renderFullBleedIcon(size: d.adaptive, variant: .splash, heroFraction: 0.56), to: "\(dir)/ic_launcher_foreground.png")
+    try savePNG(renderFullBleedIcon(size: d.adaptive, variant: .splash, heroFraction: 0.68), to: "\(dir)/ic_launcher_foreground.png")
     try savePNG(renderBackgroundOnly(size: d.adaptive, dark: false), to: "\(dir)/ic_launcher_background.png")
-    try savePNG(renderFullBleedIcon(size: d.adaptive, variant: .monochrome, heroFraction: 0.56), to: "\(dir)/ic_launcher_monochrome.png")
+    try savePNG(renderFullBleedIcon(size: d.adaptive, variant: .monochrome, heroFraction: 0.68), to: "\(dir)/ic_launcher_monochrome.png")
     try savePNG(renderBackgroundOnly(size: d.adaptive, dark: true), to: "\(nightDir)/ic_launcher_background.png")
-    try savePNG(renderFullBleedIcon(size: d.splash, variant: .splash, heroFraction: 0.68), to: "\(androidResDir)/drawable-\(d.name)/splashscreen_logo.png")
+    try savePNG(renderFullBleedIcon(size: d.splash, variant: .splash, heroFraction: 0.80), to: "\(androidResDir)/drawable-\(d.name)/splashscreen_logo.png")
 }
 
 print("Generated PNG/SVG assets successfully. pathD=\(pathD)")
