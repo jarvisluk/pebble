@@ -155,6 +155,7 @@ struct SettingsView: View {
             case .general:
                 appearanceSection
                 pushNotificationsSection
+                openSourceSection
             case .models:
                 magpieSection
                 nativeCLISection
@@ -506,6 +507,7 @@ struct SettingsView: View {
         }
     }
 
+<<<<<<< HEAD
     private var pushNotificationsSection: some View {
         let pm = PushManager.shared
         let la = LiveActivityManager.shared
@@ -551,6 +553,16 @@ struct SettingsView: View {
         }
     }
 
+    private var openSourceSection: some View {
+        Section(hub.t("openSourceTitle")) {
+            Text(hub.t("openSourceDesc"))
+                .font(.system(size: 14))
+                .foregroundStyle(p.text2)
+            Link(destination: URL(string: "https://github.com/jarvisluk/bot-hub")!) {
+                Label(hub.t("openSourceLinkBtn"), systemImage: "star")
+            }
+        }
+    }
     // MARK: 模型
 
     @ViewBuilder

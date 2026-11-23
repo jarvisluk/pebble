@@ -1736,6 +1736,22 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               </div>
               <p className="set-card-desc">{t('ubCardDesc')}</p>
             </section>
+
+            <section className="set-card">
+              <div className="set-card-hd">
+                <h2>{t('openSourceTitle')}</h2>
+                <a
+                  id="sOpenGitHub"
+                  className="mp"
+                  href="https://github.com/jarvisluk/bot-hub"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  {t('openSourceLinkBtn')}
+                </a>
+              </div>
+              <p className="set-card-desc">{t('openSourceDesc')}</p>
+            </section>
           </div>
 
           {/* Tab 4: Memory */}

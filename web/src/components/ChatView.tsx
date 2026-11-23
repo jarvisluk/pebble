@@ -501,19 +501,6 @@ export const ChatView: React.FC<ChatViewProps> = ({
     await onSendMessage(text, sentMediaIds);
   };
 
-  const fillComposer = (val: string) => {
-    setAcDismissed(false);
-    setDraft(val);
-    setCursorPos(val.length);
-    setTimeout(() => {
-      const el = inputRef.current;
-      if (el) {
-        el.focus();
-        el.setSelectionRange(val.length, val.length);
-      }
-    }, 0);
-  };
-
   const firstTakeover = takeovers[0] || null;
   let lastTs = 0;
 
@@ -704,24 +691,6 @@ export const ChatView: React.FC<ChatViewProps> = ({
                   <BotAvatar id={activeBot.id} bots={bots} />
                   <h2>{activeBot.name}</h2>
                   <p>{activeBot.description || activeBot.workspace}</p>
-                  <div className="sugs">
-                    <button
-                      type="button"
-                      className="sug p"
-                      onClick={() => fillComposer(t('sugAskRolePrompt'))}
-                    >
-                      <b>{t('sugAskRole')}</b>
-                      <span>{t('sugAskRoleSub')}</span>
-                    </button>
-                    <button type="button" className="sug l" onClick={() => fillComposer('/status')}>
-                      <b>{t('sugStatus')}</b>
-                      <span>{t('sugStatusSub')}</span>
-                    </button>
-                    <button type="button" className="sug g" onClick={() => fillComposer('/ask ')}>
-                      <b>{t('sugCollab')}</b>
-                      <span>{t('sugCollabSub')}</span>
-                    </button>
-                  </div>
                 </div>
               ) : (
                 <>
