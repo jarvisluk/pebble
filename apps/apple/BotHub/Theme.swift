@@ -36,7 +36,7 @@ func fnv1a(_ s: String) -> UInt32 {
     return h
 }
 
-let botColors = ["#f08a2c", "#8a7ad8", "#86a33a", "#b85a4a", "#7a7465", "#e0685a"]
+let botColors = ["#d9774b", "#e0a23a", "#7fa14a", "#7aaa98", "#5b8bb5", "#9a7bc0", "#c4605e"]
 let botAvatars = ["blob", "pebble-1", "pebble-2", "pebble-3", "pebble-4", "pebble-5", "pebble-6", "pebble-7"]
 
 private let legacyBotAvatarMap: [String: String] = [
@@ -494,7 +494,7 @@ struct BotAppearancePicker: View {
                 }
             }
             Text(hub.t("botColorLabel")).font(.system(size: 13)).foregroundStyle(.secondary)
-            HStack(spacing: 12) {
+            HStack(spacing: 10) {
                 ForEach(botColors, id: \.self) { hex in
                     let active = normalizeBotHex(color) == hex
                     Button { color = hex } label: {
