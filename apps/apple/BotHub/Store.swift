@@ -140,6 +140,7 @@ final class HubStore {
     var takeovers: [TakeoverRequest] = []
     var questions: [PendingQuestion] = []
     var desktopTargets: [DesktopTarget] = []
+    var activeDesktopTarget = ActiveDesktopTarget(target: "local", name: nil, temporary: false, expiresAt: nil)
     var routines: [String: [RoutineItem]] = [:]
 
     @ObservationIgnored private var activeChat: String?
@@ -262,6 +263,8 @@ final class HubStore {
             if let bid = (p["id"] as? String) ?? (p["botId"] as? String) { removeBotState(bid) }
         case "nodes_changed":
             if let arr = p["nodes"], let list = decodeAny(arr, as: [NodeInfo].self) { nodes = list }
+        case "desktop_target":
+            if let at = decodeAny(p, as: ActiveDesktopTarget.self) { activeDesktopTarget = at }
         case "takeover":
             if let arr = p["items"], let list = decodeAny(arr, as: [TakeoverRequest].self) { takeovers = list }
         case "questions":
@@ -342,6 +345,12 @@ final class HubStore {
             Task { if let t: TailcatStatus = try? await client.call("/api/tailcat"), seq == connSeq { tailcat = t } }
             Task { if let ts: HostTailscaleStatus = try? await client.call("/api/tailscale"), seq == connSeq { hostTailscale = ts } }
             Task { if let t: TakeoversResp = try? await client.call("/api/desktop/takeovers"), seq == connSeq { takeovers = t.items ?? [] } }
+            Task {
+                if let d: TargetsResp = try? await client.call("/api/desktop/targets"), seq == connSeq {
+                    desktopTargets = d.targets ?? []
+                    if let at = d.activeTarget { activeDesktopTarget = at }
+                }
+            }
             Task { if let q: QuestionsResp = try? await client.call("/api/questions"), seq == connSeq { questions = q.items ?? [] } }
             startStream(url, tok)
         } catch {
@@ -703,8 +712,18 @@ final class HubStore {
     func refreshDesktopTargets() async throws -> [DesktopTarget] {
         let d: TargetsResp = try await api.call("/api/desktop/targets")
         desktopTargets = d.targets ?? []
+        if let at = d.activeTarget {
+            activeDesktopTarget = at
+        }
         takeovers = d.takeovers ?? []
         return desktopTargets
+    }
+
+    func setActiveDesktopTarget(_ target: String) async throws {
+        let res: ActiveTargetResp = try await api.call("/api/desktop/target", method: "PUT", body: ["target": target])
+        if let at = res.activeTarget {
+            activeDesktopTarget = at
+        }
     }
 
     func fetchDesktopState(_ target: String) async throws -> DesktopState {

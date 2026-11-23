@@ -81,6 +81,18 @@ struct DesktopView: View {
         .tint(Color(hex: "#f3f1ee"))
         .preferredColorScheme(.dark)
         .task { _ = try? await hub.refreshDesktopTargets() }
+        .onChange(of: hub.activeDesktopTarget.target) { _, newTarget in
+            let next = newTarget.isEmpty ? "local" : newTarget
+            if target != next {
+                target = next
+            }
+        }
+        .onChange(of: target) { _, newTarget in
+            let next = newTarget.isEmpty ? "local" : newTarget
+            if hub.activeDesktopTarget.target != next {
+                Task { try? await hub.setActiveDesktopTarget(next) }
+            }
+        }
         .task(id: "\(target)-\(streaming)") {
             await pollState()
         }
@@ -102,6 +114,23 @@ struct DesktopView: View {
 
     private var desktopStage: some View {
         VStack(spacing: 0) {
+            if hub.activeDesktopTarget.temporary {
+                HStack(spacing: 10) {
+                    Text(hub.t("tempDesktopBanner", ["name": hub.activeDesktopTarget.name ?? hub.activeDesktopTarget.target]))
+                        .font(.system(size: 13, weight: .semibold)).foregroundStyle(pillText)
+                        .lineLimit(1)
+                    Spacer(minLength: 4)
+                    Button(hub.t("switchBackLocal")) {
+                        target = "local"
+                        Task { try? await hub.setActiveDesktopTarget("local") }
+                    }
+                    .buttonStyle(.bordered).controlSize(.small).tint(pillText)
+                }
+                .padding(.horizontal, 12).padding(.vertical, 8)
+                .background(pillBg, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .padding(.horizontal, 12)
+                .padding(.top, 8)
+            }
             if let to = activeTakeover {
                 HStack(spacing: 10) {
                     Label(hub.t("takeoverBanner", ["bot": to.botName ?? to.botId ?? "Bot", "reason": to.reason ?? ""]), systemImage: "hand.raised.fill")

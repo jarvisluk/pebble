@@ -34,10 +34,12 @@ export default function BotsScreen() {
     unread,
     tools,
     takeovers,
+    activeDesktopTarget,
     questions,
     refreshBots,
     reconnect,
     resolveTakeover,
+    setActiveDesktopTarget,
   } = useHub();
 
   const [query, setQuery] = useState('');
@@ -228,6 +230,28 @@ export default function BotsScreen() {
               <Text style={[styles.clearTxt, { color: theme.mute }]}>{t('clear')}</Text>
             </Pressable>
           )}
+        </View>
+      )}
+
+      {activeDesktopTarget.temporary && (
+        <View style={[styles.toBanner, { backgroundColor: theme.card, borderWidth: 1, borderColor: theme.s2 }]}>
+          <Text numberOfLines={1} style={[styles.toBannerTxt, { color: theme.text }]}>
+            {t('tempDesktopBanner', { name: activeDesktopTarget.name || activeDesktopTarget.target })}
+          </Text>
+          <View style={styles.toBannerActs}>
+            <Pressable
+              onPress={() => router.push(`/desktop?target=${encodeURIComponent(activeDesktopTarget.target || 'local')}`)}
+              style={[styles.toBannerBtn, { backgroundColor: theme.s1 }]}
+            >
+              <Text style={[styles.toBannerBtnTxt, { color: theme.text }]}>{t('desktopShort')}</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => void setActiveDesktopTarget('local')}
+              style={[styles.toBannerBtn, { backgroundColor: theme.s1 }]}
+            >
+              <Text style={[styles.toBannerBtnTxt, { color: theme.text }]}>{t('switchBackLocal')}</Text>
+            </Pressable>
+          </View>
         </View>
       )}
 

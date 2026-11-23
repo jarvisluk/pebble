@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type {
+  ActiveDesktopTarget,
   BotDetail,
   BotStatus,
   ChatMessage,
@@ -80,6 +81,10 @@ export default function App() {
 
   const [deskOpen, setDeskOpen] = useState(false);
   const [deskTarget, setDeskTarget] = useState('local');
+  const [activeDeskTarget, setActiveDeskTarget] = useState<ActiveDesktopTarget>({
+    target: 'local',
+    temporary: false,
+  });
   const [deskChatOpen, setDeskChatOpen] = useState(false);
 
   const [panelOpen, setPanelOpen] = useState(false);
@@ -102,6 +107,7 @@ export default function App() {
   const viewRef = useRef(view);
   const deskOpenRef = useRef(deskOpen);
   const deskTargetRef = useRef(deskTarget);
+  const activeDeskTargetRef = useRef(activeDeskTarget);
   const panelOpenRef = useRef(panelOpen);
   const panelDetailRef = useRef(panelDetail);
   const loginOpenRef = useRef(loginOpen);
@@ -114,6 +120,7 @@ export default function App() {
   viewRef.current = view;
   deskOpenRef.current = deskOpen;
   deskTargetRef.current = deskTarget;
+  activeDeskTargetRef.current = activeDeskTarget;
   panelOpenRef.current = panelOpen;
   panelDetailRef.current = panelDetail;
   loginOpenRef.current = loginOpen;
@@ -252,6 +259,56 @@ export default function App() {
     } catch {}
   }, []);
 
+  const applyActiveDesktopTarget = useCallback(
+    (next: ActiveDesktopTarget, notifyFallback = false) => {
+      const prev = activeDeskTargetRef.current;
+      const normalized: ActiveDesktopTarget = {
+        target: next?.target || 'local',
+        name: next?.name,
+        temporary: !!next?.temporary,
+        expiresAt: next?.expiresAt,
+      };
+      setActiveDeskTarget(normalized);
+      setDeskTarget(normalized.target);
+      if (notifyFallback && prev.temporary && !normalized.temporary && normalized.target === 'local') {
+        showToast(t('deskTargetFallback'));
+      }
+    },
+    [showToast, t]
+  );
+
+  const refreshActiveDesktopTarget = useCallback(async () => {
+    try {
+      const d = await api<{ activeTarget?: ActiveDesktopTarget }>('/api/desktop/targets');
+      if (d.activeTarget) {
+        applyActiveDesktopTarget(d.activeTarget);
+      }
+    } catch {}
+  }, [applyActiveDesktopTarget]);
+
+  const selectDesktopTarget = useCallback(
+    async (nextTarget: string) => {
+      const want = nextTarget || 'local';
+      try {
+        const res = await api<{ activeTarget?: ActiveDesktopTarget }>('/api/desktop/target', {
+          method: 'PUT',
+          body: { target: want },
+        });
+        if (res.activeTarget) {
+          applyActiveDesktopTarget(res.activeTarget);
+          if (res.activeTarget.temporary) {
+            showToast(t('deskTargetSwitched', { name: res.activeTarget.name || res.activeTarget.target }));
+          } else {
+            showToast(t('deskTargetFallback'));
+          }
+        }
+      } catch (e) {
+        if (e instanceof Error && e.message !== 'unauthorized') showToast(e.message);
+      }
+    },
+    [applyActiveDesktopTarget, showToast, t]
+  );
+
   const refreshQuestions = useCallback(async () => {
     try {
       const d = await api<{ items?: PendingQuestion[] }>('/api/questions');
@@ -388,6 +445,12 @@ export default function App() {
       }
     });
 
+    on('desktop_target', ({ payload }: { payload?: ActiveDesktopTarget }) => {
+      if (payload) {
+        applyActiveDesktopTarget(payload, true);
+      }
+    });
+
     on('takeover', ({ payload }: { payload?: { items?: TakeoverRequest[] } }) => {
       setTakeovers(payload?.items || []);
     });
@@ -423,6 +486,7 @@ export default function App() {
       .then(([, s]) => {
         connectEvents();
         void refreshTakeovers();
+        void refreshActiveDesktopTarget();
         void refreshQuestions();
         maybeAutoOpenUnbox(s);
       })
@@ -707,6 +771,7 @@ export default function App() {
             seenIds={seenIdsRef.current}
             toolName={activeBotId ? toolMap[activeBotId] : undefined}
             takeovers={takeovers}
+            activeDeskTarget={activeDeskTarget}
             questions={activeBotId ? questions.filter((q) => q.botId === activeBotId) : []}
             deskOpen={deskOpen}
             lang={lang}
@@ -721,9 +786,10 @@ export default function App() {
             }}
             onToggleDesktop={() => setDeskOpen((v) => !v)}
             onOpenDesktopTarget={(target) => {
-              setDeskTarget(target || 'local');
+              void selectDesktopTarget(target || 'local');
               setDeskOpen(true);
             }}
+            onSwitchBackLocal={() => void selectDesktopTarget('local')}
             onResolveTakeover={(to) => void handleResolveTakeover(to)}
             onOpenDetail={() => void openPanel()}
             onOpenCollab={(peerId) => {
@@ -790,13 +856,15 @@ export default function App() {
           <DesktopStage
             open={deskOpen}
             target={deskTarget}
+            activeDeskTarget={activeDeskTarget}
             screenUpdateSeq={screenSeq}
             liveScreen={liveScreen}
             takeovers={takeovers}
             chatOpen={deskChatOpen}
             activeBotName={activeBot?.name}
             lang={lang}
-            onChangeTarget={setDeskTarget}
+            onChangeTarget={(next) => void selectDesktopTarget(next)}
+            onActiveTargetSync={(next) => applyActiveDesktopTarget(next)}
             onTakeoversChange={setTakeovers}
             onResolveTakeover={handleResolveTakeover}
             onToggleChat={() => setDeskChatOpen((v) => !v)}
@@ -932,6 +1000,7 @@ export default function App() {
           connectEvents();
           await loadBots();
           void refreshTakeovers();
+          void refreshActiveDesktopTarget();
           loadSettings()
             .then((s) => maybeAutoOpenUnbox(s))
             .catch(() => {});
