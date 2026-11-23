@@ -446,6 +446,13 @@ const DICT = {
     rtDeleteDesc: '将移除此定时任务并立即停止计时器。',
     rtRunsEmpty: '暂无执行记录',
     routineReceiptFrom: '定时回执 · {name}',
+    sortBots: '排序',
+    sortByRecent: '按消息时间',
+    sortManual: '手动排序',
+    pinBot: '置顶',
+    unpinBot: '取消置顶',
+    markUnread: '标为未读',
+    markRead: '标为已读',
   },
   en: {
     cancel: 'Cancel',
@@ -868,6 +875,13 @@ const DICT = {
     rtDeleteDesc: 'This removes the routine and stops its timer immediately.',
     rtRunsEmpty: 'No run history yet',
     routineReceiptFrom: 'Routine receipt · {name}',
+    sortBots: 'Sort',
+    sortByRecent: 'Recent Activity',
+    sortManual: 'Manual Order',
+    pinBot: 'Pin',
+    unpinBot: 'Unpin',
+    markUnread: 'Mark as Unread',
+    markRead: 'Mark as Read',
   },
 } as const;
 

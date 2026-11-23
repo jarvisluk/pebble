@@ -158,6 +158,7 @@ interface HubContextValue {
   createBot: (body: { id: string; name: string; description?: string; avatar?: string; color?: string; harness?: string; model?: string; instructions?: string; privateSessions?: boolean }) => Promise<BotStatus>;
   updateBot: (botId: string, body: { name?: string; description?: string; avatar?: string; color?: string; instructions?: string; privateSessions?: boolean }) => Promise<BotStatus>;
   deleteBot: (botId: string) => Promise<void>;
+  toggleUnread: (botId: string) => void;
   fetchMemories: (opts: { scope?: 'global' | 'project' | 'all'; botId?: string; query?: string; kind?: string; limit?: number }) => Promise<MagpieMemoryList>;
   saveMemory: (body: { scope?: 'global' | 'project'; botId?: string; kind?: string; text: string; tags?: string[] }) => Promise<void>;
   deleteMemory: (id: string) => Promise<void>;
@@ -750,6 +751,10 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
     [removeBotState]
   );
 
+  const toggleUnread = useCallback((botId: string) => {
+    setUnread((prev) => ({ ...prev, [botId]: (prev[botId] || 0) > 0 ? 0 : 1 }));
+  }, []);
+
   const fetchMemories = useCallback(
     async (opts: { scope?: 'global' | 'project' | 'all'; botId?: string; query?: string; kind?: string; limit?: number }) => {
       const q = new URLSearchParams();
@@ -1143,6 +1148,7 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
         createBot,
         updateBot,
         deleteBot,
+        toggleUnread,
         fetchMemories,
         saveMemory,
         deleteMemory,

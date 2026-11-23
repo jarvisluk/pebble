@@ -72,30 +72,30 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   sideBtn: {
-    minWidth: 58,
+    minWidth: 52,
     height: 32,
     borderRadius: 999,
-    paddingHorizontal: 14,
+    paddingHorizontal: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
   sideTxt: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '600',
   },
   rightTxt: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '600',
   },
   title: {
-    fontSize: 17,
+    fontSize: 15,
     fontWeight: '700',
-    letterSpacing: -0.3,
+    letterSpacing: -0.2,
     flex: 1,
     textAlign: 'center',
     marginHorizontal: 8,
   },
   placeholder: {
-    minWidth: 58,
+    minWidth: 52,
   },
 });

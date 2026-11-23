@@ -17,7 +17,7 @@ import {
 } from 'react-native';
 
 type SettingsTab = 'general' | 'models' | 'memory' | 'desktop' | 'remote';
-const SETTINGS_TABS: Array<{ id: SettingsTab; labelKey: string }> = [
+const SETTINGS_TABS: Array<{ id: SettingsTab; labelKey: I18nKey }> = [
   { id: 'general', labelKey: 'tabGeneral' },
   { id: 'models', labelKey: 'tabModels' },
   { id: 'memory', labelKey: 'tabMemory' },
@@ -28,7 +28,7 @@ const SETTINGS_TABS: Array<{ id: SettingsTab; labelKey: string }> = [
 import { BotAvatar } from '../components/BotAvatar';
 import { ModalHeader } from '../components/ModalHeader';
 import { confirmAction } from '../confirm';
-import { useI18n } from '../i18n';
+import { type I18nKey, useI18n } from '../i18n';
 import { resolveDefaultModel, useHub } from '../store';
 import { MONO_FONT, useTheme, useThemePref } from '../theme';
 import type { LanguagePreference, ThemePreference } from '../storage';
@@ -450,7 +450,7 @@ export default function SettingsScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         {isWide ? (
-          <View style={[styles.sideNav, { borderRightColor: theme.line }]}>
+          <View style={[styles.sideNav, { borderRightColor: theme.s2 }]}>
             {SETTINGS_TABS.map((item) => {
               const active = tab === item.id;
               return (
@@ -524,6 +524,7 @@ export default function SettingsScreen() {
                   ]}
                 >
                   <Text
+                    numberOfLines={1}
                     style={[
                       styles.segmentTxt,
                       { color: themePref === opt.key ? theme.accent : theme.text2 },
@@ -553,6 +554,7 @@ export default function SettingsScreen() {
                   ]}
                 >
                   <Text
+                    numberOfLines={1}
                     style={[
                       styles.segmentTxt,
                       { color: langPref === opt.key ? theme.accent : theme.text2 },
@@ -923,7 +925,17 @@ export default function SettingsScreen() {
           </View>
 
           <View style={[styles.card, { backgroundColor: theme.card }]}>
-            <Text style={[styles.sectionTitle, { color: theme.text }]}>{t('botModelsSection')}</Text>
+            <View style={styles.rowBetween}>
+              <Text style={[styles.sectionTitle, { color: theme.text }]}>{t('botModelsSection')}</Text>
+              <Pressable
+                onPress={() => router.push('/create-bot')}
+                style={[styles.smallBtn, { backgroundColor: theme.accentSoft }]}
+              >
+                <Text numberOfLines={1} style={[styles.smallBtnTxt, { color: theme.accent }]}>
+                  {t('newBot')}
+                </Text>
+              </Pressable>
+            </View>
             {bots.length === 0 ? (
               <Text style={[styles.emptyNote, { color: theme.mute }]}>{t('noBotsInSettings')}</Text>
             ) : (
@@ -1003,7 +1015,7 @@ export default function SettingsScreen() {
                           autoCorrect={false}
                           style={[
                             styles.input,
-                            { flex: 1, backgroundColor: theme.card, color: theme.text, fontFamily: MONO_FONT },
+                            { flex: 1, minWidth: 0, backgroundColor: theme.card, color: theme.text, fontFamily: MONO_FONT },
                           ]}
                         />
                         <Pressable
@@ -1257,7 +1269,7 @@ export default function SettingsScreen() {
                 placeholder={memData?.semantic?.active ? t('searchSemanticMemPh') : t('searchGlobalMemPh')}
                 placeholderTextColor={theme.mute}
                 returnKeyType="search"
-                style={[styles.input, { flex: 1, backgroundColor: theme.s1, color: theme.text }]}
+                style={[styles.input, { flex: 1, minWidth: 0, backgroundColor: theme.s1, color: theme.text }]}
               />
               {memQuery.trim() !== '' && (
                 <Pressable
@@ -1469,7 +1481,7 @@ export default function SettingsScreen() {
                   autoCapitalize="none"
                   style={[
                     styles.input,
-                    { flex: 1, backgroundColor: theme.card, color: theme.text, fontFamily: MONO_FONT },
+                    { flex: 1, minWidth: 0, backgroundColor: theme.card, color: theme.text, fontFamily: MONO_FONT },
                   ]}
                 />
                 <Pressable
@@ -1508,23 +1520,23 @@ const styles = StyleSheet.create({
   root: { flex: 1 },
   flex: { flex: 1 },
   sideNav: { width: 220, borderRightWidth: StyleSheet.hairlineWidth, padding: 12, gap: 4 },
-  sideNavItem: { borderRadius: 12, paddingHorizontal: 14, paddingVertical: 11 },
-  sideNavTxt: { fontSize: 16, fontWeight: '600' },
+  sideNavItem: { borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10 },
+  sideNavTxt: { fontSize: 14, fontWeight: '600' },
   tabStrip: { paddingHorizontal: 16, paddingVertical: 8, gap: 8 },
   scroll: { padding: 16, gap: 12, paddingBottom: 36 },
   msgCard: { borderRadius: 16, paddingHorizontal: 14, paddingVertical: 10 },
-  msgTxt: { fontSize: 15, fontWeight: '600' },
-  card: { borderRadius: 22, padding: 16, gap: 12 },
-  sectionTitle: { fontSize: 17, fontWeight: '700' },
-  hostTxt: { fontSize: 17 },
-  subLabel: { fontSize: 15, fontWeight: '600' },
+  msgTxt: { fontSize: 13, fontWeight: '600' },
+  card: { borderRadius: 20, padding: 14, gap: 10 },
+  sectionTitle: { fontSize: 15, fontWeight: '700', flexShrink: 1 },
+  hostTxt: { fontSize: 14 },
+  subLabel: { fontSize: 13, fontWeight: '600' },
   swatchRow: { flexDirection: 'row', gap: 10, flexWrap: 'wrap' },
   swatch: { width: 28, height: 28, borderRadius: 14 },
-  noteTxt: { fontSize: 15, lineHeight: 21, flex: 1 },
-  rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
+  noteTxt: { fontSize: 13, lineHeight: 19, flexShrink: 1 },
+  rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' },
   segmentRow: { flexDirection: 'row', gap: 8 },
-  segmentPill: { flex: 1, borderRadius: 999, paddingVertical: 8, alignItems: 'center', justifyContent: 'center' },
-  segmentTxt: { fontSize: 15, fontWeight: '700' },
+  segmentPill: { flex: 1, minWidth: 0, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 8, alignItems: 'center', justifyContent: 'center' },
+  segmentTxt: { fontSize: 13, fontWeight: '600' },
   magpieList: { gap: 8 },
   magpieRow: {
     borderRadius: 14,
@@ -1536,30 +1548,30 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   magpieInfo: { flex: 1, minWidth: 0, gap: 2 },
-  magpieName: { fontSize: 16, fontWeight: '600' },
-  magpieSub: { fontSize: 12.5 },
-  magpieActs: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  magpieBtn: { borderRadius: 999, paddingHorizontal: 11, paddingVertical: 6 },
-  magpieBtnTxt: { fontSize: 13.5, fontWeight: '700' },
+  magpieName: { fontSize: 14, fontWeight: '600' },
+  magpieSub: { fontSize: 12 },
+  magpieActs: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap', flexShrink: 1 },
+  magpieBtn: { borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 },
+  magpieBtnTxt: { fontSize: 12, fontWeight: '700' },
   addProvBox: { borderRadius: 16, padding: 12, gap: 10 },
-  addBtn: { borderRadius: 999, paddingVertical: 10, alignItems: 'center', justifyContent: 'center' },
-  smallBtn: { borderRadius: 999, paddingHorizontal: 11, paddingVertical: 5 },
-  smallBtnTxt: { fontSize: 13.5, fontWeight: '600' },
-  input: { borderRadius: 14, paddingHorizontal: 13, paddingVertical: 10, fontSize: 17 },
-  textArea: { minHeight: 110, fontSize: 15, lineHeight: 21 },
+  addBtn: { borderRadius: 999, paddingVertical: 9, alignItems: 'center', justifyContent: 'center' },
+  smallBtn: { borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5 },
+  smallBtnTxt: { fontSize: 12, fontWeight: '600' },
+  input: { borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8, fontSize: 14 },
+  textArea: { minHeight: 100, fontSize: 14, lineHeight: 20 },
   perHarnessItem: { gap: 4 },
   pillRow: { gap: 8 },
   wrapRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  pill: { borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
-  pillTxt: { fontSize: 15, fontWeight: '700' },
-  modelChipTxt: { fontSize: 13.5, fontWeight: '600' },
-  emptyNote: { fontSize: 15 },
+  pill: { borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6 },
+  pillTxt: { fontSize: 13, fontWeight: '600' },
+  modelChipTxt: { fontSize: 12, fontWeight: '600' },
+  emptyNote: { fontSize: 13 },
   botList: { gap: 10 },
-  botItem: { borderRadius: 18, padding: 13, gap: 10 },
+  botItem: { borderRadius: 16, padding: 12, gap: 8 },
   botHead: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  botHeadTxt: { flex: 1 },
-  botName: { fontSize: 17, fontWeight: '700' },
-  botId: { fontSize: 13 },
-  switchBtn: { borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8 },
-  switchBtnTxt: { fontSize: 15, fontWeight: '600' },
+  botHeadTxt: { flex: 1, minWidth: 0 },
+  botName: { fontSize: 14, fontWeight: '700' },
+  botId: { fontSize: 12 },
+  switchBtn: { borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
+  switchBtnTxt: { fontSize: 13, fontWeight: '600' },
 });
