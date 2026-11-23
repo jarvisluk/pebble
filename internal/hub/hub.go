@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io/fs"
 	"mime"
 	"net/http"
 	"net/url"
@@ -66,8 +67,26 @@ type SendOptions struct {
 	Source    string
 	FromBotID string
 	Hop       int
+	MediaIDs  []string
 	OnText    func(chunk string)
 	OnToolUse func(toolName string)
+}
+
+type InboundAttachment struct {
+	Media         state.MessageMedia `json:"media"`
+	WorkspacePath string             `json:"workspacePath"`
+}
+
+type inboundAttEntry struct {
+	media state.MessageMedia
+	att   harness.Attachment
+}
+
+type MentionCandidate struct {
+	Kind        string `json:"kind"` // "file" | "bot" | "agent"
+	Value       string `json:"value"`
+	Label       string `json:"label"`
+	Description string `json:"description,omitempty"`
 }
 
 type IsolatedOptions struct {
@@ -177,6 +196,7 @@ type Event struct {
 type turnJob struct {
 	ctx             context.Context
 	prompt          string
+	attachments     []harness.Attachment
 	opts            SendOptions
 	userMsgID       string
 	queuedSessionID string
@@ -263,6 +283,9 @@ type Hub struct {
 
 	questionsMu sync.Mutex
 	questions   map[string]*pendingQuestionEntry
+
+	inboundAttsMu sync.Mutex
+	inboundAtts   map[string]inboundAttEntry
 }
 
 var askCmdRe = regexp.MustCompile(`(?s)^/ask\s+([a-zA-Z0-9_-]+)\s+(.+)$`)
@@ -303,6 +326,7 @@ func New(cfg *config.HubConfig, store *state.Store, messages *state.MessageStore
 		subs:               make(map[uint64]chan Event),
 		hops:               make(map[string]int),
 		questions:          make(map[string]*pendingQuestionEntry),
+		inboundAtts:        make(map[string]inboundAttEntry),
 	}
 	h.nodes = node.NewRegistry(func() {
 		h.broadcast(Event{
@@ -1057,7 +1081,7 @@ func (h *Hub) RotateSession(botID, handoffNote string, deferUntilTurnEnd bool) (
 
 func (h *Hub) HandleInput(ctx context.Context, botID, rawInput string, opts SendOptions) (*harness.TurnResult, error) {
 	input := strings.TrimSpace(rawInput)
-	if input == "" {
+	if input == "" && len(opts.MediaIDs) == 0 {
 		rec, _ := h.store.Get(botID)
 		return &harness.TurnResult{BotID: botID, SessionID: rec.SessionID}, nil
 	}
@@ -1243,6 +1267,19 @@ func (h *Hub) Send(ctx context.Context, botID, prompt string, opts SendOptions) 
 			queuedTurn = sess.TurnCount + 1
 		}
 	}
+	var media []state.MessageMedia
+	var atts []harness.Attachment
+	if len(opts.MediaIDs) > 0 {
+		h.inboundAttsMu.Lock()
+		for _, id := range opts.MediaIDs {
+			if entry, ok := h.inboundAtts[id]; ok {
+				media = append(media, entry.media)
+				atts = append(atts, entry.att)
+			}
+		}
+		h.inboundAttsMu.Unlock()
+	}
+
 	userMsg := h.appendMessage(state.ChatMessage{
 		BotID:     botID,
 		SessionID: queuedSessID,
@@ -1251,11 +1288,13 @@ func (h *Hub) Send(ctx context.Context, botID, prompt string, opts SendOptions) 
 		From:      from,
 		To:        to,
 		Text:      prompt,
+		Media:     media,
 	})
 
 	job := turnJob{
 		ctx:             ctx,
 		prompt:          prompt,
+		attachments:     atts,
 		opts:            opts,
 		userMsgID:       userMsg.ID,
 		queuedSessionID: queuedSessID,
@@ -1311,7 +1350,7 @@ func (h *Hub) runLane(lane *botLane) {
 			h.lanesMu.RLock()
 			bot := lane.bot
 			h.lanesMu.RUnlock()
-			res, err := h.executeTurn(ctx, lane, bot, job.prompt, job.opts, job.userMsgID, job.queuedSessionID)
+			res, err := h.executeTurn(ctx, lane, bot, job.prompt, job.attachments, job.opts, job.userMsgID, job.queuedSessionID)
 			lane.cancelMu.Lock()
 			lane.cancel = nil
 			lane.cancelMu.Unlock()
@@ -1335,6 +1374,10 @@ func (h *Hub) platformInstructionsPath() string {
 }
 
 func (h *Hub) buildTurnPrompt(bot config.BotConfig, prompt string, isFirstTurn bool, platPath string, pendingReceipts []state.RoutineRun) string {
+	// Slash commands must stay at the start of the prompt so harnesses recognize them.
+	if strings.HasPrefix(strings.TrimSpace(prompt), "/") {
+		return prompt
+	}
 	var prefixParts []string
 	if isFirstTurn {
 		if h.store != nil {
@@ -1461,7 +1504,7 @@ func firstLineSummary(s string, max int) string {
 	return string(r[:max-1]) + "…"
 }
 
-func (h *Hub) executeTurn(ctx context.Context, lane *botLane, bot config.BotConfig, prompt string, opts SendOptions, userMsgID, queuedSessionID string) (*harness.TurnResult, error) {
+func (h *Hub) executeTurn(ctx context.Context, lane *botLane, bot config.BotConfig, prompt string, attachments []harness.Attachment, opts SendOptions, userMsgID, queuedSessionID string) (*harness.TurnResult, error) {
 	runner, err := h.registry.Get(bot.Harness)
 	if err != nil {
 		return nil, err
@@ -1543,6 +1586,7 @@ func (h *Hub) executeTurn(ctx context.Context, lane *botLane, bot config.BotConf
 		res, err := runner.RunTurn(ctx, harness.RunOptions{
 			Bot:                      bot,
 			Prompt:                   effectivePrompt,
+			Attachments:              attachments,
 			SessionID:                sess.RuntimeSessionID,
 			PlatformInstructionsPath: platPath,
 			MCPCommand:               mcpCmd,
@@ -3276,4 +3320,355 @@ func (h *Hub) AnswerQuestion(id string, answers map[string]any, cancelled bool, 
 	}
 	h.broadcastQuestions(items)
 	return items, nil
+}
+
+func sanitizeUploadFilename(name string) string {
+	base := filepath.Base(strings.TrimSpace(name))
+	if base == "" || base == "." || base == ".." || base == string(filepath.Separator) {
+		return "file"
+	}
+	var b strings.Builder
+	for _, r := range base {
+		switch {
+		case r == '/' || r == '\\' || r < 0x20:
+			b.WriteByte('_')
+		default:
+			b.WriteRune(r)
+		}
+	}
+	out := strings.TrimSpace(b.String())
+	if out == "" || out == "." || out == ".." {
+		return "file"
+	}
+	return out
+}
+
+// SaveInboundAttachment stores a user-uploaded file in mediaDir and copies it
+// into the bot's .uploads/ directory so the harness can read it directly.
+func (h *Hub) SaveInboundAttachment(botID, filename string, raw []byte) (InboundAttachment, error) {
+	bot, ok := h.GetBot(botID)
+	if !ok {
+		return InboundAttachment{}, ErrBotNotFound
+	}
+	if len(raw) == 0 {
+		return InboundAttachment{}, fmt.Errorf("attachment is empty")
+	}
+	detected := http.DetectContentType(raw)
+	_, isImage := imageExtForMIME(detected)
+
+	safeName := sanitizeUploadFilename(filename)
+	b64 := base64.StdEncoding.EncodeToString(raw)
+	media, err := h.SaveOutboundAttachment(bot.Workspace, OutboundAttachment{
+		DataBase64: b64,
+		Filename:   safeName,
+		Name:       safeName,
+	}, isImage)
+	if err != nil {
+		return InboundAttachment{}, err
+	}
+
+	wsRel := ""
+	diskPath := filepath.Join(h.mediaDir, media.ID)
+	if bot.Workspace != "" {
+		uploadDir := filepath.Join(bot.Workspace, ".uploads")
+		if err := os.MkdirAll(uploadDir, 0o755); err != nil {
+			return InboundAttachment{}, fmt.Errorf("create uploads dir: %w", err)
+		}
+		uploadName := media.ID + "-" + safeName
+		wsAbs := filepath.Join(uploadDir, uploadName)
+		if err := os.WriteFile(wsAbs, raw, 0o644); err != nil {
+			return InboundAttachment{}, fmt.Errorf("write workspace upload: %w", err)
+		}
+		diskPath = wsAbs
+		wsRel = filepath.ToSlash(filepath.Join(".uploads", uploadName))
+	}
+
+	h.inboundAttsMu.Lock()
+	if h.inboundAtts == nil {
+		h.inboundAtts = make(map[string]inboundAttEntry)
+	}
+	h.inboundAtts[media.ID] = inboundAttEntry{
+		media: media,
+		att: harness.Attachment{
+			ID:            media.ID,
+			Kind:          media.Kind,
+			Name:          media.Name,
+			MimeType:      media.MimeType,
+			Path:          diskPath,
+			WorkspacePath: wsRel,
+		},
+	}
+	h.inboundAttsMu.Unlock()
+
+	return InboundAttachment{
+		Media:         media,
+		WorkspacePath: wsRel,
+	}, nil
+}
+
+// ListBotCommands aggregates Hub built-in commands with commands/skills exposed by the bot's harness.
+func (h *Hub) ListBotCommands(ctx context.Context, botID string) ([]harness.SlashCommand, error) {
+	bot, ok := h.GetBot(botID)
+	if !ok {
+		return nil, ErrBotNotFound
+	}
+
+	hubBuiltins := []harness.SlashCommand{
+		{Name: "status", Description: "查看当前会话状态与费用", Source: "hub"},
+		{Name: "bots", Description: "列出所有 Bot", Source: "hub"},
+		{Name: "ask", Description: "委派任务给其他 Bot", ArgumentHint: "<bot> <message>", Source: "hub"},
+		{Name: "reset", Description: "归档当前会话并开启新会话", Source: "hub"},
+	}
+	hubSet := map[string]harness.SlashCommand{}
+	for _, c := range hubBuiltins {
+		hubSet[c.Name] = c
+	}
+
+	var harnessCmds []harness.SlashCommand
+	if runner, err := h.registry.Get(bot.Harness); err == nil {
+		if lister, ok := runner.(harness.CommandLister); ok {
+			lctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+			defer cancel()
+			if list, err := lister.ListCommands(lctx, bot); err == nil {
+				harnessCmds = list
+			}
+		}
+	}
+
+	seen := make(map[string]bool)
+	out := make([]harness.SlashCommand, 0, len(harnessCmds)+len(hubBuiltins))
+	for _, c := range harnessCmds {
+		name := strings.TrimPrefix(strings.TrimSpace(c.Name), "/")
+		if name == "" || seen[name] {
+			continue
+		}
+		if _, isHub := hubSet[name]; isHub {
+			continue
+		}
+		c.Name = name
+		seen[name] = true
+		out = append(out, c)
+	}
+	for _, c := range hubBuiltins {
+		if !seen[c.Name] {
+			seen[c.Name] = true
+			out = append(out, c)
+		}
+	}
+	return out, nil
+}
+
+var skipMentionDirs = map[string]bool{
+	".git":         true,
+	"node_modules": true,
+	".uploads":     true,
+	"__pycache__":  true,
+	".next":        true,
+	"dist":         true,
+	"build":        true,
+	".venv":        true,
+}
+
+func isWithinRoot(root, target string) bool {
+	if root == "" || target == "" {
+		return false
+	}
+	rel, err := filepath.Rel(root, target)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+func scanWorkspaceMentionFiles(workspace string) []string {
+	if workspace == "" {
+		return nil
+	}
+	wsReal, err := filepath.EvalSymlinks(workspace)
+	if err != nil {
+		wsReal = filepath.Clean(workspace)
+	}
+	var sharedReal string
+	if s, err := filepath.EvalSymlinks(filepath.Join(workspace, "_shared")); err == nil {
+		sharedReal = s
+	}
+
+	const maxEntries = 2000
+	const maxDepth = 6
+
+	var files []string
+	var walkDir func(absDir, relPrefix string, depth int, allowedRoot string)
+	walkDir = func(absDir, relPrefix string, depth int, allowedRoot string) {
+		if depth > maxDepth || len(files) >= maxEntries {
+			return
+		}
+		entries, err := os.ReadDir(absDir)
+		if err != nil {
+			return
+		}
+		for _, ent := range entries {
+			if len(files) >= maxEntries {
+				return
+			}
+			name := ent.Name()
+			if skipMentionDirs[name] {
+				continue
+			}
+			relPath := name
+			if relPrefix != "" {
+				relPath = relPrefix + "/" + name
+			}
+			fullPath := filepath.Join(absDir, name)
+
+			isDir := ent.IsDir()
+			entryRoot := allowedRoot
+			if ent.Type()&fs.ModeSymlink != 0 {
+				if depth == 0 && name == "_shared" && sharedReal != "" {
+					info, err := os.Stat(fullPath)
+					if err != nil || !info.IsDir() {
+						continue
+					}
+					isDir = true
+					entryRoot = sharedReal
+				} else {
+					resolved, err := filepath.EvalSymlinks(fullPath)
+					if err != nil || !isWithinRoot(allowedRoot, resolved) {
+						continue
+					}
+					info, err := os.Stat(resolved)
+					if err != nil {
+						continue
+					}
+					isDir = info.IsDir()
+				}
+			}
+
+			if isDir {
+				walkDir(fullPath, relPath, depth+1, entryRoot)
+			} else {
+				files = append(files, relPath)
+			}
+		}
+	}
+
+	walkDir(workspace, "", 0, wsReal)
+	return files
+}
+
+// ListBotMentions returns @-mention candidates (other bots, harness agents, and workspace files).
+func (h *Hub) ListBotMentions(ctx context.Context, botID, query string, limit int) ([]MentionCandidate, error) {
+	bot, ok := h.GetBot(botID)
+	if !ok {
+		return nil, ErrBotNotFound
+	}
+	if limit <= 0 {
+		limit = 30
+	}
+	q := strings.ToLower(strings.TrimSpace(query))
+
+	type scored struct {
+		item  MentionCandidate
+		score int
+	}
+	var all []scored
+	matchScore := func(value, label string) (int, bool) {
+		if q == "" {
+			return 0, true
+		}
+		lv := strings.ToLower(value)
+		ll := strings.ToLower(label)
+		base := strings.ToLower(filepath.Base(value))
+		switch {
+		case base == q || lv == q || ll == q:
+			return 4, true
+		case strings.HasPrefix(base, q) || strings.HasPrefix(ll, q):
+			return 3, true
+		case strings.HasPrefix(lv, q):
+			return 2, true
+		case strings.Contains(lv, q) || strings.Contains(ll, q):
+			return 1, true
+		default:
+			return 0, false
+		}
+	}
+
+	// 1. Other bots in the hub.
+	h.lanesMu.RLock()
+	for _, id := range h.order {
+		if id == botID {
+			continue
+		}
+		lane := h.lanes[id]
+		if lane == nil {
+			continue
+		}
+		b := lane.bot
+		if sc, ok := matchScore(b.ID, b.Name); ok {
+			all = append(all, scored{
+				item: MentionCandidate{
+					Kind:        "bot",
+					Value:       b.ID,
+					Label:       b.Name,
+					Description: b.Description,
+				},
+				score: sc + 10,
+			})
+		}
+	}
+	h.lanesMu.RUnlock()
+
+	// 2. Harness agents (if supported).
+	if runner, err := h.registry.Get(bot.Harness); err == nil {
+		if al, ok := runner.(harness.AgentLister); ok {
+			actx, cancel := context.WithTimeout(ctx, 2*time.Second)
+			agents, err := al.ListAgents(actx, bot)
+			cancel()
+			if err == nil {
+				for _, a := range agents {
+					if sc, ok := matchScore(a.Name, a.Name); ok {
+						all = append(all, scored{
+							item: MentionCandidate{
+								Kind:        "agent",
+								Value:       a.Name,
+								Label:       a.Name,
+								Description: a.Description,
+							},
+							score: sc + 8,
+						})
+					}
+				}
+			}
+		}
+	}
+
+	// 3. Workspace files.
+	for _, rel := range scanWorkspaceMentionFiles(bot.Workspace) {
+		if sc, ok := matchScore(rel, filepath.Base(rel)); ok {
+			all = append(all, scored{
+				item: MentionCandidate{
+					Kind:        "file",
+					Value:       rel,
+					Label:       filepath.Base(rel),
+					Description: rel,
+				},
+				score: sc,
+			})
+		}
+	}
+
+	sort.SliceStable(all, func(i, j int) bool {
+		if all[i].score != all[j].score {
+			return all[i].score > all[j].score
+		}
+		return all[i].item.Value < all[j].item.Value
+	})
+
+	if len(all) > limit {
+		all = all[:limit]
+	}
+	out := make([]MentionCandidate, 0, len(all))
+	for _, s := range all {
+		out = append(out, s.item)
+	}
+	return out, nil
 }

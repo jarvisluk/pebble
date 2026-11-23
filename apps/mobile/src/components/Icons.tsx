@@ -101,3 +101,11 @@ export function MonitorIcon({ size = 19, color }: IconProps) {
     </Svg>
   );
 }
+
+export function PaperclipIcon({ size = 20, color = '#1d1b19' }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round">
+      <Path d="M21.44 11.05l-8.49 8.49a5 5 0 0 1-7.07-7.07l8.49-8.49a3.5 3.5 0 0 1 4.95 4.95l-8.49 8.49a2 2 0 0 1-2.83-2.83l7.78-7.78" />
+    </Svg>
+  );
+}

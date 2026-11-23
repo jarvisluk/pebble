@@ -100,6 +100,9 @@ func NewHTTPServer(h *hub.Hub, cfg config.HTTPConfig) *HTTPServer {
 	mux.HandleFunc("GET /api/bots/{id}/collab/{peerId}", s.handleBotCollabMessages)
 	mux.HandleFunc("POST /api/bots/{id}/message", s.handleMessage)
 	mux.HandleFunc("POST /api/bots/{id}/outbound", s.handleOutboundMessage)
+	mux.HandleFunc("GET /api/bots/{id}/commands", s.handleBotCommands)
+	mux.HandleFunc("GET /api/bots/{id}/mentions", s.handleBotMentions)
+	mux.HandleFunc("POST /api/bots/{id}/attachments", s.handleUploadAttachment)
 	mux.HandleFunc("POST /api/media/{id}/ticket", s.handleMediaTicket)
 	mux.HandleFunc("GET /api/media/{id}", s.handleMedia)
 	mux.HandleFunc("POST /api/bots/{id}/reset", s.handleReset)
@@ -571,10 +574,11 @@ func (s *HTTPServer) handleMedia(w http.ResponseWriter, r *http.Request) {
 }
 
 type messageReq struct {
-	Message   string `json:"message"`
-	FromBotID string `json:"fromBotId,omitempty"`
-	Hop       int    `json:"hop,omitempty"`
-	Source    string `json:"source,omitempty"`
+	Message   string   `json:"message"`
+	FromBotID string   `json:"fromBotId,omitempty"`
+	Hop       int      `json:"hop,omitempty"`
+	Source    string   `json:"source,omitempty"`
+	MediaIDs  []string `json:"mediaIds,omitempty"`
 }
 
 func (s *HTTPServer) handleMessage(w http.ResponseWriter, r *http.Request) {
@@ -584,8 +588,8 @@ func (s *HTTPServer) handleMessage(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json body"})
 		return
 	}
-	if strings.TrimSpace(req.Message) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "message is required"})
+	if strings.TrimSpace(req.Message) == "" && len(req.MediaIDs) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "message or mediaIds is required"})
 		return
 	}
 
@@ -603,12 +607,92 @@ func (s *HTTPServer) handleMessage(w http.ResponseWriter, r *http.Request) {
 	if src == "" {
 		src = "web"
 	}
-	res, err := s.hub.HandleInput(r.Context(), botID, req.Message, hub.SendOptions{Source: src})
+	res, err := s.hub.HandleInput(r.Context(), botID, req.Message, hub.SendOptions{
+		Source:   src,
+		MediaIDs: req.MediaIDs,
+	})
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]any{"error": err.Error()})
 		return
 	}
 	writeJSON(w, http.StatusOK, res)
+}
+
+func (s *HTTPServer) handleBotCommands(w http.ResponseWriter, r *http.Request) {
+	botID := r.PathValue("id")
+	cmds, err := s.hub.ListBotCommands(r.Context(), botID)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, hub.ErrBotNotFound) {
+			status = http.StatusNotFound
+		}
+		writeJSON(w, status, map[string]any{"error": err.Error()})
+		return
+	}
+	if cmds == nil {
+		cmds = []harness.SlashCommand{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"commands": cmds})
+}
+
+func (s *HTTPServer) handleBotMentions(w http.ResponseWriter, r *http.Request) {
+	botID := r.PathValue("id")
+	q := r.URL.Query().Get("q")
+	limit := 30
+	if rawLimit := r.URL.Query().Get("limit"); rawLimit != "" {
+		if n, err := strconv.Atoi(rawLimit); err == nil && n > 0 && n <= 100 {
+			limit = n
+		}
+	}
+	items, err := s.hub.ListBotMentions(r.Context(), botID, q, limit)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, hub.ErrBotNotFound) {
+			status = http.StatusNotFound
+		}
+		writeJSON(w, status, map[string]any{"error": err.Error()})
+		return
+	}
+	if items == nil {
+		items = []hub.MentionCandidate{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func (s *HTTPServer) handleUploadAttachment(w http.ResponseWriter, r *http.Request) {
+	botID := r.PathValue("id")
+	r.Body = http.MaxBytesReader(w, r.Body, 52<<20)
+	if err := r.ParseMultipartForm(32 << 20); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid multipart upload"})
+		return
+	}
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "file field is required"})
+		return
+	}
+	defer file.Close()
+
+	raw, err := io.ReadAll(io.LimitReader(file, (50<<20)+1))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "failed to read uploaded file"})
+		return
+	}
+	if len(raw) > 50<<20 {
+		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]any{"error": "file exceeds 50 MiB limit"})
+		return
+	}
+
+	att, err := s.hub.SaveInboundAttachment(botID, header.Filename, raw)
+	if err != nil {
+		status := http.StatusBadRequest
+		if errors.Is(err, hub.ErrBotNotFound) {
+			status = http.StatusNotFound
+		}
+		writeJSON(w, status, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, att)
 }
 
 func (s *HTTPServer) handleUpdateBot(w http.ResponseWriter, r *http.Request) {

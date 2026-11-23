@@ -3,6 +3,7 @@ package harness
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -111,5 +112,61 @@ done
 	logged, _ := os.ReadFile(outLog)
 	if !strings.Contains(string(logged), `"value":"tea"`) || !strings.Contains(string(logged), `"confirmed":true`) {
 		t.Fatalf("expected extension_ui_response in stdin log, got:\n%s", logged)
+	}
+}
+
+func TestPiGetCommandsAndCompact(t *testing.T) {
+	dir := t.TempDir()
+	outLog := filepath.Join(dir, "stdin.log")
+	script := filepath.Join(dir, "fake-pi.sh")
+	sh := fmt.Sprintf(`#!/bin/sh
+LOG=%q
+while IFS= read -r line; do
+  printf '%%s\n' "$line" >> "$LOG"
+  id=$(printf '%%s' "$line" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+  case "$line" in
+    *'"type":"get_commands"'*)
+      printf '{"type":"response","id":"%%s","command":"get_commands","success":true,"data":{"commands":[{"name":"hello","description":"say hi","source":"extension"}]}}\n' "$id"
+      ;;
+    *'"type":"compact"'*)
+      printf '{"type":"response","id":"%%s","command":"compact","success":true,"data":{"summary":"compacted summary"}}\n' "$id"
+      ;;
+  esac
+done
+`, outLog)
+	if err := os.WriteFile(script, []byte(sh), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	h := &PiHarness{binary: script, procs: make(map[string]*piProc), commands: make(map[string][]SlashCommand)}
+	defer h.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	bot := config.BotConfig{ID: "pi-cmd", Workspace: dir}
+
+	res, err := h.RunTurn(ctx, RunOptions{
+		Bot:    bot,
+		Prompt: "/compact keep decisions",
+	})
+	if err != nil {
+		t.Fatalf("compact RunTurn failed: %v", err)
+	}
+	if res.Text != "compacted summary" {
+		t.Fatalf("unexpected compact text: %q", res.Text)
+	}
+
+	cmds, err := h.ListCommands(ctx, bot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var foundHello bool
+	for _, c := range cmds {
+		if c.Name == "hello" {
+			foundHello = true
+		}
+	}
+	if !foundHello {
+		t.Fatalf("expected cached get_commands result, got %+v", cmds)
 	}
 }

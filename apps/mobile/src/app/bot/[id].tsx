@@ -1,4 +1,5 @@
 import * as Clipboard from 'expo-clipboard';
+import * as DocumentPicker from 'expo-document-picker';
 import * as Haptics from 'expo-haptics';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -22,11 +23,18 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { BotAppearancePicker } from '../../components/BotAppearancePicker';
 import { BotAvatar } from '../../components/BotAvatar';
-import { ChevronLeftIcon, DocIcon, MonitorIcon, SendIcon, StopIcon } from '../../components/Icons';
+import { ChevronLeftIcon, DocIcon, MonitorIcon, PaperclipIcon, SendIcon, StopIcon } from '../../components/Icons';
 import { MarkdownText } from '../../components/MarkdownText';
 import { ModalHeader } from '../../components/ModalHeader';
 import { QuestionCard } from '../../components/QuestionCard';
-import { fetchCollabMessages, getMediaSource, requestMediaDownloadURL } from '../../api';
+import {
+  fetchBotCommands,
+  fetchBotMentions,
+  fetchCollabMessages,
+  getMediaSource,
+  requestMediaDownloadURL,
+  uploadBotAttachment,
+} from '../../api';
 import { confirmAction } from '../../confirm';
 import { useI18n } from '../../i18n';
 import { countToolCalls, formatClockTime, formatDurationMs, formatStamp, useHub } from '../../store';
@@ -35,10 +43,13 @@ import type {
   BotDetail,
   ChatMessage,
   MagpieMemoryList,
+  MentionCandidate,
   MessageMedia,
+  PendingAttachment,
   RoutineDelivery,
   RoutineItem,
   RoutineRun,
+  SlashCommandItem,
 } from '../../types';
 
 const FIVE_MIN_MS = 5 * 60 * 1000;
@@ -89,17 +100,74 @@ export default function BotChatScreen() {
   const chatList = msgs[botId] || [];
   const botQuestions = useMemo(() => questions.filter((q) => q.botId === botId), [questions, botId]);
 
-  const slashCommands = useMemo(
-    () => [
-      { cmd: '/status', label: t('statusLabel'), autoSend: true },
-      { cmd: '/bots', label: t('allBotsLabel'), autoSend: true },
-      { cmd: '/ask ', label: t('collabLabel'), autoSend: false },
-      { cmd: '/reset', label: t('resetSessionLabel'), autoSend: true },
-    ],
-    [t]
-  );
-
   const [input, setInput] = useState('');
+  const [commands, setCommands] = useState<SlashCommandItem[]>([]);
+  const [mentions, setMentions] = useState<MentionCandidate[]>([]);
+  const [acDismissed, setAcDismissed] = useState(false);
+  const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
+
+  useEffect(() => {
+    setPendingAttachments([]);
+    setMentions([]);
+    setAcDismissed(false);
+    if (!botId || !baseURL) return;
+    let cancelled = false;
+    fetchBotCommands(baseURL, authToken, botId)
+      .then((list) => {
+        if (!cancelled) setCommands(list);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [botId, baseURL, authToken]);
+
+  const slashQuery = useMemo(() => {
+    if (acDismissed || !input.startsWith('/')) return null;
+    const rest = input.slice(1);
+    if (/\s/.test(rest)) return null;
+    return rest;
+  }, [input, acDismissed]);
+
+  const filteredCommands = useMemo(() => {
+    if (slashQuery === null) return [];
+    const q = slashQuery.toLowerCase();
+    return commands.filter(
+      (c) => !q || c.name.toLowerCase().includes(q) || (c.description && c.description.toLowerCase().includes(q))
+    );
+  }, [slashQuery, commands]);
+
+  const activeMention = useMemo(() => {
+    if (acDismissed || slashQuery !== null) return null;
+    const m = /(?:^|\s)@([^\s]*)$/.exec(input);
+    if (!m) return null;
+    return {
+      query: m[1],
+      start: input.length - m[1].length - 1,
+    };
+  }, [input, acDismissed, slashQuery]);
+
+  useEffect(() => {
+    if (!activeMention || !botId || !baseURL) {
+      setMentions([]);
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      fetchBotMentions(baseURL, authToken, botId, activeMention.query)
+        .then((items) => {
+          if (!cancelled) setMentions(items);
+        })
+        .catch(() => {
+          if (!cancelled) setMentions([]);
+        });
+    }, 120);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [activeMention, botId, baseURL, authToken]);
+
   const [sending, setSending] = useState(false);
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -373,16 +441,16 @@ export default function BotChatScreen() {
   };
 
   const handleSendText = useCallback(
-    async (raw: string, restoreOnError = false) => {
+    async (raw: string, restoreOnError = false, mediaIds: string[] = []) => {
       const trimmed = raw.trim();
-      if (!trimmed || !botId) return;
+      if ((!trimmed && mediaIds.length === 0) || !botId) return;
       setSendErr('');
       setSending(true);
       if (Platform.OS !== 'web') {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
       }
       try {
-        await sendMessage(botId, trimmed);
+        await sendMessage(botId, trimmed, mediaIds);
       } catch (err: any) {
         if (restoreOnError) setInput(raw);
         setSendErr(err?.message || t('sendFailed'));
@@ -393,11 +461,67 @@ export default function BotChatScreen() {
     [botId, sendMessage, t]
   );
 
+  const readyMediaIds = useMemo(
+    () => pendingAttachments.filter((a) => !a.uploading && !a.error && a.media?.id).map((a) => a.media!.id),
+    [pendingAttachments]
+  );
+  const hasUploading = useMemo(() => pendingAttachments.some((a) => a.uploading), [pendingAttachments]);
+
   const onSubmitComposer = () => {
     const text = input;
-    if (!text.trim() || sending) return;
+    if ((!text.trim() && readyMediaIds.length === 0) || hasUploading || sending) return;
+    const mediaIds = [...readyMediaIds];
     setInput('');
-    void handleSendText(text, true);
+    setPendingAttachments([]);
+    setAcDismissed(false);
+    void handleSendText(text, true, mediaIds);
+  };
+
+  const onPickAttachment = async () => {
+    if (!botId || !baseURL) return;
+    try {
+      const res = await DocumentPicker.getDocumentAsync({ multiple: true, copyToCacheDirectory: true });
+      if (res.canceled || !res.assets) return;
+      for (const asset of res.assets) {
+        const localId = `tmp_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+        const isImg = Boolean(asset.mimeType && asset.mimeType.startsWith('image/'));
+        setPendingAttachments((prev) => [
+          ...prev,
+          { id: localId, name: asset.name || 'file', kind: isImg ? 'image' : 'file', uri: asset.uri, uploading: true },
+        ]);
+        void uploadBotAttachment(baseURL, authToken, botId, {
+          uri: asset.uri,
+          name: asset.name || 'file',
+          mimeType: asset.mimeType,
+        })
+          .then((uploaded) => {
+            setPendingAttachments((prev) =>
+              prev.map((a) =>
+                a.id === localId
+                  ? {
+                      ...a,
+                      media: uploaded.media,
+                      name: uploaded.media.name || a.name,
+                      kind: uploaded.media.kind === 'image' ? 'image' : 'file',
+                      uploading: false,
+                    }
+                  : a
+              )
+            );
+          })
+          .catch((err) => {
+            setPendingAttachments((prev) =>
+              prev.map((a) =>
+                a.id === localId
+                  ? { ...a, uploading: false, error: err?.message || t('uploadFailed') }
+                  : a
+              )
+            );
+          });
+      }
+    } catch (err: any) {
+      setSendErr(err?.message || t('uploadFailed'));
+    }
   };
 
   const onInterrupt = async () => {
@@ -412,14 +536,20 @@ export default function BotChatScreen() {
     }
   };
 
-  const onPickSlash = (cmd: string, autoSend: boolean) => {
-    if (autoSend) {
-      setInput('');
-      void handleSendText(cmd, false);
-    } else {
-      setInput(cmd);
-      inputRef.current?.focus();
-    }
+  const onPickSlash = (cmd: SlashCommandItem) => {
+    const immediate = new Set(['status', 'bots', 'reset', 'compact', 'clear', 'cost', 'context']);
+    const nextText = immediate.has(cmd.name) && !cmd.argumentHint ? `/${cmd.name}` : `/${cmd.name} `;
+    setAcDismissed(true);
+    setInput(nextText);
+    inputRef.current?.focus();
+  };
+
+  const onPickMention = (item: MentionCandidate) => {
+    if (!activeMention) return;
+    const nextText = input.slice(0, activeMention.start) + `@${item.value} `;
+    setAcDismissed(true);
+    setInput(nextText);
+    inputRef.current?.focus();
   };
 
   const handleResetConfirm = () => {
@@ -858,33 +988,106 @@ export default function BotChatScreen() {
         ) : null}
 
         <View style={[styles.composerWrap, { paddingBottom: Math.max(insets.bottom, 10) }]}>
-          {input.startsWith('/') && (
+          {slashQuery !== null && filteredCommands.length > 0 && (
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
               keyboardShouldPersistTaps="always"
               contentContainerStyle={styles.slashRow}
             >
-              {slashCommands.map((c) => (
+              {filteredCommands.slice(0, 15).map((c) => (
                 <Pressable
-                  key={c.cmd}
-                  onPress={() => onPickSlash(c.cmd, c.autoSend)}
+                  key={`${c.source}:${c.name}`}
+                  onPress={() => onPickSlash(c)}
                   style={[styles.slashPill, { backgroundColor: theme.s1 }]}
                 >
                   <Text style={[styles.slashCmd, { color: botPal.accent, fontFamily: MONO_FONT }]}>
-                    {c.cmd.trim()}
+                    /{c.name}
                   </Text>
-                  <Text style={[styles.slashLbl, { color: theme.text2 }]}>{c.label}</Text>
+                  {c.description ? (
+                    <Text style={[styles.slashLbl, { color: theme.text2 }]} numberOfLines={1}>
+                      {c.description}
+                    </Text>
+                  ) : null}
                 </Pressable>
               ))}
             </ScrollView>
           )}
 
+          {activeMention && mentions.length > 0 && (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              keyboardShouldPersistTaps="always"
+              contentContainerStyle={styles.slashRow}
+            >
+              {mentions.slice(0, 15).map((m) => (
+                <Pressable
+                  key={`${m.kind}:${m.value}`}
+                  onPress={() => onPickMention(m)}
+                  style={[styles.slashPill, { backgroundColor: theme.s1 }]}
+                >
+                  <Text style={[styles.slashCmd, { color: botPal.accent, fontFamily: MONO_FONT }]}>
+                    {m.kind === 'file' ? m.value : `@${m.value}`}
+                  </Text>
+                  <Text style={[styles.slashLbl, { color: theme.text2 }]}>
+                    {m.kind === 'bot' ? t('mentionBot') : m.kind === 'agent' ? t('mentionAgent') : t('mentionFile')}
+                  </Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+          )}
+
+          {pendingAttachments.length > 0 && (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              keyboardShouldPersistTaps="always"
+              contentContainerStyle={styles.slashRow}
+            >
+              {pendingAttachments.map((att) => (
+                <View
+                  key={att.id}
+                  style={[
+                    styles.attChip,
+                    { backgroundColor: theme.card, borderColor: att.error ? theme.danger : theme.s2 },
+                  ]}
+                >
+                  {att.kind === 'image' ? (
+                    <Image source={{ uri: att.uri }} style={styles.attThumb} />
+                  ) : (
+                    <DocIcon size={16} color={theme.text2} />
+                  )}
+                  <Text style={[styles.attName, { color: theme.text }]} numberOfLines={1}>
+                    {att.name}
+                  </Text>
+                  {att.uploading ? <ActivityIndicator size="small" color={theme.mute} /> : null}
+                  <Pressable
+                    onPress={() => setPendingAttachments((prev) => prev.filter((a) => a.id !== att.id))}
+                    hitSlop={6}
+                  >
+                    <Text style={[styles.attRmTxt, { color: theme.text2 }]}>×</Text>
+                  </Pressable>
+                </View>
+              ))}
+            </ScrollView>
+          )}
+
           <View style={[styles.composerCapsule, { backgroundColor: theme.card }]}>
+            <Pressable
+              accessibilityLabel={t('attachFile')}
+              onPress={() => void onPickAttachment()}
+              style={[styles.attachBtn, { backgroundColor: theme.s1 }]}
+            >
+              <PaperclipIcon size={18} color={theme.text2} />
+            </Pressable>
             <TextInput
               ref={inputRef}
               value={input}
-              onChangeText={setInput}
+              onChangeText={(txt) => {
+                setAcDismissed(false);
+                setInput(txt);
+              }}
               placeholder={t('msgBotPh', { name: bot?.name || botId })}
               placeholderTextColor={theme.mute}
               multiline
@@ -893,14 +1096,14 @@ export default function BotChatScreen() {
             />
             <Pressable
               accessibilityLabel={showStop ? t('stopOutput') : t('sendMsg')}
-              disabled={!showStop && (!input.trim() || sending)}
+              disabled={!showStop && ((!input.trim() && readyMediaIds.length === 0) || hasUploading || sending)}
               onPress={showStop ? onInterrupt : onSubmitComposer}
               style={[
                 styles.sendBtn,
                 {
                   backgroundColor: showStop
                     ? theme.text
-                    : input.trim()
+                    : (input.trim() || readyMediaIds.length > 0) && !hasUploading
                       ? botPal.accent
                       : theme.s2,
                 },
@@ -909,7 +1112,10 @@ export default function BotChatScreen() {
               {showStop ? (
                 <StopIcon size={16} color={theme.page} />
               ) : (
-                <SendIcon size={17} color={input.trim() ? botPal.text : theme.mute} />
+                <SendIcon
+                  size={17}
+                  color={(input.trim() || readyMediaIds.length > 0) && !hasUploading ? botPal.text : theme.mute}
+                />
               )}
             </Pressable>
           </View>
@@ -1888,12 +2094,43 @@ const styles = StyleSheet.create({
   },
   composerCapsule: {
     borderRadius: 24,
-    paddingLeft: 16,
+    paddingLeft: 6,
     paddingRight: 6,
     paddingVertical: 6,
     flexDirection: 'row',
     alignItems: 'flex-end',
     gap: 8,
+  },
+  attachBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  attChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderRadius: 12,
+    borderWidth: 1,
+    maxWidth: 200,
+  },
+  attThumb: {
+    width: 28,
+    height: 28,
+    borderRadius: 6,
+  },
+  attName: {
+    fontSize: 13,
+    maxWidth: 110,
+  },
+  attRmTxt: {
+    fontSize: 18,
+    lineHeight: 18,
+    paddingHorizontal: 2,
   },
   composerInput: {
     flex: 1,

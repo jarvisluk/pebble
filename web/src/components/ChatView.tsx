@@ -1,5 +1,16 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { BotStatus, ChatMessage, MessageMedia, PendingQuestion, ResolvedLang, TakeoverRequest } from '../types';
+import type {
+  BotStatus,
+  ChatMessage,
+  MentionCandidate,
+  MessageMedia,
+  PendingAttachment,
+  PendingQuestion,
+  ResolvedLang,
+  SlashCommandItem,
+  TakeoverRequest,
+} from '../types';
+import { fetchBotCommands, fetchBotMentions, uploadBotAttachment } from '../lib/api';
 import { translate } from '../lib/i18n';
 import { renderMarkdownHtml } from '../lib/markdown';
 import { botColor, contrastText, countToolCalls, formatClockTime, formatDurationMs, formatStamp } from '../lib/theme';
@@ -124,7 +135,7 @@ interface ChatViewProps {
   onOpenDetail: () => void;
   onOpenCollab?: (peerId: string) => void;
   onOpenCreate: () => void;
-  onSendMessage: (text: string) => Promise<void>;
+  onSendMessage: (text: string, mediaIds?: string[]) => Promise<void>;
   onInterrupt: () => Promise<void>;
   children?: React.ReactNode;
 }
@@ -158,14 +169,44 @@ export const ChatView: React.FC<ChatViewProps> = ({
 }) => {
   const t = (k: string, vars?: Record<string, string | number>) => translate(lang, k, vars);
   const [draft, setDraft] = useState('');
-  const [popOpen, setPopOpen] = useState(false);
+  const [cursorPos, setCursorPos] = useState(0);
+  const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
+  const [dragging, setDragging] = useState(false);
+  const [commandsMap, setCommandsMap] = useState<Record<string, SlashCommandItem[]>>({});
+  const [mentionItems, setMentionItems] = useState<MentionCandidate[]>([]);
+  const [acIndex, setAcIndex] = useState(0);
+  const [acDismissed, setAcDismissed] = useState(false);
   const [previewImg, setPreviewImg] = useState<MessageMedia | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const popRef = useRef<HTMLDivElement>(null);
-  const plusRef = useRef<HTMLButtonElement>(null);
+  const acRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setPreviewImg(null);
+    setAttachments((prev) => {
+      prev.forEach((a) => {
+        if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
+      });
+      return [];
+    });
+    setMentionItems([]);
+    setAcDismissed(false);
+  }, [activeBot?.id]);
+
+  useEffect(() => {
+    const botId = activeBot?.id;
+    if (!botId) return;
+    let cancelled = false;
+    void fetchBotCommands(botId)
+      .then((cmds) => {
+        if (!cancelled) {
+          setCommandsMap((prev) => ({ ...prev, [botId]: cmds }));
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, [activeBot?.id]);
 
   useEffect(() => {
@@ -218,8 +259,8 @@ export const ChatView: React.FC<ChatViewProps> = ({
     const onDocClick = (e: MouseEvent) => {
       const target = e.target as HTMLElement | null;
       if (!target) return;
-      if (!target.closest('#pop, #plusBtn')) {
-        setPopOpen(false);
+      if (!target.closest('.ac-pop, #input')) {
+        setAcDismissed(true);
       }
       const copyBtn = target.closest<HTMLElement>('[data-copy]');
       if (copyBtn && copyBtn.closest('#thread')) {
@@ -255,8 +296,181 @@ export const ChatView: React.FC<ChatViewProps> = ({
     messages.forEach((m) => seenIds.add(m.id));
   }, [messages, questions.length, activeBot?.id, activeBot?.busy, toolName, seenIds]);
 
-  const stopMode = Boolean(activeBot?.busy) && !draft.trim();
-  const canSend = stopMode || (Boolean(draft.trim()) && Boolean(activeBot));
+  const acContext = useMemo(() => {
+    if (acDismissed) return null;
+    const before = draft.slice(0, Math.min(cursorPos, draft.length));
+    const slashMatch = /^\/([^\s]*)$/.exec(before);
+    if (slashMatch) {
+      return {
+        kind: 'slash' as const,
+        query: slashMatch[1],
+        start: 0,
+        end: before.length,
+      };
+    }
+    const mentionMatch = /(?:^|\s)@([^\s]*)$/.exec(before);
+    if (mentionMatch) {
+      const tokenStart = before.length - mentionMatch[1].length - 1;
+      return {
+        kind: 'mention' as const,
+        query: mentionMatch[1],
+        start: tokenStart,
+        end: before.length,
+      };
+    }
+    return null;
+  }, [draft, cursorPos, acDismissed]);
+
+  const botCommands = useMemo(() => {
+    if (!activeBot) return [];
+    return commandsMap[activeBot.id] || [];
+  }, [activeBot, commandsMap]);
+
+  const filteredCommands = useMemo(() => {
+    if (!acContext || acContext.kind !== 'slash') return [];
+    const q = acContext.query.toLowerCase();
+    return botCommands.filter(
+      (c) =>
+        !q ||
+        c.name.toLowerCase().includes(q) ||
+        (c.description && c.description.toLowerCase().includes(q))
+    );
+  }, [acContext, botCommands]);
+
+  useEffect(() => {
+    if (!acContext || acContext.kind !== 'mention' || !activeBot) {
+      setMentionItems([]);
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void fetchBotMentions(activeBot.id, acContext.query)
+        .then((items) => {
+          if (!cancelled) setMentionItems(items);
+        })
+        .catch(() => {
+          if (!cancelled) setMentionItems([]);
+        });
+    }, 120);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [acContext, activeBot?.id]);
+
+  const acOpen = Boolean(
+    acContext &&
+      ((acContext.kind === 'slash' && filteredCommands.length > 0) ||
+        (acContext.kind === 'mention' && mentionItems.length > 0))
+  );
+
+  const acListLen = acContext?.kind === 'slash' ? filteredCommands.length : mentionItems.length;
+
+  useEffect(() => {
+    setAcIndex(0);
+  }, [acContext?.kind, acContext?.query, acListLen]);
+
+  useEffect(() => {
+    if (!acOpen || !acRef.current) return;
+    const activeEl = acRef.current.querySelector<HTMLElement>('.ac-item.active');
+    activeEl?.scrollIntoView({ block: 'nearest' });
+  }, [acIndex, acOpen]);
+
+  const applySlashCommand = (cmd: SlashCommandItem) => {
+    const immediateNoArg = new Set(['status', 'bots', 'reset', 'compact', 'clear', 'cost', 'context']);
+    const nextText = immediateNoArg.has(cmd.name) && !cmd.argumentHint ? `/${cmd.name}` : `/${cmd.name} `;
+    setAcDismissed(true);
+    setDraft(nextText);
+    setCursorPos(nextText.length);
+    setTimeout(() => {
+      const el = inputRef.current;
+      if (el) {
+        el.focus();
+        el.setSelectionRange(nextText.length, nextText.length);
+      }
+    }, 0);
+  };
+
+  const applyMention = (item: MentionCandidate) => {
+    if (!acContext) return;
+    const inserted = `@${item.value} `;
+    const nextText = draft.slice(0, acContext.start) + inserted + draft.slice(acContext.end);
+    const nextCursor = acContext.start + inserted.length;
+    setAcDismissed(true);
+    setDraft(nextText);
+    setCursorPos(nextCursor);
+    setTimeout(() => {
+      const el = inputRef.current;
+      if (el) {
+        el.focus();
+        el.setSelectionRange(nextCursor, nextCursor);
+      }
+    }, 0);
+  };
+
+  const handleUploadFiles = (fileList: FileList | File[]) => {
+    const botId = activeBot?.id;
+    if (!botId) return;
+    const files = Array.from(fileList);
+    for (const file of files) {
+      const localId = `tmp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const isImg = file.type.startsWith('image/');
+      const previewUrl = isImg ? URL.createObjectURL(file) : undefined;
+      setAttachments((prev) => [
+        ...prev,
+        {
+          id: localId,
+          name: file.name || 'file',
+          kind: isImg ? 'image' : 'file',
+          previewUrl,
+          uploading: true,
+        },
+      ]);
+      void uploadBotAttachment(botId, file)
+        .then((res) => {
+          setAttachments((prev) =>
+            prev.map((a) =>
+              a.id === localId
+                ? {
+                    ...a,
+                    media: res.media,
+                    name: res.media.name || a.name,
+                    kind: res.media.kind === 'image' ? 'image' : 'file',
+                    uploading: false,
+                  }
+                : a
+            )
+          );
+        })
+        .catch((err) => {
+          setAttachments((prev) =>
+            prev.map((a) =>
+              a.id === localId
+                ? {
+                    ...a,
+                    uploading: false,
+                    error: err instanceof Error ? err.message : t('uploadFailed'),
+                  }
+                : a
+            )
+          );
+        });
+    }
+  };
+
+  const removeAttachment = (id: string) => {
+    setAttachments((prev) => {
+      const target = prev.find((a) => a.id === id);
+      if (target?.previewUrl) URL.revokeObjectURL(target.previewUrl);
+      return prev.filter((a) => a.id !== id);
+    });
+  };
+
+  const readyMediaIds = attachments.filter((a) => a.media?.id && !a.uploading && !a.error).map((a) => a.media!.id);
+  const hasUploading = attachments.some((a) => a.uploading);
+  const hasContent = Boolean(draft.trim()) || readyMediaIds.length > 0;
+  const stopMode = Boolean(activeBot?.busy) && !hasContent;
+  const canSend = stopMode || (hasContent && !hasUploading && Boolean(activeBot));
 
   const handleSend = async () => {
     if (stopMode) {
@@ -264,14 +478,24 @@ export const ChatView: React.FC<ChatViewProps> = ({
       return;
     }
     const text = draft.trim();
-    if (!text || !activeBot) return;
+    if ((!text && readyMediaIds.length === 0) || hasUploading || !activeBot) return;
+    const sentMediaIds = [...readyMediaIds];
     setDraft('');
-    await onSendMessage(text);
+    setCursorPos(0);
+    setAcDismissed(false);
+    setAttachments((prev) => {
+      prev.forEach((a) => {
+        if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
+      });
+      return [];
+    });
+    await onSendMessage(text, sentMediaIds);
   };
 
   const fillComposer = (val: string) => {
-    setPopOpen(false);
+    setAcDismissed(false);
     setDraft(val);
+    setCursorPos(val.length);
     setTimeout(() => {
       const el = inputRef.current;
       if (el) {
@@ -559,17 +783,79 @@ export const ChatView: React.FC<ChatViewProps> = ({
           </div>
 
           <div className="composer-wrap">
-            <div className="composer">
+            {attachments.length > 0 && (
+              <div className="composer-attachments">
+                {attachments.map((att) => (
+                  <div
+                    key={att.id}
+                    className={`att-chip${att.kind === 'image' ? ' is-img' : ''}${att.error ? ' is-err' : ''}`}
+                    title={att.error || att.name}
+                  >
+                    {att.kind === 'image' && (att.previewUrl || att.media?.url) ? (
+                      <img src={att.previewUrl || att.media?.url} alt={att.name} className="att-thumb" />
+                    ) : (
+                      <span className="att-file-body">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
+                          <path d="M14 3v5h5" />
+                        </svg>
+                        <span className="att-name">{att.name}</span>
+                      </span>
+                    )}
+                    {att.uploading && <span className="att-status">{t('uploading')}</span>}
+                    <button
+                      type="button"
+                      className="att-rm"
+                      aria-label={t('removeAttachment')}
+                      onClick={() => removeAttachment(att.id)}
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div
+              className={`composer${dragging ? ' dragging' : ''}`}
+              onDragOver={(e) => {
+                if (e.dataTransfer?.types.includes('Files')) {
+                  e.preventDefault();
+                  setDragging(true);
+                }
+              }}
+              onDragLeave={() => setDragging(false)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setDragging(false);
+                if (e.dataTransfer?.files && e.dataTransfer.files.length > 0) {
+                  handleUploadFiles(e.dataTransfer.files);
+                }
+              }}
+            >
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                hidden
+                onChange={(e) => {
+                  if (e.target.files && e.target.files.length > 0) {
+                    handleUploadFiles(e.target.files);
+                    e.target.value = '';
+                  }
+                }}
+              />
               <button
-                ref={plusRef}
                 id="plusBtn"
                 type="button"
                 className="circle"
-                aria-label={t('slashCmds')}
-                title={t('slashCmds')}
-                onClick={() => setPopOpen((v) => !v)}
+                aria-label={t('attachFile')}
+                title={t('attachFile')}
+                disabled={!activeBot}
+                onClick={() => fileInputRef.current?.click()}
               >
-                /
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21.44 11.05l-8.49 8.49a5 5 0 0 1-7.07-7.07l8.49-8.49a3.5 3.5 0 0 1 4.95 4.95l-8.49 8.49a2 2 0 0 1-2.83-2.83l7.78-7.78" />
+                </svg>
               </button>
               <textarea
                 ref={inputRef}
@@ -577,8 +863,53 @@ export const ChatView: React.FC<ChatViewProps> = ({
                 rows={1}
                 placeholder={activeBot ? t('msgBotPh', { name: activeBot.name }) : t('msgPh')}
                 value={draft}
-                onChange={(e) => setDraft(e.target.value)}
+                onChange={(e) => {
+                  setAcDismissed(false);
+                  setDraft(e.target.value);
+                  setCursorPos(e.target.selectionStart ?? e.target.value.length);
+                }}
+                onClick={(e) => {
+                  setCursorPos((e.target as HTMLTextAreaElement).selectionStart ?? draft.length);
+                }}
+                onKeyUp={(e) => {
+                  if (!['ArrowUp', 'ArrowDown', 'Enter', 'Tab', 'Escape'].includes(e.key)) {
+                    setCursorPos((e.target as HTMLTextAreaElement).selectionStart ?? draft.length);
+                  }
+                }}
+                onPaste={(e) => {
+                  const files = Array.from(e.clipboardData?.files || []);
+                  if (files.length > 0) {
+                    e.preventDefault();
+                    handleUploadFiles(files);
+                  }
+                }}
                 onKeyDown={(e) => {
+                  if (acOpen && !e.nativeEvent.isComposing) {
+                    if (e.key === 'ArrowDown') {
+                      e.preventDefault();
+                      setAcIndex((i) => (i + 1) % acListLen);
+                      return;
+                    }
+                    if (e.key === 'ArrowUp') {
+                      e.preventDefault();
+                      setAcIndex((i) => (i - 1 + acListLen) % acListLen);
+                      return;
+                    }
+                    if (e.key === 'Escape') {
+                      e.preventDefault();
+                      setAcDismissed(true);
+                      return;
+                    }
+                    if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
+                      e.preventDefault();
+                      if (acContext?.kind === 'slash' && filteredCommands[acIndex]) {
+                        applySlashCommand(filteredCommands[acIndex]);
+                      } else if (acContext?.kind === 'mention' && mentionItems[acIndex]) {
+                        applyMention(mentionItems[acIndex]);
+                      }
+                      return;
+                    }
+                  }
                   if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
                     e.preventDefault();
                     void handleSend();
@@ -610,20 +941,70 @@ export const ChatView: React.FC<ChatViewProps> = ({
                   </svg>
                 )}
               </button>
-              <div ref={popRef} id="pop" className={`pop${popOpen ? ' open' : ''}`}>
-                <button type="button" onClick={() => fillComposer('/status')}>
-                  /status <span>{t('cmdStatusDesc')}</span>
-                </button>
-                <button type="button" onClick={() => fillComposer('/bots')}>
-                  /bots <span>{t('cmdBotsDesc')}</span>
-                </button>
-                <button type="button" onClick={() => fillComposer('/ask ')}>
-                  /ask &lt;bot&gt; … <span>{t('cmdAskDesc')}</span>
-                </button>
-                <button type="button" onClick={() => fillComposer('/reset')}>
-                  /reset <span>{t('cmdResetDesc')}</span>
-                </button>
-              </div>
+              {acOpen && (
+                <div ref={acRef} className="ac-pop open" role="listbox">
+                  {acContext?.kind === 'slash'
+                    ? filteredCommands.map((cmd, idx) => {
+                        const srcKey =
+                          cmd.source === 'hub'
+                            ? 'cmdSourceHub'
+                            : cmd.source === 'skill'
+                              ? 'cmdSourceSkill'
+                              : cmd.source === 'workflow'
+                                ? 'cmdSourceWorkflow'
+                                : 'cmdSourceHarness';
+                        return (
+                          <button
+                            key={`${cmd.source}-${cmd.name}`}
+                            type="button"
+                            role="option"
+                            aria-selected={idx === acIndex}
+                            className={`ac-item${idx === acIndex ? ' active' : ''}`}
+                            onMouseEnter={() => setAcIndex(idx)}
+                            onClick={() => applySlashCommand(cmd)}
+                          >
+                            <span className="ac-main">
+                              <span className="ac-title">
+                                /{cmd.name}
+                                {cmd.argumentHint ? <span className="ac-hint"> {cmd.argumentHint}</span> : null}
+                              </span>
+                              {cmd.description ? <span className="ac-desc">{cmd.description}</span> : null}
+                            </span>
+                            <span className={`ac-tag src-${cmd.source}`}>{t(srcKey)}</span>
+                          </button>
+                        );
+                      })
+                    : mentionItems.map((item, idx) => {
+                        const kindKey =
+                          item.kind === 'bot'
+                            ? 'mentionBot'
+                            : item.kind === 'agent'
+                              ? 'mentionAgent'
+                              : 'mentionFile';
+                        return (
+                          <button
+                            key={`${item.kind}-${item.value}`}
+                            type="button"
+                            role="option"
+                            aria-selected={idx === acIndex}
+                            className={`ac-item${idx === acIndex ? ' active' : ''}`}
+                            onMouseEnter={() => setAcIndex(idx)}
+                            onClick={() => applyMention(item)}
+                          >
+                            <span className="ac-main">
+                              <span className="ac-title">
+                                {item.kind === 'file' ? item.value : `@${item.value}`}
+                              </span>
+                              {item.description && item.description !== item.value ? (
+                                <span className="ac-desc">{item.description}</span>
+                              ) : null}
+                            </span>
+                            <span className={`ac-tag kind-${item.kind}`}>{t(kindKey)}</span>
+                          </button>
+                        );
+                      })}
+                </div>
+              )}
             </div>
           </div>
         </div>

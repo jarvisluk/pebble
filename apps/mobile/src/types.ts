@@ -280,3 +280,27 @@ export interface PendingQuestion {
   fields: QuestionField[];
   createdAt: string;
 }
+
+export interface SlashCommandItem {
+  name: string;
+  description?: string;
+  argumentHint?: string;
+  source: 'harness' | 'skill' | 'workflow' | 'hub' | string;
+}
+
+export interface MentionCandidate {
+  kind: 'file' | 'bot' | 'agent' | string;
+  value: string;
+  label: string;
+  description?: string;
+}
+
+export interface PendingAttachment {
+  id: string;
+  name: string;
+  kind: 'image' | 'file';
+  uri: string;
+  media?: MessageMedia;
+  uploading?: boolean;
+  error?: string;
+}

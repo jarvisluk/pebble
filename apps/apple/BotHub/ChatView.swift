@@ -1,4 +1,6 @@
 import SwiftUI
+import PhotosUI
+import UniformTypeIdentifiers
 
 struct ConfirmItem: Identifiable {
     let id = UUID()
@@ -30,6 +32,14 @@ struct ChatView: View {
     @State private var detailOpen = false
     @State private var collabPeer: CollabTarget?
     @State private var previewMedia: MessageMedia?
+    @State private var commands: [SlashCommandItem] = []
+    @State private var mentions: [MentionCandidate] = []
+    @State private var mentionTask: Task<Void, Never>?
+    @State private var acDismissed = false
+    @State private var pendingAttachments: [PendingAttachment] = []
+    @State private var showPhotoPicker = false
+    @State private var selectedPhotoItems: [PhotosPickerItem] = []
+    @State private var showFileImporter = false
     @FocusState private var focused: Bool
 
     private struct CollabTarget: Identifiable {
@@ -99,6 +109,42 @@ struct ChatView: View {
                 }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) { composer(pal) }
+            .task(id: botId) {
+                pendingAttachments = []
+                mentions = []
+                acDismissed = false
+                if let list = try? await hub.fetchCommands(botId) {
+                    commands = list
+                }
+            }
+            .photosPicker(isPresented: $showPhotoPicker, selection: $selectedPhotoItems, maxSelectionCount: 5, matching: .images)
+            .onChange(of: selectedPhotoItems) { _, items in
+                guard !items.isEmpty else { return }
+                let picked = items
+                selectedPhotoItems = []
+                for (idx, item) in picked.enumerated() {
+                    Task {
+                        if let data = try? await item.loadTransferable(type: Data.self) {
+                            await uploadData(data: data, filename: "photo_\(Int(Date().timeIntervalSince1970))_\(idx).jpg", mimeType: "image/jpeg", isImage: true)
+                        }
+                    }
+                }
+            }
+            .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
+                guard case .success(let urls) = result else { return }
+                for url in urls {
+                    let accessed = url.startAccessingSecurityScopedResource()
+                    defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+                    if let data = try? Data(contentsOf: url) {
+                        let name = url.lastPathComponent
+                        let mime = UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? "application/octet-stream"
+                        let isImg = mime.hasPrefix("image/")
+                        Task {
+                            await uploadData(data: data, filename: name, mimeType: mime, isImage: isImg)
+                        }
+                    }
+                }
+            }
             .background(p.page)
             .toolbarBackground(p.page, for: .navigationBar)
             .detailPanel(isPresented: $detailOpen, compact: router.compact) {
@@ -245,66 +291,277 @@ struct ChatView: View {
         .padding(.top, 40)
     }
 
-    private func composer(_ pal: (accent: Color, text: Color, soft: Color)) -> some View {
-        let hasText = !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        return HStack(alignment: .bottom, spacing: 8) {
-            Menu {
-                Button { input = ""; send("/status") } label: { Label("/status · \(hub.t("statusLabel"))", systemImage: "info.circle") }
-                Button { input = ""; send("/bots") } label: { Label("/bots · \(hub.t("allBotsLabel"))", systemImage: "person.3") }
-                Button { input = "/ask "; focused = true } label: { Label("/ask · \(hub.t("collabLabel"))", systemImage: "arrow.triangle.branch") }
-                Divider()
-                Button(role: .destructive) { input = ""; send("/reset") } label: { Label("/reset · \(hub.t("resetSessionLabel"))", systemImage: "arrow.counterclockwise") }
-            } label: {
-                Text("/").font(.system(size: 19, weight: .semibold)).foregroundStyle(p.text2)
-                    .frame(width: 40, height: 40)
-                    .background(p.s1, in: Circle())
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            TextField(hub.t("msgBotPh", ["name": name]), text: $input, axis: .vertical)
-                .textFieldStyle(.plain)
-                .font(.system(size: 16))
-                .lineLimit(1...6)
-                .focused($focused)
-                .padding(.vertical, 11)
-                .onChange(of: input) { _, v in if v.count > 8000 { input = String(v.prefix(8000)) } }
-            Button {
-                showStop ? interrupt() : submit()
-            } label: {
-                Image(systemName: showStop ? "stop.fill" : "arrow.up")
-                    .font(.system(size: showStop ? 13 : 16, weight: .bold))
-                    .foregroundStyle(showStop ? p.page : pal.text)
-                    .frame(width: 40, height: 40)
-                    .background(showStop ? p.text : (hasText ? pal.accent : p.s2), in: Circle())
-            }
-            .buttonStyle(PressStyle())
-            .disabled(!showStop && (!hasText || sending))
-            .keyboardShortcut(.return, modifiers: .command)
-            .accessibilityLabel(showStop ? hub.t("stopOutput") : hub.t("sendMsg"))
+    private var slashQuery: String? {
+        guard !acDismissed, input.hasPrefix("/") else { return nil }
+        let rest = String(input.dropFirst())
+        if rest.contains(where: { $0.isWhitespace }) { return nil }
+        return rest
+    }
+
+    private var filteredCommands: [SlashCommandItem] {
+        guard let q = slashQuery?.lowercased() else { return [] }
+        if q.isEmpty { return commands }
+        return commands.filter {
+            $0.name.lowercased().contains(q) || ($0.description?.lowercased().contains(q) ?? false)
         }
-        .padding(6)
-        .background(p.card, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+    }
+
+    private var activeMentionRange: (range: Range<String.Index>, query: String)? {
+        guard !acDismissed, slashQuery == nil else { return nil }
+        guard let atIdx = input.lastIndex(of: "@") else { return nil }
+        if atIdx != input.startIndex {
+            let prev = input[input.index(before: atIdx)]
+            if !prev.isWhitespace { return nil }
+        }
+        let after = input[input.index(after: atIdx)...]
+        if after.contains(where: { $0.isWhitespace }) { return nil }
+        return (atIdx..<input.endIndex, String(after))
+    }
+
+    private func composer(_ pal: (accent: Color, text: Color, soft: Color)) -> some View {
+        let readyMediaIds = pendingAttachments.compactMap { (!$0.uploading && $0.error == nil) ? $0.media?.id : nil }
+        let hasUploading = pendingAttachments.contains { $0.uploading }
+        let hasText = !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let hasContent = hasText || !readyMediaIds.isEmpty
+        let showSlashAC = slashQuery != nil && !filteredCommands.isEmpty
+        let showMentionAC = activeMentionRange != nil && !mentions.isEmpty
+
+        return VStack(spacing: 8) {
+            if showSlashAC || showMentionAC {
+                ScrollView {
+                    LazyVStack(spacing: 2) {
+                        if showSlashAC {
+                            ForEach(filteredCommands.prefix(12)) { cmd in
+                                Button {
+                                    let immediate: Set<String> = ["status", "bots", "reset", "compact", "clear", "cost", "context"]
+                                    acDismissed = true
+                                    input = (immediate.contains(cmd.name) && (cmd.argumentHint ?? "").isEmpty) ? "/\(cmd.name)" : "/\(cmd.name) "
+                                    focused = true
+                                } label: {
+                                    HStack(spacing: 10) {
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text("/\(cmd.name)" + ((cmd.argumentHint ?? "").isEmpty ? "" : " \(cmd.argumentHint!)"))
+                                                .font(.system(size: 15, weight: .medium, design: .monospaced))
+                                                .foregroundStyle(p.text)
+                                            if let d = cmd.description, !d.isEmpty {
+                                                Text(d).font(.system(size: 12)).foregroundStyle(p.mute).lineLimit(1)
+                                            }
+                                        }
+                                        Spacer()
+                                        Text(sourceLabel(cmd.source))
+                                            .font(.system(size: 11, weight: .semibold))
+                                            .foregroundStyle(p.text2)
+                                            .padding(.horizontal, 8).padding(.vertical, 3)
+                                            .background(p.s1, in: Capsule())
+                                    }
+                                    .padding(.horizontal, 12).padding(.vertical, 8)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        } else if let mRange = activeMentionRange {
+                            ForEach(mentions.prefix(12)) { item in
+                                Button {
+                                    acDismissed = true
+                                    input.replaceSubrange(mRange.range, with: "@\(item.value) ")
+                                    focused = true
+                                } label: {
+                                    HStack(spacing: 10) {
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(item.kind == "file" ? item.value : "@\(item.value)")
+                                                .font(.system(size: 15, weight: .medium, design: .monospaced))
+                                                .foregroundStyle(p.text)
+                                                .lineLimit(1)
+                                            if let d = item.description, !d.isEmpty, d != item.value {
+                                                Text(d).font(.system(size: 12)).foregroundStyle(p.mute).lineLimit(1)
+                                            }
+                                        }
+                                        Spacer()
+                                        Text(mentionLabel(item.kind))
+                                            .font(.system(size: 11, weight: .semibold))
+                                            .foregroundStyle(p.text2)
+                                            .padding(.horizontal, 8).padding(.vertical, 3)
+                                            .background(p.s1, in: Capsule())
+                                    }
+                                    .padding(.horizontal, 12).padding(.vertical, 8)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                    .padding(6)
+                }
+                .frame(maxHeight: 220)
+                .background(p.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .shadow(color: .black.opacity(0.12), radius: 12, y: 4)
+            }
+
+            if !pendingAttachments.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(pendingAttachments) { att in
+                            ZStack(alignment: .topTrailing) {
+                                Group {
+                                    if att.isImage, let data = att.imageData, let uiImg = UIImage(data: data) {
+                                        Image(uiImage: uiImg)
+                                            .resizable()
+                                            .scaledToFill()
+                                            .frame(width: 52, height: 52)
+                                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                    } else {
+                                        HStack(spacing: 6) {
+                                            Image(systemName: "doc")
+                                                .font(.system(size: 14))
+                                                .foregroundStyle(p.text2)
+                                            Text(att.name)
+                                                .font(.system(size: 13))
+                                                .foregroundStyle(p.text)
+                                                .lineLimit(1)
+                                            if att.uploading {
+                                                ProgressView().controlSize(.mini)
+                                            }
+                                        }
+                                        .padding(.horizontal, 10).padding(.vertical, 8)
+                                        .frame(maxWidth: 180)
+                                        .background(p.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                    }
+                                }
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                        .stroke(att.error != nil ? p.danger : p.s2, lineWidth: 1)
+                                )
+                                Button {
+                                    pendingAttachments.removeAll { $0.id == att.id }
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .font(.system(size: 16))
+                                        .foregroundStyle(p.text, p.card)
+                                }
+                                .offset(x: 5, y: -5)
+                            }
+                            .padding(.top, 5)
+                            .padding(.trailing, 5)
+                        }
+                    }
+                }
+            }
+
+            HStack(alignment: .bottom, spacing: 8) {
+                Menu {
+                    Button { showPhotoPicker = true } label: { Label(hub.t("photoLibrary"), systemImage: "photo") }
+                    Button { showFileImporter = true } label: { Label(hub.t("chooseFile"), systemImage: "doc") }
+                } label: {
+                    Image(systemName: "paperclip")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(p.text2)
+                        .frame(width: 40, height: 40)
+                        .background(p.s1, in: Circle())
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                TextField(hub.t("msgBotPh", ["name": name]), text: $input, axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 16))
+                    .lineLimit(1...6)
+                    .focused($focused)
+                    .padding(.vertical, 11)
+                    .onChange(of: input) { _, v in
+                        acDismissed = false
+                        if v.count > 8000 { input = String(v.prefix(8000)) }
+                        mentionTask?.cancel()
+                        if let m = activeMentionRange {
+                            let q = m.query
+                            mentionTask = Task {
+                                try? await Task.sleep(nanoseconds: 120_000_000)
+                                guard !Task.isCancelled else { return }
+                                if let items = try? await hub.fetchMentions(botId, query: q) {
+                                    await MainActor.run { mentions = items }
+                                }
+                            }
+                        } else {
+                            mentions = []
+                        }
+                    }
+                Button {
+                    showStop ? interrupt() : submit()
+                } label: {
+                    Image(systemName: showStop ? "stop.fill" : "arrow.up")
+                        .font(.system(size: showStop ? 13 : 16, weight: .bold))
+                        .foregroundStyle(showStop ? p.page : pal.text)
+                        .frame(width: 40, height: 40)
+                        .background(showStop ? p.text : ((hasContent && !hasUploading) ? pal.accent : p.s2), in: Circle())
+                }
+                .buttonStyle(PressStyle())
+                .disabled(!showStop && (!hasContent || hasUploading || sending))
+                .keyboardShortcut(.return, modifiers: .command)
+                .accessibilityLabel(showStop ? hub.t("stopOutput") : hub.t("sendMsg"))
+            }
+            .padding(6)
+            .background(p.card, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+        }
         .frame(maxWidth: 760)
         .padding(.horizontal, router.compact ? 12 : 24)
         .padding(.bottom, 8)
         .frame(maxWidth: .infinity)
     }
 
-    private func submit() {
-        let text = input
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !sending else { return }
-        input = ""
-        send(text, restore: true)
+    private func sourceLabel(_ source: String?) -> String {
+        switch source {
+        case "hub": return hub.t("cmdSourceHub")
+        case "skill": return hub.t("cmdSourceSkill")
+        case "workflow": return hub.t("cmdSourceWorkflow")
+        default: return hub.t("cmdSourceHarness")
+        }
     }
 
-    private func send(_ raw: String, restore: Bool = false) {
+    private func mentionLabel(_ kind: String) -> String {
+        switch kind {
+        case "bot": return hub.t("mentionBot")
+        case "agent": return hub.t("mentionAgent")
+        default: return hub.t("mentionFile")
+        }
+    }
+
+    private func uploadData(data: Data, filename: String, mimeType: String, isImage: Bool) async {
+        let localId = UUID().uuidString
+        await MainActor.run {
+            pendingAttachments.append(PendingAttachment(id: localId, name: filename, isImage: isImage, imageData: isImage ? data : nil, uploading: true))
+        }
+        do {
+            let res = try await hub.uploadAttachment(botId, data: data, filename: filename, mimeType: mimeType)
+            await MainActor.run {
+                if let idx = pendingAttachments.firstIndex(where: { $0.id == localId }) {
+                    pendingAttachments[idx].media = res.media
+                    pendingAttachments[idx].uploading = false
+                }
+            }
+        } catch {
+            await MainActor.run {
+                if let idx = pendingAttachments.firstIndex(where: { $0.id == localId }) {
+                    pendingAttachments[idx].uploading = false
+                    pendingAttachments[idx].error = errText(error, hub.t("uploadFailed"))
+                }
+            }
+        }
+    }
+
+    private func submit() {
+        let text = input
+        let readyMediaIds = pendingAttachments.compactMap { (!$0.uploading && $0.error == nil) ? $0.media?.id : nil }
+        let hasText = !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        guard (hasText || !readyMediaIds.isEmpty), !sending else { return }
+        input = ""
+        pendingAttachments = []
+        send(text, mediaIds: readyMediaIds, restore: true)
+    }
+
+    private func send(_ raw: String, mediaIds: [String] = [], restore: Bool = false) {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+        guard !trimmed.isEmpty || !mediaIds.isEmpty else { return }
         sendErr = ""
         sending = true
         Task {
-            do { try await hub.sendMessage(botId, trimmed) } catch {
+            do { try await hub.sendMessage(botId, trimmed, mediaIds: mediaIds) } catch {
                 if restore { input = raw }
                 sendErr = errText(error, hub.t("sendFailed"))
             }

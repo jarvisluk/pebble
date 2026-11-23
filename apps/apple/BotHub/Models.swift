@@ -369,6 +369,40 @@ struct OkResp: Decodable { var ok: Bool?; var output: String?; var error: String
 struct TargetsResp: Decodable { var targets: [DesktopTarget]?; var takeovers: [TakeoverRequest]? }
 struct Empty: Decodable {}
 
+struct SlashCommandItem: Codable, Hashable, Identifiable {
+    var name: String
+    var description: String?
+    var argumentHint: String?
+    var source: String?
+    var id: String { "\(source ?? "h"):\(name)" }
+}
+
+struct MentionCandidate: Codable, Hashable, Identifiable {
+    var kind: String
+    var value: String
+    var label: String
+    var description: String?
+    var id: String { "\(kind):\(value)" }
+}
+
+struct InboundAttachmentResponse: Codable {
+    var media: MessageMedia
+    var workspacePath: String?
+}
+
+struct PendingAttachment: Identifiable {
+    var id: String
+    var name: String
+    var isImage: Bool
+    var media: MessageMedia?
+    var imageData: Data?
+    var uploading = true
+    var error: String?
+}
+
+struct CommandsResp: Decodable { var commands: [SlashCommandItem]? }
+struct MentionsResp: Decodable { var items: [MentionCandidate]? }
+
 func decodeAny<T: Decodable>(_ obj: Any, as: T.Type = T.self) -> T? {
     guard JSONSerialization.isValidJSONObject(obj),
           let data = try? JSONSerialization.data(withJSONObject: obj) else { return nil }

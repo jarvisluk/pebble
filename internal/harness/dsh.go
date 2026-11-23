@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"bot-hub/internal/config"
 )
 
 // DshHarness drives DeepSeek Harness through one long-lived
@@ -19,13 +21,15 @@ type DshHarness struct {
 	binary  string
 	startMu sync.Mutex // serializes process start + initialize
 
-	mu      sync.Mutex
-	proc    *lineProc
-	seq     int
-	pending map[int]chan acpResponse
-	subs    map[string]chan acpUpdate // sessionID → turn listener
-	open    map[string]*dshSession    // sessions live on the current proc
-	models  []string
+	mu           sync.Mutex
+	proc         *lineProc
+	seq          int
+	pending      map[int]chan acpResponse
+	subs         map[string]chan acpUpdate // sessionID → turn listener
+	open         map[string]*dshSession    // sessions live on the current proc
+	models       []string
+	botCommands  map[string][]SlashCommand
+	sessionToBot map[string]string
 }
 
 type dshSession struct {
@@ -55,7 +59,14 @@ type acpUpdate struct {
 		Type string `json:"type"`
 		Text string `json:"text"`
 	} `json:"content"`
-	Title string `json:"title"`
+	Title             string `json:"title"`
+	AvailableCommands []struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		Input       *struct {
+			Hint string `json:"hint"`
+		} `json:"input"`
+	} `json:"availableCommands"`
 }
 
 type acpConfigOption struct {
@@ -73,6 +84,15 @@ func NewDshHarness() *DshHarness {
 
 func (h *DshHarness) Kind() string  { return "dsh" }
 func (h *DshHarness) Label() string { return "DeepSeek Harness" }
+
+func (h *DshHarness) ListCommands(_ context.Context, bot config.BotConfig) ([]SlashCommand, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.botCommands == nil {
+		return nil, nil
+	}
+	return append([]SlashCommand(nil), h.botCommands[bot.ID]...), nil
+}
 
 // Models returns the model choices dsh advertised on the last session it
 // opened, or its stock routes before any session exists.
@@ -154,6 +174,27 @@ func (h *DshHarness) readLoop(p *lineProc) {
 				continue
 			}
 			h.mu.Lock()
+			if params.Update.SessionUpdate == "available_commands_update" {
+				if botID := h.sessionToBot[params.SessionID]; botID != "" {
+					var list []SlashCommand
+					for _, c := range params.Update.AvailableCommands {
+						hint := ""
+						if c.Input != nil {
+							hint = c.Input.Hint
+						}
+						list = append(list, SlashCommand{
+							Name:         c.Name,
+							Description:  c.Description,
+							ArgumentHint: hint,
+							Source:       "harness",
+						})
+					}
+					if h.botCommands == nil {
+						h.botCommands = make(map[string][]SlashCommand)
+					}
+					h.botCommands[botID] = list
+				}
+			}
 			ch := h.subs[params.SessionID]
 			h.mu.Unlock()
 			if ch != nil {
@@ -289,6 +330,10 @@ func (h *DshHarness) openSession(ctx context.Context, p *lineProc, opts RunOptio
 	}
 	h.mu.Lock()
 	h.open[sid] = &dshSession{autoApprove: opts.Bot.ShouldAutoApprove()}
+	if h.sessionToBot == nil {
+		h.sessionToBot = make(map[string]string)
+	}
+	h.sessionToBot[sid] = opts.Bot.ID
 	if m := acpModels(res.ConfigOptions); len(m) > 0 {
 		h.models = m
 	}
@@ -387,7 +432,7 @@ func (h *DshHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnResult,
 		// still answers (with stopReason "cancelled").
 		raw, err := h.request(context.Background(), p, "session/prompt", map[string]any{
 			"sessionId": sid,
-			"prompt":    []map[string]string{{"type": "text", "text": opts.Prompt}},
+			"prompt":    []map[string]string{{"type": "text", "text": AppendAttachmentContext(opts.Prompt, opts.Attachments)}},
 		})
 		done <- promptResult{raw, err}
 	}()

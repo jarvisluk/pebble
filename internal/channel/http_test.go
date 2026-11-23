@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -864,4 +867,93 @@ func TestOutboundCollabAndMediaEndpoints(t *testing.T) {
 	if wrongTktRec.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401 for mismatched media ticket, got %d", wrongTktRec.Code)
 	}
+}
+
+func TestHTTPCommandsMentionsAndAttachmentUpload(t *testing.T) {
+	tmp := t.TempDir()
+	ws := filepath.Join(tmp, "a")
+	_ = os.MkdirAll(ws, 0o755)
+	_ = os.WriteFile(filepath.Join(ws, "hello.txt"), []byte("hi"), 0o644)
+
+	store, _ := state.NewStore(filepath.Join(tmp, "sessions.json"))
+	msgStore, _ := state.NewMessageStore(filepath.Join(tmp, "messages"))
+	defer store.Close()
+
+	reg := harness.NewRegistry()
+	reg.Register(&stubHTTPTestHarness{})
+
+	h := hub.New(&config.HubConfig{
+		SharedDir:   filepath.Join(tmp, "_shared"),
+		StateFile:   filepath.Join(tmp, "sessions.json"),
+		MessagesDir: filepath.Join(tmp, "messages"),
+		Bots: []config.BotConfig{
+			{ID: "a", Name: "A", Workspace: ws, Harness: "stub"},
+			{ID: "b", Name: "B", Workspace: filepath.Join(tmp, "b"), Harness: "stub"},
+		},
+	}, store, msgStore, reg)
+	defer h.Close()
+
+	srv := NewHTTPServer(h, config.HTTPConfig{Host: "127.0.0.1"})
+
+	// 1. GET /api/bots/a/commands
+	cmdReq := httptest.NewRequest(http.MethodGet, "/api/bots/a/commands", nil)
+	cmdReq.Host = "127.0.0.1:3789"
+	cmdRec := httptest.NewRecorder()
+	srv.srv.Handler.ServeHTTP(cmdRec, cmdReq)
+	if cmdRec.Code != http.StatusOK || !strings.Contains(cmdRec.Body.String(), `"status"`) {
+		t.Fatalf("GET commands failed: %d %s", cmdRec.Code, cmdRec.Body.String())
+	}
+
+	// 2. GET /api/bots/a/mentions?q=hello
+	mReq := httptest.NewRequest(http.MethodGet, "/api/bots/a/mentions?q=hello", nil)
+	mReq.Host = "127.0.0.1:3789"
+	mRec := httptest.NewRecorder()
+	srv.srv.Handler.ServeHTTP(mRec, mReq)
+	if mRec.Code != http.StatusOK || !strings.Contains(mRec.Body.String(), `"hello.txt"`) {
+		t.Fatalf("GET mentions failed: %d %s", mRec.Code, mRec.Body.String())
+	}
+
+	// 3. POST /api/bots/a/attachments
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	fw, _ := mw.CreateFormFile("file", "sample.txt")
+	_, _ = fw.Write([]byte("attachment body"))
+	_ = mw.Close()
+
+	upReq := httptest.NewRequest(http.MethodPost, "/api/bots/a/attachments", &buf)
+	upReq.Host = "127.0.0.1:3789"
+	upReq.Header.Set("Origin", "http://127.0.0.1:3789")
+	upReq.Header.Set("Content-Type", mw.FormDataContentType())
+	upRec := httptest.NewRecorder()
+	srv.srv.Handler.ServeHTTP(upRec, upReq)
+	if upRec.Code != http.StatusOK {
+		t.Fatalf("POST attachments failed: %d %s", upRec.Code, upRec.Body.String())
+	}
+	var upResp struct {
+		Media state.MessageMedia `json:"media"`
+	}
+	_ = json.Unmarshal(upRec.Body.Bytes(), &upResp)
+	if upResp.Media.ID == "" {
+		t.Fatalf("expected media id, got %s", upRec.Body.String())
+	}
+
+	// 4. POST /api/bots/a/message with mediaIds only
+	msgReq := httptest.NewRequest(http.MethodPost, "/api/bots/a/message", strings.NewReader(fmt.Sprintf(`{"message":"","mediaIds":["%s"]}`, upResp.Media.ID)))
+	msgReq.Host = "127.0.0.1:3789"
+	msgReq.Header.Set("Origin", "http://127.0.0.1:3789")
+	msgRec := httptest.NewRecorder()
+	srv.srv.Handler.ServeHTTP(msgRec, msgReq)
+	if msgRec.Code != http.StatusOK {
+		t.Fatalf("POST message with mediaIds failed: %d %s", msgRec.Code, msgRec.Body.String())
+	}
+}
+
+type stubHTTPTestHarness struct{}
+
+func (s *stubHTTPTestHarness) Kind() string                                     { return "stub" }
+func (s *stubHTTPTestHarness) Label() string                                    { return "Stub" }
+func (s *stubHTTPTestHarness) Models(context.Context) ([]string, error)         { return nil, nil }
+func (s *stubHTTPTestHarness) Close()                                           {}
+func (s *stubHTTPTestHarness) RunTurn(_ context.Context, o harness.RunOptions) (*harness.TurnResult, error) {
+	return &harness.TurnResult{BotID: o.Bot.ID, SessionID: "s1", Text: "ok"}, nil
 }

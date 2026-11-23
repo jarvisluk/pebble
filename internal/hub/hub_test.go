@@ -1291,3 +1291,160 @@ func TestSendOutboundMessageBackfillsMeta(t *testing.T) {
 	}
 }
 
+type fakeCmdHarness struct {
+	cmds  []harness.SlashCommand
+	onRun func(context.Context, harness.RunOptions) (*harness.TurnResult, error)
+}
+
+func (f *fakeCmdHarness) Kind() string                             { return "fake" }
+func (f *fakeCmdHarness) Label() string                            { return "Fake" }
+func (f *fakeCmdHarness) Models(context.Context) ([]string, error) { return nil, nil }
+func (f *fakeCmdHarness) Close()                                   {}
+func (f *fakeCmdHarness) RunTurn(ctx context.Context, opts harness.RunOptions) (*harness.TurnResult, error) {
+	return f.onRun(ctx, opts)
+}
+func (f *fakeCmdHarness) ListCommands(_ context.Context, _ config.BotConfig) ([]harness.SlashCommand, error) {
+	return f.cmds, nil
+}
+
+func TestSlashPassthroughCommandsMentionsAndAttachments(t *testing.T) {
+	tmp := t.TempDir()
+	ws := filepath.Join(tmp, "ws-alpha")
+	shared := filepath.Join(tmp, "_shared")
+	if err := os.MkdirAll(ws, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(shared, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(shared, "USER.md"), []byte("user"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(shared, filepath.Join(ws, "_shared")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(ws, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ws, ".git", "HEAD"), []byte("ref: refs/heads/main"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ws, "README.md"), []byte("# readme"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	store, _ := state.NewStore(filepath.Join(tmp, "sessions.json"))
+	msgStore, _ := state.NewMessageStore(filepath.Join(tmp, "messages"))
+	defer store.Close()
+
+	var gotPrompt string
+	var gotAtts []harness.Attachment
+	reg := harness.NewRegistry()
+	reg.Register(&fakeCmdHarness{
+		onRun: func(_ context.Context, opts harness.RunOptions) (*harness.TurnResult, error) {
+			gotPrompt = opts.Prompt
+			gotAtts = opts.Attachments
+			return &harness.TurnResult{BotID: opts.Bot.ID, SessionID: "s1", Text: "ok"}, nil
+		},
+		cmds: []harness.SlashCommand{
+			{Name: "compact", Description: "compact ctx", Source: "harness"},
+			{Name: "status", Description: "harness status", Source: "harness"},
+		},
+	})
+
+	h := New(&config.HubConfig{
+		SharedDir:   shared,
+		StateFile:   filepath.Join(tmp, "sessions.json"),
+		MessagesDir: filepath.Join(tmp, "messages"),
+		Bots: []config.BotConfig{
+			{ID: "alpha", Name: "Alpha", Workspace: ws, Harness: "fake"},
+			{ID: "beta", Name: "Beta", Workspace: filepath.Join(tmp, "ws-beta"), Harness: "fake"},
+		},
+	}, store, msgStore, reg)
+	defer h.Close()
+
+	// Seed an archived session so buildTurnPrompt would normally prepend [System Note: ...] on next turn.
+	if _, err := h.HandleInput(context.Background(), "alpha", "warmup", SendOptions{Source: "web"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := h.ResetSession("alpha"); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Slash command prompt must not be prefixed with [System Note: ...]
+	if _, err := h.HandleInput(context.Background(), "alpha", "/compact now", SendOptions{Source: "web"}); err != nil {
+		t.Fatal(err)
+	}
+	if gotPrompt != "/compact now" {
+		t.Fatalf("expected slash prompt to pass through verbatim, got %q", gotPrompt)
+	}
+
+	// 2. ListBotCommands merges harness + hub and keeps hub definition for /status
+	cmds, err := h.ListBotCommands(context.Background(), "alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundCompact := false
+	statusSource := ""
+	for _, c := range cmds {
+		if c.Name == "compact" && c.Source == "harness" {
+			foundCompact = true
+		}
+		if c.Name == "status" {
+			statusSource = c.Source
+		}
+	}
+	if !foundCompact || statusSource != "hub" {
+		t.Fatalf("unexpected commands: %+v", cmds)
+	}
+
+	// 3. ListBotMentions includes beta bot, README.md, _shared/USER.md, skips .git
+	mentions, err := h.ListBotMentions(context.Background(), "alpha", "", 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var hasBeta, hasReadme, hasSharedUser, hasGit bool
+	for _, m := range mentions {
+		if m.Kind == "bot" && m.Value == "beta" {
+			hasBeta = true
+		}
+		if m.Kind == "file" && m.Value == "README.md" {
+			hasReadme = true
+		}
+		if m.Kind == "file" && m.Value == "_shared/USER.md" {
+			hasSharedUser = true
+		}
+		if strings.Contains(m.Value, ".git") {
+			hasGit = true
+		}
+	}
+	if !hasBeta || !hasReadme || !hasSharedUser || hasGit {
+		t.Fatalf("unexpected mentions: beta=%v readme=%v shared=%v git=%v items=%+v", hasBeta, hasReadme, hasSharedUser, hasGit, mentions)
+	}
+
+	// 4. SaveInboundAttachment + empty text send with MediaIDs
+	att, err := h.SaveInboundAttachment("alpha", "note.txt", []byte("hello world"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(att.WorkspacePath, ".uploads/") {
+		t.Fatalf("unexpected workspacePath: %q", att.WorkspacePath)
+	}
+	if _, err := h.HandleInput(context.Background(), "alpha", "", SendOptions{Source: "web", MediaIDs: []string{att.Media.ID}}); err != nil {
+		t.Fatal(err)
+	}
+	if len(gotAtts) != 1 || gotAtts[0].ID != att.Media.ID {
+		t.Fatalf("expected attachment forwarded to harness, got %+v", gotAtts)
+	}
+	msgs, _ := h.Messages("alpha", 10)
+	var sawUserMedia bool
+	for _, m := range msgs {
+		if m.Role == "user" && len(m.Media) == 1 && m.Media[0].ID == att.Media.ID {
+			sawUserMedia = true
+		}
+	}
+	if !sawUserMedia {
+		t.Fatalf("expected user message to persist attachment media, got %+v", msgs)
+	}
+}
+

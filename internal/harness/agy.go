@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"bot-hub/internal/config"
 )
 
 // AgyHarness keeps one long-lived Antigravity CLI (`agy`) process per bot,
@@ -79,6 +81,23 @@ func resolveAgyBin() string {
 
 func (h *AgyHarness) Kind() string  { return "agy" }
 func (h *AgyHarness) Label() string { return "Antigravity CLI" }
+
+func (h *AgyHarness) ListCommands(_ context.Context, bot config.BotConfig) ([]SlashCommand, error) {
+	builtins := []SlashCommand{
+		{Name: "compact", Description: "压缩当前会话上下文", Source: "harness"},
+		{Name: "plan", Description: "切换计划模式", Source: "harness"},
+		{Name: "clear", Description: "清空会话上下文", Source: "harness"},
+	}
+	var local []SlashCommand
+	if bot.Workspace != "" {
+		local = append(local, scanMarkdownCommands(filepath.Join(bot.Workspace, ".agents", "workflows"), "workflow")...)
+		local = append(local, scanSkillDirs(filepath.Join(bot.Workspace, ".agents", "skills"))...)
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		local = append(local, scanSkillDirs(filepath.Join(home, ".gemini", "config", "skills"))...)
+	}
+	return mergeSlashCommands(builtins, local), nil
+}
 
 // Models lists model slugs from `agy models` (cached).
 func (h *AgyHarness) Models(ctx context.Context) ([]string, error) {
@@ -261,7 +280,7 @@ func (h *AgyHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnResult,
 	}
 	err = p.send(map[string]any{
 		"event":   "user",
-		"message": map[string]any{"content": opts.Prompt},
+		"message": map[string]any{"content": AppendAttachmentContext(opts.Prompt, opts.Attachments)},
 	})
 	if err != nil {
 		h.drop(bot.ID, p)

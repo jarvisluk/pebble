@@ -3,7 +3,10 @@ package harness
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"bot-hub/internal/config"
@@ -56,9 +59,31 @@ type QuestionResponse struct {
 	Message   string         `json:"message,omitempty"`
 }
 
+type SlashCommand struct {
+	Name         string `json:"name"`
+	Description  string `json:"description,omitempty"`
+	ArgumentHint string `json:"argumentHint,omitempty"`
+	Source       string `json:"source"` // "harness" | "skill" | "workflow" | "hub"
+}
+
+type AgentInfo struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+}
+
+type Attachment struct {
+	ID            string `json:"id"`
+	Kind          string `json:"kind"` // "image" | "file"
+	Name          string `json:"name"`
+	MimeType      string `json:"mimeType,omitempty"`
+	Path          string `json:"path"`
+	WorkspacePath string `json:"workspacePath,omitempty"`
+}
+
 type RunOptions struct {
 	Bot                      config.BotConfig
 	Prompt                   string
+	Attachments              []Attachment
 	SessionID                string
 	Ephemeral                bool
 	PlatformInstructionsPath string
@@ -83,10 +108,185 @@ type Harness interface {
 	Close()
 }
 
+// CommandLister is optionally implemented by harnesses that expose slash commands or skills.
+type CommandLister interface {
+	ListCommands(ctx context.Context, bot config.BotConfig) ([]SlashCommand, error)
+}
+
+// AgentLister is optionally implemented by harnesses that expose subagents.
+type AgentLister interface {
+	ListAgents(ctx context.Context, bot config.BotConfig) ([]AgentInfo, error)
+}
+
 // Reloader is optionally implemented by harnesses whose cached runtime process
 // or catalog should be restarted after CLI model/provider changes.
 type Reloader interface {
 	Reload()
+}
+
+// ParseSlashCommand extracts a leading "/<name> [args]" from the first line of prompt.
+func ParseSlashCommand(prompt string) (name, args string, ok bool) {
+	trimmed := strings.TrimSpace(prompt)
+	if !strings.HasPrefix(trimmed, "/") || len(trimmed) < 2 {
+		return "", "", false
+	}
+	rest := trimmed[1:]
+	if rest[0] == ' ' || rest[0] == '\t' || rest[0] == '\n' || rest[0] == '/' {
+		return "", "", false
+	}
+	idx := strings.IndexAny(rest, " \t\r\n")
+	if idx < 0 {
+		return rest, "", true
+	}
+	return rest[:idx], strings.TrimSpace(rest[idx+1:]), true
+}
+
+// AppendAttachmentContext appends workspace paths for attached files so any harness
+// can read them directly from disk.
+func AppendAttachmentContext(prompt string, atts []Attachment) string {
+	trimmed := strings.TrimSpace(prompt)
+	if len(atts) == 0 {
+		return prompt
+	}
+	if trimmed == "" {
+		trimmed = "请查看附件。"
+	}
+	var paths []string
+	for _, a := range atts {
+		p := a.WorkspacePath
+		if p == "" {
+			p = a.Path
+		}
+		if p != "" {
+			paths = append(paths, p)
+		}
+	}
+	if len(paths) == 0 {
+		return trimmed
+	}
+	return fmt.Sprintf("%s\n\n[Attached files in workspace: %s]", trimmed, strings.Join(paths, ", "))
+}
+
+// parseFrontmatter extracts name and description from YAML frontmatter if present.
+func parseFrontmatter(content string) (name, desc string) {
+	s := strings.TrimPrefix(content, "\ufeff")
+	if !strings.HasPrefix(s, "---") {
+		return "", ""
+	}
+	rest := s[3:]
+	if strings.HasPrefix(rest, "\r\n") {
+		rest = rest[2:]
+	} else if strings.HasPrefix(rest, "\n") {
+		rest = rest[1:]
+	} else {
+		return "", ""
+	}
+	end := strings.Index(rest, "\n---")
+	if end < 0 {
+		return "", ""
+	}
+	block := rest[:end]
+	for _, line := range strings.Split(block, "\n") {
+		line = strings.TrimSpace(line)
+		if k, v, ok := strings.Cut(line, ":"); ok {
+			key := strings.TrimSpace(k)
+			val := strings.TrimSpace(v)
+			val = strings.Trim(val, `"'`)
+			switch key {
+			case "name":
+				name = val
+			case "description":
+				desc = val
+			}
+		}
+	}
+	return name, desc
+}
+
+// scanMarkdownCommands scans top-level *.md files in dir as slash commands.
+func scanMarkdownCommands(dir, source string) []SlashCommand {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var out []SlashCommand
+	for _, ent := range entries {
+		if ent.IsDir() || !strings.HasSuffix(strings.ToLower(ent.Name()), ".md") {
+			continue
+		}
+		base := strings.TrimSuffix(ent.Name(), filepath.Ext(ent.Name()))
+		if base == "" || strings.HasPrefix(base, ".") {
+			continue
+		}
+		var desc string
+		if raw, err := os.ReadFile(filepath.Join(dir, ent.Name())); err == nil {
+			n, d := parseFrontmatter(string(raw))
+			if n != "" {
+				base = n
+			}
+			desc = d
+		}
+		out = append(out, SlashCommand{
+			Name:        base,
+			Description: desc,
+			Source:      source,
+		})
+	}
+	return out
+}
+
+// scanSkillDirs scans */SKILL.md inside dir as skill commands.
+func scanSkillDirs(dir string) []SlashCommand {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var out []SlashCommand
+	for _, ent := range entries {
+		if !ent.IsDir() || strings.HasPrefix(ent.Name(), ".") {
+			continue
+		}
+		skillPath := filepath.Join(dir, ent.Name(), "SKILL.md")
+		raw, err := os.ReadFile(skillPath)
+		if err != nil {
+			continue
+		}
+		name, desc := parseFrontmatter(string(raw))
+		if name == "" {
+			name = ent.Name()
+		}
+		out = append(out, SlashCommand{
+			Name:        name,
+			Description: desc,
+			Source:      "skill",
+		})
+	}
+	return out
+}
+
+func mergeSlashCommands(groups ...[]SlashCommand) []SlashCommand {
+	seen := make(map[string]SlashCommand)
+	var order []string
+	for _, g := range groups {
+		for _, c := range g {
+			name := strings.TrimPrefix(strings.TrimSpace(c.Name), "/")
+			if name == "" {
+				continue
+			}
+			c.Name = name
+			if prev, exists := seen[name]; !exists {
+				seen[name] = c
+				order = append(order, name)
+			} else if prev.Description == "" && c.Description != "" {
+				seen[name] = c
+			}
+		}
+	}
+	out := make([]SlashCommand, 0, len(order))
+	for _, name := range order {
+		out = append(out, seen[name])
+	}
+	return out
 }
 
 type Registry struct {

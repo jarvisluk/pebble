@@ -458,9 +458,27 @@ final class HubStore {
         return data
     }
 
-    func sendMessage(_ botId: String, _ text: String) async throws {
-        let d: TextResp = try await api.call("/api/bots/\(enc(botId))/message", method: "POST",
-                                             body: ["message": text, "source": "mobile"])
+    func fetchCommands(_ botId: String) async throws -> [SlashCommandItem] {
+        let resp: CommandsResp = try await api.call("/api/bots/\(enc(botId))/commands")
+        return resp.commands ?? []
+    }
+
+    func fetchMentions(_ botId: String, query: String) async throws -> [MentionCandidate] {
+        let q = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
+        let resp: MentionsResp = try await api.call("/api/bots/\(enc(botId))/mentions?q=\(q)")
+        return resp.items ?? []
+    }
+
+    func uploadAttachment(_ botId: String, data: Data, filename: String, mimeType: String) async throws -> InboundAttachmentResponse {
+        try await api.uploadAttachment("/api/bots/\(enc(botId))/attachments", data: data, filename: filename, mimeType: mimeType)
+    }
+
+    func sendMessage(_ botId: String, _ text: String, mediaIds: [String] = []) async throws {
+        var body: [String: Any] = ["message": text, "source": "mobile"]
+        if !mediaIds.isEmpty {
+            body["mediaIds"] = mediaIds
+        }
+        let d: TextResp = try await api.call("/api/bots/\(enc(botId))/message", method: "POST", body: body)
         if ["/bots", "/status", "/reset"].contains(text), let out = d.text, !out.isEmpty {
             pushIncoming(botId, ChatMessage(id: "cmd_\(Int(Date().timeIntervalSince1970 * 1000))", botId: botId,
                                             role: "system", from: "command", text: out,
