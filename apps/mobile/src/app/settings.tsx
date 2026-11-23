@@ -101,6 +101,7 @@ export default function SettingsScreen() {
   const [sharedUserMd, setSharedUserMd] = useState('');
   const [sharedUserMdTouched, setSharedUserMdTouched] = useState(false);
   const [botDrafts, setBotDrafts] = useState<Record<string, BotDraft>>({});
+  const [touchedBots, setTouchedBots] = useState<Set<string>>(() => new Set());
   const [loadingModelsFor, setLoadingModelsFor] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [busyAction, setBusyAction] = useState('');
@@ -175,7 +176,7 @@ export default function SettingsScreen() {
       setDefaultHarnessDraft(settings.defaultHarness || settings.harnesses?.[0]?.id || 'opencode');
     }
     if (settings && !defaultModelTouched) {
-      setDefaultModel(settings.defaultModel || '');
+      setDefaultModel((settings.defaultModel || '').trim());
     }
     if (settings && !deskTouched) {
       setDeskHarness(settings.desktopHarness || '');
@@ -191,24 +192,34 @@ export default function SettingsScreen() {
     if (settings && !sharedUserMdTouched) {
       setSharedUserMd(settings.sharedUserMd || '');
     }
-  }, [defaultHarnessTouched, defaultModelTouched, defaultModelsTouched, settings, sharedUserMdTouched]);
+  }, [defaultHarnessTouched, defaultModelTouched, defaultModelsTouched, deskTouched, settings, sharedUserMdTouched]);
 
   useEffect(() => {
     setBotDrafts((prev) => {
       let changed = false;
-      const next = { ...prev };
+      const next: Record<string, BotDraft> = {};
+      const validIds = new Set(bots.map((b) => b.id));
+      for (const id of Object.keys(prev)) {
+        if (!validIds.has(id)) changed = true;
+      }
       for (const b of bots) {
-        if (!next[b.id]) {
-          next[b.id] = {
-            harness: b.harness,
-            model: b.modelInherited ? '' : b.model || '',
-          };
+        if (touchedBots.has(b.id) && prev[b.id]) {
+          next[b.id] = prev[b.id];
+          continue;
+        }
+        const target = {
+          harness: b.harness,
+          model: (b.modelInherited ? '' : b.model || '').trim(),
+        };
+        const cur = prev[b.id];
+        if (!cur || cur.harness !== target.harness || cur.model !== target.model) {
           changed = true;
         }
+        next[b.id] = target;
       }
       return changed ? next : prev;
     });
-  }, [bots]);
+  }, [bots, touchedBots]);
 
   const harnessOptions = useMemo(() => {
     if (settings?.harnesses?.length) return settings.harnesses;
@@ -253,24 +264,26 @@ export default function SettingsScreen() {
   const botUpdates = useMemo(() => {
     const out: { id: string; harness: string; model: string }[] = [];
     for (const b of bots) {
+      if (!touchedBots.has(b.id)) continue;
       const draft = botDrafts[b.id];
       if (!draft) continue;
-      const origModel = b.modelInherited ? '' : b.model || '';
+      const origModel = (b.modelInherited ? '' : b.model || '').trim();
       if (draft.harness !== b.harness || draft.model.trim() !== origModel) {
         out.push({ id: b.id, harness: draft.harness, model: draft.model.trim() });
       }
     }
     return out;
-  }, [botDrafts, bots]);
+  }, [botDrafts, bots, touchedBots]);
 
   const cleanedDraftPerHarness = useMemo(() => cleanModelsMap(defaultModelsDraft), [defaultModelsDraft]);
   const cleanedBasePerHarness = useMemo(() => cleanModelsMap(settings?.defaultModels), [settings?.defaultModels]);
 
-  const settingsChanged =
-    defaultHarnessDraft !== (settings?.defaultHarness || harnessOptions[0]?.id || 'opencode') ||
-    defaultModel.trim() !== (settings?.defaultModel || '') ||
-    !mapsEqual(cleanedDraftPerHarness, cleanedBasePerHarness) ||
-    sharedUserMd.replace(/\s+$/, '') !== (settings?.sharedUserMd || '').replace(/\s+$/, '');
+  const settingsChanged = Boolean(settings) && (
+    (defaultHarnessTouched && defaultHarnessDraft !== (settings?.defaultHarness || harnessOptions[0]?.id || 'opencode')) ||
+    (defaultModelTouched && defaultModel.trim() !== (settings?.defaultModel || '').trim()) ||
+    (defaultModelsTouched && !mapsEqual(cleanedDraftPerHarness, cleanedBasePerHarness)) ||
+    (sharedUserMdTouched && sharedUserMd.replace(/\s+$/, '') !== (settings?.sharedUserMd || '').replace(/\s+$/, ''))
+  );
   const dirty = settingsChanged || botUpdates.length > 0;
 
   const doCloseSheet = useCallback(() => {
@@ -298,6 +311,7 @@ export default function SettingsScreen() {
       setDefaultModelTouched(false);
       setDefaultModelsTouched(false);
       setSharedUserMdTouched(false);
+      setTouchedBots(new Set());
       setBotDrafts({});
       setSavedMsg(t('settingsSaved'));
       if (closeAfter) {
@@ -633,6 +647,7 @@ export default function SettingsScreen() {
                       <TextInput
                         value={curVal}
                         onChangeText={(val) => {
+                          if (val === curVal) return;
                           setDefaultModelsTouched(true);
                           setSavedMsg('');
                           setDefaultModelsDraft((prev) => ({ ...prev, [h.id]: val }));
@@ -649,6 +664,7 @@ export default function SettingsScreen() {
                             <Pressable
                               key={m}
                               onPress={() => {
+                                if (m === curVal) return;
                                 setDefaultModelsTouched(true);
                                 setSavedMsg('');
                                 setDefaultModelsDraft((prev) => ({ ...prev, [h.id]: m }));
@@ -706,6 +722,7 @@ export default function SettingsScreen() {
                 <Pressable
                   key={h.id}
                   onPress={() => {
+                    if (h.id === defaultHarnessDraft) return;
                     setDefaultHarnessDraft(h.id);
                     setDefaultHarnessTouched(true);
                     setSavedMsg('');
@@ -724,6 +741,7 @@ export default function SettingsScreen() {
             <TextInput
               value={defaultModel}
               onChangeText={(val) => {
+                if (val === defaultModel) return;
                 setDefaultModelTouched(true);
                 setSavedMsg('');
                 setDefaultModel(val);
@@ -759,6 +777,7 @@ export default function SettingsScreen() {
                       <TextInput
                         value={curHVal}
                         onChangeText={(val) => {
+                          if (val === curHVal) return;
                           setDefaultModelsTouched(true);
                           setSavedMsg('');
                           setDefaultModelsDraft((prev) => ({ ...prev, [h.id]: val }));
@@ -810,6 +829,7 @@ export default function SettingsScreen() {
                   <Pressable
                     key={m}
                     onPress={() => {
+                      if (m === defaultModel) return;
                       setDefaultModelTouched(true);
                       setSavedMsg('');
                       setDefaultModel(m);
@@ -867,7 +887,13 @@ export default function SettingsScreen() {
                             <Pressable
                               key={h.id}
                               onPress={() => {
+                                if (h.id === draft.harness) return;
                                 setSavedMsg('');
+                                setTouchedBots((prev) => {
+                                  const next = new Set(prev);
+                                  next.add(b.id);
+                                  return next;
+                                });
                                 setBotDrafts((prev) => ({
                                   ...prev,
                                   [b.id]: { ...draft, harness: h.id },
@@ -890,7 +916,13 @@ export default function SettingsScreen() {
                         <TextInput
                           value={draft.model}
                           onChangeText={(val) => {
+                            if (val === draft.model) return;
                             setSavedMsg('');
+                            setTouchedBots((prev) => {
+                              const next = new Set(prev);
+                              next.add(b.id);
+                              return next;
+                            });
                             setBotDrafts((prev) => ({
                               ...prev,
                               [b.id]: { ...draft, model: val },
@@ -921,10 +953,17 @@ export default function SettingsScreen() {
                             <Pressable
                               key={m}
                               onPress={() => {
+                                const nextModel = draft.model.trim() === m ? '' : m;
+                                if (nextModel === draft.model) return;
                                 setSavedMsg('');
+                                setTouchedBots((prev) => {
+                                  const next = new Set(prev);
+                                  next.add(b.id);
+                                  return next;
+                                });
                                 setBotDrafts((prev) => ({
                                   ...prev,
-                                  [b.id]: { ...draft, model: draft.model.trim() === m ? '' : m },
+                                  [b.id]: { ...draft, model: nextModel },
                                 }));
                               }}
                               style={[
@@ -959,6 +998,7 @@ export default function SettingsScreen() {
             <TextInput
               value={sharedUserMd}
               onChangeText={(val) => {
+                if (val === sharedUserMd) return;
                 setSharedUserMdTouched(true);
                 setSavedMsg('');
                 setSharedUserMd(val);
