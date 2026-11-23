@@ -569,40 +569,6 @@ export default function BotChatScreen() {
     );
   };
 
-  const suggestions = [
-    {
-      title: t('sugAskTitle'),
-      sub: t('sugAskSub'),
-      bg: theme.pink,
-      ink: theme.pinkInk,
-      onPress: () => void handleSendText(t('sugAskTitle'), false),
-    },
-    {
-      title: t('statusLabel'),
-      sub: t('sugStatusSub'),
-      bg: theme.lilac,
-      ink: theme.lilacInk,
-      onPress: () => void handleSendText('/status', false),
-    },
-    {
-      title: t('sugCollabTitle'),
-      sub: '/ask ',
-      bg: theme.sage,
-      ink: theme.sageInk,
-      onPress: () => {
-        setInput('/ask ');
-        inputRef.current?.focus();
-      },
-    },
-    {
-      title: t('sugListTitle'),
-      sub: '/bots',
-      bg: botPal.soft,
-      ink: botPal.accent,
-      onPress: () => void handleSendText('/bots', false),
-    },
-  ];
-
   useEffect(() => {
     if (!collabPeerId || !botId || !baseURL) return;
     let cancelled = false;
@@ -938,21 +904,6 @@ export default function BotChatScreen() {
               <Text style={[styles.emptyDesc, { color: theme.text2 }]}>
                 {bot?.description || t('emptyChatHint')}
               </Text>
-              <View style={styles.suggestGrid}>
-                {suggestions.map((s) => (
-                  <Pressable
-                    key={s.title}
-                    onPress={s.onPress}
-                    style={({ pressed }) => [
-                      styles.suggestCard,
-                      { backgroundColor: s.bg, opacity: pressed ? 0.85 : 1 },
-                    ]}
-                  >
-                    <Text style={[styles.suggestTitle, { color: s.ink }]}>{s.title}</Text>
-                    <Text style={[styles.suggestSub, { color: theme.text2 }]}>{s.sub}</Text>
-                  </Pressable>
-                ))}
-              </View>
             </View>
           }
           ListFooterComponent={

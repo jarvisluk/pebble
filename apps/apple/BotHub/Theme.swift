@@ -222,8 +222,21 @@ private func pebbleParams(for id: String) -> PebbleParams {
     )
 }
 
-private func drawPebble(in ctx: inout GraphicsContext, size: CGSize, params P: PebbleParams, color: Color, eye: Color, t: Double, busy: Bool) {
-    let k = size.width / 100.0
+private struct PebblePressFX {
+    var sx: Double
+    var sy: Double
+    var dy: Double
+    var eye: Double
+}
+
+private func drawPebble(in ctx: inout GraphicsContext, size: CGSize, params P: PebbleParams, color: Color, eye: Color, t: Double, busy: Bool, fx: PebblePressFX? = nil) {
+    let k = min(size.width, size.height) / 100.0
+    if let fx {
+        ctx.translateBy(x: 0, y: fx.dy * k)
+        ctx.translateBy(x: 50 * k, y: 90 * k)
+        ctx.scaleBy(x: fx.sx, y: fx.sy)
+        ctx.translateBy(x: -50 * k, y: -90 * k)
+    }
     let circMap: [Int: Double] = [3: 54, 4: 49, 5: 46, 6: 45]
     let circ = circMap[P.n] ?? 49
     let breathe = 1.0 + 0.018 * sin(t * P.breath * .pi * (busy ? 2.6 : 1.0))
@@ -305,7 +318,7 @@ private func drawPebble(in ctx: inout GraphicsContext, size: CGSize, params P: P
     }
 
     let ew = 5.0
-    let eh = 9.5 * max(0.12, blink)
+    let eh = 9.5 * max(0.12, blink * (fx?.eye ?? 1.0))
     let gap = 19.0
     let lean = -P.side * 14.0
     let ex = 50.0 + lx
@@ -330,20 +343,78 @@ struct BotAvatar: View {
     var avatar: String? = nil
     var color: String? = nil
     var busy = false
+    var bounceTrigger: Int = 0
     @State private var pulse = false
     @State private var startTime = Date()
+    @State private var pressDown = false
+    @State private var pressT0: TimeInterval = 0
+    @State private var pressT1: TimeInterval = 0
+    @State private var pressActive = false
+    @State private var clearTask: Task<Void, Never>?
+
+    private func scheduleStopPress() {
+        clearTask?.cancel()
+        clearTask = Task {
+            try? await Task.sleep(for: .seconds(1.5))
+            if !Task.isCancelled && !pressDown {
+                pressActive = false
+            }
+        }
+    }
 
     var body: some View {
         let blob = Color(hex: botColorHex(id, index, custom: color))
         let seed = resolvePebbleSeed(id: id, avatar: avatar)
         let params = pebbleParams(for: seed)
-        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: reduceMotion)) { timeline in
+        TimelineView(.animation(minimumInterval: pressActive ? (1.0 / 60.0) : (1.0 / 30.0), paused: reduceMotion && !pressActive)) { timeline in
             let t = reduceMotion ? 0.0 : max(0.0, timeline.date.timeIntervalSince(startTime))
+            let fx: PebblePressFX? = {
+                guard pressActive else { return nil }
+                let now = timeline.date.timeIntervalSinceReferenceDate
+                let d = pressDown ? min(1.0, max(0.0, (now - pressT0) / 0.08)) : 0.0
+                let r = pressDown ? 0.0 : max(0.0, now - pressT1)
+                if !pressDown && r > 1.4 { return nil }
+                let b = pressDown ? 0.0 : exp(-5.0 * r) * sin(r * 22.0)
+                let hop = (!pressDown && r < 0.32) ? sin((r / 0.32) * .pi) : 0.0
+                let eye = pressDown ? 0.0 : (r < 0.14 ? r / 0.14 : 1.0)
+                return PebblePressFX(
+                    sx: 1.0 + 0.08 * d - 0.07 * b,
+                    sy: 1.0 - 0.10 * d + 0.09 * b,
+                    dy: -5.0 * hop,
+                    eye: eye
+                )
+            }()
             Canvas { ctx, sz in
-                drawPebble(in: &ctx, size: sz, params: params, color: blob, eye: p.eye, t: t, busy: busy)
+                drawPebble(in: &ctx, size: sz, params: params, color: blob, eye: p.eye, t: t, busy: busy, fx: fx)
             }
         }
         .frame(width: size, height: size)
+        .contentShape(Rectangle())
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { _ in
+                    if !pressDown {
+                        clearTask?.cancel()
+                        pressDown = true
+                        pressT0 = Date().timeIntervalSinceReferenceDate
+                        pressActive = true
+                    }
+                }
+                .onEnded { _ in
+                    if pressDown {
+                        pressDown = false
+                        pressT1 = Date().timeIntervalSinceReferenceDate
+                        scheduleStopPress()
+                    }
+                }
+        )
+        .onChange(of: bounceTrigger) { _, _ in
+            clearTask?.cancel()
+            pressDown = false
+            pressT1 = Date().timeIntervalSinceReferenceDate
+            pressActive = true
+            scheduleStopPress()
+        }
         .overlay(alignment: .bottomTrailing) {
             if busy {
                 let d = max(9, (size * 0.24).rounded())
@@ -394,15 +465,53 @@ struct StatusText: View {
 }
 
 extension View {
-    /// macOS 表单用分组样式，与 iOS 观感一致。
-    /// 原生 Form/List 套 DESIGN 页面底色与卡片圆角。
+    /// 原生 Form 套 DESIGN 页面底色与卡片圆角。
     func hubForm() -> some View { modifier(HubSurface(form: true)) }
-    func hubList(sidebar: Bool = false) -> some View { modifier(HubSurface(form: false, sidebar: sidebar)) }
+
+    /// 窄宽度：insetGrouped + page 底；宽屏：系统悬浮侧栏。
+    @ViewBuilder
+    func hubColumnList(compact: Bool, page: Color) -> some View {
+        if compact {
+            self.listStyle(.insetGrouped).scrollContentBackground(.hidden).background(page)
+        } else {
+            self.listStyle(.sidebar)
+        }
+    }
 
     func monoInput() -> some View {
         self.font(.system(size: 15, design: .monospaced))
             .autocorrectionDisabled()
             .textInputAutocapitalization(.never)
+    }
+
+    @ViewBuilder
+    func composerGlassButton() -> some View {
+        let base = self.buttonBorderShape(.circle)
+        if #available(iOS 26.0, *) {
+            base.buttonStyle(.glass)
+        } else {
+            base.buttonStyle(.bordered)
+        }
+    }
+
+    @ViewBuilder
+    func composerGlassField() -> some View {
+        let shape = RoundedRectangle(cornerRadius: 22, style: .continuous)
+        if #available(iOS 26.0, *) {
+            self.glassEffect(.regular.interactive(), in: shape)
+        } else {
+            self.background(.regularMaterial, in: shape)
+        }
+    }
+
+    @ViewBuilder
+    func composerSendButton(accent: Color) -> some View {
+        let base = self.buttonBorderShape(.circle).tint(accent)
+        if #available(iOS 26.0, *) {
+            base.buttonStyle(.glassProminent)
+        } else {
+            base.buttonStyle(.borderedProminent)
+        }
     }
 }
 
@@ -522,12 +631,11 @@ struct BotAppearancePicker: View {
 struct HubSurface: ViewModifier {
     @Environment(\.palette) private var p
     var form: Bool
-    var sidebar = false
 
     func body(content: Content) -> some View {
         content
             .scrollContentBackground(.hidden)
-            .background(sidebar ? p.card : p.page)
+            .background(p.page)
             .font(.system(size: 16))
     }
 }

@@ -156,7 +156,7 @@ function polyPath(V: Array<[number, number]>, c: number): string {
   return d + 'Z';
 }
 
-export function pebbleFrame(P: PebbleParams, t: number, busy: boolean): PebbleFrameData {
+export function pebbleFrame(P: PebbleParams, t: number, busy: boolean, eyeOpen = 1): PebbleFrameData {
   const breathe = 1 + 0.018 * Math.sin(t * P.breath * Math.PI * (busy ? 2.6 : 1));
   const bobY = Math.sin(t * 1.2 + P.bob) * (busy ? 1.2 : 0.6);
   const asym = 0.35;
@@ -200,7 +200,7 @@ export function pebbleFrame(P: PebbleParams, t: number, busy: boolean): PebbleFr
   }
 
   const w = 5;
-  const h = 9.5 * Math.max(0.12, blink);
+  const h = 9.5 * Math.max(0.12, blink * eyeOpen);
   const gap = 19;
   const lean = -P.side * 14;
   const ex = 50 + lx;
