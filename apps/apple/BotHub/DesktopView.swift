@@ -190,9 +190,9 @@ struct DesktopView: View {
                         Text(hub.t("deskChatSidebar"))
                             .font(.system(size: 13, weight: .semibold))
                     }
-                    .foregroundStyle(showChat ? p.accentText : pillText)
+                    .foregroundStyle(showChat ? Color(hex: "#171717") : pillText)
                     .padding(.horizontal, 12).frame(height: 32)
-                    .background(showChat ? p.accent : pillBg, in: Capsule())
+                    .background(showChat ? pillText : pillBg, in: Capsule())
                 }
             }
             .padding(.horizontal, 12)
