@@ -128,30 +128,11 @@ export default function SettingsScreen() {
     }
   };
 
-  const autoLoadedRef = useRef<Set<string>>(new Set());
-
   useEffect(() => {
     loadSettings().catch(() => {});
     refreshBots().catch(() => {});
     void loadGlobalMemories('');
   }, [loadSettings, refreshBots]);
-
-  useEffect(() => {
-    const needed = new Set<string>();
-    if (primaryHarness) needed.add(primaryHarness);
-    for (const b of bots) {
-      const h = botDrafts[b.id]?.harness || b.harness;
-      if (h) needed.add(h);
-    }
-    if (perHarnessExpanded) {
-      for (const h of harnessOptions) needed.add(h.id);
-    }
-    for (const hId of needed) {
-      if ((models[hId] || []).length > 0 || autoLoadedRef.current.has(hId)) continue;
-      autoLoadedRef.current.add(hId);
-      loadModels(hId).catch(() => {});
-    }
-  }, [botDrafts, bots, harnessOptions, loadModels, models, perHarnessExpanded, primaryHarness]);
 
   useEffect(() => {
     if (settings && !defaultModelTouched) {
@@ -200,6 +181,25 @@ export default function SettingsScreen() {
   }, [settings]);
 
   const primaryHarness = harnessOptions[0]?.id || 'opencode';
+
+  const autoLoadedRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    const needed = new Set<string>();
+    if (primaryHarness) needed.add(primaryHarness);
+    for (const b of bots) {
+      const h = botDrafts[b.id]?.harness || b.harness;
+      if (h) needed.add(h);
+    }
+    if (perHarnessExpanded) {
+      for (const h of harnessOptions) needed.add(h.id);
+    }
+    for (const hId of needed) {
+      if ((models[hId] || []).length > 0 || autoLoadedRef.current.has(hId)) continue;
+      autoLoadedRef.current.add(hId);
+      loadModels(hId).catch(() => {});
+    }
+  }, [botDrafts, bots, harnessOptions, loadModels, models, perHarnessExpanded, primaryHarness]);
 
   const connectedHarnesses = useMemo(
     () => harnessOptions.filter((h) => Boolean(h.magpie?.connected)),

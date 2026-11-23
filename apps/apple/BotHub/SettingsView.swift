@@ -345,7 +345,7 @@ struct SettingsView: View {
                     .labelsHidden()
                 Menu {
                     if cands.isEmpty {
-                        Button(loadingModelsFor == h.id ? hub.t("loading") : hub.t("optionalModels")) {
+                        Button(loadingModelsFor.contains(h.id) ? hub.t("loading") : hub.t("optionalModels")) {
                             loadCands(for: h.id)
                         }
                     } else {
