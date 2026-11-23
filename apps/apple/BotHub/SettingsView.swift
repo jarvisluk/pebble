@@ -16,7 +16,7 @@ struct SettingsView: View {
     @State private var userMd = ""
     @State private var userMdTouched = false
     @State private var drafts: [String: BotDraft] = [:]
-    @State private var loadingModelsFor = ""
+    @State private var loadingModelsFor: Set<String> = []
     @State private var saving = false
     @State private var busy = ""
     @State private var error = ""
@@ -385,35 +385,58 @@ struct SettingsView: View {
 
     // MARK: 模型
 
+    @ViewBuilder
+    private func modelMenu(for harness: String, current: String, onSelect: @escaping (String) -> Void) -> some View {
+        let cands = hub.models[harness] ?? []
+        Menu {
+            if !current.trimmingCharacters(in: .whitespaces).isEmpty {
+                Button(hub.t("clear")) { onSelect("") }
+                Divider()
+            }
+            if cands.isEmpty {
+                Button(loadingModelsFor.contains(harness) ? hub.t("loading") : hub.t("optionalModels")) {
+                    loadCands(for: harness)
+                }
+                .disabled(loadingModelsFor.contains(harness))
+            } else {
+                ForEach(Array(cands.prefix(40)), id: \.self) { m in
+                    Button(m) { onSelect(m) }
+                }
+            }
+        } label: {
+            Label(hub.t("optionalModels"), systemImage: "list.bullet").labelStyle(.iconOnly)
+        }
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .onAppear {
+            if cands.isEmpty, hub.isConnected, !harness.isEmpty {
+                loadCands(for: harness)
+            }
+        }
+    }
+
     private var defaultModelSection: some View {
-        let cands = hub.models[primaryHarness] ?? []
-        return Section(hub.t("globalDefaultModel")) {
+        Section(hub.t("globalDefaultModel")) {
             HStack {
                 TextField(hub.t("globalDefaultModel"), text: Binding(get: { defaultModel }, set: { defaultModel = $0; defaultTouched = true; saved = "" }),
                           prompt: Text("magpie/claude-sonnet-4"))
                     .monoInput()
                     .labelsHidden()
-                Menu {
-                    if cands.isEmpty {
-                        Button(loadingModelsFor == primaryHarness ? hub.t("loading") : hub.t("optionalModels")) { loadCands() }
-                    } else {
-                        ForEach(Array(cands.prefix(24)), id: \.self) { m in
-                            Button(m) { defaultModel = m; defaultTouched = true; saved = "" }
-                        }
-                    }
-                } label: {
-                    Label(hub.t("optionalModels"), systemImage: "list.bullet").labelStyle(.iconOnly)
+                modelMenu(for: primaryHarness, current: defaultModel) { m in
+                    defaultModel = m; defaultTouched = true; saved = ""
                 }
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .onAppear { if cands.isEmpty, hub.isConnected { loadCands() } }
             }
             DisclosureGroup(hub.t("perHarnessTitle"), isExpanded: $perOpen) {
                 ForEach(harnesses) { h in
-                    TextField(h.title, text: Binding(get: { perHarness[h.id] ?? "" },
-                                                    set: { perHarness[h.id] = $0; perTouched = true; saved = "" }),
-                              prompt: Text(hub.t("followGlobalPh")))
-                        .monoInput()
+                    HStack {
+                        TextField(h.title, text: Binding(get: { perHarness[h.id] ?? "" },
+                                                        set: { perHarness[h.id] = $0; perTouched = true; saved = "" }),
+                                  prompt: Text(hub.t("followGlobalPh")))
+                            .monoInput()
+                        modelMenu(for: h.id, current: perHarness[h.id] ?? "") { m in
+                            perHarness[h.id] = m; perTouched = true; saved = ""
+                        }
+                    }
                 }
             }
         }
@@ -421,11 +444,11 @@ struct SettingsView: View {
 
     private func loadCands(for harness: String? = nil) {
         let target = harness ?? primaryHarness
-        guard loadingModelsFor.isEmpty else { return }
-        loadingModelsFor = target
+        guard !target.isEmpty, !loadingModelsFor.contains(target) else { return }
+        loadingModelsFor.insert(target)
         Task {
             do { _ = try await hub.loadModels(target) } catch { self.error = errText(error, hub.t("loadModelsFailed")) }
-            loadingModelsFor = ""
+            loadingModelsFor.remove(target)
         }
     }
 
@@ -446,17 +469,25 @@ struct SettingsView: View {
                             Text("@\(b.id)").font(.system(size: 13, design: .monospaced)).foregroundStyle(.secondary)
                         }
                         Spacer()
-                        Picker(hub.t("statHarness"), selection: Binding(get: { d.harness }, set: { var n = d; n.harness = $0; drafts[b.id] = n; saved = "" })) {
+                        Picker(hub.t("statHarness"), selection: Binding(get: { d.harness }, set: {
+                            var n = d; n.harness = $0; drafts[b.id] = n; saved = ""
+                            if (hub.models[$0] ?? []).isEmpty, hub.isConnected { loadCands(for: $0) }
+                        })) {
                             if !harnesses.contains(where: { $0.id == d.harness }) { Text(d.harness.isEmpty ? "-" : d.harness).tag(d.harness) }
                             ForEach(harnesses) { Text($0.title).tag($0.id) }
                         }
                         .labelsHidden()
                         .fixedSize()
                     }
-                    TextField(hub.t("statModel"), text: Binding(get: { d.model }, set: { var n = d; n.model = $0; drafts[b.id] = n; saved = "" }),
-                              prompt: Text(ph.isEmpty ? hub.t("inheritDefaultPh") : ph))
-                        .monoInput()
-                        .labelsHidden()
+                    HStack {
+                        TextField(hub.t("statModel"), text: Binding(get: { d.model }, set: { var n = d; n.model = $0; drafts[b.id] = n; saved = "" }),
+                                  prompt: Text(ph.isEmpty ? hub.t("inheritDefaultPh") : ph))
+                            .monoInput()
+                            .labelsHidden()
+                        modelMenu(for: d.harness, current: d.model) { m in
+                            var n = d; n.model = m; drafts[b.id] = n; saved = ""
+                        }
+                    }
                 }
                 .padding(.vertical, 2)
             }

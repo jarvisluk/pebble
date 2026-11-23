@@ -13,6 +13,7 @@ struct CreateBotView: View {
     @State private var color = ""
     @State private var harness = "opencode"
     @State private var model = ""
+    @State private var loadingModels = false
     @State private var instructions = ""
     @State private var submitting = false
     @State private var err = ""
@@ -59,7 +60,30 @@ struct CreateBotView: View {
                 Picker(hub.t("harnessBackend"), selection: $harness) {
                     ForEach(harnesses) { Text($0.title).tag($0.id) }
                 }
-                TextField(hub.t("modelOptional"), text: $model, prompt: Text(ph.isEmpty ? hub.t("inheritDefaultPh") : ph)).monoInput()
+                let cands = hub.models[harness] ?? []
+                HStack(spacing: 8) {
+                    TextField(hub.t("modelOptional"), text: $model, prompt: Text(ph.isEmpty ? hub.t("inheritDefaultPh") : ph)).monoInput()
+                    Menu {
+                        if !model.trimmingCharacters(in: .whitespaces).isEmpty {
+                            Button(hub.t("clear")) { model = "" }
+                            Divider()
+                        }
+                        if cands.isEmpty {
+                            Button(loadingModels ? hub.t("loading") : hub.t("optionalModels")) {
+                                loadCands(for: harness)
+                            }
+                            .disabled(loadingModels)
+                        } else {
+                            ForEach(Array(cands.prefix(40)), id: \.self) { m in
+                                Button(m) { model = m }
+                            }
+                        }
+                    } label: {
+                        Label(hub.t("optionalModels"), systemImage: "list.bullet").labelStyle(.iconOnly)
+                    }
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                }
             }
             Section(hub.t("agentsCreateLbl")) {
                 TextField(hub.t("agentsCreateLbl"), text: $instructions, prompt: Text(hub.t("agentsCreatePh")), axis: .vertical)
@@ -73,6 +97,20 @@ struct CreateBotView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { SheetToolbar(actionTitle: hub.t("create"), loading: submitting) { create() } }
         .task { if hub.settings == nil { _ = try? await hub.loadSettings() } }
+        .task(id: harness) {
+            if hub.isConnected && (hub.models[harness] ?? []).isEmpty {
+                loadCands(for: harness)
+            }
+        }
+    }
+
+    private func loadCands(for target: String) {
+        guard !loadingModels else { return }
+        loadingModels = true
+        Task {
+            _ = try? await hub.loadModels(target)
+            loadingModels = false
+        }
     }
 
     private func create() {
