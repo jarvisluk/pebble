@@ -154,6 +154,7 @@ struct SettingsView: View {
             switch tab {
             case .general:
                 appearanceSection
+                openSourceSection
             case .models:
                 magpieSection
                 nativeCLISection
@@ -501,6 +502,17 @@ struct SettingsView: View {
                 Text(hub.t("followSystem")).tag("system")
                 Text("简体中文").tag("zh-CN")
                 Text("English").tag("en")
+            }
+        }
+    }
+
+    private var openSourceSection: some View {
+        Section(hub.t("openSourceTitle")) {
+            Text(hub.t("openSourceDesc"))
+                .font(.system(size: 14))
+                .foregroundStyle(p.text2)
+            Link(destination: URL(string: "https://github.com/jarvisluk/bot-hub")!) {
+                Label(hub.t("openSourceLinkBtn"), systemImage: "star")
             }
         }
     }

@@ -505,6 +505,7 @@ export default function SettingsScreen() {
           ) : null}
 
           {tab === 'general' && (
+          <>
           <View style={[styles.card, { backgroundColor: theme.card }]}>
             <Text style={[styles.sectionTitle, { color: theme.text }]}>{t('appearance')}</Text>
             <View style={styles.segmentRow}>
@@ -564,6 +565,18 @@ export default function SettingsScreen() {
               ))}
             </View>
           </View>
+
+          <View style={[styles.card, { backgroundColor: theme.card }]}>
+            <Text style={[styles.sectionTitle, { color: theme.text }]}>{t('openSourceTitle')}</Text>
+            <Text style={[styles.noteTxt, { color: theme.text2 }]}>{t('openSourceDesc')}</Text>
+            <Pressable
+              onPress={() => void Linking.openURL('https://github.com/jarvisluk/bot-hub')}
+              style={[styles.addBtn, { backgroundColor: theme.s1 }]}
+            >
+              <Text style={[styles.segmentTxt, { color: theme.text }]}>{t('openSourceLinkBtn')}</Text>
+            </Pressable>
+          </View>
+          </>
           )}
 
           {tab === 'remote' && (
