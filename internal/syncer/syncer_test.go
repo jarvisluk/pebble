@@ -7,11 +7,13 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"bot-hub/internal/config"
+	"bot-hub/internal/state"
 )
 
 func TestShouldSyncPathFilters(t *testing.T) {
@@ -264,5 +266,132 @@ func TestWebDAVReadOnlyAndPropfind(t *testing.T) {
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("expected 403 on read-only PUT, got %d", rec.Code)
+	}
+}
+
+func TestBidirectionalDeltaSyncWithStores(t *testing.T) {
+	primaryDir := t.TempDir()
+	standbyDir := t.TempDir()
+
+	pStore, err := state.NewStore(filepath.Join(primaryDir, "state", "sessions.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pStore.Close()
+	sStore, err := state.NewStore(filepath.Join(standbyDir, "state", "sessions.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sStore.Close()
+
+	_, _ = pStore.AppendMessage(state.ChatMessage{
+		ID:        "p_msg_1",
+		BotID:     "assistant",
+		Role:      "user",
+		Text:      "from primary",
+		CreatedAt: "2026-11-24T01:00:00Z",
+	})
+	_, _ = pStore.RecordRoutineRun(state.RoutineRun{
+		ID:         "p_run_1",
+		BotID:      "assistant",
+		RoutineID:  "check",
+		StartedAt:  "2026-11-24T01:01:00Z",
+		FinishedAt: "2026-11-24T01:01:01Z",
+	})
+
+	primaryCfg := &config.HubConfig{
+		ProjectRoot:    primaryDir,
+		SharedDir:      filepath.Join(primaryDir, "workspaces", "_shared"),
+		DefaultHarness: "opencode",
+		Bots: []config.BotConfig{
+			{ID: "assistant", Name: "Assistant", Workspace: filepath.Join(primaryDir, "workspaces", "assistant")},
+		},
+	}
+	standbyCfg := &config.HubConfig{
+		ProjectRoot:    standbyDir,
+		SharedDir:      filepath.Join(standbyDir, "workspaces", "_shared"),
+		DefaultHarness: "claude",
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/sync/portable", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(config.ExportPortable(primaryCfg, "mac-mini"))
+	})
+	mux.HandleFunc("POST /api/sync/portable", func(w http.ResponseWriter, r *http.Request) {
+		var b config.PortableBundle
+		_ = json.NewDecoder(r.Body).Decode(&b)
+		changed, _, _, _ := config.ApplyPortable(primaryCfg, b)
+		_ = json.NewEncoder(w).Encode(map[string]any{"changed": changed})
+	})
+	mux.HandleFunc("GET /api/sync/manifest", func(w http.ResponseWriter, _ *http.Request) {
+		m, _ := BuildManifest(primaryDir, "mac-mini", true)
+		_ = json.NewEncoder(w).Encode(m)
+	})
+	mux.HandleFunc("GET /api/sync/file", func(w http.ResponseWriter, r *http.Request) {
+		data, _, err := ReadSyncedFile(primaryDir, r.URL.Query().Get("path"))
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write(data)
+	})
+	mux.HandleFunc("PUT /api/sync/file", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+	})
+	mux.HandleFunc("GET /api/sync/delta", func(w http.ResponseWriter, r *http.Request) {
+		afterMsg, _ := strconv.ParseInt(r.URL.Query().Get("afterMsgId"), 10, 64)
+		afterRun := r.URL.Query().Get("afterRunAt")
+		msgs, nextMsg, _ := pStore.ExportMessagesSince(afterMsg, 500)
+		runs, nextRun, _ := pStore.ExportRoutineRunsSince(afterRun, 500)
+		_ = json.NewEncoder(w).Encode(state.SyncDelta{
+			Messages:      msgs,
+			NextMsgCursor: nextMsg,
+			RoutineRuns:   runs,
+			NextRunCursor: nextRun,
+		})
+	})
+	mux.HandleFunc("POST /api/sync/delta", func(w http.ResponseWriter, r *http.Request) {
+		var d state.SyncDelta
+		_ = json.NewDecoder(r.Body).Decode(&d)
+		mIns, _ := pStore.ImportMessages(d.Messages)
+		rIns, _ := pStore.ImportRoutineRuns(d.RoutineRuns)
+		_ = json.NewEncoder(w).Encode(map[string]any{"messagesInserted": mIns, "routineRunsInserted": rIns})
+	})
+
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	standbySvc := NewWithStore(standbyCfg, sStore)
+	pullSum, err := standbySvc.PullFromPeer(context.Background(), srv.Client(), srv.URL, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pullSum.MessagesSynced != 1 || pullSum.RoutineRunsSynced != 1 {
+		t.Fatalf("expected 1 msg and 1 run pulled, got %+v", pullSum)
+	}
+
+	// Standby creates a new message while taken over, then pushes back to primary.
+	_, _ = sStore.AppendMessage(state.ChatMessage{
+		ID:        "s_msg_2",
+		BotID:     "assistant",
+		Role:      "user",
+		Text:      "from standby takeover",
+		CreatedAt: "2026-11-24T01:05:00Z",
+	})
+	pushSum, err := standbySvc.PushToPeer(context.Background(), srv.Client(), srv.URL, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pushSum.MessagesSynced != 1 {
+		t.Fatalf("expected 1 new message pushed back, got %+v", pushSum)
+	}
+
+	// Second push should be a no-op (cursor advanced).
+	pushSum2, err := standbySvc.PushToPeer(context.Background(), srv.Client(), srv.URL, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pushSum2.MessagesSynced != 0 || pushSum2.RoutineRunsSynced != 0 {
+		t.Fatalf("expected 0 synced on second push, got %+v", pushSum2)
 	}
 }

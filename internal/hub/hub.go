@@ -414,6 +414,10 @@ func (h *Hub) Nodes() *node.Registry {
 	return h.nodes
 }
 
+func (h *Hub) Store() *state.Store {
+	return h.store
+}
+
 func (h *Hub) LocalDesktop() *desktop.Engine {
 	return h.localDesk
 }
@@ -1405,6 +1409,8 @@ func (h *Hub) buildTurnPrompt(bot config.BotConfig, prompt string, isFirstTurn b
 					"[System Note: New session started. Previous session %s (%s) is archived. Use recall_session if you need prior context.]",
 					prev.ID, strings.Join(details, ", "),
 				))
+			} else if recent, err := h.store.RecentMessagesForHandoff(bot.ID, 8); err == nil && len(recent) > 0 {
+				prefixParts = append(prefixParts, formatCrossHostHandoffPrefix(recent))
 			}
 		}
 		if bot.Harness == "dsh" && platPath != "" {
@@ -1420,6 +1426,15 @@ func (h *Hub) buildTurnPrompt(bot config.BotConfig, prompt string, isFirstTurn b
 		return prompt
 	}
 	return strings.Join(prefixParts, "\n\n") + "\n\n" + prompt
+}
+
+func formatCrossHostHandoffPrefix(recent []state.SyncMessageRow) string {
+	var lines []string
+	lines = append(lines, "[System Note: Cross-host session handoff — recent conversation synced from another host:]")
+	for _, m := range recent {
+		lines = append(lines, fmt.Sprintf("- %s: %s", m.Role, firstLineSummary(m.Text, 240)))
+	}
+	return strings.Join(lines, "\n")
 }
 
 func formatRoutineReceiptsPrefix(receipts []state.RoutineRun) string {

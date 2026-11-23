@@ -1,8 +1,10 @@
 package channel
 
 import (
+	"context"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"path/filepath"
 	"strconv"
@@ -10,16 +12,20 @@ import (
 	"time"
 
 	"bot-hub/internal/config"
+	"bot-hub/internal/state"
 	"bot-hub/internal/syncer"
+	"bot-hub/internal/tunnel"
 )
 
 func (s *HTTPServer) syncService() *syncer.Syncer {
 	s.syncOnce.Do(func() {
 		var cfg *config.HubConfig
+		var store *state.Store
 		if s.hub != nil {
 			cfg = s.hub.Config()
+			store = s.hub.Store()
 		}
-		s.syncSvc = syncer.New(cfg)
+		s.syncSvc = syncer.NewWithStore(cfg, store)
 	})
 	return s.syncSvc
 }
@@ -166,6 +172,138 @@ func (s *HTTPServer) handleSyncGitPull(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, res)
+}
+
+func (s *HTTPServer) handleSyncDeltaGet(w http.ResponseWriter, r *http.Request) {
+	if s.hub == nil || s.hub.Store() == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "store unavailable"})
+		return
+	}
+	var afterMsgID int64
+	if raw := strings.TrimSpace(r.URL.Query().Get("afterMsgId")); raw != "" {
+		if n, err := strconv.ParseInt(raw, 10, 64); err == nil && n > 0 {
+			afterMsgID = n
+		}
+	}
+	afterRunAt := strings.TrimSpace(r.URL.Query().Get("afterRunAt"))
+	limit := 500
+	if rawLim := strings.TrimSpace(r.URL.Query().Get("limit")); rawLim != "" {
+		if n, err := strconv.Atoi(rawLim); err == nil && n > 0 && n <= 1000 {
+			limit = n
+		}
+	}
+
+	store := s.hub.Store()
+	msgs, nextMsg, err := store.ExportMessagesSince(afterMsgID, limit)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+	runs, nextRun, err := store.ExportRoutineRunsSince(afterRunAt, limit)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, state.SyncDelta{
+		Messages:      msgs,
+		NextMsgCursor: nextMsg,
+		RoutineRuns:   runs,
+		NextRunCursor: nextRun,
+	})
+}
+
+func (s *HTTPServer) handleSyncDeltaPost(w http.ResponseWriter, r *http.Request) {
+	if s.hub == nil || s.hub.Store() == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "store unavailable"})
+		return
+	}
+	var delta state.SyncDelta
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<20)).Decode(&delta); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid delta json"})
+		return
+	}
+	store := s.hub.Store()
+	msgIns, err := store.ImportMessages(delta.Messages)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+	runIns, err := store.ImportRoutineRuns(delta.RoutineRuns)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":                  true,
+		"messagesInserted":    msgIns,
+		"routineRunsInserted": runIns,
+	})
+}
+
+func (s *HTTPServer) handleSyncPeerPull(w http.ResponseWriter, r *http.Request) {
+	s.handleSyncPeer(w, r, true)
+}
+
+func (s *HTTPServer) handleSyncPeerPush(w http.ResponseWriter, r *http.Request) {
+	s.handleSyncPeer(w, r, false)
+}
+
+func (s *HTTPServer) handleSyncPeer(w http.ResponseWriter, r *http.Request, pull bool) {
+	if s.hub == nil || s.hub.Config() == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "hub unavailable"})
+		return
+	}
+	var body struct {
+		PeerURL   string `json:"peerUrl"`
+		PeerToken string `json:"peerToken"`
+	}
+	_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<14)).Decode(&body)
+
+	peerURL := strings.TrimSpace(body.PeerURL)
+	peerToken := strings.TrimSpace(body.PeerToken)
+	if peerURL == "" && s.hub.Config().Sync != nil {
+		peerURL = s.hub.Config().Sync.PeerURL
+	}
+	if peerToken == "" && s.hub.Config().Sync != nil {
+		peerToken = s.hub.Config().Sync.PeerToken
+	}
+
+	cli := &http.Client{Timeout: 30 * time.Second}
+	if strings.HasPrefix(peerURL, "tailcat://") {
+		link, linkTok := tunnel.ExtractTokenFromLink(peerURL)
+		if peerToken == "" {
+			peerToken = linkTok
+		}
+		dial, closeClient, err := tunnel.Connect(r.Context(), link)
+		if err != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]any{"error": err.Error()})
+			return
+		}
+		defer func() { _ = closeClient() }()
+		cli = &http.Client{
+			Timeout: 30 * time.Second,
+			Transport: &http.Transport{
+				DialContext: func(dctx context.Context, _, _ string) (net.Conn, error) { return dial(dctx) },
+			},
+		}
+		peerURL = "http://tailcat.local"
+	}
+
+	svc := s.syncService()
+	var (
+		summary syncer.SyncSummary
+		err     error
+	)
+	if pull {
+		summary, err = svc.PullFromPeer(r.Context(), cli, peerURL, peerToken)
+	} else {
+		summary, err = svc.PushToPeer(r.Context(), cli, peerURL, peerToken)
+	}
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, summary)
 }
 
 func (s *HTTPServer) mountWebDAVIfEnabled(mux *http.ServeMux) {

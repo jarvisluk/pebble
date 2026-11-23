@@ -16,18 +16,21 @@ import (
 	"time"
 
 	"bot-hub/internal/config"
+	"bot-hub/internal/state"
 )
 
 // SyncSummary summarizes a peer-to-peer sync or checkpoint operation.
 type SyncSummary struct {
-	Direction     string   `json:"direction"` // "pull" | "push"
-	PeerURL       string   `json:"peerUrl,omitempty"`
-	PortableBots  int      `json:"portableBots"`
-	ConfigChanged bool     `json:"configChanged"`
-	FilesChecked  int      `json:"filesChecked"`
-	FilesSynced   int      `json:"filesSynced"`
-	Conflicts     []string `json:"conflicts,omitempty"`
-	CompletedAt   string   `json:"completedAt"`
+	Direction         string   `json:"direction"` // "pull" | "push"
+	PeerURL           string   `json:"peerUrl,omitempty"`
+	PortableBots      int      `json:"portableBots"`
+	ConfigChanged     bool     `json:"configChanged"`
+	FilesChecked      int      `json:"filesChecked"`
+	FilesSynced       int      `json:"filesSynced"`
+	MessagesSynced    int      `json:"messagesSynced"`
+	RoutineRunsSynced int      `json:"routineRunsSynced"`
+	Conflicts         []string `json:"conflicts,omitempty"`
+	CompletedAt       string   `json:"completedAt"`
 }
 
 // SyncStatus exposes current sync configuration and last run metadata.
@@ -45,9 +48,10 @@ type SyncStatus struct {
 	LastError       string       `json:"lastError,omitempty"`
 }
 
-// Syncer coordinates portable config export/import, P2P file sync, and Git checkpoints.
+// Syncer coordinates portable config export/import, P2P file sync, DB cursor sync, and Git checkpoints.
 type Syncer struct {
 	cfg    *config.HubConfig
+	store  *state.Store
 	hostID string
 
 	mu               sync.Mutex
@@ -59,6 +63,11 @@ type Syncer struct {
 
 // New creates a Syncer bound to cfg.
 func New(cfg *config.HubConfig) *Syncer {
+	return NewWithStore(cfg, nil)
+}
+
+// NewWithStore creates a Syncer bound to cfg and an optional SQLite store for delta sync.
+func NewWithStore(cfg *config.HubConfig, store *state.Store) *Syncer {
 	host, _ := os.Hostname()
 	host = strings.TrimSpace(host)
 	if host == "" {
@@ -66,8 +75,15 @@ func New(cfg *config.HubConfig) *Syncer {
 	}
 	return &Syncer{
 		cfg:    cfg,
+		store:  store,
 		hostID: host,
 	}
+}
+
+func (s *Syncer) SetStore(store *state.Store) {
+	s.mu.Lock()
+	s.store = store
+	s.mu.Unlock()
 }
 
 func (s *Syncer) HostID() string {
@@ -172,15 +188,23 @@ func (s *Syncer) PullFromPeer(ctx context.Context, client *http.Client, peerBase
 		}
 	}
 
+	msgSynced, runSynced, err := s.pullDelta(ctx, cli, base, tok, remoteManifest.HostID)
+	if err != nil {
+		s.recordErr(err)
+		return SyncSummary{}, fmt.Errorf("pull delta: %w", err)
+	}
+
 	summary := SyncSummary{
-		Direction:     "pull",
-		PeerURL:       base,
-		PortableBots:  len(bundle.Bots),
-		ConfigChanged: changed,
-		FilesChecked:  len(remoteManifest.Files),
-		FilesSynced:   synced,
-		Conflicts:     conflicts,
-		CompletedAt:   time.Now().UTC().Format(time.RFC3339),
+		Direction:         "pull",
+		PeerURL:           base,
+		PortableBots:      len(bundle.Bots),
+		ConfigChanged:     changed,
+		FilesChecked:      len(remoteManifest.Files),
+		FilesSynced:       synced,
+		MessagesSynced:    msgSynced,
+		RoutineRunsSynced: runSynced,
+		Conflicts:         conflicts,
+		CompletedAt:       time.Now().UTC().Format(time.RFC3339),
 	}
 	s.recordSync(summary)
 	return summary, nil
@@ -241,18 +265,156 @@ func (s *Syncer) PushToPeer(ctx context.Context, client *http.Client, peerBaseUR
 		}
 	}
 
+	msgSynced, runSynced, err := s.pushDelta(ctx, cli, base, tok, remoteManifest.HostID)
+	if err != nil {
+		s.recordErr(err)
+		return SyncSummary{}, fmt.Errorf("push delta: %w", err)
+	}
+
 	summary := SyncSummary{
-		Direction:     "push",
-		PeerURL:       base,
-		PortableBots:  len(bundle.Bots),
-		ConfigChanged: applyResp.Changed,
-		FilesChecked:  len(localManifest.Files),
-		FilesSynced:   synced,
-		Conflicts:     conflicts,
-		CompletedAt:   time.Now().UTC().Format(time.RFC3339),
+		Direction:         "push",
+		PeerURL:           base,
+		PortableBots:      len(bundle.Bots),
+		ConfigChanged:     applyResp.Changed,
+		FilesChecked:      len(localManifest.Files),
+		FilesSynced:       synced,
+		MessagesSynced:    msgSynced,
+		RoutineRunsSynced: runSynced,
+		Conflicts:         conflicts,
+		CompletedAt:       time.Now().UTC().Format(time.RFC3339),
 	}
 	s.recordSync(summary)
 	return summary, nil
+}
+
+func (s *Syncer) pullDelta(ctx context.Context, cli *http.Client, base, tok, peerHost string) (int, int, error) {
+	s.mu.Lock()
+	store := s.store
+	s.mu.Unlock()
+	if store == nil {
+		return 0, 0, nil
+	}
+	peerKey := sanitizeHostTag(peerHost)
+	if peerKey == "" {
+		peerKey = sanitizeHostTag(base)
+	}
+	msgKey := "sync_cursor:pull_msg:" + peerKey
+	runKey := "sync_cursor:pull_run:" + peerKey
+
+	var afterMsgID int64
+	if raw := store.GetMeta(msgKey); raw != "" {
+		if n, err := strconv.ParseInt(raw, 10, 64); err == nil && n > 0 {
+			afterMsgID = n
+		}
+	}
+	afterRunAt := store.GetMeta(runKey)
+
+	totalMsgs, totalRuns := 0, 0
+	for round := 0; round < 50; round++ {
+		q := url.Values{}
+		q.Set("afterMsgId", strconv.FormatInt(afterMsgID, 10))
+		if afterRunAt != "" {
+			q.Set("afterRunAt", afterRunAt)
+		}
+		var delta state.SyncDelta
+		if err := doJSONRequest(ctx, cli, http.MethodGet, base+"/api/sync/delta?"+q.Encode(), tok, nil, &delta); err != nil {
+			return totalMsgs, totalRuns, err
+		}
+		if len(delta.Messages) == 0 && len(delta.RoutineRuns) == 0 {
+			break
+		}
+		if len(delta.Messages) > 0 {
+			ins, err := store.ImportMessages(delta.Messages)
+			if err != nil {
+				return totalMsgs, totalRuns, err
+			}
+			totalMsgs += ins
+			if delta.NextMsgCursor > afterMsgID {
+				afterMsgID = delta.NextMsgCursor
+				_ = store.SetMeta(msgKey, strconv.FormatInt(afterMsgID, 10))
+			}
+		}
+		if len(delta.RoutineRuns) > 0 {
+			ins, err := store.ImportRoutineRuns(delta.RoutineRuns)
+			if err != nil {
+				return totalMsgs, totalRuns, err
+			}
+			totalRuns += ins
+			if delta.NextRunCursor > afterRunAt {
+				afterRunAt = delta.NextRunCursor
+				_ = store.SetMeta(runKey, afterRunAt)
+			}
+		}
+		if len(delta.Messages) < 500 && len(delta.RoutineRuns) < 500 {
+			break
+		}
+	}
+	return totalMsgs, totalRuns, nil
+}
+
+func (s *Syncer) pushDelta(ctx context.Context, cli *http.Client, base, tok, peerHost string) (int, int, error) {
+	s.mu.Lock()
+	store := s.store
+	s.mu.Unlock()
+	if store == nil {
+		return 0, 0, nil
+	}
+	peerKey := sanitizeHostTag(peerHost)
+	if peerKey == "" {
+		peerKey = sanitizeHostTag(base)
+	}
+	msgKey := "sync_cursor:push_msg:" + peerKey
+	runKey := "sync_cursor:push_run:" + peerKey
+
+	var afterMsgID int64
+	if raw := store.GetMeta(msgKey); raw != "" {
+		if n, err := strconv.ParseInt(raw, 10, 64); err == nil && n > 0 {
+			afterMsgID = n
+		}
+	}
+	afterRunAt := store.GetMeta(runKey)
+
+	totalMsgs, totalRuns := 0, 0
+	for round := 0; round < 50; round++ {
+		msgs, nextMsg, err := store.ExportMessagesSince(afterMsgID, 500)
+		if err != nil {
+			return totalMsgs, totalRuns, err
+		}
+		runs, nextRun, err := store.ExportRoutineRunsSince(afterRunAt, 500)
+		if err != nil {
+			return totalMsgs, totalRuns, err
+		}
+		if len(msgs) == 0 && len(runs) == 0 {
+			break
+		}
+		delta := state.SyncDelta{
+			Messages:      msgs,
+			NextMsgCursor: nextMsg,
+			RoutineRuns:   runs,
+			NextRunCursor: nextRun,
+		}
+		var resp struct {
+			MessagesInserted    int `json:"messagesInserted"`
+			RoutineRunsInserted int `json:"routineRunsInserted"`
+		}
+		if err := doJSONRequest(ctx, cli, http.MethodPost, base+"/api/sync/delta", tok, delta, &resp); err != nil {
+			return totalMsgs, totalRuns, err
+		}
+		totalMsgs += resp.MessagesInserted
+		totalRuns += resp.RoutineRunsInserted
+		if nextMsg > afterMsgID {
+			afterMsgID = nextMsg
+			_ = store.SetMeta(msgKey, strconv.FormatInt(afterMsgID, 10))
+		}
+		if nextRun > afterRunAt {
+			afterRunAt = nextRun
+			_ = store.SetMeta(runKey, afterRunAt)
+		}
+		if len(msgs) < 500 && len(runs) < 500 {
+			break
+		}
+	}
+	return totalMsgs, totalRuns, nil
 }
 
 func (s *Syncer) resolvePeer(client *http.Client, peerBaseURL, peerToken string) (string, string, *http.Client) {
