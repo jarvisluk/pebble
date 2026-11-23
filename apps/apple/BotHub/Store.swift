@@ -110,7 +110,6 @@ final class HubStore {
     // 偏好
     var themePref: String { didSet { UserDefaults.standard.set(themePref, forKey: "bothub.theme") } }
     var langPref: String { didSet { UserDefaults.standard.set(langPref, forKey: "bothub.lang"); L.lang = lang } }
-    var accentHex: String { didSet { UserDefaults.standard.set(accentHex, forKey: "bothub.accent") } }
     var tsBound: Bool { didSet { UserDefaults.standard.set(tsBound, forKey: "bothub.tsBound") } }
     var tsControlUrl: String { didSet { UserDefaults.standard.set(tsControlUrl, forKey: "bothub.tsControlUrl") } }
 
@@ -151,7 +150,6 @@ final class HubStore {
         let d = UserDefaults.standard
         themePref = d.string(forKey: "bothub.theme") ?? "system"
         langPref = d.string(forKey: "bothub.lang") ?? "system"
-        accentHex = d.string(forKey: "bothub.accent") ?? Palette.defaultAccent
         tsBound = d.bool(forKey: "bothub.tsBound")
         tsControlUrl = d.string(forKey: "bothub.tsControlUrl") ?? ""
         L.lang = lang

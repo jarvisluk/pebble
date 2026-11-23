@@ -2,15 +2,11 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useS
 import { Platform, useColorScheme } from 'react-native';
 
 import {
-  loadAccentPref,
   loadThemePref,
-  saveAccentPref,
   saveThemePref,
   type ThemePreference,
 } from './storage';
 
-export const DEFAULT_ACCENT = '#d9774b';
-export const ACCENT_PRESETS = ['#d9774b', '#3b82f6', '#10b981', '#8b5cf6', '#e11d48', '#f59e0b'];
 export const BOT_COLORS = ['#f08a2c', '#8a7ad8', '#86a33a', '#b85a4a', '#7a7465', '#e0685a'];
 export const BOT_AVATARS = ['blob', 'squircle', 'cat', 'bear', 'cloud', 'ghost', 'star', 'sprout'] as const;
 
@@ -107,10 +103,10 @@ export const LIGHT_THEME: Theme = {
   text: '#1d1b19',
   text2: '#57524d',
   mute: '#9b958f',
-  accent: DEFAULT_ACCENT,
+  accent: '#1d1b19',
   accentText: '#ffffff',
-  accentSoft: '#f8e1d6',
-  sel: '#faebe4',
+  accentSoft: '#e9e5e0',
+  sel: '#eeebe6',
   pink: '#f7d9d3',
   pinkInk: '#b2443a',
   lilac: '#e0dbfb',
@@ -133,8 +129,8 @@ export const DARK_THEME: Theme = {
   text: '#f3f1ee',
   text2: '#ccc7c1',
   mute: '#948e88',
-  accent: DEFAULT_ACCENT,
-  accentText: '#ffffff',
+  accent: '#f3f1ee',
+  accentText: '#171717',
   accentSoft: '#2a2a2a',
   sel: '#262626',
   pink: '#171717',
@@ -152,24 +148,16 @@ export const DARK_THEME: Theme = {
 interface ThemePrefContextValue {
   pref: ThemePreference;
   setPref: (next: ThemePreference) => void;
-  accent: string;
-  setAccent: (next: string | null) => void;
 }
 
 const ThemePrefContext = createContext<ThemePrefContextValue | null>(null);
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [pref, setPrefState] = useState<ThemePreference>('system');
-  const [accent, setAccentState] = useState<string>(DEFAULT_ACCENT);
 
   useEffect(() => {
     loadThemePref()
       .then((saved) => setPrefState(saved))
-      .catch(() => {});
-    loadAccentPref()
-      .then((saved) => {
-        if (saved) setAccentState(saved);
-      })
       .catch(() => {});
   }, []);
 
@@ -178,15 +166,9 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     void saveThemePref(next).catch(() => {});
   }, []);
 
-  const setAccent = useCallback((next: string | null) => {
-    const clean = next && parseHex(next) ? next.toLowerCase() : DEFAULT_ACCENT;
-    setAccentState(clean);
-    void saveAccentPref(clean === DEFAULT_ACCENT ? null : clean).catch(() => {});
-  }, []);
-
   const value = useMemo(
-    () => ({ pref, setPref, accent, setAccent }),
-    [pref, setPref, accent, setAccent]
+    () => ({ pref, setPref }),
+    [pref, setPref]
   );
 
   return React.createElement(ThemePrefContext.Provider, { value }, children);
@@ -195,7 +177,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 export function useThemePref(): ThemePrefContextValue {
   const ctx = useContext(ThemePrefContext);
   if (!ctx) {
-    return { pref: 'system', setPref: () => {}, accent: DEFAULT_ACCENT, setAccent: () => {} };
+    return { pref: 'system', setPref: () => {} };
   }
   return ctx;
 }
@@ -204,22 +186,7 @@ export function useTheme(): Theme {
   const systemScheme = useColorScheme();
   const ctx = useContext(ThemePrefContext);
   const effective = ctx && ctx.pref !== 'system' ? ctx.pref : systemScheme;
-  const accent = ctx?.accent || DEFAULT_ACCENT;
-  const base = effective === 'dark' ? DARK_THEME : LIGHT_THEME;
-  return useMemo(() => {
-    if (accent === DEFAULT_ACCENT) return base;
-    const accentText = contrastText(accent);
-    if (base.dark) {
-      return { ...base, accent, accentText };
-    }
-    return {
-      ...base,
-      accent,
-      accentText,
-      accentSoft: mixHex(accent, base.card, 0.16),
-      sel: mixHex(accent, base.card, 0.10),
-    };
-  }, [accent, base]);
+  return effective === 'dark' ? DARK_THEME : LIGHT_THEME;
 }
 
 export const MONO_FONT = Platform.select({
