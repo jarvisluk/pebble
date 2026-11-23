@@ -79,6 +79,52 @@ export async function apiRequest<T>(
   return data as T;
 }
 
+export async function fetchCollabMessages<T = unknown>(
+  baseURL: string,
+  token: string,
+  botId: string,
+  peerId: string,
+  limit = 200
+): Promise<T[]> {
+  const res = await apiRequest<{ messages?: T[] }>(
+    baseURL,
+    token,
+    `/api/bots/${encodeURIComponent(botId)}/collab/${encodeURIComponent(peerId)}?limit=${limit}`
+  );
+  return res.messages || [];
+}
+
+export function getMediaSource(baseURL: string, token: string, url: string) {
+  const fullUri = url.startsWith('http://') || url.startsWith('https://') ? url : `${baseURL}${url}`;
+  return token ? { uri: fullUri, headers: { Authorization: `Bearer ${token}` } } : { uri: fullUri };
+}
+
+export async function requestMediaDownloadURL(
+  baseURL: string,
+  token: string,
+  media: { id: string; url: string; name?: string }
+): Promise<string> {
+  const fullUri = media.url.startsWith('http://') || media.url.startsWith('https://') ? media.url : `${baseURL}${media.url}`;
+  const params = new URLSearchParams();
+  params.set('download', '1');
+  if (media.name) {
+    params.set('name', media.name);
+  }
+  if (token) {
+    const res = await apiRequest<{ ticket: string }>(
+      baseURL,
+      token,
+      `/api/media/${encodeURIComponent(media.id)}/ticket`,
+      { method: 'POST' }
+    );
+    if (res.ticket) {
+      params.set('ticket', res.ticket);
+    }
+  }
+  const sep = fullUri.includes('?') ? '&' : '?';
+  return `${fullUri}${sep}${params.toString()}`;
+}
+
 export interface SSEHandlers {
   onStatus: (online: boolean) => void;
   onEvent: (type: string, payload: unknown) => void;

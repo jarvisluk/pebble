@@ -3,9 +3,12 @@ package hub
 import (
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"mime"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -196,6 +199,11 @@ type botLane struct {
 
 	sessionGen atomic.Uint64
 
+	turnSentCount   atomic.Int64
+	turnMu          sync.Mutex
+	activeSessionID string
+	activeTurn      int
+
 	rotateMu       sync.Mutex
 	pendingRotate  bool
 	pendingHandoff string
@@ -213,6 +221,7 @@ type Hub struct {
 	cfg       *config.HubConfig
 	store     *state.Store
 	messages  *state.MessageStore
+	mediaDir  string
 	registry  *harness.Registry
 	nodes     *node.Registry
 	localDesk *desktop.Engine
@@ -269,10 +278,19 @@ func New(cfg *config.HubConfig, store *state.Store, messages *state.MessageStore
 		IdleStop:              time.Duration(cfg.Desktop.EffectiveIdleStopMinutes()) * time.Minute,
 		StopOnlyWhenNoWindows: cfg.Desktop.ShouldStopOnlyWhenNoWindows(),
 	}
+	mediaDir := filepath.Join(os.TempDir(), "bot-hub-media")
+	if store != nil && store.DBPath() != "" && store.DBPath() != ":memory:" {
+		mediaDir = filepath.Join(filepath.Dir(store.DBPath()), "media")
+	} else if cfg != nil && cfg.StateFile != "" {
+		mediaDir = filepath.Join(filepath.Dir(cfg.StateFile), "media")
+	} else if cfg != nil && cfg.MessagesDir != "" {
+		mediaDir = filepath.Join(filepath.Dir(cfg.MessagesDir), "media")
+	}
 	h := &Hub{
 		cfg:                cfg,
 		store:              store,
 		messages:           messages,
+		mediaDir:           mediaDir,
 		registry:           reg,
 		localDesk:          desktop.NewEngineWithConfig(deskCfg),
 		lanes:              make(map[string]*botLane, len(cfg.Bots)),
@@ -445,6 +463,304 @@ func (h *Hub) appendMessage(msg state.ChatMessage) state.ChatMessage {
 		Payload: saved,
 	})
 	return saved
+}
+
+func (h *Hub) appendInternalMessage(msg state.ChatMessage) state.ChatMessage {
+	msg.Role = "internal"
+	if h.store != nil {
+		if saved, err := h.store.AppendMessage(msg); err == nil {
+			return saved
+		}
+		return msg
+	}
+	if h.messages != nil {
+		if saved, err := h.messages.Append(msg); err == nil {
+			return saved
+		}
+	}
+	return msg
+}
+
+func (h *Hub) CollabMessages(botID, peerID string, limit int) ([]state.ChatMessage, error) {
+	h.lanesMu.RLock()
+	_, ok := h.lanes[botID]
+	h.lanesMu.RUnlock()
+	if !ok {
+		return nil, fmt.Errorf("bot %q not found", botID)
+	}
+	if strings.TrimSpace(peerID) == "" {
+		return nil, fmt.Errorf("peerId is required")
+	}
+	if h.store != nil {
+		return h.store.ListCollabMessages(botID, peerID, limit)
+	}
+	if h.messages == nil {
+		return []state.ChatMessage{}, nil
+	}
+	return h.messages.ListCollab(botID, peerID, limit)
+}
+
+type OutboundImage struct {
+	Path       string `json:"path,omitempty"`
+	Alt        string `json:"alt,omitempty"`
+	DataBase64 string `json:"dataBase64,omitempty"`
+	Filename   string `json:"filename,omitempty"`
+}
+
+type OutboundFile struct {
+	Path       string `json:"path,omitempty"`
+	Name       string `json:"name,omitempty"`
+	DataBase64 string `json:"dataBase64,omitempty"`
+	Filename   string `json:"filename,omitempty"`
+}
+
+type OutboundAttachment struct {
+	Path       string `json:"path,omitempty"`
+	Name       string `json:"name,omitempty"`
+	Alt        string `json:"alt,omitempty"`
+	DataBase64 string `json:"dataBase64,omitempty"`
+	Filename   string `json:"filename,omitempty"`
+}
+
+const (
+	maxOutboundImageBytes = 20 << 20 // 20 MiB
+	maxOutboundFileBytes  = 50 << 20 // 50 MiB
+)
+
+var (
+	validMediaIDRe = regexp.MustCompile(`^med_[0-9]+_[a-f0-9]+(\.[a-z0-9]{1,12})?$`)
+	safeFileExtRe  = regexp.MustCompile(`^\.[a-z0-9]{1,12}$`)
+)
+
+func imageExtForMIME(mimeType string) (string, bool) {
+	switch mimeType {
+	case "image/png":
+		return ".png", true
+	case "image/jpeg":
+		return ".jpg", true
+	case "image/gif":
+		return ".gif", true
+	case "image/webp":
+		return ".webp", true
+	default:
+		return "", false
+	}
+}
+
+func (h *Hub) SaveOutboundImage(botWorkspace string, img OutboundImage) (state.MessageMedia, error) {
+	return h.SaveOutboundAttachment(botWorkspace, OutboundAttachment{
+		Path:       img.Path,
+		Alt:        img.Alt,
+		DataBase64: img.DataBase64,
+		Filename:   img.Filename,
+	}, true)
+}
+
+func (h *Hub) SaveOutboundFile(botWorkspace string, f OutboundFile) (state.MessageMedia, error) {
+	return h.SaveOutboundAttachment(botWorkspace, OutboundAttachment{
+		Path:       f.Path,
+		Name:       f.Name,
+		DataBase64: f.DataBase64,
+		Filename:   f.Filename,
+	}, false)
+}
+
+func (h *Hub) SaveOutboundAttachment(botWorkspace string, att OutboundAttachment, requireImage bool) (state.MessageMedia, error) {
+	maxBytes := int64(maxOutboundFileBytes)
+	kindLabel := "file"
+	if requireImage {
+		maxBytes = maxOutboundImageBytes
+		kindLabel = "image"
+	}
+
+	var raw []byte
+	var name string
+
+	if strings.TrimSpace(att.DataBase64) != "" {
+		b64 := strings.TrimSpace(att.DataBase64)
+		if idx := strings.Index(b64, ";base64,"); idx >= 0 {
+			b64 = b64[idx+len(";base64,"):]
+		}
+		decoded, err := base64.StdEncoding.DecodeString(b64)
+		if err != nil {
+			return state.MessageMedia{}, fmt.Errorf("invalid base64 %s: %w", kindLabel, err)
+		}
+		if int64(len(decoded)) > maxBytes {
+			return state.MessageMedia{}, fmt.Errorf("%s exceeds max size (%d bytes)", kindLabel, maxBytes)
+		}
+		raw = decoded
+		name = filepath.Base(strings.TrimSpace(att.Filename))
+	} else {
+		p := strings.TrimSpace(att.Path)
+		if p == "" {
+			return state.MessageMedia{}, fmt.Errorf("%s path or dataBase64 is required", kindLabel)
+		}
+		if !filepath.IsAbs(p) && botWorkspace != "" {
+			p = filepath.Join(botWorkspace, p)
+		}
+		info, err := os.Stat(p)
+		if err != nil {
+			return state.MessageMedia{}, fmt.Errorf("stat %s %s: %w", kindLabel, p, err)
+		}
+		if info.IsDir() {
+			return state.MessageMedia{}, fmt.Errorf("%s path %s is a directory", kindLabel, p)
+		}
+		if info.Size() > maxBytes {
+			return state.MessageMedia{}, fmt.Errorf("%s %s exceeds max size (%d bytes)", kindLabel, p, maxBytes)
+		}
+		b, err := os.ReadFile(p)
+		if err != nil {
+			return state.MessageMedia{}, fmt.Errorf("read %s %s: %w", kindLabel, p, err)
+		}
+		raw = b
+		name = filepath.Base(p)
+	}
+
+	if len(raw) == 0 {
+		return state.MessageMedia{}, fmt.Errorf("%s is empty", kindLabel)
+	}
+	if customName := strings.TrimSpace(att.Name); customName != "" {
+		name = filepath.Base(customName)
+	}
+
+	var mimeType, ext string
+	if requireImage {
+		mimeType = http.DetectContentType(raw)
+		var ok bool
+		ext, ok = imageExtForMIME(mimeType)
+		if !ok {
+			return state.MessageMedia{}, fmt.Errorf("unsupported image type %q", mimeType)
+		}
+		if name == "" || name == "." || name == string(filepath.Separator) {
+			name = "image" + ext
+		}
+	} else {
+		rawExt := strings.ToLower(filepath.Ext(name))
+		if safeFileExtRe.MatchString(rawExt) {
+			ext = rawExt
+		}
+		if ext != "" {
+			mimeType = mime.TypeByExtension(ext)
+		}
+		if mimeType == "" {
+			mimeType = http.DetectContentType(raw)
+		}
+		if mimeType == "" {
+			mimeType = "application/octet-stream"
+		}
+		if name == "" || name == "." || name == string(filepath.Separator) {
+			name = "file" + ext
+		}
+	}
+
+	if err := os.MkdirAll(h.mediaDir, 0o755); err != nil {
+		return state.MessageMedia{}, fmt.Errorf("create media dir: %w", err)
+	}
+	rb := make([]byte, 4)
+	_, _ = rand.Read(rb)
+	id := fmt.Sprintf("med_%d_%s%s", time.Now().UTC().UnixMilli(), hex.EncodeToString(rb), ext)
+	dst := filepath.Join(h.mediaDir, id)
+	if err := os.WriteFile(dst, raw, 0o644); err != nil {
+		return state.MessageMedia{}, fmt.Errorf("write media file: %w", err)
+	}
+
+	return state.MessageMedia{
+		ID:       id,
+		Kind:     kindLabel,
+		URL:      "/api/media/" + id,
+		MimeType: mimeType,
+		Name:     name,
+		Alt:      strings.TrimSpace(att.Alt),
+		Size:     int64(len(raw)),
+	}, nil
+}
+
+func (h *Hub) ResolveMediaFile(mediaID string) (string, string, error) {
+	id := strings.TrimSpace(mediaID)
+	if !validMediaIDRe.MatchString(id) || strings.Contains(id, "..") || strings.ContainsAny(id, "/\\") {
+		return "", "", fmt.Errorf("invalid media id")
+	}
+	p := filepath.Join(h.mediaDir, id)
+	info, err := os.Stat(p)
+	if err != nil || info.IsDir() {
+		return "", "", os.ErrNotExist
+	}
+	ext := strings.ToLower(filepath.Ext(id))
+	mimeType := ""
+	if ext != "" {
+		mimeType = mime.TypeByExtension(ext)
+	}
+	if mimeType == "" {
+		if f, err := os.Open(p); err == nil {
+			var buf [512]byte
+			n, _ := f.Read(buf[:])
+			_ = f.Close()
+			if n > 0 {
+				mimeType = http.DetectContentType(buf[:n])
+			}
+		}
+	}
+	if mimeType == "" {
+		mimeType = "application/octet-stream"
+	}
+	return p, mimeType, nil
+}
+
+func (h *Hub) SendOutboundMessage(botID, text string, images []OutboundImage, files ...OutboundFile) (state.ChatMessage, error) {
+	h.lanesMu.RLock()
+	lane, ok := h.lanes[botID]
+	laneBot := config.BotConfig{}
+	if ok {
+		laneBot = lane.bot
+	}
+	h.lanesMu.RUnlock()
+	if !ok {
+		return state.ChatMessage{}, fmt.Errorf("bot %q not found", botID)
+	}
+
+	if strings.TrimSpace(text) == "" && len(images) == 0 && len(files) == 0 {
+		return state.ChatMessage{}, fmt.Errorf("text, images, or files is required")
+	}
+
+	var media []state.MessageMedia
+	for _, img := range images {
+		m, err := h.SaveOutboundImage(laneBot.Workspace, img)
+		if err != nil {
+			return state.ChatMessage{}, err
+		}
+		media = append(media, m)
+	}
+	for _, f := range files {
+		m, err := h.SaveOutboundFile(laneBot.Workspace, f)
+		if err != nil {
+			return state.ChatMessage{}, err
+		}
+		media = append(media, m)
+	}
+
+	lane.turnMu.Lock()
+	sessID := lane.activeSessionID
+	turn := lane.activeTurn
+	lane.turnMu.Unlock()
+
+	if sessID == "" && h.store != nil {
+		if sess, err := h.store.EnsureActiveSession(botID, laneBot.Harness, laneBot.Model); err == nil {
+			sessID = sess.ID
+			turn = sess.TurnCount
+		}
+	}
+
+	saved := h.appendMessage(state.ChatMessage{
+		BotID:     botID,
+		SessionID: sessID,
+		Turn:      turn,
+		Role:      "assistant",
+		From:      "bot:" + botID,
+		Text:      text,
+		Media:     media,
+	})
+	lane.turnSentCount.Add(1)
+	return saved, nil
 }
 
 func (h *Hub) Messages(botID string, limit int) ([]state.ChatMessage, error) {
@@ -890,12 +1206,14 @@ func (h *Hub) Send(ctx context.Context, botID, prompt string, opts SendOptions) 
 
 	role := "user"
 	from := opts.Source
+	to := ""
 	if from == "" {
 		from = "user"
 	}
 	if opts.FromBotID != "" {
 		role = "bot_in"
 		from = "bot:" + opts.FromBotID
+		to = "bot:" + botID
 	}
 
 	var queuedSessID string
@@ -912,6 +1230,7 @@ func (h *Hub) Send(ctx context.Context, botID, prompt string, opts SendOptions) 
 		Turn:      queuedTurn,
 		Role:      role,
 		From:      from,
+		To:        to,
 		Text:      prompt,
 	})
 
@@ -1195,6 +1514,12 @@ func (h *Hub) executeTurn(ctx context.Context, lane *botLane, bot config.BotConf
 			}
 		}
 
+		lane.turnSentCount.Store(0)
+		lane.turnMu.Lock()
+		lane.activeSessionID = sess.ID
+		lane.activeTurn = turnNum
+		lane.turnMu.Unlock()
+
 		res, err := runner.RunTurn(ctx, harness.RunOptions{
 			Bot:                      bot,
 			Prompt:                   effectivePrompt,
@@ -1227,6 +1552,11 @@ func (h *Hub) executeTurn(ctx context.Context, lane *botLane, bot config.BotConf
 				}
 			},
 		})
+
+		lane.turnMu.Lock()
+		lane.activeSessionID = ""
+		lane.activeTurn = 0
+		lane.turnMu.Unlock()
 
 		toolMu.Lock()
 		tools := formatToolCounts(toolOrder, toolCounts)
@@ -1262,9 +1592,9 @@ func (h *Hub) executeTurn(ctx context.Context, lane *botLane, bot config.BotConf
 					})
 				}
 				if res != nil && strings.TrimSpace(res.Text) != "" {
-					h.appendMessage(state.ChatMessage{
+					h.appendInternalMessage(state.ChatMessage{
 						BotID: bot.ID, SessionID: sess.ID, Turn: turnNum, Tools: tools,
-						Role: "assistant", From: "bot:" + bot.ID, Text: res.Text,
+						From: "bot:" + bot.ID, Text: res.Text,
 					})
 				}
 				h.appendMessage(state.ChatMessage{
@@ -1277,9 +1607,9 @@ func (h *Hub) executeTurn(ctx context.Context, lane *botLane, bot config.BotConf
 			// D2-A: Fatal session corruption/overflow on an existing session -> archive & retry once cleanly.
 			if attempt == 0 && h.store != nil && sess.RuntimeSessionID != "" && isFatalSessionError(err) {
 				if res != nil && strings.TrimSpace(res.Text) != "" {
-					h.appendMessage(state.ChatMessage{
+					h.appendInternalMessage(state.ChatMessage{
 						BotID: bot.ID, SessionID: sess.ID, Turn: turnNum, Tools: tools,
-						Role: "assistant", From: "bot:" + bot.ID, Text: res.Text,
+						From: "bot:" + bot.ID, Text: res.Text,
 					})
 				}
 				h.appendMessage(state.ChatMessage{
@@ -1306,9 +1636,9 @@ func (h *Hub) executeTurn(ctx context.Context, lane *botLane, bot config.BotConf
 				})
 			}
 			if res != nil && strings.TrimSpace(res.Text) != "" {
-				h.appendMessage(state.ChatMessage{
+				h.appendInternalMessage(state.ChatMessage{
 					BotID: bot.ID, SessionID: sess.ID, Turn: turnNum, Tools: tools,
-					Role: "assistant", From: "bot:" + bot.ID, Text: res.Text,
+					From: "bot:" + bot.ID, Text: res.Text,
 				})
 			}
 			h.appendMessage(state.ChatMessage{
@@ -1340,12 +1670,28 @@ func (h *Hub) executeTurn(ctx context.Context, lane *botLane, bot config.BotConf
 		}
 
 		res.Tools = tools
-		if res.Text != "" {
-			h.appendMessage(state.ChatMessage{
+		if opts.FromBotID != "" {
+			if strings.TrimSpace(res.Text) != "" {
+				h.appendMessage(state.ChatMessage{
+					BotID:        bot.ID,
+					SessionID:    sess.ID,
+					Turn:         turnNum,
+					Role:         "bot_out",
+					From:         "bot:" + bot.ID,
+					To:           "bot:" + opts.FromBotID,
+					Text:         res.Text,
+					Tools:        tools,
+					DurationMs:   res.DurationMs,
+					CostUSD:      res.Usage.CostUSD,
+					InputTokens:  res.Usage.InputTokens,
+					OutputTokens: res.Usage.OutputTokens,
+				})
+			}
+		} else if strings.TrimSpace(res.Text) != "" {
+			h.appendInternalMessage(state.ChatMessage{
 				BotID:        bot.ID,
 				SessionID:    sess.ID,
 				Turn:         turnNum,
-				Role:         "assistant",
 				From:         "bot:" + bot.ID,
 				Text:         res.Text,
 				Tools:        tools,
@@ -1354,6 +1700,21 @@ func (h *Hub) executeTurn(ctx context.Context, lane *botLane, bot config.BotConf
 				InputTokens:  res.Usage.InputTokens,
 				OutputTokens: res.Usage.OutputTokens,
 			})
+			if lane.turnSentCount.Load() == 0 && isUserDirectSource(opts) {
+				h.appendMessage(state.ChatMessage{
+					BotID:        bot.ID,
+					SessionID:    sess.ID,
+					Turn:         turnNum,
+					Role:         "assistant",
+					From:         "bot:" + bot.ID,
+					Text:         res.Text,
+					Tools:        tools,
+					DurationMs:   res.DurationMs,
+					CostUSD:      res.Usage.CostUSD,
+					InputTokens:  res.Usage.InputTokens,
+					OutputTokens: res.Usage.OutputTokens,
+				})
+			}
 		}
 
 		lane.rotateMu.Lock()
@@ -2759,6 +3120,20 @@ func (h *Hub) RunDesktopTask(ctx context.Context, req DesktopTaskRequest) (*harn
 			})
 		},
 	})
+}
+
+func isUserDirectSource(opts SendOptions) bool {
+	if opts.FromBotID != "" {
+		return false
+	}
+	src := strings.TrimSpace(opts.Source)
+	if src == "webhook" ||
+		strings.HasPrefix(src, "routine:") ||
+		strings.HasPrefix(src, "schedule:") ||
+		strings.HasPrefix(src, "bot:") {
+		return false
+	}
+	return true
 }
 
 func isInteractiveQuestionSource(opts SendOptions) bool {

@@ -93,11 +93,18 @@ export default function BotsScreen() {
       subtitleText = t('questionWaitingBadge');
       subtitleColor = theme.busy;
     } else if (item.busy) {
-      subtitleText = toolName ? t('callingTool', { tool: toolName }) : t('thinking');
+      subtitleText = t('processing');
       subtitleColor = theme.busy;
     } else if (lastMsg) {
       const prefix = lastMsg.role === 'user' ? t('youPrefix') : '';
-      subtitleText = plainPreview(prefix + lastMsg.text, t('codeTag')) || ' ';
+      const firstAtt = lastMsg.media && lastMsg.media.length > 0 ? lastMsg.media[0] : null;
+      const attText = firstAtt
+        ? firstAtt.kind === 'file' || (firstAtt.kind !== 'image' && firstAtt.mimeType && !firstAtt.mimeType.startsWith('image/'))
+          ? `[${t('fileAltFallback')}] ${firstAtt.name || ''}`.trim()
+          : `[${t('imageAltFallback')}]`
+        : '';
+      const rawText = lastMsg.text || attText;
+      subtitleText = plainPreview(prefix + rawText, t('codeTag')) || ' ';
       subtitleColor = theme.text2;
     }
 

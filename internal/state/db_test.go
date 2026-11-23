@@ -325,3 +325,67 @@ func TestRoutineRunsReceiptsAndActiveRecall(t *testing.T) {
 		t.Fatalf("unexpected LatestRoutineRun: %+v ok=%v", latest, ok)
 	}
 }
+
+func TestStoreMediaInternalAndCollab(t *testing.T) {
+	store, err := NewStore(filepath.Join(t.TempDir(), "hub.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	sess, err := store.EnsureActiveSession("alpha", "opencode", "m1")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := store.AppendMessage(ChatMessage{
+		BotID: "alpha", SessionID: sess.ID, Turn: 1, Role: "internal", From: "bot:alpha", Text: "raw trace",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.AppendMessage(ChatMessage{
+		BotID: "alpha", SessionID: sess.ID, Turn: 1, Role: "assistant", From: "bot:alpha", Text: "visible",
+		Media: []MessageMedia{{ID: "med_1.png", URL: "/api/media/med_1.png", MimeType: "image/png", Size: 123}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.AppendMessage(ChatMessage{
+		BotID: "alpha", SessionID: sess.ID, Turn: 1, Role: "bot_out", From: "bot:alpha", To: "bot:beta", Text: "ping beta",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.AppendMessage(ChatMessage{
+		BotID: "alpha", SessionID: sess.ID, Turn: 1, Role: "bot_in", From: "bot:beta", To: "bot:alpha", Text: "pong alpha",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.AppendMessage(ChatMessage{
+		BotID: "alpha", SessionID: sess.ID, Turn: 1, Role: "bot_out", From: "bot:alpha", To: "bot:gamma", Text: "other peer",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	msgs, err := store.ListMessages("alpha", 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 4 {
+		t.Fatalf("expected 4 non-internal messages, got %d", len(msgs))
+	}
+	for _, m := range msgs {
+		if m.Role == "internal" {
+			t.Fatalf("internal message leaked into ListMessages: %+v", m)
+		}
+	}
+	if len(msgs[0].Media) != 1 || msgs[0].Media[0].ID != "med_1.png" {
+		t.Fatalf("expected media_json roundtrip, got %+v", msgs[0].Media)
+	}
+
+	collab, err := store.ListCollabMessages("alpha", "beta", 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(collab) != 2 || collab[0].Text != "ping beta" || collab[1].Text != "pong alpha" {
+		t.Fatalf("unexpected ListCollabMessages: %+v", collab)
+	}
+}

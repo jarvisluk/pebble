@@ -721,3 +721,147 @@ func TestQuestionsHTTPAPI(t *testing.T) {
 		t.Fatalf("expected 404 for settled question, got %d", missingRec.Code)
 	}
 }
+
+func TestOutboundCollabAndMediaEndpoints(t *testing.T) {
+	tmp := t.TempDir()
+	store, _ := state.NewStore(filepath.Join(tmp, "sessions.json"))
+	msgStore, _ := state.NewMessageStore(filepath.Join(tmp, "messages"))
+	reg := harness.NewRegistry()
+	reg.Register(noopHarness{kind: "opencode"})
+	cfg := &config.HubConfig{
+		ProjectRoot: tmp,
+		SharedDir:   filepath.Join(tmp, "workspaces", "_shared"),
+		StateFile:   filepath.Join(tmp, "sessions.json"),
+		MessagesDir: filepath.Join(tmp, "messages"),
+		Bots: []config.BotConfig{
+			{ID: "alpha", Name: "Alpha", Workspace: filepath.Join(tmp, "alpha"), Harness: "opencode"},
+			{ID: "beta", Name: "Beta", Workspace: filepath.Join(tmp, "beta"), Harness: "opencode"},
+		},
+	}
+	h := hub.New(cfg, store, msgStore, reg)
+	defer h.Close()
+
+	srv := NewHTTPServer(h, config.HTTPConfig{Host: "127.0.0.1"})
+	defer srv.Shutdown(t.Context())
+	mux := srv.srv.Handler
+
+	// 1x1 PNG in base64
+	b64 := "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+	outReq := httptest.NewRequest(http.MethodPost, "/api/bots/alpha/outbound", bytes.NewBufferString(
+		`{"text":"look at this","images":[{"dataBase64":"`+b64+`","filename":"dot.png","alt":"dot"}]}`,
+	))
+	outReq.Host = "127.0.0.1:3789"
+	outRec := httptest.NewRecorder()
+	mux.ServeHTTP(outRec, outReq)
+	if outRec.Code != http.StatusOK {
+		t.Fatalf("POST /api/bots/alpha/outbound failed: %d %s", outRec.Code, outRec.Body.String())
+	}
+	var sent state.ChatMessage
+	if err := json.Unmarshal(outRec.Body.Bytes(), &sent); err != nil {
+		t.Fatal(err)
+	}
+	if sent.Role != "assistant" || len(sent.Media) != 1 || !strings.HasPrefix(sent.Media[0].URL, "/api/media/") {
+		t.Fatalf("unexpected outbound message: %+v", sent)
+	}
+
+	// Fetch media
+	medReq := httptest.NewRequest(http.MethodGet, sent.Media[0].URL, nil)
+	medReq.Host = "127.0.0.1:3789"
+	medRec := httptest.NewRecorder()
+	mux.ServeHTTP(medRec, medReq)
+	if medRec.Code != http.StatusOK || medRec.Header().Get("Content-Type") != "image/png" {
+		t.Fatalf("GET media failed: %d ct=%s", medRec.Code, medRec.Header().Get("Content-Type"))
+	}
+
+	// Invalid media ID -> 400
+	badReq := httptest.NewRequest(http.MethodGet, "/api/media/..secret.png", nil)
+	badReq.Host = "127.0.0.1:3789"
+	badRec := httptest.NewRecorder()
+	mux.ServeHTTP(badRec, badReq)
+	if badRec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid media id, got %d", badRec.Code)
+	}
+
+	// Collab endpoint
+	colReq := httptest.NewRequest(http.MethodGet, "/api/bots/alpha/collab/beta", nil)
+	colReq.Host = "127.0.0.1:3789"
+	colRec := httptest.NewRecorder()
+	mux.ServeHTTP(colRec, colReq)
+	if colRec.Code != http.StatusOK || !strings.Contains(colRec.Body.String(), `"messages"`) {
+		t.Fatalf("GET collab failed: %d %s", colRec.Code, colRec.Body.String())
+	}
+
+	// Outbound file with attachment disposition & sandbox CSP
+	fileReq := httptest.NewRequest(http.MethodPost, "/api/bots/alpha/outbound", bytes.NewBufferString(
+		`{"text":"report","files":[{"dataBase64":"JVBERi0xLjQK","filename":"report.html"}]}`,
+	))
+	fileReq.Host = "127.0.0.1:3789"
+	fileRec := httptest.NewRecorder()
+	mux.ServeHTTP(fileRec, fileReq)
+	if fileRec.Code != http.StatusOK {
+		t.Fatalf("POST file outbound failed: %d %s", fileRec.Code, fileRec.Body.String())
+	}
+	var fileMsg state.ChatMessage
+	_ = json.Unmarshal(fileRec.Body.Bytes(), &fileMsg)
+	if len(fileMsg.Media) != 1 || fileMsg.Media[0].Kind != "file" {
+		t.Fatalf("expected 1 file media, got %+v", fileMsg.Media)
+	}
+
+	dlReq := httptest.NewRequest(http.MethodGet, fileMsg.Media[0].URL+"?name=report.html", nil)
+	dlReq.Host = "127.0.0.1:3789"
+	dlRec := httptest.NewRecorder()
+	mux.ServeHTTP(dlRec, dlReq)
+	if dlRec.Code != http.StatusOK ||
+		!strings.Contains(dlRec.Header().Get("Content-Disposition"), "attachment") ||
+		dlRec.Header().Get("Content-Security-Policy") != "sandbox" {
+		t.Fatalf("expected attachment + sandbox CSP for non-image file, got code=%d cd=%q csp=%q",
+			dlRec.Code, dlRec.Header().Get("Content-Disposition"), dlRec.Header().Get("Content-Security-Policy"))
+	}
+
+	// Ticket-based download when APIToken is enabled
+	authSrv := NewHTTPServer(h, config.HTTPConfig{Host: "127.0.0.1", APIToken: "sec-tok"})
+	defer authSrv.Shutdown(t.Context())
+	authMux := authSrv.srv.Handler
+
+	unauthReq := httptest.NewRequest(http.MethodGet, fileMsg.Media[0].URL, nil)
+	unauthReq.Host = "127.0.0.1:3789"
+	unauthRec := httptest.NewRecorder()
+	authMux.ServeHTTP(unauthRec, unauthReq)
+	if unauthRec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 without token or ticket, got %d", unauthRec.Code)
+	}
+
+	tktReq := httptest.NewRequest(http.MethodPost, "/api/media/"+fileMsg.Media[0].ID+"/ticket", nil)
+	tktReq.Host = "127.0.0.1:3789"
+	tktReq.Header.Set("Authorization", "Bearer sec-tok")
+	tktRec := httptest.NewRecorder()
+	authMux.ServeHTTP(tktRec, tktReq)
+	if tktRec.Code != http.StatusOK {
+		t.Fatalf("POST ticket failed: %d %s", tktRec.Code, tktRec.Body.String())
+	}
+	var tktBody struct {
+		Ticket string `json:"ticket"`
+	}
+	_ = json.Unmarshal(tktRec.Body.Bytes(), &tktBody)
+	if tktBody.Ticket == "" {
+		t.Fatalf("expected non-empty ticket")
+	}
+
+	// Valid ticket on matching media ID -> 200
+	okTktReq := httptest.NewRequest(http.MethodGet, fileMsg.Media[0].URL+"?ticket="+tktBody.Ticket, nil)
+	okTktReq.Host = "127.0.0.1:3789"
+	okTktRec := httptest.NewRecorder()
+	authMux.ServeHTTP(okTktRec, okTktReq)
+	if okTktRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 with valid ticket, got %d", okTktRec.Code)
+	}
+
+	// Ticket bound to fileMsg cannot access another media ID -> 401
+	wrongTktReq := httptest.NewRequest(http.MethodGet, sent.Media[0].URL+"?ticket="+tktBody.Ticket, nil)
+	wrongTktReq.Host = "127.0.0.1:3789"
+	wrongTktRec := httptest.NewRecorder()
+	authMux.ServeHTTP(wrongTktRec, wrongTktReq)
+	if wrongTktRec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for mismatched media ticket, got %d", wrongTktRec.Code)
+	}
+}

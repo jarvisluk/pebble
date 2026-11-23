@@ -34,3 +34,14 @@ export async function api<T = unknown>(
   }
   return data as T;
 }
+
+export async function fetchCollabMessages<T = unknown>(
+  botId: string,
+  peerId: string,
+  limit = 200
+): Promise<T[]> {
+  const data = await api<{ messages?: T[] }>(
+    `/api/bots/${encodeURIComponent(botId)}/collab/${encodeURIComponent(peerId)}?limit=${limit}`
+  );
+  return data.messages || [];
+}

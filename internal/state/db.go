@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS messages (
   sender        TEXT NOT NULL DEFAULT '',
   recipient     TEXT NOT NULL DEFAULT '',
   text          TEXT NOT NULL,
+  media_json    TEXT NOT NULL DEFAULT '[]',
   tools_json    TEXT NOT NULL DEFAULT '[]',
   duration_ms   INTEGER NOT NULL DEFAULT 0,
   cost_usd      REAL NOT NULL DEFAULT 0,
@@ -146,7 +147,39 @@ func openSQLite(dbPath string) (*sql.DB, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("init sqlite schema: %w", err)
 	}
+	if err := ensureMessagesMediaColumn(db); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("migrate messages.media_json: %w", err)
+	}
 	return db, nil
+}
+
+func ensureMessagesMediaColumn(db *sql.DB) error {
+	rows, err := db.Query(`PRAGMA table_info(messages)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			cid        int
+			name, ctyp string
+			notnull    int
+			dflt       sql.NullString
+			pk         int
+		)
+		if err := rows.Scan(&cid, &name, &ctyp, &notnull, &dflt, &pk); err != nil {
+			return err
+		}
+		if name == "media_json" {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	_, err = db.Exec(`ALTER TABLE messages ADD COLUMN media_json TEXT NOT NULL DEFAULT '[]'`)
+	return err
 }
 
 func newSessionID() string {
@@ -582,6 +615,7 @@ func toSummary(rec SessionRecord) SessionSummary {
 
 func scanMessageRow(scanner interface{ Scan(...any) error }) (ChatMessage, error) {
 	var m ChatMessage
+	var mediaJSON string
 	var toolsJSON string
 	err := scanner.Scan(
 		&m.ID,
@@ -592,6 +626,7 @@ func scanMessageRow(scanner interface{ Scan(...any) error }) (ChatMessage, error
 		&m.From,
 		&m.To,
 		&m.Text,
+		&mediaJSON,
 		&toolsJSON,
 		&m.DurationMs,
 		&m.CostUSD,
@@ -602,8 +637,20 @@ func scanMessageRow(scanner interface{ Scan(...any) error }) (ChatMessage, error
 	if err != nil {
 		return ChatMessage{}, err
 	}
+	m.Media = decodeMediaJSON(mediaJSON)
 	m.Tools = decodeToolsJSON(toolsJSON)
 	return m, nil
+}
+
+func decodeMediaJSON(raw string) []MessageMedia {
+	if raw == "" || raw == "[]" || raw == "null" {
+		return nil
+	}
+	var out []MessageMedia
+	if err := json.Unmarshal([]byte(raw), &out); err != nil || len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func isValidMsgRowID(id string) (int64, bool) {

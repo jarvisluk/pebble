@@ -23,6 +23,7 @@ import { ChatView } from './components/ChatView';
 import { DesktopStage } from './components/DesktopStage';
 import { SettingsView } from './components/SettingsView';
 import { BotDetailPanel } from './components/BotDetailPanel';
+import { CollabPanel } from './components/CollabPanel';
 import { UnboxModal } from './components/UnboxModal';
 import { ConfirmModal, CreateBotModal, LoginModal } from './components/Modals';
 
@@ -80,6 +81,7 @@ export default function App() {
 
   const [panelOpen, setPanelOpen] = useState(false);
   const [panelDetail, setPanelDetail] = useState<BotDetail | null>(null);
+  const [collabPeerId, setCollabPeerId] = useState<string | null>(null);
   const [routineRefreshSeq, setRoutineRefreshSeq] = useState(0);
 
   const [createOpen, setCreateOpen] = useState(false);
@@ -132,6 +134,7 @@ export default function App() {
   const closeAllOverlays = useCallback(() => {
     setMobileSideOpen(false);
     setPanelOpen(false);
+    setCollabPeerId(null);
     setCreateOpen(false);
   }, []);
 
@@ -407,7 +410,7 @@ export default function App() {
       if (e.key === 'Escape') {
         if (confirmOpts) setConfirmOpts(null);
         else if (unboxOpen) setUnboxOpen(false);
-        else if (createOpen || panelOpen || mobileSideOpen) closeAllOverlays();
+        else if (createOpen || panelOpen || collabPeerId || mobileSideOpen) closeAllOverlays();
         else if (viewRef.current === 'settings') setView('chat');
       }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
@@ -435,7 +438,7 @@ export default function App() {
       mq.removeEventListener('change', onMq);
       document.removeEventListener('keydown', onKeyDown);
     };
-  }, [closeAllOverlays, confirmOpts, createOpen, loadSettings, mobileSideOpen, panelOpen, toggleDesktopSidebar, unboxOpen]);
+  }, [closeAllOverlays, collabPeerId, confirmOpts, createOpen, loadSettings, mobileSideOpen, panelOpen, toggleDesktopSidebar, unboxOpen]);
 
   const selectBot = async (id: string) => {
     setActiveBotId(id);
@@ -488,7 +491,7 @@ export default function App() {
   };
 
   const activeBot = bots.find((b) => b.id === activeBotId);
-  const shadeOpen = mobileSideOpen || panelOpen;
+  const shadeOpen = mobileSideOpen || panelOpen || Boolean(collabPeerId);
 
   const handleSideResizeStart = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
@@ -625,6 +628,10 @@ export default function App() {
             }}
             onResolveTakeover={(to) => void handleResolveTakeover(to)}
             onOpenDetail={() => void openPanel()}
+            onOpenCollab={(peerId) => {
+              setPanelOpen(false);
+              setCollabPeerId(peerId);
+            }}
             onOpenCreate={() => {
               closeAllOverlays();
               setCreateOpen(true);
@@ -746,6 +753,16 @@ export default function App() {
         onReloadBots={loadBots}
         onLoadModels={loadModels}
         onRefreshDetail={(id) => openPanel(id)}
+      />
+
+      <CollabPanel
+        open={Boolean(collabPeerId)}
+        bot={activeBot}
+        peerId={collabPeerId}
+        bots={bots}
+        liveMessages={activeBot ? msgsMap[activeBot.id] || [] : []}
+        lang={lang}
+        onClose={() => setCollabPeerId(null)}
       />
 
       <CreateBotModal

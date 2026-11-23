@@ -138,7 +138,7 @@ const sessionSelectCols = `
 
 const messageSelectCols = `
   msg_uid, session_id, bot_id, turn, role, sender, recipient,
-  text, tools_json, duration_ms, cost_usd, input_tokens, output_tokens, created_at
+  text, media_json, tools_json, duration_ms, cost_usd, input_tokens, output_tokens, created_at
 `
 
 // NewStore opens the SQLite state store (hub.db next to filePath when a legacy
@@ -571,6 +571,12 @@ func (s *Store) AppendMessage(msg ChatMessage) (ChatMessage, error) {
 	if msg.CreatedAt == "" {
 		msg.CreatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	}
+	mediaJSON := "[]"
+	if len(msg.Media) > 0 {
+		if b, err := json.Marshal(msg.Media); err == nil {
+			mediaJSON = string(b)
+		}
+	}
 	toolsJSON := "[]"
 	if len(msg.Tools) > 0 {
 		if b, err := json.Marshal(msg.Tools); err == nil {
@@ -585,9 +591,9 @@ func (s *Store) AppendMessage(msg ChatMessage) (ChatMessage, error) {
 	defer func() { _ = tx.Rollback() }()
 
 	if _, err := tx.Exec(`
-		INSERT INTO messages(msg_uid, session_id, bot_id, turn, role, sender, recipient, text, tools_json, duration_ms, cost_usd, input_tokens, output_tokens, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, msg.ID, msg.SessionID, msg.BotID, msg.Turn, msg.Role, msg.From, msg.To, msg.Text, toolsJSON, msg.DurationMs, msg.CostUSD, msg.InputTokens, msg.OutputTokens, msg.CreatedAt); err != nil {
+		INSERT INTO messages(msg_uid, session_id, bot_id, turn, role, sender, recipient, text, media_json, tools_json, duration_ms, cost_usd, input_tokens, output_tokens, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, msg.ID, msg.SessionID, msg.BotID, msg.Turn, msg.Role, msg.From, msg.To, msg.Text, mediaJSON, toolsJSON, msg.DurationMs, msg.CostUSD, msg.InputTokens, msg.OutputTokens, msg.CreatedAt); err != nil {
 		return msg, err
 	}
 
@@ -652,12 +658,44 @@ func (s *Store) ListMessages(botID string, limit int) ([]ChatMessage, error) {
 		FROM (
 			SELECT `+messageSelectCols+`, id AS _row_id
 			FROM messages
-			WHERE bot_id = ?
+			WHERE bot_id = ? AND role != 'internal'
 			ORDER BY id DESC
 			LIMIT ?
 		) sub
 		ORDER BY _row_id ASC
 	`, botID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []ChatMessage{}
+	for rows.Next() {
+		m, err := scanMessageRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) ListCollabMessages(botID, peerID string, limit int) ([]ChatMessage, error) {
+	if limit <= 0 {
+		limit = 200
+	}
+	peerTag := "bot:" + peerID
+	rows, err := s.db.Query(`
+		SELECT `+messageSelectCols+`
+		FROM (
+			SELECT `+messageSelectCols+`, id AS _row_id
+			FROM messages
+			WHERE bot_id = ? AND role IN ('bot_out', 'bot_in') AND (sender = ? OR recipient = ?)
+			ORDER BY id DESC
+			LIMIT ?
+		) sub
+		ORDER BY _row_id ASC
+	`, botID, peerTag, peerTag, limit)
 	if err != nil {
 		return nil, err
 	}

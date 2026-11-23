@@ -41,6 +41,16 @@ export interface BotDetail extends BotStatus {
   instructions: string;
 }
 
+export interface MessageMedia {
+  id: string;
+  kind?: 'image' | 'file' | string;
+  url: string;
+  mimeType?: string;
+  name?: string;
+  alt?: string;
+  size?: number;
+}
+
 export interface ChatMessage {
   id: string;
   botId: string;
@@ -48,6 +58,7 @@ export interface ChatMessage {
   from?: string;
   to?: string;
   text: string;
+  media?: MessageMedia[];
   createdAt: string;
   durationMs?: number;
   costUsd?: number;

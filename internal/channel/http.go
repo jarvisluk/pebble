@@ -3,7 +3,9 @@ package channel
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -50,6 +52,14 @@ type HTTPServer struct {
 	deskOnce       sync.Once
 	fallbackDesk   *desktop.Coordinator
 	fallbackEngine *desktop.Engine
+
+	mediaTicketsMu sync.Mutex
+	mediaTickets   map[string]mediaTicket
+}
+
+type mediaTicket struct {
+	mediaID   string
+	expiresAt time.Time
 }
 
 func (s *HTTPServer) SetScheduler(sched RoutineScheduler) {
@@ -87,7 +97,11 @@ func NewHTTPServer(h *hub.Hub, cfg config.HTTPConfig) *HTTPServer {
 	mux.HandleFunc("POST /api/bots", s.handleCreateBot)
 	mux.HandleFunc("GET /api/bots/{id}", s.handleBotDetail)
 	mux.HandleFunc("GET /api/bots/{id}/messages", s.handleBotMessages)
+	mux.HandleFunc("GET /api/bots/{id}/collab/{peerId}", s.handleBotCollabMessages)
 	mux.HandleFunc("POST /api/bots/{id}/message", s.handleMessage)
+	mux.HandleFunc("POST /api/bots/{id}/outbound", s.handleOutboundMessage)
+	mux.HandleFunc("POST /api/media/{id}/ticket", s.handleMediaTicket)
+	mux.HandleFunc("GET /api/media/{id}", s.handleMedia)
 	mux.HandleFunc("POST /api/bots/{id}/reset", s.handleReset)
 	mux.HandleFunc("POST /api/bots/{id}/rotate", s.handleRotate)
 	mux.HandleFunc("GET /api/sessions", s.handleListSessions)
@@ -230,7 +244,8 @@ func (s *HTTPServer) guard(next http.Handler) http.Handler {
 			r.URL.Path != "/" &&
 			!strings.HasPrefix(r.URL.Path, "/assets/") &&
 			r.URL.Path != "/api/login" &&
-			!s.authorized(r) {
+			!s.authorized(r) &&
+			!(r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/media/") && s.validMediaTicket(strings.TrimPrefix(r.URL.Path, "/api/media/"), r.URL.Query().Get("ticket"))) {
 			writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "unauthorized"})
 			return
 		}
@@ -396,6 +411,163 @@ func (s *HTTPServer) handleBotMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"messages": msgs})
+}
+
+func (s *HTTPServer) handleBotCollabMessages(w http.ResponseWriter, r *http.Request) {
+	botID := r.PathValue("id")
+	peerID := r.PathValue("peerId")
+	limit := 200
+	if q := r.URL.Query().Get("limit"); q != "" {
+		if n, err := strconv.Atoi(q); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	msgs, err := s.hub.CollabMessages(botID, peerID, limit)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"messages": msgs})
+}
+
+type outboundMessageReq struct {
+	Text   string              `json:"text"`
+	Images []hub.OutboundImage `json:"images,omitempty"`
+	Files  []hub.OutboundFile  `json:"files,omitempty"`
+}
+
+func (s *HTTPServer) handleOutboundMessage(w http.ResponseWriter, r *http.Request) {
+	botID := r.PathValue("id")
+	var req outboundMessageReq
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<20)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json body"})
+		return
+	}
+	msg, err := s.hub.SendOutboundMessage(botID, req.Text, req.Images, req.Files...)
+	if err != nil {
+		status := http.StatusBadRequest
+		if strings.Contains(err.Error(), "not found") {
+			status = http.StatusNotFound
+		}
+		writeJSON(w, status, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, msg)
+}
+
+func (s *HTTPServer) validMediaTicket(mediaID, ticket string) bool {
+	if mediaID == "" || ticket == "" || strings.Contains(mediaID, "/") {
+		return false
+	}
+	now := time.Now()
+	s.mediaTicketsMu.Lock()
+	defer s.mediaTicketsMu.Unlock()
+	if s.mediaTickets == nil {
+		return false
+	}
+	for k, v := range s.mediaTickets {
+		if now.After(v.expiresAt) {
+			delete(s.mediaTickets, k)
+		}
+	}
+	entry, ok := s.mediaTickets[ticket]
+	if !ok || now.After(entry.expiresAt) || entry.mediaID != mediaID {
+		return false
+	}
+	return true
+}
+
+func (s *HTTPServer) handleMediaTicket(w http.ResponseWriter, r *http.Request) {
+	mediaID := r.PathValue("id")
+	if _, _, err := s.hub.ResolveMediaFile(mediaID); err != nil {
+		status := http.StatusNotFound
+		if strings.Contains(err.Error(), "invalid") {
+			status = http.StatusBadRequest
+		}
+		writeJSON(w, status, map[string]any{"error": err.Error()})
+		return
+	}
+	rb := make([]byte, 16)
+	if _, err := rand.Read(rb); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "failed to issue ticket"})
+		return
+	}
+	ticket := hex.EncodeToString(rb)
+	now := time.Now()
+
+	s.mediaTicketsMu.Lock()
+	if s.mediaTickets == nil {
+		s.mediaTickets = make(map[string]mediaTicket)
+	}
+	for k, v := range s.mediaTickets {
+		if now.After(v.expiresAt) {
+			delete(s.mediaTickets, k)
+		}
+	}
+	s.mediaTickets[ticket] = mediaTicket{
+		mediaID:   mediaID,
+		expiresAt: now.Add(60 * time.Second),
+	}
+	s.mediaTicketsMu.Unlock()
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ticket":    ticket,
+		"expiresIn": 60,
+	})
+}
+
+func isSafeInlineImageMIME(mimeType string) bool {
+	base := strings.TrimSpace(strings.Split(mimeType, ";")[0])
+	switch base {
+	case "image/png", "image/jpeg", "image/gif", "image/webp":
+		return true
+	default:
+		return false
+	}
+}
+
+func sanitizeASCIIName(name string) string {
+	var b strings.Builder
+	for _, r := range name {
+		if r >= 0x20 && r <= 0x7e && r != '"' && r != '\\' && r != ';' {
+			b.WriteRune(r)
+		} else if r > 0x7e {
+			b.WriteByte('_')
+		}
+	}
+	out := strings.TrimSpace(b.String())
+	if out == "" {
+		return "download"
+	}
+	return out
+}
+
+func (s *HTTPServer) handleMedia(w http.ResponseWriter, r *http.Request) {
+	mediaID := r.PathValue("id")
+	filePath, mimeType, err := s.hub.ResolveMediaFile(mediaID)
+	if err != nil {
+		status := http.StatusNotFound
+		if strings.Contains(err.Error(), "invalid") {
+			status = http.StatusBadRequest
+		}
+		writeJSON(w, status, map[string]any{"error": err.Error()})
+		return
+	}
+	w.Header().Set("Content-Type", mimeType)
+	w.Header().Set("Cache-Control", "private, max-age=86400")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	if r.URL.Query().Get("download") == "1" || !isSafeInlineImageMIME(mimeType) {
+		dlName := strings.TrimSpace(r.URL.Query().Get("name"))
+		if dlName == "" {
+			dlName = mediaID
+		} else {
+			dlName = path.Base(dlName)
+		}
+		asciiName := sanitizeASCIIName(dlName)
+		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"; filename*=UTF-8''%s`, asciiName, url.PathEscape(dlName)))
+		w.Header().Set("Content-Security-Policy", "sandbox")
+	}
+	http.ServeFile(w, r, filePath)
 }
 
 type messageReq struct {

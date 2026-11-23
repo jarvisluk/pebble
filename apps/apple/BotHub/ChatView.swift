@@ -28,7 +28,49 @@ struct ChatView: View {
     @State private var sending = false
     @State private var sendErr = ""
     @State private var detailOpen = false
+    @State private var collabPeer: CollabTarget?
+    @State private var previewMedia: MessageMedia?
     @FocusState private var focused: Bool
+
+    private struct CollabTarget: Identifiable {
+        let id: String
+    }
+
+    private enum TimelineEntry: Identifiable {
+        case message(ChatMessage)
+        case collab(id: String, peerId: String, items: [ChatMessage], createdAt: String?)
+
+        var id: String {
+            switch self {
+            case let .message(m): return m.id
+            case let .collab(id, _, _, _): return id
+            }
+        }
+        var createdAt: String? {
+            switch self {
+            case let .message(m): return m.createdAt
+            case let .collab(_, _, _, ts): return ts
+            }
+        }
+    }
+
+    private var timelineEntries: [TimelineEntry] {
+        var entries: [TimelineEntry] = []
+        for m in list {
+            if m.role == "bot_out" || m.role == "bot_in" {
+                let rawPeer = (m.role == "bot_out" ? (m.to ?? "") : (m.from ?? ""))
+                let peerId = rawPeer.hasPrefix("bot:") ? String(rawPeer.dropFirst(4)) : rawPeer
+                if case let .collab(eid, lastPeer, items, ts) = entries.last, lastPeer == peerId {
+                    entries[entries.count - 1] = .collab(id: eid, peerId: peerId, items: items + [m], createdAt: ts)
+                } else {
+                    entries.append(.collab(id: "collab_\(m.id)", peerId: peerId, items: [m], createdAt: m.createdAt))
+                }
+            } else {
+                entries.append(.message(m))
+            }
+        }
+        return entries
+    }
 
     private var index: Int { hub.bots.firstIndex { $0.id == botId } ?? -1 }
     private var bot: BotStatus? { index >= 0 ? hub.bots[index] : nil }
@@ -61,6 +103,14 @@ struct ChatView: View {
             .toolbarBackground(p.page, for: .navigationBar)
             .detailPanel(isPresented: $detailOpen, compact: router.compact) {
                 BotDetailView(botId: botId, isPresented: $detailOpen, inline: !router.compact)
+            }
+            .sheet(item: $collabPeer) { target in
+                NavigationStack {
+                    CollabSheetView(botId: botId, peerId: target.id)
+                }
+            }
+            .sheet(item: $previewMedia) { media in
+                MediaPreviewSheet(media: media)
             }
             .navigationTitle(name)
             .navigationBarTitleDisplayMode(.inline)
@@ -98,18 +148,41 @@ struct ChatView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 10) {
                     if list.isEmpty { emptyState(pal) }
-                    ForEach(Array(list.enumerated()), id: \.element.id) { i, m in
-                        let prev = i > 0 ? list[i - 1] : nil
-                        if showStamp(m, prev) {
-                            Text(formatStamp(m.createdAt)).font(.system(size: 13)).foregroundStyle(p.mute)
+                    ForEach(Array(timelineEntries.enumerated()), id: \.element.id) { i, entry in
+                        let prevAt = i > 0 ? timelineEntries[i - 1].createdAt : nil
+                        if showStamp(entry.createdAt, prevAt) {
+                            Text(formatStamp(entry.createdAt)).font(.system(size: 13)).foregroundStyle(p.mute)
                                 .frame(maxWidth: .infinity).padding(.top, 4)
                         }
-                        MessageBubble(msg: m, soft: pal.soft)
+                        switch entry {
+                        case let .collab(_, peerId, items, _):
+                            let peerIdx = hub.bots.firstIndex { $0.id == peerId } ?? -1
+                            let peerBot = peerIdx >= 0 ? hub.bots[peerIdx] : nil
+                            let peerName = peerBot?.displayName ?? peerId
+                            Button {
+                                if !peerId.isEmpty { collabPeer = CollabTarget(id: peerId) }
+                            } label: {
+                                HStack(spacing: 8) {
+                                    BotAvatar(id: peerId, size: 16, index: peerIdx, avatar: peerBot?.avatar, color: peerBot?.color)
+                                    Text("\(hub.t("collabWith", ["peer": peerName])) · \(hub.t("collabCount", ["count": "\(items.count)"]))")
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundStyle(p.lilacInk)
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 11, weight: .semibold))
+                                        .foregroundStyle(p.lilacInk.opacity(0.75))
+                                }
+                                .padding(.horizontal, 12).padding(.vertical, 7)
+                                .background(p.lilac, in: Capsule())
+                            }
+                            .buttonStyle(PressStyle())
+                        case let .message(m):
+                            MessageBubble(msg: m, soft: pal.soft, onPreviewMedia: { previewMedia = $0 })
+                        }
                     }
                     if bot?.isBusy == true {
                         HStack(spacing: 8) {
                             BotAvatar(id: botId, size: 24, index: index, avatar: bot?.avatar, color: bot?.color, busy: true)
-                            Text(hub.tools[botId].map { $0.isEmpty ? hub.t("thinking") : hub.t("callingTool", ["tool": $0]) } ?? hub.t("thinking"))
+                            Text(hub.t("processing"))
                                 .font(.system(size: 15)).foregroundStyle(p.busy)
                         }
                         .padding(.vertical, 6)
@@ -133,9 +206,9 @@ struct ChatView: View {
         }
     }
 
-    private func showStamp(_ m: ChatMessage, _ prev: ChatMessage?) -> Bool {
+    private func showStamp(_ cur: String?, _ prev: String?) -> Bool {
         guard let prev else { return true }
-        guard let a = parseISO(m.createdAt), let b = parseISO(prev.createdAt) else { return false }
+        guard let a = parseISO(cur), let b = parseISO(prev) else { return false }
         return a.timeIntervalSince(b) > 300
     }
 
@@ -251,15 +324,21 @@ struct MessageBubble: View {
     @Environment(\.palette) private var p
     var msg: ChatMessage
     var soft: Color
+    var onPreviewMedia: ((MessageMedia) -> Void)? = nil
 
     var body: some View {
         switch msg.role {
         case "user":
             HStack {
                 Spacer(minLength: 48)
-                Text(msg.body).font(.system(size: 16)).textSelection(.enabled)
-                    .padding(.horizontal, 16).padding(.vertical, 10)
-                    .background(soft, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                VStack(alignment: .trailing, spacing: 6) {
+                    if !msg.body.isEmpty {
+                        Text(msg.body).font(.system(size: 16)).textSelection(.enabled)
+                    }
+                    mediaGrid
+                }
+                .padding(.horizontal, 16).padding(.vertical, 10)
+                .background(soft, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
             }
         case "assistant":
             let meta = [
@@ -271,7 +350,10 @@ struct MessageBubble: View {
                     Text(hub.t("routineReceiptFrom", ["name": String(from.dropFirst(8))]))
                         .font(.system(size: 13, weight: .semibold)).foregroundStyle(p.accent)
                 }
-                MarkdownText(text: msg.body)
+                if !msg.body.isEmpty {
+                    MarkdownText(text: msg.body)
+                }
+                mediaGrid
                 if !meta.isEmpty {
                     Text(meta.joined(separator: " · ")).font(.system(size: 13)).foregroundStyle(p.mute)
                 }
@@ -283,7 +365,10 @@ struct MessageBubble: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text(msg.role == "bot_out" ? hub.t("delegateTo", ["peer": msg.to ?? ""]) : hub.t("fromPeer", ["peer": msg.from ?? ""]))
                     .font(.system(size: 13, weight: .semibold)).foregroundStyle(p.lilacInk)
-                MarkdownText(text: msg.body)
+                if !msg.body.isEmpty {
+                    MarkdownText(text: msg.body)
+                }
+                mediaGrid
             }
             .padding(.horizontal, 16).padding(.vertical, 10)
             .background(p.lilac, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
@@ -305,6 +390,272 @@ struct MessageBubble: View {
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity)
             }
+        }
+    }
+
+    @ViewBuilder
+    private var mediaGrid: some View {
+        let all = msg.media ?? []
+        let imageItems = all.filter(\.isImage)
+        let fileItems = all.filter { !$0.isImage }
+        if !imageItems.isEmpty {
+            let cols = imageItems.count == 1
+                ? [GridItem(.flexible())]
+                : [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)]
+            LazyVGrid(columns: cols, spacing: 8) {
+                ForEach(imageItems) { img in
+                    Button {
+                        onPreviewMedia?(img)
+                    } label: {
+                        AuthMediaImage(path: img.url)
+                            .frame(maxWidth: imageItems.count == 1 ? 280 : .infinity, maxHeight: 240)
+                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    }
+                    .buttonStyle(PressStyle())
+                }
+            }
+        }
+        if !fileItems.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(fileItems) { file in
+                    FileAttachmentRow(file: file)
+                }
+            }
+        }
+    }
+}
+
+private struct SharedFileURL: Identifiable {
+    let id = UUID()
+    let url: URL
+}
+
+struct FileAttachmentRow: View {
+    @Environment(HubStore.self) private var hub
+    @Environment(\.palette) private var p
+    var file: MessageMedia
+    @State private var loading = false
+    @State private var shareItem: SharedFileURL?
+    @State private var errMsg = ""
+
+    private var displayName: String {
+        let n = (file.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return n.isEmpty ? file.id : n
+    }
+
+    private var sizeLabel: String {
+        guard let bytes = file.size, bytes > 0 else { return "" }
+        if bytes < 1024 { return "\(bytes) B" }
+        if bytes < 1024 * 1024 { return String(format: "%.1f KB", Double(bytes) / 1024.0) }
+        return String(format: "%.1f MB", Double(bytes) / (1024.0 * 1024.0))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Button {
+                downloadAndShare()
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "doc.fill")
+                        .font(.system(size: 16))
+                        .foregroundStyle(p.text2)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(displayName)
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(p.text)
+                            .lineLimit(1)
+                        if !sizeLabel.isEmpty {
+                            Text(sizeLabel)
+                                .font(.system(size: 12))
+                                .foregroundStyle(p.mute)
+                        }
+                    }
+                    Spacer(minLength: 8)
+                    if loading {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Image(systemName: "arrow.down.circle")
+                            .font(.system(size: 17))
+                            .foregroundStyle(p.mute)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(p.s1, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+            .buttonStyle(PressStyle())
+            .disabled(loading)
+
+            if !errMsg.isEmpty {
+                Text(errMsg).font(.system(size: 12)).foregroundStyle(p.danger)
+            }
+        }
+        .sheet(item: $shareItem) { item in
+            ShareSheet(items: [item.url])
+        }
+    }
+
+    private func downloadAndShare() {
+        loading = true
+        errMsg = ""
+        Task {
+            do {
+                let data = try await hub.fetchMediaData(file.url)
+                let safeName = (displayName as NSString).lastPathComponent
+                let dir = FileManager.default.temporaryDirectory.appendingPathComponent("bothub-files-\(file.id)", isDirectory: true)
+                try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                let dst = dir.appendingPathComponent(safeName.isEmpty ? file.id : safeName)
+                try data.write(to: dst, options: .atomic)
+                shareItem = SharedFileURL(url: dst)
+            } catch {
+                errMsg = hub.t("downloadFailed")
+            }
+            loading = false
+        }
+    }
+}
+
+struct ShareSheet: UIViewControllerRepresentable {
+    var items: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        let vc = UIActivityViewController(activityItems: items, applicationActivities: nil)
+        if let pop = vc.popoverPresentationController {
+            if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+               let win = scene.windows.first(where: { $0.isKeyWindow }) ?? scene.windows.first {
+                pop.sourceView = win
+                pop.sourceRect = CGRect(x: win.bounds.midX, y: win.bounds.midY, width: 1, height: 1)
+                pop.permittedArrowDirections = []
+            }
+        }
+        return vc
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+}
+
+struct AuthMediaImage: View {
+    @Environment(HubStore.self) private var hub
+    @Environment(\.palette) private var p
+    var path: String
+    @State private var data: Data?
+
+    var body: some View {
+        Group {
+            if let data, let uiImage = UIImage(data: data) {
+                Image(uiImage: uiImage)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(p.s1)
+                    .frame(height: 120)
+                    .overlay { ProgressView() }
+            }
+        }
+        .task(id: path) {
+            data = try? await hub.fetchMediaData(path)
+        }
+    }
+}
+
+struct MediaPreviewSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(HubStore.self) private var hub
+    var media: MessageMedia
+    @State private var data: Data?
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                Color.black.ignoresSafeArea()
+                if let data, let uiImage = UIImage(data: data) {
+                    Image(uiImage: uiImage)
+                        .resizable()
+                        .scaledToFit()
+                        .padding()
+                } else {
+                    ProgressView().tint(.white)
+                }
+            }
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(hub.t("close")) { dismiss() }
+                        .foregroundStyle(.white)
+                }
+            }
+            .task(id: media.url) {
+                data = try? await hub.fetchMediaData(media.url)
+            }
+        }
+    }
+}
+
+struct CollabSheetView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(HubStore.self) private var hub
+    @Environment(\.palette) private var p
+    var botId: String
+    var peerId: String
+
+    @State private var history: [ChatMessage] = []
+    @State private var loading = false
+    @State private var previewMedia: MessageMedia?
+
+    private var botName: String { hub.bots.first { $0.id == botId }?.displayName ?? botId }
+    private var peerName: String { hub.bots.first { $0.id == peerId }?.displayName ?? peerId }
+
+    private var items: [ChatMessage] {
+        let peerTag = "bot:\(peerId)"
+        var map: [String: ChatMessage] = [:]
+        for m in history { map[m.id] = m }
+        for m in (hub.msgs[botId] ?? []) where (m.role == "bot_out" || m.role == "bot_in") && (m.from == peerTag || m.to == peerTag) {
+            map[m.id] = m
+        }
+        return map.values.sorted { ($0.createdAt ?? "") < ($1.createdAt ?? "") }
+    }
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 10) {
+                if loading && items.isEmpty {
+                    ProgressView().frame(maxWidth: .infinity).padding(.top, 40)
+                } else if items.isEmpty {
+                    Text(hub.t("collabEmpty"))
+                        .font(.system(size: 15))
+                        .foregroundStyle(p.mute)
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 40)
+                } else {
+                    ForEach(items) { m in
+                        let isOut = m.role == "bot_out"
+                        VStack(alignment: isOut ? .trailing : .leading, spacing: 4) {
+                            Text(isOut ? hub.t("delegateTo", ["peer": peerName]) : hub.t("fromPeer", ["peer": peerName]))
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(p.lilacInk)
+                            MessageBubble(msg: m, soft: p.s1, onPreviewMedia: { previewMedia = $0 })
+                        }
+                        .frame(maxWidth: .infinity, alignment: isOut ? .trailing : .leading)
+                    }
+                }
+            }
+            .padding(16)
+        }
+        .background(p.page)
+        .navigationTitle(hub.t("collabTitle", ["bot": botName, "peer": peerName]))
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button(hub.t("close")) { dismiss() }
+            }
+        }
+        .sheet(item: $previewMedia) { media in
+            MediaPreviewSheet(media: media)
+        }
+        .task(id: "\(botId)-\(peerId)") {
+            loading = true
+            history = (try? await hub.loadCollabMessages(botId, peerId: peerId)) ?? []
+            loading = false
         }
     }
 }
