@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/robfig/cron/v3"
 )
@@ -19,6 +20,10 @@ const (
 	RoutineDeliveryReceipt = "receipt"
 	RoutineDeliveryNotify  = "notify"
 	RoutineDeliveryNone    = "none"
+
+	RoutineFailoverAuto        = "auto"
+	RoutineFailoverPrimaryOnly = "primary_only"
+	RoutineFailoverManual      = "manual"
 )
 
 var cronParser = cron.NewParser(
@@ -47,7 +52,8 @@ type ScheduleConfig struct {
 	WebhookURL     string `json:"webhookUrl,omitempty"`
 	Prompt         string `json:"prompt"`
 	Model          string `json:"model,omitempty"`
-	MainDelivery   string `json:"mainDelivery,omitempty"` // "receipt" (default) | "notify" | "none"
+	MainDelivery   string `json:"mainDelivery,omitempty"`   // "receipt" (default) | "notify" | "none"
+	FailoverPolicy string `json:"failoverPolicy,omitempty"` // "auto" (default) | "primary_only" | "manual"
 	Enabled        *bool  `json:"enabled,omitempty"`
 }
 
@@ -74,6 +80,20 @@ func (s ScheduleConfig) EffectiveMainDelivery() string {
 		return RoutineDeliveryNone
 	default:
 		return strings.ToLower(strings.TrimSpace(s.MainDelivery))
+	}
+}
+
+// EffectiveFailoverPolicy returns the normalized failover policy ("auto", "primary_only", or "manual").
+func (s ScheduleConfig) EffectiveFailoverPolicy() string {
+	switch strings.ToLower(strings.TrimSpace(s.FailoverPolicy)) {
+	case "", RoutineFailoverAuto:
+		return RoutineFailoverAuto
+	case RoutineFailoverPrimaryOnly:
+		return RoutineFailoverPrimaryOnly
+	case RoutineFailoverManual:
+		return RoutineFailoverManual
+	default:
+		return strings.ToLower(strings.TrimSpace(s.FailoverPolicy))
 	}
 }
 
@@ -116,6 +136,11 @@ func (s ScheduleConfig) Validate() error {
 	case "", RoutineDeliveryReceipt, RoutineDeliveryNotify, RoutineDeliveryNone:
 	default:
 		return fmt.Errorf("invalid mainDelivery %q (expected receipt, notify, or none)", s.MainDelivery)
+	}
+	switch strings.ToLower(strings.TrimSpace(s.FailoverPolicy)) {
+	case "", RoutineFailoverAuto, RoutineFailoverPrimaryOnly, RoutineFailoverManual:
+	default:
+		return fmt.Errorf("invalid failoverPolicy %q (expected auto, primary_only, or manual)", s.FailoverPolicy)
 	}
 	return nil
 }
@@ -324,11 +349,19 @@ func (w SyncWebDAVConfig) IsReadOnly() bool {
 }
 
 type SyncConfig struct {
-	Role      string            `json:"role,omitempty"` // "primary" (default) | "standby"
-	PeerURL   string            `json:"peerUrl,omitempty"`
-	PeerToken string            `json:"peerToken,omitempty"`
-	Git       *SyncGitConfig    `json:"git,omitempty"`
-	WebDAV    *SyncWebDAVConfig `json:"webdav,omitempty"`
+	Role               string            `json:"role,omitempty"` // "primary" (default) | "standby"
+	PeerURL            string            `json:"peerUrl,omitempty"`
+	PeerToken          string            `json:"peerToken,omitempty"`
+	FailoverTimeoutSec int               `json:"failoverTimeoutSec,omitempty"` // default: 90
+	Git                *SyncGitConfig    `json:"git,omitempty"`
+	WebDAV             *SyncWebDAVConfig `json:"webdav,omitempty"`
+}
+
+func (s *SyncConfig) EffectiveFailoverTimeout() time.Duration {
+	if s == nil || s.FailoverTimeoutSec <= 0 {
+		return 90 * time.Second
+	}
+	return time.Duration(s.FailoverTimeoutSec) * time.Second
 }
 
 func (s *SyncConfig) EffectiveRole() string {

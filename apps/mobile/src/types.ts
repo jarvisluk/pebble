@@ -197,6 +197,8 @@ export interface ServerProfile {
   label: string;
   address: string;
   token: string;
+  standbyAddress?: string;
+  standbyToken?: string;
 }
 
 export interface HostTailscaleStatus {

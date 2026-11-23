@@ -128,6 +128,7 @@ interface HubContextValue {
   isTailcat: boolean;
   isTailscale: boolean;
   online: boolean;
+  usingStandby: boolean;
   bots: BotStatus[];
   msgs: Record<string, ChatMessage[]>;
   last: Record<string, ChatMessage>;
@@ -147,7 +148,7 @@ interface HubContextValue {
   activeDesktopTarget: ActiveDesktopTarget;
   setActiveDesktopTarget: (target: string) => Promise<void>;
   setActiveChatBot: (botId: string | null) => void;
-  addAndConnectServer: (input: { label?: string; address: string; token?: string }) => Promise<boolean>;
+  addAndConnectServer: (input: { label?: string; address: string; token?: string; standbyAddress?: string; standbyToken?: string }) => Promise<boolean>;
   selectServer: (id: string) => Promise<void>;
   updateServerToken: (id: string, token: string) => Promise<void>;
   removeServer: (id: string) => Promise<void>;
@@ -218,6 +219,7 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
   const [isTailcat, setIsTailcat] = useState(false);
   const [isTailscale, setIsTailscale] = useState(false);
   const [online, setOnline] = useState(false);
+  const [usingStandby, setUsingStandby] = useState(false);
 
   const [bots, setBots] = useState<BotStatus[]>([]);
   const [msgs, setMsgs] = useState<Record<string, ChatMessage[]>>({});
@@ -394,125 +396,152 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
       sseCloseRef.current?.();
       sseCloseRef.current = null;
       setOnline(false);
+      setUsingStandby(false);
       setConnState('connecting');
       setConnError('');
 
-      const norm = normalizeAddress(profile.address);
-      let resolvedToken = profile.token || norm.token;
-      let resolvedURL = norm.cleanAddress;
+      const tryEndpoint = async (rawAddr: string, rawTok: string, isStandby: boolean) => {
+        const norm = normalizeAddress(rawAddr);
+        let resolvedToken = rawTok || norm.token;
+        let resolvedURL = norm.cleanAddress;
+
+        try {
+          if (norm.isTailscale) {
+            if (mobileTsRef.current?.state !== 'running') {
+              const st = await tailscaleStart({ controlUrl: tsControlUrlRef.current });
+              setMobileTailscale(st);
+              if (st.state === 'needs_login' && st.authUrl) {
+                void Linking.openURL(st.authUrl).catch(() => {});
+              }
+            }
+            const tRes = await startTunnel(norm.cleanAddress, resolvedToken);
+            if (seq !== connSeqRef.current) return;
+            resolvedURL = tRes.url;
+            if (tRes.token && !resolvedToken) {
+              resolvedToken = tRes.token;
+            }
+          } else if (norm.isTailcat) {
+            const tRes = await startTunnel(norm.cleanAddress, resolvedToken);
+            if (seq !== connSeqRef.current) return;
+            resolvedURL = tRes.url;
+            if (tRes.token && !resolvedToken) {
+              resolvedToken = tRes.token;
+            }
+          } else {
+            await stopTunnel().catch(() => {});
+          }
+
+          if (seq !== connSeqRef.current) return;
+
+          if (!isStandby && (resolvedToken !== profile.token || norm.cleanAddress !== profile.address)) {
+            const updated = allServers.map((s) =>
+              s.id === profile.id ? { ...s, address: norm.cleanAddress, token: resolvedToken } : s
+            );
+            setServers(updated);
+            await saveServers(updated, profile.id);
+          }
+
+          setIsTailcat(norm.isTailcat);
+          setIsTailscale(norm.isTailscale);
+          setBaseURL(resolvedURL);
+          setAuthToken(resolvedToken);
+
+          const data = await apiRequest<{ bots: BotStatus[] }>(resolvedURL, resolvedToken, '/api/bots');
+          if (seq !== connSeqRef.current) return;
+
+          const botList = data.bots || [];
+          setBots(botList);
+          setMsgs({});
+          setLast({});
+          setUnread({});
+          setTools({});
+          setModels({});
+          setRoutines({});
+          setUsingStandby(isStandby);
+          setConnState('connected');
+          setConnError('');
+
+          Promise.all(
+            botList.map(async (b) => {
+              try {
+                const res = await apiRequest<{ messages: ChatMessage[] }>(
+                  resolvedURL,
+                  resolvedToken,
+                  `/api/bots/${encodeURIComponent(b.id)}/messages?limit=1`
+                );
+                const m = res.messages?.[res.messages.length - 1];
+                if (m && seq === connSeqRef.current) {
+                  setLast((prev) => ({ ...prev, [b.id]: m }));
+                }
+              } catch {}
+            })
+          ).catch(() => {});
+
+          apiRequest<SettingsData>(resolvedURL, resolvedToken, '/api/settings')
+            .then((s) => seq === connSeqRef.current && setSettings(s))
+            .catch(() => {});
+          apiRequest<{ nodes: NodeInfo[] }>(resolvedURL, resolvedToken, '/api/nodes')
+            .then((n) => seq === connSeqRef.current && setNodes(n.nodes || []))
+            .catch(() => {});
+          apiRequest<TailcatStatus>(resolvedURL, resolvedToken, '/api/tailcat')
+            .then((t) => seq === connSeqRef.current && setTailcat(t))
+            .catch(() => {});
+          apiRequest<HostTailscaleStatus>(resolvedURL, resolvedToken, '/api/tailscale')
+            .then((ts) => seq === connSeqRef.current && setHostTailscale(ts))
+            .catch(() => {});
+          apiRequest<{ items: TakeoverRequest[] }>(resolvedURL, resolvedToken, '/api/desktop/takeovers')
+            .then((t) => seq === connSeqRef.current && setTakeovers(t.items || []))
+            .catch(() => {});
+          apiRequest<{ targets?: DesktopTarget[]; activeTarget?: ActiveDesktopTarget }>(
+            resolvedURL,
+            resolvedToken,
+            '/api/desktop/targets'
+          )
+            .then((d) => {
+              if (seq !== connSeqRef.current) return;
+              setDesktopTargets(d.targets || []);
+              if (d.activeTarget) setActiveDesktopTargetState(d.activeTarget);
+            })
+            .catch(() => {});
+          apiRequest<{ items: PendingQuestion[] }>(resolvedURL, resolvedToken, '/api/questions')
+            .then((q) => seq === connSeqRef.current && setQuestions(q.items || []))
+            .catch(() => {});
+
+          startStream(resolvedURL, resolvedToken);
+        } catch (err) {
+          if (seq === connSeqRef.current) {
+            setBaseURL(resolvedURL);
+            setAuthToken(resolvedToken);
+            setIsTailcat(norm.isTailcat);
+            setIsTailscale(norm.isTailscale);
+          }
+          throw err;
+        }
+      };
 
       try {
-        if (norm.isTailscale) {
-          if (mobileTsRef.current?.state !== 'running') {
-            const st = await tailscaleStart({ controlUrl: tsControlUrlRef.current });
-            setMobileTailscale(st);
-            if (st.state === 'needs_login' && st.authUrl) {
-              void Linking.openURL(st.authUrl).catch(() => {});
-            }
-          }
-          const tRes = await startTunnel(norm.cleanAddress, resolvedToken);
-          if (seq !== connSeqRef.current) return;
-          resolvedURL = tRes.url;
-          if (tRes.token && !resolvedToken) {
-            resolvedToken = tRes.token;
-          }
-        } else if (norm.isTailcat) {
-          const tRes = await startTunnel(norm.cleanAddress, resolvedToken);
-          if (seq !== connSeqRef.current) return;
-          resolvedURL = tRes.url;
-          if (tRes.token && !resolvedToken) {
-            resolvedToken = tRes.token;
-          }
-        } else {
-          await stopTunnel().catch(() => {});
-        }
-
-        if (seq !== connSeqRef.current) return;
-
-        // Persist extracted token if new.
-        if (resolvedToken !== profile.token || norm.cleanAddress !== profile.address) {
-          const updated = allServers.map((s) =>
-            s.id === profile.id ? { ...s, address: norm.cleanAddress, token: resolvedToken } : s
-          );
-          setServers(updated);
-          await saveServers(updated, profile.id);
-        }
-
-        setIsTailcat(norm.isTailcat);
-        setIsTailscale(norm.isTailscale);
-        setBaseURL(resolvedURL);
-        setAuthToken(resolvedToken);
-
-        const data = await apiRequest<{ bots: BotStatus[] }>(resolvedURL, resolvedToken, '/api/bots');
-        if (seq !== connSeqRef.current) return;
-
-        const botList = data.bots || [];
-        setBots(botList);
-        setMsgs({});
-        setLast({});
-        setUnread({});
-        setTools({});
-        setModels({});
-        setRoutines({});
-        setConnState('connected');
-        setConnError('');
-
-        // Fetch previews & settings & nodes in parallel.
-        Promise.all(
-          botList.map(async (b) => {
-            try {
-              const res = await apiRequest<{ messages: ChatMessage[] }>(
-                resolvedURL,
-                resolvedToken,
-                `/api/bots/${encodeURIComponent(b.id)}/messages?limit=1`
-              );
-              const m = res.messages?.[res.messages.length - 1];
-              if (m && seq === connSeqRef.current) {
-                setLast((prev) => ({ ...prev, [b.id]: m }));
-              }
-            } catch {
-              // ignore preview errors
-            }
-          })
-        ).catch(() => {});
-
-        apiRequest<SettingsData>(resolvedURL, resolvedToken, '/api/settings')
-          .then((s) => seq === connSeqRef.current && setSettings(s))
-          .catch(() => {});
-        apiRequest<{ nodes: NodeInfo[] }>(resolvedURL, resolvedToken, '/api/nodes')
-          .then((n) => seq === connSeqRef.current && setNodes(n.nodes || []))
-          .catch(() => {});
-        apiRequest<TailcatStatus>(resolvedURL, resolvedToken, '/api/tailcat')
-          .then((t) => seq === connSeqRef.current && setTailcat(t))
-          .catch(() => {});
-        apiRequest<HostTailscaleStatus>(resolvedURL, resolvedToken, '/api/tailscale')
-          .then((ts) => seq === connSeqRef.current && setHostTailscale(ts))
-          .catch(() => {});
-        apiRequest<{ items: TakeoverRequest[] }>(resolvedURL, resolvedToken, '/api/desktop/takeovers')
-          .then((t) => seq === connSeqRef.current && setTakeovers(t.items || []))
-          .catch(() => {});
-        apiRequest<{ targets?: DesktopTarget[]; activeTarget?: ActiveDesktopTarget }>(
-          resolvedURL,
-          resolvedToken,
-          '/api/desktop/targets'
-        )
-          .then((d) => {
-            if (seq !== connSeqRef.current) return;
-            setDesktopTargets(d.targets || []);
-            if (d.activeTarget) setActiveDesktopTargetState(d.activeTarget);
-          })
-          .catch(() => {});
-        apiRequest<{ items: PendingQuestion[] }>(resolvedURL, resolvedToken, '/api/questions')
-          .then((q) => seq === connSeqRef.current && setQuestions(q.items || []))
-          .catch(() => {});
-
-        startStream(resolvedURL, resolvedToken);
+        await tryEndpoint(profile.address, profile.token, false);
       } catch (err: any) {
         if (seq !== connSeqRef.current) return;
-        setBaseURL(resolvedURL);
-        setAuthToken(resolvedToken);
-        setIsTailcat(norm.isTailcat);
-        setIsTailscale(norm.isTailscale);
+        const sbAddr = (profile.standbyAddress || '').trim();
+        if (!(err instanceof UnauthorizedError) && sbAddr) {
+          try {
+            await tryEndpoint(sbAddr, profile.standbyToken || '', true);
+            return;
+          } catch (sbErr: any) {
+            if (seq !== connSeqRef.current) return;
+            setUsingStandby(false);
+            if (sbErr instanceof UnauthorizedError) {
+              setConnState('unauthorized');
+              setConnError(sbErr.message);
+            } else {
+              setConnState('error');
+              setConnError(sbErr?.message || tStatic('connFailed'));
+            }
+            return;
+          }
+        }
+        setUsingStandby(false);
         if (err instanceof UnauthorizedError) {
           setConnState('unauthorized');
           setConnError(err.message);
@@ -585,15 +614,32 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
   }, [connectProfile, startStream]);
 
   const addAndConnectServer = useCallback(
-    async (input: { label?: string; address: string; token?: string }) => {
+    async (input: { label?: string; address: string; token?: string; standbyAddress?: string; standbyToken?: string }) => {
       const norm = normalizeAddress(input.address);
       if (!norm.cleanAddress) throw new Error(tStatic('enterValidAddr'));
       const tok = (input.token || norm.token || '').trim();
+      const sbRaw = (input.standbyAddress || '').trim();
+      const sbNorm = sbRaw ? normalizeAddress(sbRaw) : null;
+      const sbAddr = sbNorm?.cleanAddress || undefined;
+      const sbTok = (input.standbyToken || sbNorm?.token || '').trim() || undefined;
       const existing = serversRef.current.find((s) => s.address === norm.cleanAddress);
       const label = (input.label || '').trim() || (norm.isTailcat ? tStatic('remoteHostDefault') : norm.cleanAddress.replace(/^https?:\/\//, ''));
       const target: ServerProfile = existing
-        ? { ...existing, label: (input.label || '').trim() || existing.label, token: tok || existing.token }
-        : { id: `${Date.now()}`, label, address: norm.cleanAddress, token: tok };
+        ? {
+            ...existing,
+            label: (input.label || '').trim() || existing.label,
+            token: tok || existing.token,
+            standbyAddress: sbAddr ?? existing.standbyAddress,
+            standbyToken: sbTok ?? existing.standbyToken,
+          }
+        : {
+            id: `${Date.now()}`,
+            label,
+            address: norm.cleanAddress,
+            token: tok,
+            standbyAddress: sbAddr,
+            standbyToken: sbTok,
+          };
 
       const nextList = existing
         ? serversRef.current.map((s) => (s.id === existing.id ? target : s))
@@ -1156,6 +1202,7 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
         isTailcat,
         isTailscale,
         online,
+        usingStandby,
         bots,
         msgs,
         last,
