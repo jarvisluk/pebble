@@ -959,3 +959,40 @@ func (s *stubHTTPTestHarness) Close()                                           
 func (s *stubHTTPTestHarness) RunTurn(_ context.Context, o harness.RunOptions) (*harness.TurnResult, error) {
 	return &harness.TurnResult{BotID: o.Bot.ID, SessionID: "s1", Text: "ok"}, nil
 }
+
+func TestDesktopPermissionsRoutes(t *testing.T) {
+	srv := NewHTTPServer(nil, config.HTTPConfig{Host: "127.0.0.1", Port: 3789, APIToken: "secret-token"})
+
+	getReq := httptest.NewRequest(http.MethodGet, "/api/desktop/permissions?target=local", nil)
+	getReq.Host = "127.0.0.1:3789"
+	getReq.Header.Set("Authorization", "Bearer secret-token")
+	getRec := httptest.NewRecorder()
+	srv.srv.Handler.ServeHTTP(getRec, getReq)
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/desktop/permissions status = %d, body = %s", getRec.Code, getRec.Body.String())
+	}
+	var listResp struct {
+		Target string `json:"target"`
+		Items  []struct {
+			ID     string `json:"id"`
+			Status string `json:"status"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(getRec.Body.Bytes(), &listResp); err != nil {
+		t.Fatalf("decode permissions response: %v", err)
+	}
+	if listResp.Target != "local" || len(listResp.Items) == 0 {
+		t.Fatalf("unexpected permissions payload: %+v", listResp)
+	}
+
+	badReq := httptest.NewRequest(http.MethodPost, "/api/desktop/permissions/request", strings.NewReader(`{}`))
+	badReq.Host = "127.0.0.1:3789"
+	badReq.Header.Set("Origin", "http://127.0.0.1:3789")
+	badReq.Header.Set("Authorization", "Bearer secret-token")
+	badReq.Header.Set("Content-Type", "application/json")
+	badRec := httptest.NewRecorder()
+	srv.srv.Handler.ServeHTTP(badRec, badReq)
+	if badRec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 when permission missing, got %d", badRec.Code)
+	}
+}

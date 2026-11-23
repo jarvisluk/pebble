@@ -134,6 +134,8 @@ func NewHTTPServer(h *hub.Hub, cfg config.HTTPConfig) *HTTPServer {
 
 	mux.HandleFunc("GET /api/desktop/targets", s.handleDesktopTargets)
 	mux.HandleFunc("GET /api/desktop/state", s.handleDesktopState)
+	mux.HandleFunc("GET /api/desktop/permissions", s.handleDesktopPermissions)
+	mux.HandleFunc("POST /api/desktop/permissions/request", s.handleDesktopPermissionRequest)
 	mux.HandleFunc("GET /api/desktop/windows", s.handleDesktopWindows)
 	mux.HandleFunc("POST /api/desktop/focus", s.handleDesktopFocus)
 	mux.HandleFunc("GET /api/desktop/frame", s.handleDesktopFrame)

@@ -109,7 +109,7 @@ struct BotListView: View {
                 Label(hub.t("takeoverBanner", ["bot": to.botName ?? to.botId ?? "Bot", "reason": to.reason ?? ""]), systemImage: "hand.raised.fill")
                     .font(.system(size: 15)).foregroundStyle(p.pinkInk)
                 HStack {
-                    Button(hub.t("desktopShort")) { router.sheet = .desktop(target: to.target ?? "local") }
+                    Button(hub.t("desktopShort")) { router.openDesktop(to.target ?? "local") }
                         .buttonStyle(.bordered)
                     Button(hub.t("resumeAI")) { Task { try? await hub.resolveTakeover(to.id) } }
                         .buttonStyle(.borderedProminent)

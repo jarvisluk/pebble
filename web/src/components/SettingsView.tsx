@@ -2,6 +2,10 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   BotStatus,
   ConfirmOptions,
+  DesktopPermissionItem,
+  DesktopPermissionRequestResponse,
+  DesktopPermissionsResponse,
+  DesktopTarget,
   LangPref,
   LocalNodeState,
   MemoryResponse,
@@ -114,6 +118,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [mpWebUrl, setMpWebUrl] = useState('');
   const [remoteErr, setRemoteErr] = useState('');
   const [remoteBusy, setRemoteBusy] = useState(false);
+
+  // Desktop & Permissions
+  const [permTarget, setPermTarget] = useState('local');
+  const [permTargets, setPermTargets] = useState<DesktopTarget[]>([]);
+  const [deskPerms, setDeskPerms] = useState<DesktopPermissionItem[]>([]);
+  const [deskPermsLoading, setDeskPermsLoading] = useState(false);
+  const [permBusyId, setPermBusyId] = useState('');
+  const [deskPermErr, setDeskPermErr] = useState('');
 
   // General
   const [themePref, setThemePref] = useState<ThemePref>(() => getThemePref());
@@ -320,6 +332,63 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     }
   };
 
+  const loadDesktopPermissions = useCallback(async (targetId = permTarget) => {
+    setDeskPermsLoading(true);
+    setDeskPermErr('');
+    try {
+      const res = await api<DesktopPermissionsResponse>(
+        `/api/desktop/permissions?target=${encodeURIComponent(targetId || 'local')}`
+      );
+      setDeskPerms(res.items || []);
+    } catch (e) {
+      if (e instanceof Error && e.message !== 'unauthorized') setDeskPermErr(e.message);
+      setDeskPerms([]);
+    } finally {
+      setDeskPermsLoading(false);
+    }
+  }, [permTarget]);
+
+  const refreshDesktopTab = useCallback(() => {
+    setDeskPermErr('');
+    api<{ targets?: DesktopTarget[] }>('/api/desktop/targets')
+      .then((d) => setPermTargets(d.targets || []))
+      .catch(() => setPermTargets([]));
+    api<{ status?: { webrtcAvailable?: boolean; supported?: boolean } }>('/api/desktop/state?target=local')
+      .then((st) => {
+        setLocalDeskEngine(st?.status?.webrtcAvailable ? 'bot-host (WebRTC H.264)' : t('jpegStream'));
+        setLocalDeskSupported(Boolean(st?.status?.supported));
+      })
+      .catch(() => {
+        setLocalDeskEngine(t('unavailable'));
+        setLocalDeskSupported(false);
+      });
+    void loadDesktopPermissions(permTarget);
+  }, [loadDesktopPermissions, permTarget, t]);
+
+  const handleRequestPermission = async (item: DesktopPermissionItem, openSettings: boolean) => {
+    setPermBusyId(item.id);
+    setDeskPermErr('');
+    try {
+      const res = await api<DesktopPermissionRequestResponse>('/api/desktop/permissions/request', {
+        method: 'POST',
+        body: { target: permTarget, permission: item.id, openSettings },
+      });
+      if (res.items) setDeskPerms(res.items);
+      if (res.openedSettings) {
+        onToast(t('deskPermOpened'));
+      } else if (res.prompted) {
+        onToast(t('deskPermPrompted'));
+      }
+      window.setTimeout(() => {
+        void loadDesktopPermissions(permTarget);
+      }, 1500);
+    } catch (e) {
+      if (e instanceof Error && e.message !== 'unauthorized') setDeskPermErr(e.message);
+    } finally {
+      setPermBusyId('');
+    }
+  };
+
   useEffect(() => {
     if (hidden) {
       if (remoteTimerRef.current) window.clearTimeout(remoteTimerRef.current);
@@ -328,6 +397,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     }
     if (tab === 'remote') {
       refreshRemoteTab();
+    } else if (tab === 'desktop') {
+      refreshDesktopTab();
     } else if (tab === 'memory') {
       void loadGlobalMemories();
     }
@@ -336,6 +407,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       if (localNodeTimerRef.current) window.clearTimeout(localNodeTimerRef.current);
     };
   }, [hidden, tab]);
+
+  useEffect(() => {
+    if (hidden || tab !== 'desktop') return;
+    const onFocus = () => {
+      void loadDesktopPermissions(permTarget);
+    };
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [hidden, tab, permTarget, loadDesktopPermissions]);
 
   useEffect(() => {
     if (hidden || tab !== 'models') return;
@@ -464,11 +544,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const titleKey =
     tab === 'remote'
       ? 'tabRemote'
-      : tab === 'memory'
-        ? 'tabMemory'
-        : tab === 'general'
-          ? 'tabGeneral'
-          : 'tabModels';
+      : tab === 'desktop'
+        ? 'tabDesktop'
+        : tab === 'memory'
+          ? 'tabMemory'
+          : tab === 'general'
+            ? 'tabGeneral'
+            : 'tabModels';
   const mp = settings?.magpie;
   const onlineNodeCount = nodes.filter((n) => n.connected).length;
 
@@ -1466,80 +1548,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               </details>
             </section>
 
-            <section className="set-card" id="localDeskBox">
-              <div className="set-card-hd">
-                <h2>{t('localDesktopTitle')}</h2>
-                <span id="localDeskEngine" className={`mp${localDeskSupported ? ' ok' : ''}`}>
-                  {localDeskEngine || t('checking')}
-                </span>
-              </div>
-              <div className="two">
-                <div className="fld">
-                  <label>
-                    {t('deskWorkerHarness')} <em>{t('rtOptional')}</em>
-                  </label>
-                  <select
-                    id="sDeskHarness"
-                    value={deskHarness}
-                    onChange={(e) => {
-                      setDeskHarness(e.target.value);
-                      if (e.target.value) void onLoadModels(e.target.value);
-                    }}
-                  >
-                    <option value="">{t('deskWorkerFollowBot')}</option>
-                    {(settings?.harnesses || []).map((h) => (
-                      <option key={h.id} value={h.id}>
-                        {h.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="fld">
-                  <label>
-                    {t('deskWorkerModel')} <em>{t('deskWorkerModelHint')}</em>
-                  </label>
-                  <div className="row-inline">
-                    <input
-                      id="sDeskModel"
-                      className="mono flex-1"
-                      list={deskHarness ? `models-${deskHarness}` : 'models-global'}
-                      placeholder={t('rtModelPh')}
-                      spellCheck={false}
-                      value={deskModel}
-                      onChange={(e) => setDeskModel(e.target.value)}
-                    />
-                    <button
-                      type="button"
-                      id="sDeskWorkerSave"
-                      className="mp go"
-                      disabled={remoteBusy}
-                      onClick={async () => {
-                        setRemoteBusy(true);
-                        setRemoteErr('');
-                        try {
-                          const next = await api<SettingsData>('/api/settings', {
-                            method: 'PUT',
-                            body: { desktopHarness: deskHarness, desktopModel: deskModel.trim() },
-                          });
-                          onSettingsUpdated(next);
-                          onToast(t('deskWorkerSaved'));
-                        } catch (e) {
-                          if (e instanceof Error && e.message !== 'unauthorized') setRemoteErr(e.message);
-                        } finally {
-                          setRemoteBusy(false);
-                        }
-                      }}
-                    >
-                      {t('save')}
-                    </button>
-                  </div>
-                </div>
-              </div>
-              <p className="set-card-desc">
-                {t('deskWorkerDesc')}
-              </p>
-            </section>
-
             <section className="set-card" id="remoteNodesBox">
               <div className="set-card-hd">
                 <h2>{t('connectedNodes')}</h2>
@@ -1834,6 +1842,174 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               <div id="sMemErr" className="msg-err">
                 {memErr}
               </div>
+            </section>
+          </div>
+
+          {/* Tab 5: Remote Desktop */}
+          <div id="sTabDesktop" className={`tab-pane${tab === 'desktop' && tabAnim ? ' tab-anim' : ''}`} hidden={tab !== 'desktop'}>
+            <section className="set-card" id="sDeskPermsBox">
+              <div className="set-card-hd">
+                <h2>{t('deskPermsTitle')}</h2>
+                <div className="row-inline-sm row-wrap">
+                  {permTargets.length > 1 && (
+                    <select
+                      id="sDeskPermTarget"
+                      aria-label={t('deskPermTarget')}
+                      value={permTarget}
+                      onChange={(e) => {
+                        const next = e.target.value;
+                        setPermTarget(next);
+                        void loadDesktopPermissions(next);
+                      }}
+                    >
+                      {permTargets.map((tr) => (
+                        <option key={tr.id} value={tr.id}>
+                          {tr.name}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  <button
+                    type="button"
+                    id="sDeskPermsRefresh"
+                    className="mp"
+                    disabled={deskPermsLoading}
+                    onClick={() => void loadDesktopPermissions(permTarget)}
+                  >
+                    {deskPermsLoading ? t('loading') : t('refresh')}
+                  </button>
+                  <button
+                    type="button"
+                    id="sDeskOpenBtn"
+                    className="mp go"
+                    onClick={() => onOpenDesktopTarget(permTarget || 'local')}
+                  >
+                    {t('openDesktop')}
+                  </button>
+                </div>
+              </div>
+              <p className="set-card-desc">{t('deskPermsDesc')}</p>
+              <div id="sDeskPermsList" className="stack6">
+                {deskPerms.map((perm) => {
+                  const statusLabel =
+                    perm.status === 'granted'
+                      ? t('deskPermGranted')
+                      : perm.status === 'denied'
+                        ? t('deskPermDenied')
+                        : perm.status === 'unsupported'
+                          ? t('deskPermUnsupported')
+                          : t('deskPermNotDetermined');
+                  const statusClass =
+                    perm.status === 'granted' ? ' ok' : perm.status === 'denied' ? ' bad' : '';
+                  const isBusy = permBusyId === perm.id;
+                  return (
+                    <div key={perm.id} className="node-row">
+                      <div>
+                        <div className="nm">{perm.name}</div>
+                        <div className="meta">{perm.description}</div>
+                      </div>
+                      <div className="row-inline-sm row-wrap">
+                        <span className={`mp${statusClass}`}>{statusLabel}</span>
+                        {perm.canPrompt && perm.status !== 'granted' && (
+                          <button
+                            type="button"
+                            className="mp go"
+                            disabled={isBusy}
+                            onClick={() => void handleRequestPermission(perm, false)}
+                          >
+                            {t('deskPermRequest')}
+                          </button>
+                        )}
+                        {perm.canOpenSettings && (
+                          <button
+                            type="button"
+                            className="mp"
+                            disabled={isBusy}
+                            onClick={() => void handleRequestPermission(perm, true)}
+                          >
+                            {t('deskPermOpenSettings')}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              {deskPermErr && <div className="msg-err">{deskPermErr}</div>}
+            </section>
+
+            <section className="set-card" id="localDeskBox">
+              <div className="set-card-hd">
+                <h2>{t('localDesktopTitle')}</h2>
+                <span id="localDeskEngine" className={`mp${localDeskSupported ? ' ok' : ''}`}>
+                  {localDeskEngine || t('checking')}
+                </span>
+              </div>
+              <div className="two">
+                <div className="fld">
+                  <label>
+                    {t('deskWorkerHarness')} <em>{t('rtOptional')}</em>
+                  </label>
+                  <select
+                    id="sDeskHarness"
+                    value={deskHarness}
+                    onChange={(e) => {
+                      setDeskHarness(e.target.value);
+                      if (e.target.value) void onLoadModels(e.target.value);
+                    }}
+                  >
+                    <option value="">{t('deskWorkerFollowBot')}</option>
+                    {(settings?.harnesses || []).map((h) => (
+                      <option key={h.id} value={h.id}>
+                        {h.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="fld">
+                  <label>
+                    {t('deskWorkerModel')} <em>{t('deskWorkerModelHint')}</em>
+                  </label>
+                  <div className="row-inline">
+                    <input
+                      id="sDeskModel"
+                      className="mono flex-1"
+                      list={deskHarness ? `models-${deskHarness}` : 'models-global'}
+                      placeholder={t('rtModelPh')}
+                      spellCheck={false}
+                      value={deskModel}
+                      onChange={(e) => setDeskModel(e.target.value)}
+                    />
+                    <button
+                      type="button"
+                      id="sDeskWorkerSave"
+                      className="mp go"
+                      disabled={remoteBusy}
+                      onClick={async () => {
+                        setRemoteBusy(true);
+                        setDeskPermErr('');
+                        try {
+                          const next = await api<SettingsData>('/api/settings', {
+                            method: 'PUT',
+                            body: { desktopHarness: deskHarness, desktopModel: deskModel.trim() },
+                          });
+                          onSettingsUpdated(next);
+                          onToast(t('deskWorkerSaved'));
+                        } catch (e) {
+                          if (e instanceof Error && e.message !== 'unauthorized') setDeskPermErr(e.message);
+                        } finally {
+                          setRemoteBusy(false);
+                        }
+                      }}
+                    >
+                      {t('save')}
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <p className="set-card-desc">
+                {t('deskWorkerDesc')}
+              </p>
             </section>
           </div>
 

@@ -305,6 +305,27 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </button>
           <button
             type="button"
+            className={`snav-item${settingsTab === 'desktop' ? ' on' : ''}`}
+            role="tab"
+            aria-selected={settingsTab === 'desktop'}
+            data-stab="desktop"
+            onClick={() => onSwitchSettingsTab('desktop')}
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.9"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <rect x="2" y="4" width="20" height="14" rx="2.5" />
+              <path d="M8 21h8M12 18v3" />
+            </svg>
+            <span>{t('tabDesktop')}</span>
+          </button>
+          <button
+            type="button"
             className={`snav-item${settingsTab === 'remote' ? ' on' : ''}`}
             role="tab"
             aria-selected={settingsTab === 'remote'}

@@ -353,6 +353,15 @@ func (e *Engine) Status(ctx context.Context) (*HostStatus, error) {
 			}
 		}
 	}
+	if runtime.GOOS == "darwin" && (st.ScreenRecording == "" || st.Accessibility == "") {
+		for _, p := range platformPermissions(ctx) {
+			if p.ID == "screen_recording" && st.ScreenRecording == "" && p.Status != "unsupported" {
+				st.ScreenRecording = p.Status
+			} else if p.ID == "accessibility" && st.Accessibility == "" && p.Status != "unsupported" {
+				st.Accessibility = p.Status
+			}
+		}
+	}
 	return st, nil
 }
 

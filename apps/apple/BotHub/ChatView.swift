@@ -25,6 +25,9 @@ struct ChatView: View {
     @Environment(Router.self) private var router
     @Environment(\.palette) private var p
     var botId: String
+    var inDesktopSidebar = false
+    var onSelectBot: ((String) -> Void)? = nil
+    var onCloseSidebar: (() -> Void)? = nil
 
     @State private var input = ""
     @State private var sending = false
@@ -98,7 +101,7 @@ struct ChatView: View {
                         Label(hub.t("takeoverInline", ["reason": to.reason ?? ""]), systemImage: "hand.raised.fill")
                             .font(.system(size: 15)).foregroundStyle(p.pinkInk).lineLimit(2)
                         Spacer(minLength: 4)
-                        Button(hub.t("handleAction")) { router.sheet = .desktop(target: to.target ?? "local") }
+                        Button(hub.t("handleAction")) { router.openDesktop(to.target ?? "local") }
                             .buttonStyle(.bordered)
                         Button(hub.t("resumeShort")) { Task { try? await hub.resolveTakeover(to.id) } }
                             .buttonStyle(.borderedProminent).tint(pal.accent)
@@ -161,12 +164,40 @@ struct ChatView: View {
             .navigationTitle(name)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .principal) { titleView }
-                ToolbarItemGroup(placement: .primaryAction) {
-                    Button { router.sheet = .desktop(target: hub.takeovers.first?.target ?? "local") } label: {
-                        Label(hub.t("remoteDesktop"), systemImage: hub.takeovers.isEmpty ? "display" : "exclamationmark.triangle")
+                ToolbarItem(placement: .principal) {
+                    if inDesktopSidebar && hub.bots.count > 1 {
+                        Menu {
+                            ForEach(hub.bots) { b in
+                                Button {
+                                    onSelectBot?(b.id)
+                                } label: {
+                                    Label(b.displayName, systemImage: b.id == botId ? "checkmark" : "bubble.left")
+                                }
+                            }
+                        } label: {
+                            HStack(spacing: 6) {
+                                titleView
+                                Image(systemName: "chevron.down")
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    } else {
+                        titleView
                     }
-                    Button { detailOpen.toggle() } label: { Label(hub.t("botDetails"), systemImage: "info.circle") }
+                }
+                ToolbarItemGroup(placement: .primaryAction) {
+                    if inDesktopSidebar {
+                        Button { detailOpen.toggle() } label: { Label(hub.t("botDetails"), systemImage: "info.circle") }
+                        if let onCloseSidebar {
+                            Button { onCloseSidebar() } label: { Label(hub.t("close"), systemImage: "xmark") }
+                        }
+                    } else {
+                        Button { router.openDesktop(hub.takeovers.first?.target ?? "local") } label: {
+                            Label(hub.t("remoteDesktop"), systemImage: hub.takeovers.isEmpty ? "display" : "exclamationmark.triangle")
+                        }
+                        Button { detailOpen.toggle() } label: { Label(hub.t("botDetails"), systemImage: "info.circle") }
+                    }
                 }
             }
             .task(id: botId) {
@@ -175,7 +206,7 @@ struct ChatView: View {
             }
             .onDisappear { hub.setActiveChat(nil) }
             .onChange(of: hub.bots.map(\.id)) { _, ids in
-                if !ids.isEmpty, !ids.contains(botId) {
+                if !inDesktopSidebar, !ids.isEmpty, !ids.contains(botId) {
                     detailOpen = false
                     router.closeBot()
                 }

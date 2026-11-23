@@ -703,6 +703,15 @@ final class HubStore {
         return d
     }
 
+    func fetchDesktopPermissions(_ target: String) async throws -> DesktopPermissionsResp {
+        try await api.call("/api/desktop/permissions?target=\(enc(target))")
+    }
+
+    func requestDesktopPermission(target: String, permission: String, openSettings: Bool = false) async throws -> DesktopPermissionRequestResp {
+        try await api.call("/api/desktop/permissions/request", method: "POST",
+                           body: ["target": target, "permission": permission, "openSettings": openSettings])
+    }
+
     func fetchDesktopFrame(_ target: String) async throws -> DesktopFrame {
         try await api.call("/api/desktop/frame?target=\(enc(target))&windowId=&maxDim=1280&quality=72")
     }

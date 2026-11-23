@@ -404,6 +404,29 @@ struct PendingAttachment: Identifiable {
 struct CommandsResp: Decodable { var commands: [SlashCommandItem]? }
 struct MentionsResp: Decodable { var items: [MentionCandidate]? }
 
+struct DesktopPermissionItem: Decodable, Identifiable, Hashable {
+    var id: String
+    var name: String
+    var description: String
+    var status: String
+    var canPrompt: Bool?
+    var canOpenSettings: Bool?
+}
+
+struct DesktopPermissionsResp: Decodable {
+    var target: String?
+    var platform: String?
+    var items: [DesktopPermissionItem]?
+}
+
+struct DesktopPermissionRequestResp: Decodable {
+    var ok: Bool?
+    var prompted: Bool?
+    var openedSettings: Bool?
+    var item: DesktopPermissionItem?
+    var items: [DesktopPermissionItem]?
+}
+
 func decodeAny<T: Decodable>(_ obj: Any, as: T.Type = T.self) -> T? {
     guard JSONSerialization.isValidJSONObject(obj),
           let data = try? JSONSerialization.data(withJSONObject: obj) else { return nil }

@@ -36,6 +36,8 @@ struct SettingsView: View {
     @State private var deskHarness = ""
     @State private var deskModel = ""
     @State private var deskTouched = false
+    @State private var deskPerms: [DesktopPermissionItem] = []
+    @State private var deskPermsLoading = false
 
     private var harnesses: [HarnessInfo] {
         if let h = hub.settings?.harnesses, !h.isEmpty { return h }
@@ -90,6 +92,7 @@ struct SettingsView: View {
                 Text("_shared/USER.md").font(.system(size: 13, design: .monospaced))
             }
             memorySection
+            desktopPermissionsSection
             remoteSection
         }
         .hubForm()
@@ -118,6 +121,7 @@ struct SettingsView: View {
             _ = try? await hub.loadSettings()
             try? await hub.refreshBots()
             await loadMem("")
+            await loadPerms()
         }
         .onAppear { sync() }
         .onChange(of: hub.settings?.defaultHarness) { _, _ in sync() }
@@ -203,7 +207,7 @@ struct SettingsView: View {
                     Text(hub.t("switchHost")).foregroundStyle(p.mute)
                 }
             }
-            Button { router.sheet = .desktop(target: hub.takeovers.first?.target ?? "local") } label: {
+            Button { router.openDesktop(hub.takeovers.first?.target ?? "local") } label: {
                 Label(hub.takeovers.isEmpty ? hub.t("remoteDesktop") : "\(hub.t("remoteDesktop")) (\(hub.takeovers.count))", systemImage: "display")
             }
             Button { router.sheet = .devices } label: {
@@ -567,6 +571,80 @@ struct SettingsView: View {
     }
 
     // MARK: 远程与设备
+
+    private func loadPerms() async {
+        deskPermsLoading = true
+        defer { deskPermsLoading = false }
+        if let resp = try? await hub.fetchDesktopPermissions("local") {
+            deskPerms = resp.items ?? []
+        }
+    }
+
+    private func reqPerm(_ id: String, openSettings: Bool) {
+        run("perm:\(id)", "opFailed") {
+            let res = try await hub.requestDesktopPermission(target: "local", permission: id, openSettings: openSettings)
+            if let items = res.items { deskPerms = items }
+            return res.openedSettings == true ? hub.t("deskPermOpened") : (res.prompted == true ? hub.t("deskPermPrompted") : nil)
+        }
+    }
+
+    private var desktopPermissionsSection: some View {
+        Section {
+            if deskPerms.isEmpty {
+                if deskPermsLoading {
+                    ProgressView()
+                } else {
+                    Text(hub.t("deskPermsDesc")).foregroundStyle(.secondary)
+                }
+            } else {
+                ForEach(deskPerms) { item in
+                    let stLabel = item.status == "granted" ? hub.t("deskPermGranted")
+                        : item.status == "denied" ? hub.t("deskPermDenied")
+                        : item.status == "unsupported" ? hub.t("deskPermUnsupported")
+                        : hub.t("deskPermNotDetermined")
+                    let bg = item.status == "granted" ? p.sage : item.status == "denied" ? p.pink : p.s1
+                    let fg: Color = item.status == "granted" ? p.sageInk : item.status == "denied" ? p.danger : .secondary
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 8) {
+                            Text(item.name).font(.system(size: 16, weight: .semibold))
+                            Spacer()
+                            Tag(text: stLabel, bg: bg, fg: fg)
+                        }
+                        Text(item.description).font(.system(size: 13)).foregroundStyle(.secondary)
+                        if (item.canPrompt == true && item.status != "granted") || item.canOpenSettings == true {
+                            HStack(spacing: 8) {
+                                if item.canPrompt == true && item.status != "granted" {
+                                    Button(hub.t("deskPermRequest")) { reqPerm(item.id, openSettings: false) }
+                                        .buttonStyle(.borderedProminent).controlSize(.small)
+                                        .disabled(busy == "perm:\(item.id)")
+                                }
+                                if item.canOpenSettings == true {
+                                    Button(hub.t("deskPermOpenSettings")) { reqPerm(item.id, openSettings: true) }
+                                        .buttonStyle(.bordered).controlSize(.small)
+                                        .disabled(busy == "perm:\(item.id)")
+                                }
+                            }
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+            }
+            Button { router.openDesktop("local") } label: {
+                Label(hub.t("openDesktop"), systemImage: "display")
+            }
+        } header: {
+            HStack {
+                Text(hub.t("deskPermsTitle"))
+                Spacer()
+                Button { Task { await loadPerms() } } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .disabled(deskPermsLoading)
+            }
+        } footer: {
+            Text(hub.t("deskPermsDesc"))
+        }
+    }
 
     private var remoteSection: some View {
         Section(hub.t("deskWorkerTitle")) {

@@ -49,7 +49,7 @@ function RootContent() {
             <Stack.Screen name="create-bot" options={{ presentation: sheetPresentation }} />
             <Stack.Screen name="settings" options={{ presentation: sheetPresentation }} />
             <Stack.Screen name="devices" options={{ presentation: sheetPresentation }} />
-            <Stack.Screen name="desktop" options={{ presentation: sheetPresentation }} />
+            <Stack.Screen name="desktop" options={{ presentation: 'fullScreenModal' }} />
           </Stack>
         </HubProvider>
       </SafeAreaProvider>

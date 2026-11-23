@@ -59,7 +59,7 @@ struct DevicesView: View {
                 }
                 Button(hub.t("manageConn")) { router.sheet = .connect(scan: false) }
                 if hub.activeServer != nil {
-                    Button(hub.t("openHostDesktop")) { router.sheet = .desktop(target: "local") }
+                    Button(hub.t("openHostDesktop")) { router.openDesktop("local") }
                 }
             }
             Section(hub.t("hostRemoteAccess")) {
@@ -113,7 +113,7 @@ struct DevicesView: View {
                     ForEach(perms, id: \.self) { Tag(text: labels[$0] ?? $0, bg: p.s1, fg: .secondary) }
                     Spacer()
                     if on && perms.contains("desktop") {
-                        Button(hub.t("openDesktop")) { router.sheet = .desktop(target: node.id) }
+                        Button(hub.t("openDesktop")) { router.openDesktop(node.id) }
                             .buttonStyle(.bordered).controlSize(.small)
                     }
                 }
