@@ -1106,3 +1106,120 @@ drain:
 	}
 }
 
+func TestStreamlineOutputAndMedia(t *testing.T) {
+	tmp := t.TempDir()
+	store, err := state.NewStore(filepath.Join(tmp, "hub.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	cfg := &config.HubConfig{
+		SharedDir: filepath.Join(tmp, "_shared"),
+		Bots: []config.BotConfig{
+			{ID: "alpha", Name: "Alpha", Harness: "opencode", Workspace: filepath.Join(tmp, "ws-alpha")},
+			{ID: "beta", Name: "Beta", Harness: "opencode", Workspace: filepath.Join(tmp, "ws-beta")},
+		},
+	}
+	for _, b := range cfg.Bots {
+		_ = os.MkdirAll(b.Workspace, 0o755)
+	}
+
+	// Minimal valid 1x1 PNG
+	pngBytes := []byte{
+		0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+		0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+		0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+		0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
+		0x89, 0x00, 0x00, 0x00, 0x0a, 0x49, 0x44, 0x41,
+		0x54, 0x78, 0x9c, 0x63, 0x00, 0x01, 0x00, 0x00,
+		0x05, 0x00, 0x01, 0x0d, 0x0a, 0x2d, 0xb4, 0x00,
+		0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae,
+		0x42, 0x60, 0x82,
+	}
+	if err := os.WriteFile(filepath.Join(cfg.Bots[0].Workspace, "chart.png"), pngBytes, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var h *Hub
+	reg := harness.NewRegistry()
+	fh := &questionTestHarness{
+		run: func(_ context.Context, opts harness.RunOptions) (*harness.TurnResult, error) {
+			if strings.Contains(opts.Prompt, "USE_TOOL") {
+				if _, err := h.SendOutboundMessage(opts.Bot.ID, "formal reply", []OutboundImage{{Path: "chart.png", Alt: "chart"}}); err != nil {
+					return nil, err
+				}
+				return &harness.TurnResult{Text: "raw thinking trace"}, nil
+			}
+			if opts.Bot.ID == "beta" {
+				return &harness.TurnResult{Text: "beta answer"}, nil
+			}
+			return &harness.TurnResult{Text: "fallback or silent"}, nil
+		},
+	}
+	reg.Register(fh)
+	h = New(cfg, store, nil, reg)
+	defer h.Close()
+
+	// 1. Explicit send_message hides raw res.Text as internal.
+	if _, err := h.Send(context.Background(), "alpha", "USE_TOOL", SendOptions{Source: "web"}); err != nil {
+		t.Fatal(err)
+	}
+	msgs, _ := h.Messages("alpha", 50)
+	if len(msgs) != 2 || msgs[1].Text != "formal reply" || len(msgs[1].Media) != 1 {
+		t.Fatalf("expected only user + formal outbound message with media, got %+v", msgs)
+	}
+	if _, _, err := h.ResolveMediaFile(msgs[1].Media[0].ID); err != nil {
+		t.Fatalf("expected media file resolvable: %v", err)
+	}
+	if _, _, err := h.ResolveMediaFile("../etc/passwd"); err == nil {
+		t.Fatalf("expected path traversal media id rejected")
+	}
+
+	// 2. Background webhook without send_message stays silent.
+	if _, err := h.Send(context.Background(), "alpha", "BG_CHECK", SendOptions{Source: "webhook"}); err != nil {
+		t.Fatal(err)
+	}
+	msgs, _ = h.Messages("alpha", 50)
+	if len(msgs) != 3 {
+		t.Fatalf("expected silent webhook turn (only user/webhook input added), got %d msgs", len(msgs))
+	}
+
+	// 3. Direct user turn without send_message falls back to showing res.Text.
+	if _, err := h.Send(context.Background(), "alpha", "DIRECT_CHAT", SendOptions{Source: "web"}); err != nil {
+		t.Fatal(err)
+	}
+	msgs, _ = h.Messages("alpha", 50)
+	if len(msgs) != 5 || msgs[4].Role != "assistant" || msgs[4].Text != "fallback or silent" {
+		t.Fatalf("expected user direct fallback assistant message, got %+v", msgs)
+	}
+
+	// 4. MessageBot records bidirectional bot_out/bot_in on both bots without assistant bubble on beta.
+	if _, err := h.MessageBot(context.Background(), "alpha", "beta", "hello beta", 0); err != nil {
+		t.Fatal(err)
+	}
+	alphaCollab, err := h.CollabMessages("alpha", "beta", 20)
+	if err != nil || len(alphaCollab) != 2 {
+		t.Fatalf("expected 2 collab messages on alpha, got %+v err=%v", alphaCollab, err)
+	}
+	betaCollab, err := h.CollabMessages("beta", "alpha", 20)
+	if err != nil || len(betaCollab) != 2 || betaCollab[0].Role != "bot_in" || betaCollab[1].Role != "bot_out" {
+		t.Fatalf("expected bot_in + bot_out on beta, got %+v err=%v", betaCollab, err)
+	}
+
+	// 5. Outbound file attachment.
+	if err := os.WriteFile(filepath.Join(cfg.Bots[0].Workspace, "report.pdf"), []byte("%PDF-1.4\nhello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fileMsg, err := h.SendOutboundMessage("alpha", "attached report", nil, OutboundFile{Path: "report.pdf"})
+	if err != nil {
+		t.Fatalf("SendOutboundMessage with file failed: %v", err)
+	}
+	if len(fileMsg.Media) != 1 || fileMsg.Media[0].Kind != "file" || fileMsg.Media[0].Name != "report.pdf" || fileMsg.Media[0].Size <= 0 {
+		t.Fatalf("unexpected file attachment metadata: %+v", fileMsg.Media)
+	}
+	if _, mimeType, err := h.ResolveMediaFile(fileMsg.Media[0].ID); err != nil || !strings.Contains(mimeType, "pdf") {
+		t.Fatalf("ResolveMediaFile failed: mime=%q err=%v", mimeType, err)
+	}
+}
+

@@ -5,7 +5,9 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   FlatList,
+  Image,
   KeyboardAvoidingView,
+  Linking,
   Modal,
   Platform,
   Pressable,
@@ -24,6 +26,7 @@ import { ChevronLeftIcon, DocIcon, MonitorIcon, SendIcon, StopIcon } from '../..
 import { MarkdownText } from '../../components/MarkdownText';
 import { ModalHeader } from '../../components/ModalHeader';
 import { QuestionCard } from '../../components/QuestionCard';
+import { fetchCollabMessages, getMediaSource, requestMediaDownloadURL } from '../../api';
 import { confirmAction } from '../../confirm';
 import { useI18n } from '../../i18n';
 import { formatStamp, useHub } from '../../store';
@@ -32,12 +35,17 @@ import type {
   BotDetail,
   ChatMessage,
   MagpieMemoryList,
+  MessageMedia,
   RoutineDelivery,
   RoutineItem,
   RoutineRun,
 } from '../../types';
 
 const FIVE_MIN_MS = 5 * 60 * 1000;
+
+type TimelineEntry =
+  | { kind: 'msg'; id: string; msg: ChatMessage; createdAt: string }
+  | { kind: 'collab'; id: string; peerId: string; items: ChatMessage[]; createdAt: string };
 
 export default function BotChatScreen() {
   const { id } = useLocalSearchParams<{ id: string | string[] }>();
@@ -48,6 +56,7 @@ export default function BotChatScreen() {
   const insets = useSafeAreaInsets();
   const {
     baseURL,
+    authToken,
     bots,
     msgs,
     tools,
@@ -106,6 +115,10 @@ export default function BotChatScreen() {
   const [editSaving, setEditSaving] = useState(false);
   const [editErr, setEditErr] = useState('');
   const [sendErr, setSendErr] = useState('');
+  const [collabPeerId, setCollabPeerId] = useState<string | null>(null);
+  const [collabHistory, setCollabHistory] = useState<ChatMessage[]>([]);
+  const [collabLoading, setCollabLoading] = useState(false);
+  const [previewImg, setPreviewImg] = useState<MessageMedia | null>(null);
   const botPal = useMemo(
     () => getBotPalette(botId, botIndex, theme.dark, detailOpen ? editColor || bot?.color : bot?.color),
     [botId, botIndex, theme.dark, detailOpen, editColor, bot?.color]
@@ -140,7 +153,7 @@ export default function BotChatScreen() {
   const [rtRunsOpenId, setRtRunsOpenId] = useState('');
   const [rtRunsMap, setRtRunsMap] = useState<Record<string, RoutineRun[]>>({});
 
-  const listRef = useRef<FlatList<ChatMessage>>(null);
+  const listRef = useRef<FlatList<TimelineEntry>>(null);
   const inputRef = useRef<React.ComponentRef<typeof TextInput>>(null);
 
   useEffect(() => {
@@ -460,89 +473,233 @@ export default function BotChatScreen() {
     },
   ];
 
-  const renderMessage = ({ item, index }: { item: ChatMessage; index: number }) => {
-    const prev = index > 0 ? chatList[index - 1] : null;
-    const curMs = Date.parse(item.createdAt || '');
+  useEffect(() => {
+    if (!collabPeerId || !botId || !baseURL) return;
+    let cancelled = false;
+    setCollabLoading(true);
+    fetchCollabMessages<ChatMessage>(baseURL, authToken, botId, collabPeerId, 200)
+      .then((res) => {
+        if (!cancelled) setCollabHistory(res);
+      })
+      .catch(() => {
+        if (!cancelled) setCollabHistory([]);
+      })
+      .finally(() => {
+        if (!cancelled) setCollabLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [collabPeerId, botId, baseURL, authToken]);
+
+  const collabItems = useMemo(() => {
+    if (!collabPeerId) return [];
+    const peerTag = `bot:${collabPeerId}`;
+    const map = new Map<string, ChatMessage>();
+    for (const m of collabHistory) map.set(m.id, m);
+    for (const m of chatList) {
+      if ((m.role === 'bot_out' || m.role === 'bot_in') && (m.from === peerTag || m.to === peerTag)) {
+        map.set(m.id, m);
+      }
+    }
+    return Array.from(map.values()).sort((a, b) => (Date.parse(a.createdAt) || 0) - (Date.parse(b.createdAt) || 0));
+  }, [collabHistory, chatList, collabPeerId]);
+
+  const timelineEntries = useMemo<TimelineEntry[]>(() => {
+    const out: TimelineEntry[] = [];
+    for (const m of chatList) {
+      if (m.role === 'bot_out' || m.role === 'bot_in') {
+        const rawPeer = m.role === 'bot_out' ? m.to || '' : m.from || '';
+        const peerId = rawPeer.replace(/^bot:/, '');
+        const last = out[out.length - 1];
+        if (last && last.kind === 'collab' && last.peerId === peerId) {
+          last.items.push(m);
+        } else {
+          out.push({ kind: 'collab', id: `collab_${m.id}`, peerId, items: [m], createdAt: m.createdAt });
+        }
+      } else {
+        out.push({ kind: 'msg', id: m.id, msg: m, createdAt: m.createdAt });
+      }
+    }
+    return out;
+  }, [chatList]);
+
+  const isImageAttachment = (m: MessageMedia) => {
+    if (m.kind === 'image') return true;
+    if (m.kind === 'file') return false;
+    return Boolean(m.mimeType && m.mimeType.startsWith('image/'));
+  };
+
+  const formatBytes = (bytes?: number) => {
+    if (!bytes || bytes <= 0) return '';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  const onOpenFile = async (f: MessageMedia) => {
+    try {
+      const url = await requestMediaDownloadURL(baseURL, authToken, f);
+      await Linking.openURL(url);
+    } catch {
+      setSendErr(t('downloadFailed'));
+    }
+  };
+
+  const renderMediaGrid = (media?: MessageMedia[]) => {
+    if (!media || media.length === 0) return null;
+    const images = media.filter(isImageAttachment);
+    const files = media.filter((m) => !isImageAttachment(m));
+    return (
+      <View style={styles.attachWrap}>
+        {images.length > 0 && (
+          <View style={styles.mediaGrid}>
+            {images.map((img) => (
+              <Pressable key={img.id} onPress={() => setPreviewImg(img)} style={styles.mediaItem}>
+                <Image
+                  source={getMediaSource(baseURL, authToken, img.url)}
+                  style={images.length === 1 ? styles.mediaImgSingle : styles.mediaImgMulti}
+                  resizeMode="cover"
+                />
+              </Pressable>
+            ))}
+          </View>
+        )}
+        {files.length > 0 && (
+          <View style={styles.fileList}>
+            {files.map((f) => {
+              const name = f.name || f.id || t('fileAltFallback');
+              const sz = formatBytes(f.size);
+              return (
+                <Pressable
+                  key={f.id}
+                  onPress={() => void onOpenFile(f)}
+                  style={({ pressed }) => [
+                    styles.fileCard,
+                    { backgroundColor: pressed ? theme.s2 : theme.s1 },
+                  ]}
+                >
+                  <DocIcon size={18} color={theme.text2} />
+                  <View style={styles.fileMeta}>
+                    <Text numberOfLines={1} style={[styles.fileName, { color: theme.text }]}>
+                      {name}
+                    </Text>
+                    {sz ? (
+                      <Text style={[styles.fileSize, { color: theme.mute }]}>{sz}</Text>
+                    ) : null}
+                  </View>
+                </Pressable>
+              );
+            })}
+          </View>
+        )}
+      </View>
+    );
+  };
+
+  const renderTimelineEntry = ({ item: entry, index }: { item: TimelineEntry; index: number }) => {
+    const prev = index > 0 ? timelineEntries[index - 1] : null;
+    const curMs = Date.parse(entry.createdAt || '');
     const prevMs = prev ? Date.parse(prev.createdAt || '') : 0;
     const showStamp =
       !prev ||
       (!Number.isNaN(curMs) && !Number.isNaN(prevMs) && curMs - prevMs > FIVE_MIN_MS);
 
     let bubble: React.ReactNode = null;
-    if (item.role === 'user') {
+    if (entry.kind === 'collab') {
+      const peerIdx = bots.findIndex((b) => b.id === entry.peerId);
+      const peerBot = peerIdx >= 0 ? bots[peerIdx] : undefined;
+      const peerName = peerBot?.name || entry.peerId || 'Bot';
       bubble = (
-        <View style={styles.userRow}>
-          <View style={[styles.userBubble, { backgroundColor: botPal.soft }]}>
-            <Text selectable style={[styles.userText, { color: theme.text }]}>
-              {item.text}
+        <View style={styles.assistantRow}>
+          <Pressable
+            onPress={() => entry.peerId && setCollabPeerId(entry.peerId)}
+            style={({ pressed }) => [
+              styles.collabChip,
+              { backgroundColor: theme.lilac, opacity: pressed ? 0.85 : 1 },
+            ]}
+          >
+            <BotAvatar
+              id={entry.peerId}
+              size={18}
+              index={peerIdx >= 0 ? peerIdx : 0}
+              avatar={peerBot?.avatar}
+              color={peerBot?.color}
+            />
+            <Text style={[styles.collabChipTxt, { color: theme.lilacInk }]}>
+              {t('collabWith', { peer: peerName })} · {t('collabCount', { count: entry.items.length })} ›
             </Text>
-          </View>
-        </View>
-      );
-    } else if (item.role === 'assistant') {
-      const metaParts: string[] = [];
-      if (item.durationMs && item.durationMs > 0) {
-        metaParts.push(`${(item.durationMs / 1000).toFixed(1)}s`);
-      }
-      if (item.costUsd && item.costUsd > 0) {
-        metaParts.push(`$${item.costUsd.toFixed(4)}`);
-      }
-      const routineLabel = item.from?.startsWith('routine:')
-        ? t('routineReceiptFrom', { name: item.from.slice(8) })
-        : '';
-      bubble = (
-        <View style={styles.assistantRow}>
-          <View style={[styles.assistantBubble, { backgroundColor: theme.card }]}>
-            {routineLabel ? (
-              <Text style={[styles.botRelLabel, { color: theme.accent, marginBottom: 4 }]}>
-                {routineLabel}
-              </Text>
-            ) : null}
-            <MarkdownText text={item.text} theme={theme} />
-            {metaParts.length > 0 && (
-              <Text style={[styles.msgMeta, { color: theme.mute }]}>{metaParts.join(' · ')}</Text>
-            )}
-          </View>
-        </View>
-      );
-    } else if (item.role === 'bot_out' || item.role === 'bot_in') {
-      const label =
-        item.role === 'bot_out'
-          ? t('delegateTo', { peer: item.to || '' })
-          : t('fromPeer', { peer: item.from || '' });
-      bubble = (
-        <View style={styles.assistantRow}>
-          <View style={[styles.botRelBubble, { backgroundColor: theme.lilac }]}>
-            <Text style={[styles.botRelLabel, { color: theme.lilacInk }]}>{label}</Text>
-            <MarkdownText text={item.text} theme={theme} />
-          </View>
+          </Pressable>
         </View>
       );
     } else {
-      const isErr = item.from === 'error';
-      const isCmd = item.from === 'command';
-      bubble = (
-        <View style={styles.systemWrap}>
-          <View style={[styles.systemCard, { backgroundColor: theme.s1 }]}>
-            <Text
-              selectable
-              style={[
-                styles.systemTxt,
-                isCmd && { fontFamily: MONO_FONT, fontSize: 13.5 },
-                { color: isErr ? theme.danger : theme.text2 },
-              ]}
-            >
-              {item.text}
-            </Text>
+      const item = entry.msg;
+      if (item.role === 'user') {
+        bubble = (
+          <View style={styles.userRow}>
+            <View style={[styles.userBubble, { backgroundColor: botPal.soft }]}>
+              {item.text ? (
+                <Text selectable style={[styles.userText, { color: theme.text }]}>
+                  {item.text}
+                </Text>
+              ) : null}
+              {renderMediaGrid(item.media)}
+            </View>
           </View>
-        </View>
-      );
+        );
+      } else if (item.role === 'assistant') {
+        const metaParts: string[] = [];
+        if (item.durationMs && item.durationMs > 0) {
+          metaParts.push(`${(item.durationMs / 1000).toFixed(1)}s`);
+        }
+        if (item.costUsd && item.costUsd > 0) {
+          metaParts.push(`$${item.costUsd.toFixed(4)}`);
+        }
+        const routineLabel = item.from?.startsWith('routine:')
+          ? t('routineReceiptFrom', { name: item.from.slice(8) })
+          : '';
+        bubble = (
+          <View style={styles.assistantRow}>
+            <View style={[styles.assistantBubble, { backgroundColor: theme.card }]}>
+              {routineLabel ? (
+                <Text style={[styles.botRelLabel, { color: theme.accent, marginBottom: 4 }]}>
+                  {routineLabel}
+                </Text>
+              ) : null}
+              {item.text ? <MarkdownText text={item.text} theme={theme} /> : null}
+              {renderMediaGrid(item.media)}
+              {metaParts.length > 0 && (
+                <Text style={[styles.msgMeta, { color: theme.mute }]}>{metaParts.join(' · ')}</Text>
+              )}
+            </View>
+          </View>
+        );
+      } else {
+        const isErr = item.from === 'error';
+        const isCmd = item.from === 'command';
+        bubble = (
+          <View style={styles.systemWrap}>
+            <View style={[styles.systemCard, { backgroundColor: theme.s1 }]}>
+              <Text
+                selectable
+                style={[
+                  styles.systemTxt,
+                  isCmd && { fontFamily: MONO_FONT, fontSize: 13.5 },
+                  { color: isErr ? theme.danger : theme.text2 },
+                ]}
+              >
+                {item.text}
+              </Text>
+            </View>
+          </View>
+        );
+      }
     }
 
     return (
       <View>
         {showStamp && (
-          <Text style={[styles.stamp, { color: theme.mute }]}>{formatStamp(item.createdAt, lang)}</Text>
+          <Text style={[styles.stamp, { color: theme.mute }]}>{formatStamp(entry.createdAt, lang)}</Text>
         )}
         {bubble}
       </View>
@@ -626,12 +783,12 @@ export default function BotChatScreen() {
       >
         <FlatList
           ref={listRef}
-          data={chatList}
+          data={timelineEntries}
           keyExtractor={(item, idx) => item.id || `${idx}`}
-          renderItem={renderMessage}
+          renderItem={renderTimelineEntry}
           contentContainerStyle={[
             styles.listContent,
-            chatList.length === 0 && styles.emptyGrow,
+            timelineEntries.length === 0 && styles.emptyGrow,
           ]}
           ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
           keyboardDismissMode="interactive"
@@ -672,7 +829,7 @@ export default function BotChatScreen() {
                   <View style={[styles.busyFoot, { backgroundColor: theme.s1 }]}>
                     <ActivityIndicator size="small" color={theme.busy} />
                     <Text style={[styles.busyFootTxt, { color: theme.busy }]}>
-                      {tools[botId] ? t('callingTool', { tool: tools[botId] }) : t('thinking')}
+                      {t('processing')}
                     </Text>
                   </View>
                 ) : null}
@@ -1404,6 +1561,65 @@ export default function BotChatScreen() {
           </ScrollView>
         </View>
       </Modal>
+
+      <Modal visible={!!collabPeerId} animationType="slide" onRequestClose={() => setCollabPeerId(null)}>
+        <SafeAreaView style={[styles.safe, { backgroundColor: theme.page }]} edges={['top', 'left', 'right', 'bottom']}>
+          <ModalHeader
+            title={
+              collabPeerId
+                ? t('collabTitle', {
+                    bot: bot?.name || botId,
+                    peer: bots.find((b) => b.id === collabPeerId)?.name || collabPeerId,
+                  })
+                : ''
+            }
+            onClose={() => setCollabPeerId(null)}
+          />
+          <ScrollView contentContainerStyle={{ padding: 16, gap: 10 }}>
+            {collabLoading && collabItems.length === 0 ? (
+              <ActivityIndicator size="small" color={theme.accent} style={{ marginTop: 32 }} />
+            ) : collabItems.length === 0 ? (
+              <Text style={{ textAlign: 'center', color: theme.mute, marginTop: 32, fontSize: 15 }}>
+                {t('collabEmpty')}
+              </Text>
+            ) : (
+              collabItems.map((m) => {
+                const isOut = m.role === 'bot_out';
+                const peerName = bots.find((b) => b.id === collabPeerId)?.name || collabPeerId || '';
+                const label = isOut ? t('delegateTo', { peer: peerName }) : t('fromPeer', { peer: peerName });
+                return (
+                  <View key={m.id} style={isOut ? styles.userRow : styles.assistantRow}>
+                    <View
+                      style={[
+                        styles.botRelBubble,
+                        { backgroundColor: isOut ? botPal.soft : theme.lilac },
+                      ]}
+                    >
+                      <Text style={[styles.botRelLabel, { color: isOut ? theme.text2 : theme.lilacInk }]}>
+                        {label}
+                      </Text>
+                      {m.text ? <MarkdownText text={m.text} theme={theme} /> : null}
+                      {renderMediaGrid(m.media)}
+                    </View>
+                  </View>
+                );
+              })
+            )}
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
+
+      <Modal visible={!!previewImg} transparent animationType="fade" onRequestClose={() => setPreviewImg(null)}>
+        <Pressable style={styles.lightboxBackdrop} onPress={() => setPreviewImg(null)}>
+          {previewImg ? (
+            <Image
+              source={getMediaSource(baseURL, authToken, previewImg.url)}
+              style={styles.lightboxImg}
+              resizeMode="contain"
+            />
+          ) : null}
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -1535,6 +1751,76 @@ const styles = StyleSheet.create({
   botRelLabel: {
     fontSize: 13,
     fontWeight: '700',
+  },
+  collabChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+  },
+  collabChipTxt: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  mediaGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 4,
+  },
+  mediaItem: {
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  mediaImgSingle: {
+    width: 240,
+    height: 180,
+    borderRadius: 12,
+  },
+  mediaImgMulti: {
+    width: 120,
+    height: 120,
+    borderRadius: 12,
+  },
+  attachWrap: {
+    gap: 6,
+    marginTop: 4,
+  },
+  fileList: {
+    gap: 6,
+  },
+  fileCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 12,
+    minWidth: 180,
+  },
+  fileMeta: {
+    flex: 1,
+    minWidth: 0,
+  },
+  fileName: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  fileSize: {
+    fontSize: 12,
+  },
+  lightboxBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.88)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 16,
+  },
+  lightboxImg: {
+    width: '100%',
+    height: '85%',
   },
   systemWrap: {
     alignItems: 'center',

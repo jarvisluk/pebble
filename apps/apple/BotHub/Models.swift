@@ -29,6 +29,22 @@ struct BotStatus: Codable, Identifiable, Hashable {
     var isBusy: Bool { busy ?? false }
 }
 
+struct MessageMedia: Codable, Identifiable, Hashable {
+    var id: String
+    var kind: String?
+    var url: String
+    var mimeType: String?
+    var name: String?
+    var alt: String?
+    var size: Int64?
+
+    var isImage: Bool {
+        if kind == "image" { return true }
+        if kind == "file" { return false }
+        return mimeType?.hasPrefix("image/") ?? false
+    }
+}
+
 struct ChatMessage: Codable, Identifiable, Hashable {
     var id: String
     var botId: String?
@@ -36,6 +52,7 @@ struct ChatMessage: Codable, Identifiable, Hashable {
     var from: String?
     var to: String?
     var text: String?
+    var media: [MessageMedia]?
     var createdAt: String?
     var durationMs: Double?
     var costUsd: Double?

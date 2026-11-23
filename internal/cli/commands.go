@@ -214,11 +214,19 @@ func readInstructionsInput(inline, filePath, cwd string, inlineSet, fileSet bool
 	return "", false, nil
 }
 
+type multiStringFlag []string
+
+func (m *multiStringFlag) String() string { return strings.Join(*m, ",") }
+func (m *multiStringFlag) Set(v string) error {
+	*m = append(*m, v)
+	return nil
+}
+
 // --- bot ---
 
 func runBotCmd(ctx context.Context, args []string, cwd string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: bot-hub bot <list|get|create|update|delete|message> [flags]")
+		return errors.New("usage: bot-hub bot <list|get|create|update|delete|message|send> [flags]")
 	}
 	action := args[0]
 	rest := args[1:]
@@ -421,8 +429,64 @@ func runBotCmd(ctx context.Context, args []string, cwd string, stdout, stderr io
 		}
 		return writeJSONOut(stdout, body)
 
+	case "send":
+		fs := newSubFlagSet("bot send", stderr, &co)
+		id := fs.String("id", "", "bot ID (defaults to current bot)")
+		text := fs.String("text", "", "message text to send to user")
+		var images multiStringFlag
+		var files multiStringFlag
+		fs.Var(&images, "image", "image file path to attach (repeatable)")
+		fs.Var(&files, "file", "file path to attach (repeatable)")
+		if err := fs.Parse(rest); err != nil {
+			return err
+		}
+		if *text == "" && fs.NArg() > 0 {
+			*text = strings.Join(fs.Args(), " ")
+		}
+		c := resolveClient(co, cwd)
+		target := c.ResolveBotID(*id)
+		if target == "" {
+			return errors.New("bot ID is required (--id or BOT_HUB_BOT_ID)")
+		}
+		if strings.TrimSpace(*text) == "" && len(images) == 0 && len(files) == 0 {
+			return errors.New("--text (or positional text), --image, or --file is required")
+		}
+		type attPayload struct {
+			Path string `json:"path"`
+		}
+		resolvePaths := func(paths []string) []attPayload {
+			var out []attPayload
+			for _, p := range paths {
+				p = strings.TrimSpace(p)
+				if p == "" {
+					continue
+				}
+				if !filepath.IsAbs(p) && cwd != "" {
+					p = filepath.Join(cwd, p)
+				}
+				out = append(out, attPayload{Path: p})
+			}
+			return out
+		}
+		imgList := resolvePaths(images)
+		fileList := resolvePaths(files)
+		payload := map[string]any{
+			"text": *text,
+		}
+		if len(imgList) > 0 {
+			payload["images"] = imgList
+		}
+		if len(fileList) > 0 {
+			payload["files"] = fileList
+		}
+		body, err := c.DoJSON(ctx, http.MethodPost, "/api/bots/"+url.PathEscape(target)+"/outbound", payload)
+		if err != nil {
+			return err
+		}
+		return writeJSONOut(stdout, body)
+
 	default:
-		return fmt.Errorf("unknown bot action %q (expected list|get|create|update|delete|message)", action)
+		return fmt.Errorf("unknown bot action %q (expected list|get|create|update|delete|message|send)", action)
 	}
 }
 

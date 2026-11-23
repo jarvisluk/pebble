@@ -155,7 +155,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               } else if (b.busy) {
                 previewNode = (
                   <div className="pv run">
-                    <span>{tool ? t('callingTool', { tool }) : t('thinking')}</span>
+                    <span>{t('processing')}</span>
                     {count > 0 && <i className="badge">{count}</i>}
                   </div>
                 );
@@ -173,11 +173,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     : m.role === 'bot_out'
                       ? `→ ${(m.to || '').replace(/^bot:/, '')}: `
                       : '';
+                const att = m.media && m.media.length > 0 ? m.media[0] : null;
+                const attPreview = att
+                  ? att.kind === 'file' || (att.kind !== 'image' && att.mimeType && !att.mimeType.startsWith('image/'))
+                    ? `[${t('fileAltFallback')}] ${att.name || ''}`.trim()
+                    : `[${t('imageAltFallback')}]`
+                  : '';
+                const previewTxt = plainPreviewText(m.text, lang) || attPreview;
                 previewNode = (
                   <div className="pv">
                     <span>
                       {who}
-                      {plainPreviewText(m.text, lang)}
+                      {previewTxt}
                     </span>
                     {count > 0 && <i className="badge">{count}</i>}
                   </div>

@@ -147,6 +147,65 @@ func (s *Server) handle(ctx context.Context, req rpcRequest) rpcResponse {
 func toolDefinitions() []map[string]any {
 	return []map[string]any{
 		{
+			"name":        "send_message",
+			"description": "Send a visible message (text, images, and/or files) to the user in bot-hub. Your ordinary text output is internal and hidden from the user; call this tool whenever you want the user to see a reply, progress update, image, or file.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"text": map[string]any{
+						"type":        "string",
+						"description": "Markdown text to show to the user. Optional if images or files are provided.",
+					},
+					"images": map[string]any{
+						"type":        "array",
+						"description": "Optional list of images to attach (either local file paths relative to workspace or absolute, or objects with path and alt).",
+						"items": map[string]any{
+							"anyOf": []map[string]any{
+								{"type": "string"},
+								{
+									"type": "object",
+									"properties": map[string]any{
+										"path": map[string]any{
+											"type":        "string",
+											"description": "Local image file path (png/jpg/gif/webp).",
+										},
+										"alt": map[string]any{
+											"type":        "string",
+											"description": "Optional alt description.",
+										},
+									},
+									"required": []string{"path"},
+								},
+							},
+						},
+					},
+					"files": map[string]any{
+						"type":        "array",
+						"description": "Optional list of files to attach (either local file paths relative to workspace or absolute, or objects with path and optional name).",
+						"items": map[string]any{
+							"anyOf": []map[string]any{
+								{"type": "string"},
+								{
+									"type": "object",
+									"properties": map[string]any{
+										"path": map[string]any{
+											"type":        "string",
+											"description": "Local file path.",
+										},
+										"name": map[string]any{
+											"type":        "string",
+											"description": "Optional display filename.",
+										},
+									},
+									"required": []string{"path"},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
 			"name":        "message_bot",
 			"description": "Send a message to another bot in bot-hub and return its reply. Both bots' chat timelines will record the collaboration.",
 			"inputSchema": map[string]any{
@@ -316,6 +375,87 @@ func toolDefinitions() []map[string]any {
 func (s *Server) callTool(ctx context.Context, name string, rawArgs json.RawMessage) (string, bool) {
 	selfBotID := s.client.SelfBotID()
 	switch name {
+	case "send_message":
+		if selfBotID == "" {
+			return "caller bot ID is unknown", true
+		}
+		var args struct {
+			Text   string            `json:"text"`
+			Images []json.RawMessage `json:"images"`
+			Files  []json.RawMessage `json:"files"`
+		}
+		if len(rawArgs) > 0 {
+			if err := json.Unmarshal(rawArgs, &args); err != nil {
+				return "invalid arguments", true
+			}
+		}
+		type imgArg struct {
+			Path string `json:"path"`
+			Alt  string `json:"alt,omitempty"`
+		}
+		type fileArg struct {
+			Path string `json:"path"`
+			Name string `json:"name,omitempty"`
+		}
+		var images []imgArg
+		for _, rawImg := range args.Images {
+			var strPath string
+			if err := json.Unmarshal(rawImg, &strPath); err == nil {
+				if strings.TrimSpace(strPath) != "" {
+					images = append(images, imgArg{Path: strings.TrimSpace(strPath)})
+				}
+				continue
+			}
+			var obj imgArg
+			if err := json.Unmarshal(rawImg, &obj); err == nil && strings.TrimSpace(obj.Path) != "" {
+				obj.Path = strings.TrimSpace(obj.Path)
+				images = append(images, obj)
+				continue
+			}
+			return "each image must be a file path string or {path, alt} object", true
+		}
+		var files []fileArg
+		for _, rawFile := range args.Files {
+			var strPath string
+			if err := json.Unmarshal(rawFile, &strPath); err == nil {
+				if strings.TrimSpace(strPath) != "" {
+					files = append(files, fileArg{Path: strings.TrimSpace(strPath)})
+				}
+				continue
+			}
+			var obj fileArg
+			if err := json.Unmarshal(rawFile, &obj); err == nil && strings.TrimSpace(obj.Path) != "" {
+				obj.Path = strings.TrimSpace(obj.Path)
+				files = append(files, obj)
+				continue
+			}
+			return "each file must be a file path string or {path, name} object", true
+		}
+		if strings.TrimSpace(args.Text) == "" && len(images) == 0 && len(files) == 0 {
+			return "text, images, or files is required", true
+		}
+		payload := map[string]any{
+			"text": args.Text,
+		}
+		if len(images) > 0 {
+			payload["images"] = images
+		}
+		if len(files) > 0 {
+			payload["files"] = files
+		}
+		body, err := s.client.DoJSON(ctx, http.MethodPost, "/api/bots/"+url.PathEscape(selfBotID)+"/outbound", payload)
+		if err != nil {
+			return err.Error(), true
+		}
+		var resp struct {
+			ID    string `json:"id"`
+			Media []any  `json:"media"`
+		}
+		if json.Unmarshal(body, &resp) == nil && resp.ID != "" {
+			return fmt.Sprintf("Message sent to user (id=%s, attachments=%d).", resp.ID, len(resp.Media)), false
+		}
+		return PrettyJSON(body), false
+
 	case "message_bot":
 		var args struct {
 			BotID   string `json:"botId"`

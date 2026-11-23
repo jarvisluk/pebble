@@ -397,6 +397,24 @@ final class HubStore {
         if let m = list.last { last[botId] = m }
     }
 
+    func loadCollabMessages(_ botId: String, peerId: String, limit: Int = 200) async throws -> [ChatMessage] {
+        guard !baseURL.isEmpty else { return [] }
+        let d: MessagesResp = try await api.call("/api/bots/\(enc(botId))/collab/\(enc(peerId))?limit=\(limit)")
+        return d.messages ?? []
+    }
+
+    private let mediaCache = NSCache<NSString, NSData>()
+
+    func fetchMediaData(_ path: String) async throws -> Data {
+        let key = (baseURL + path) as NSString
+        if let cached = mediaCache.object(forKey: key) {
+            return Data(referencing: cached)
+        }
+        let data = try await api.raw(path)
+        mediaCache.setObject(data as NSData, forKey: key)
+        return data
+    }
+
     func sendMessage(_ botId: String, _ text: String) async throws {
         let d: TextResp = try await api.call("/api/bots/\(enc(botId))/message", method: "POST",
                                              body: ["message": text, "source": "mobile"])

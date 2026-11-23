@@ -54,6 +54,7 @@ func TestMCPStdioToolsFlow(t *testing.T) {
 		t.Fatalf("parse tools/list: %v", err)
 	}
 	want := map[string]bool{
+		"send_message":     true,
 		"message_bot":      true,
 		"node_exec":        true,
 		"node_file":        true,
@@ -238,5 +239,40 @@ func TestMCPDesktopTaskAndRoleFiltering(t *testing.T) {
 	}
 	if !strings.Contains(cuLines[1], `"isError":true`) {
 		t.Fatalf("expected nested desktop_task rejected, got %s", cuLines[1])
+	}
+}
+
+func TestMCPSendMessageTool(t *testing.T) {
+	var gotBody map[string]any
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodPost && r.URL.Path == "/api/bots/assistant/outbound" {
+			if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+				http.Error(w, `{"error":"bad json"}`, http.StatusBadRequest)
+				return
+			}
+			_, _ = w.Write([]byte(`{"id":"msg_1","media":[{"id":"m1"},{"id":"m2"}]}`))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer api.Close()
+
+	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_message","arguments":{"text":"hello","images":["a.png",{"path":"b.png","alt":"diagram"}],"files":["report.pdf",{"path":"data.csv","name":"metrics.csv"}]}}}` + "\n"
+	var out bytes.Buffer
+	srv := NewServer(api.URL, "assistant")
+	if err := srv.ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatalf("ServeStdio failed: %v", err)
+	}
+	if !strings.Contains(out.String(), "Message sent to user (id=msg_1, attachments=2)") {
+		t.Fatalf("unexpected send_message output:\n%s", out.String())
+	}
+	imgs, ok := gotBody["images"].([]any)
+	if !ok || len(imgs) != 2 {
+		t.Fatalf("expected 2 images forwarded, got %#v", gotBody["images"])
+	}
+	files, ok := gotBody["files"].([]any)
+	if !ok || len(files) != 2 {
+		t.Fatalf("expected 2 files forwarded, got %#v", gotBody["files"])
 	}
 }

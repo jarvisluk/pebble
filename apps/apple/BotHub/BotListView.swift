@@ -172,12 +172,20 @@ struct BotRow: View {
                 return (hub.t("questionWaitingBadge"), p.busy)
             }
             if bot.isBusy {
-                if let tool = hub.tools[bot.id], !tool.isEmpty { return (hub.t("callingTool", ["tool": tool]), p.busy) }
-                return (hub.t("thinking"), p.busy)
+                return (hub.t("processing"), p.busy)
             }
             if let m = lastMsg {
                 let pre = m.role == "user" ? hub.t("youPrefix") : ""
-                let s = plainPreview(pre + m.body)
+                var rawBody = m.body
+                if rawBody.isEmpty, let first = m.media?.first {
+                    if first.isImage {
+                        rawBody = "[\(hub.t("imageAltFallback"))]"
+                    } else {
+                        let fn = (first.name ?? "").isEmpty ? "" : " \(first.name!)"
+                        rawBody = "[\(hub.t("fileAltFallback"))]\(fn)"
+                    }
+                }
+                let s = plainPreview(pre + rawBody)
                 return (s.isEmpty ? " " : s, p.text2)
             }
             return (bot.description ?? bot.harness ?? "", p.mute)

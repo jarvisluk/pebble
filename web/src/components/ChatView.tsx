@@ -1,11 +1,105 @@
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { BotStatus, ChatMessage, PendingQuestion, ResolvedLang, TakeoverRequest } from '../types';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import type { BotStatus, ChatMessage, MessageMedia, PendingQuestion, ResolvedLang, TakeoverRequest } from '../types';
 import { translate } from '../lib/i18n';
 import { renderMarkdownHtml } from '../lib/markdown';
 import { botColor, contrastText, formatStamp } from '../lib/theme';
 import type { ViewDir, ViewState } from '../lib/useViewTransition';
 import { BotAvatar } from './BotAvatar';
 import { QuestionCard } from './QuestionCard';
+
+export function isImageMedia(m: MessageMedia): boolean {
+  if (m.kind === 'image') return true;
+  if (m.kind === 'file') return false;
+  return Boolean(m.mimeType && m.mimeType.startsWith('image/'));
+}
+
+export function formatFileSize(bytes?: number): string {
+  if (!bytes || bytes <= 0) return '';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+export const MessageAttachments: React.FC<{
+  media?: MessageMedia[];
+  lang: ResolvedLang;
+  onPreviewImage: (img: MessageMedia) => void;
+}> = ({ media, lang, onPreviewImage }) => {
+  if (!media || media.length === 0) return null;
+  const t = (k: string) => translate(lang, k);
+  const images = media.filter(isImageMedia);
+  const files = media.filter((m) => !isImageMedia(m));
+
+  return (
+    <>
+      {images.length > 0 && (
+        <div className={`msg-media${images.length === 1 ? ' single' : ''}`}>
+          {images.map((img) => (
+            <button
+              key={img.id}
+              type="button"
+              className="msg-img-btn"
+              onClick={() => onPreviewImage(img)}
+            >
+              <img
+                className="msg-img"
+                src={img.url}
+                alt={img.alt || img.name || t('imageAltFallback')}
+                loading="lazy"
+              />
+            </button>
+          ))}
+        </div>
+      )}
+      {files.length > 0 && (
+        <div className="msg-files">
+          {files.map((f) => {
+            const name = f.name || f.id || t('fileAltFallback');
+            const sizeStr = formatFileSize(f.size);
+            const href = `${f.url}?download=1&name=${encodeURIComponent(name)}`;
+            return (
+              <a
+                key={f.id}
+                className="msg-file-card"
+                href={href}
+                download={name}
+                title={t('downloadFile')}
+              >
+                <svg
+                  className="msg-file-ico"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.9"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
+                  <path d="M14 3v5h5" />
+                </svg>
+                <span className="msg-file-meta">
+                  <span className="msg-file-name">{name}</span>
+                  {sizeStr ? <span className="msg-file-size">{sizeStr}</span> : null}
+                </span>
+                <svg
+                  className="msg-file-dl"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M12 4v12m0 0-4-4m4 4 4-4M4 20h16" />
+                </svg>
+              </a>
+            );
+          })}
+        </div>
+      )}
+    </>
+  );
+};
 
 interface ChatViewProps {
   hidden: boolean;
@@ -28,6 +122,7 @@ interface ChatViewProps {
   onResolveTakeover: (to: TakeoverRequest) => void;
   onReplyQuestion: (id: string, answers: Record<string, unknown>, cancelled: boolean) => Promise<void>;
   onOpenDetail: () => void;
+  onOpenCollab?: (peerId: string) => void;
   onOpenCreate: () => void;
   onSendMessage: (text: string) => Promise<void>;
   onInterrupt: () => Promise<void>;
@@ -55,6 +150,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
   onResolveTakeover,
   onReplyQuestion,
   onOpenDetail,
+  onOpenCollab,
   onOpenCreate,
   onSendMessage,
   onInterrupt,
@@ -63,9 +159,53 @@ export const ChatView: React.FC<ChatViewProps> = ({
   const t = (k: string, vars?: Record<string, string | number>) => translate(lang, k, vars);
   const [draft, setDraft] = useState('');
   const [popOpen, setPopOpen] = useState(false);
+  const [previewImg, setPreviewImg] = useState<MessageMedia | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const popRef = useRef<HTMLDivElement>(null);
   const plusRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    setPreviewImg(null);
+  }, [activeBot?.id]);
+
+  useEffect(() => {
+    if (!previewImg) return;
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        setPreviewImg(null);
+      }
+    };
+    document.addEventListener('keydown', onEsc, true);
+    return () => document.removeEventListener('keydown', onEsc, true);
+  }, [previewImg]);
+
+  const timelineItems = useMemo(() => {
+    type TimelineEntry =
+      | { kind: 'msg'; msg: ChatMessage }
+      | { kind: 'collab'; id: string; peerId: string; items: ChatMessage[]; createdAt: string };
+    const entries: TimelineEntry[] = [];
+    for (const m of messages) {
+      if (m.role === 'bot_out' || m.role === 'bot_in') {
+        const peerId = (m.role === 'bot_out' ? m.to || '' : m.from || '').replace(/^bot:/, '');
+        const last = entries[entries.length - 1];
+        if (last && last.kind === 'collab' && last.peerId === peerId) {
+          last.items.push(m);
+        } else {
+          entries.push({
+            kind: 'collab',
+            id: `collab-${m.id}`,
+            peerId,
+            items: [m],
+            createdAt: m.createdAt,
+          });
+        }
+      } else {
+        entries.push({ kind: 'msg', msg: m });
+      }
+    }
+    return entries;
+  }, [messages]);
 
   const botAccentStyle: React.CSSProperties | undefined = activeBot
     ? ({
@@ -289,15 +429,51 @@ export const ChatView: React.FC<ChatViewProps> = ({
                 </div>
               ) : (
                 <>
-                  {messages.map((m) => {
-                    const ts = Date.parse(m.createdAt) || 0;
+                  {timelineItems.map((entry) => {
+                    const stampSource = entry.kind === 'collab' ? entry.createdAt : entry.msg.createdAt;
+                    const ts = Date.parse(stampSource) || 0;
                     let stampEl: React.ReactNode = null;
                     if (!lastTs || ts - lastTs > 300000) {
-                      const lbl = formatStamp(m.createdAt, lang);
+                      const lbl = formatStamp(stampSource, lang);
                       if (lbl) stampEl = <div className="stamp">{lbl}</div>;
                     }
                     lastTs = ts;
 
+                    if (entry.kind === 'collab') {
+                      const peerBot = bots.find((b) => b.id === entry.peerId);
+                      const peerName = peerBot?.name || entry.peerId || 'Bot';
+                      const fresh = entry.items.some((item) => !seenIds.has(item.id)) ? ' fresh' : '';
+                      return (
+                        <React.Fragment key={entry.id}>
+                          {stampEl}
+                          <div className={`msg bot collab-row${fresh}`}>
+                            <button
+                              type="button"
+                              className="collab-chip"
+                              onClick={() => entry.peerId && onOpenCollab?.(entry.peerId)}
+                            >
+                              <BotAvatar id={entry.peerId} bots={bots} />
+                              <span className="collab-chip-txt">
+                                {t('collabWith', { peer: peerName })} · {t('collabCount', { count: entry.items.length })}
+                              </span>
+                              <svg
+                                className="collab-chip-chev"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2.2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              >
+                                <path d="m9 18 6-6-6-6" />
+                              </svg>
+                            </button>
+                          </div>
+                        </React.Fragment>
+                      );
+                    }
+
+                    const m = entry.msg;
                     const fresh = seenIds.has(m.id) ? '' : ' fresh';
                     const foot = [
                       m.durationMs ? `${(m.durationMs / 1000).toFixed(1)}s` : '',
@@ -305,6 +481,10 @@ export const ChatView: React.FC<ChatViewProps> = ({
                     ]
                       .filter(Boolean)
                       .join(' · ');
+
+                    const mediaEl = (
+                      <MessageAttachments media={m.media} lang={lang} onPreviewImage={setPreviewImg} />
+                    );
 
                     let body: React.ReactNode;
                     if (m.role === 'user') {
@@ -315,10 +495,12 @@ export const ChatView: React.FC<ChatViewProps> = ({
                       body = (
                         <div className={`msg me${fresh}`}>
                           {via}
-                          <div
-                            className="bubble"
-                            dangerouslySetInnerHTML={{ __html: renderMarkdownHtml(m.text, t('copy')) }}
-                          />
+                          <div className="bubble">
+                            {m.text ? (
+                              <div dangerouslySetInnerHTML={{ __html: renderMarkdownHtml(m.text, t('copy')) }} />
+                            ) : null}
+                            {mediaEl}
+                          </div>
                         </div>
                       );
                     } else if (m.role === 'assistant') {
@@ -329,27 +511,12 @@ export const ChatView: React.FC<ChatViewProps> = ({
                       body = (
                         <div className={`msg bot${fresh}`}>
                           {rt}
-                          <div
-                            className="bubble"
-                            dangerouslySetInnerHTML={{ __html: renderMarkdownHtml(m.text, t('copy')) }}
-                          />
-                          {foot && <div className="foot">{foot}</div>}
-                        </div>
-                      );
-                    } else if (m.role === 'bot_out' || m.role === 'bot_in') {
-                      const out = m.role === 'bot_out';
-                      const peer = (out ? m.to || '' : m.from || '').replace(/^bot:/, '');
-                      const label = out ? t('sentToPeer', { peer }) : t('peerReply', { peer });
-                      body = (
-                        <div className={`msg bot peer${fresh}`}>
-                          <div className="label">
-                            <BotAvatar id={peer} bots={bots} />
-                            {label}
+                          <div className="bubble">
+                            {m.text ? (
+                              <div dangerouslySetInnerHTML={{ __html: renderMarkdownHtml(m.text, t('copy')) }} />
+                            ) : null}
+                            {mediaEl}
                           </div>
-                          <div
-                            className="bubble"
-                            dangerouslySetInnerHTML={{ __html: renderMarkdownHtml(m.text, t('copy')) }}
-                          />
                           {foot && <div className="foot">{foot}</div>}
                         </div>
                       );
@@ -376,9 +543,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
                   {activeBot.busy && (
                     <div className="live">
                       <BotAvatar id={activeBot.id} bots={bots} />
-                      <span className="shimmer">
-                        {toolName ? t('callingToolEllipsis', { tool: toolName }) : t('thinking')}
-                      </span>
+                      <span className="shimmer">{t('processing')}</span>
                     </div>
                   )}
                   {questions.map((q) => (
@@ -460,6 +625,20 @@ export const ChatView: React.FC<ChatViewProps> = ({
         </div>
         {children}
       </div>
+      {previewImg && (
+        <div
+          className="img-lightbox"
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setPreviewImg(null)}
+        >
+          <img
+            src={previewImg.url}
+            alt={previewImg.alt || previewImg.name || t('imageAltFallback')}
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
     </div>
   );
 };
