@@ -89,6 +89,8 @@ export default function SettingsScreen() {
   }, [activeServer, connState, online, t]);
 
   const onlineNodes = nodes.filter((n) => n.connected).length;
+  const [defaultHarnessDraft, setDefaultHarnessDraft] = useState('opencode');
+  const [defaultHarnessTouched, setDefaultHarnessTouched] = useState(false);
   const [defaultModel, setDefaultModel] = useState('');
   const [defaultModelTouched, setDefaultModelTouched] = useState(false);
   const [defaultModelsDraft, setDefaultModelsDraft] = useState<Record<string, string>>({});
@@ -135,6 +137,9 @@ export default function SettingsScreen() {
   }, [loadSettings, refreshBots]);
 
   useEffect(() => {
+    if (settings && !defaultHarnessTouched) {
+      setDefaultHarnessDraft(settings.defaultHarness || settings.harnesses?.[0]?.id || 'opencode');
+    }
     if (settings && !defaultModelTouched) {
       setDefaultModel(settings.defaultModel || '');
     }
@@ -152,7 +157,7 @@ export default function SettingsScreen() {
     if (settings && !sharedUserMdTouched) {
       setSharedUserMd(settings.sharedUserMd || '');
     }
-  }, [defaultModelTouched, defaultModelsTouched, settings, sharedUserMdTouched]);
+  }, [defaultHarnessTouched, defaultModelTouched, defaultModelsTouched, settings, sharedUserMdTouched]);
 
   useEffect(() => {
     setBotDrafts((prev) => {
@@ -228,6 +233,7 @@ export default function SettingsScreen() {
   const cleanedBasePerHarness = useMemo(() => cleanModelsMap(settings?.defaultModels), [settings?.defaultModels]);
 
   const settingsChanged =
+    defaultHarnessDraft !== (settings?.defaultHarness || harnessOptions[0]?.id || 'opencode') ||
     defaultModel.trim() !== (settings?.defaultModel || '') ||
     !mapsEqual(cleanedDraftPerHarness, cleanedBasePerHarness) ||
     sharedUserMd.replace(/\s+$/, '') !== (settings?.sharedUserMd || '').replace(/\s+$/, '');
@@ -248,11 +254,13 @@ export default function SettingsScreen() {
     try {
       await saveSettings({
         settingsChanged,
+        defaultHarness: defaultHarnessDraft,
         defaultModel: defaultModel.trim(),
         defaultModels: cleanedDraftPerHarness,
         sharedUserMd,
         botUpdates,
       });
+      setDefaultHarnessTouched(false);
       setDefaultModelTouched(false);
       setDefaultModelsTouched(false);
       setSharedUserMdTouched(false);
@@ -266,7 +274,7 @@ export default function SettingsScreen() {
     } finally {
       setSaving(false);
     }
-  }, [botUpdates, cleanedDraftPerHarness, defaultModel, doCloseSheet, saveSettings, settingsChanged, sharedUserMd, t]);
+  }, [botUpdates, cleanedDraftPerHarness, defaultHarnessDraft, defaultModel, doCloseSheet, saveSettings, settingsChanged, sharedUserMd, t]);
 
   const requestClose = useCallback(() => {
     if (!dirty) {
@@ -658,6 +666,27 @@ export default function SettingsScreen() {
                 </Pressable>
               </View>
             </View>
+            <Text style={[styles.subLabel, { color: theme.text2 }]}>{t('defaultHarness')}</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.pillRow}>
+              {harnessOptions.map((h) => (
+                <Pressable
+                  key={h.id}
+                  onPress={() => {
+                    setDefaultHarnessDraft(h.id);
+                    setDefaultHarnessTouched(true);
+                    setSavedMsg('');
+                  }}
+                  style={[
+                    styles.pill,
+                    { backgroundColor: defaultHarnessDraft === h.id ? theme.accentSoft : theme.s1 },
+                  ]}
+                >
+                  <Text style={[styles.pillTxt, { color: defaultHarnessDraft === h.id ? theme.accent : theme.text }]}>
+                    {h.label || h.id}
+                  </Text>
+                </Pressable>
+              ))}
+            </ScrollView>
             <TextInput
               value={defaultModel}
               onChangeText={(val) => {

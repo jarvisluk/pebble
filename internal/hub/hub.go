@@ -921,7 +921,7 @@ func (h *Hub) CreateBot(req CreateBotRequest) (*BotStatus, error) {
 	req.Model = strings.TrimSpace(req.Model)
 	req.Harness = strings.TrimSpace(req.Harness)
 	if req.Harness == "" {
-		req.Harness = "opencode"
+		req.Harness = h.DefaultHarness()
 	}
 	if _, err := h.registry.Get(req.Harness); err != nil {
 		return nil, err
@@ -2189,6 +2189,35 @@ func (h *Hub) DeleteBot(botID string) error {
 		Payload: map[string]any{"id": botID},
 	})
 	h.notifySchedulesChanged()
+	return nil
+}
+
+// DefaultHarness returns the hub-wide default harness for new bots.
+func (h *Hub) DefaultHarness() string {
+	h.lanesMu.RLock()
+	defer h.lanesMu.RUnlock()
+	return h.cfg.EffectiveDefaultHarness()
+}
+
+// SetDefaultHarness updates and persists the hub-wide default harness.
+func (h *Hub) SetDefaultHarness(harness string) error {
+	harness = strings.TrimSpace(harness)
+	if harness != "" {
+		if _, err := h.registry.Get(harness); err != nil {
+			return err
+		}
+	}
+	h.lanesMu.Lock()
+	defer h.lanesMu.Unlock()
+	if h.cfg.ConfigPath != "" {
+		if err := config.UpdateRaw(h.cfg, func(raw *config.HubConfig) error {
+			raw.DefaultHarness = harness
+			return nil
+		}); err != nil {
+			return fmt.Errorf("save config: %w", err)
+		}
+	}
+	h.cfg.DefaultHarness = harness
 	return nil
 }
 

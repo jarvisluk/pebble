@@ -42,18 +42,19 @@ export const CreateBotModal: React.FC<CreateBotModalProps> = ({
 
   useEffect(() => {
     if (!open) return;
+    const defaultH = settings?.defaultHarness || settings?.harnesses?.[0]?.id || 'opencode';
     setName('');
     setId('');
     setIdTouched(false);
     setDesc('');
     setAvatar('');
     setColor('');
-    setHarness('opencode');
+    setHarness(defaultH);
     setModel('');
     setInst('');
     setPriv(false);
     setErr('');
-    void onLoadModels('opencode');
+    void onLoadModels(defaultH);
   }, [open]);
 
   const defModel = settings?.harnesses.find((h) => h.id === harness)?.defaultModel || '';

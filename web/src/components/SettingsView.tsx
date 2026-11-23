@@ -75,6 +75,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const t = (k: string, vars?: Record<string, string | number>) => translate(lang, k, vars);
 
   // Models & Bots draft
+  const [defaultHarness, setDefaultHarness] = useState('opencode');
   const [defaultModel, setDefaultModel] = useState('');
   const [perHarnessOpen, setPerHarnessOpen] = useState(false);
   const [defaultModelsDraft, setDefaultModelsDraft] = useState<Record<string, string>>({});
@@ -142,6 +143,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       };
     }
     return {
+      defaultHarness: settings?.defaultHarness || settings?.harnesses?.[0]?.id || 'opencode',
       defaultModel: settings?.defaultModel || '',
       defaultModels: cleanPer,
       sharedUserMd: settings?.sharedUserMd || '',
@@ -151,6 +153,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   const isDirty = useMemo(() => {
     if (!settings) return false;
+    if (defaultHarness !== baseline.defaultHarness) return true;
     if (defaultModel.trim() !== baseline.defaultModel) return true;
     const ka = Object.keys(defaultModelsDraft).filter((k) => defaultModelsDraft[k]?.trim());
     const kb = Object.keys(baseline.defaultModels).filter((k) => baseline.defaultModels[k]);
@@ -165,13 +168,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       if (cur.harness !== base.harness || cur.model.trim() !== base.model) return true;
     }
     return false;
-  }, [settings, defaultModel, defaultModelsDraft, sharedUserMd, botDrafts, baseline, bots]);
+  }, [settings, defaultHarness, defaultModel, defaultModelsDraft, sharedUserMd, botDrafts, baseline, bots]);
 
   useEffect(() => {
     onDirtyChange?.(isDirty);
   }, [isDirty, onDirtyChange]);
 
   const resetDraftsToBaseline = useCallback(() => {
+    setDefaultHarness(baseline.defaultHarness);
     setDefaultModel(baseline.defaultModel);
     setDefaultModelsDraft({ ...baseline.defaultModels });
     setPerHarnessOpen(Object.values(baseline.defaultModels).some(Boolean));
@@ -190,6 +194,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   useEffect(() => {
     if (!settings) return;
     if (!isDirty) {
+      setDefaultHarness(settings.defaultHarness || settings.harnesses?.[0]?.id || 'opencode');
       setDefaultModel(settings.defaultModel || '');
       setDefaultModelsDraft({ ...(settings.defaultModels || {}) });
       setPerHarnessOpen(Object.values(settings.defaultModels || {}).some(Boolean));
@@ -401,13 +406,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         Object.keys(perHarness).length === Object.keys(baseline.defaultModels).length &&
         Object.keys(perHarness).every((k) => perHarness[k] === baseline.defaultModels[k]);
       if (
+        defaultHarness !== baseline.defaultHarness ||
         general !== baseline.defaultModel ||
         !equalPer ||
         sharedUserMd.replace(/\s+$/, '') !== baseline.sharedUserMd.replace(/\s+$/, '')
       ) {
         const next = await api<SettingsData>('/api/settings', {
           method: 'PUT',
-          body: { defaultModel: general, defaultModels: perHarness, sharedUserMd },
+          body: { defaultHarness, defaultModel: general, defaultModels: perHarness, sharedUserMd },
         });
         onSettingsUpdated(next);
       }
@@ -430,7 +436,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     } finally {
       setSaving(false);
     }
-  }, [defaultModelsDraft, defaultModel, baseline, sharedUserMd, onSettingsUpdated, bots, botDrafts, onToast, t, onReloadBots]);
+  }, [defaultHarness, defaultModelsDraft, defaultModel, baseline, sharedUserMd, onSettingsUpdated, bots, botDrafts, onToast, t, onReloadBots]);
 
   useEffect(() => {
     if (saveRef) saveRef.current = saveSettingsChanges;
@@ -798,6 +804,22 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 >
                   {perHarnessOpen ? t('collapse') : t('perHarness')}
                 </button>
+              </div>
+              <div className="fld">
+                <label>
+                  {t('defaultHarness')} <em>{t('defaultHarnessDesc')}</em>
+                </label>
+                <select
+                  id="sDefaultHarness"
+                  value={defaultHarness}
+                  onChange={(e) => setDefaultHarness(e.target.value)}
+                >
+                  {(settings?.harnesses || [{ id: 'opencode', label: 'opencode' }]).map((h) => (
+                    <option key={h.id} value={h.id}>
+                      {h.label}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div className="fld">
                 <label dangerouslySetInnerHTML={{ __html: t('globalDefaultModel') }} />

@@ -38,6 +38,7 @@ export default function CreateBotScreen() {
   const [avatar, setAvatar] = useState('');
   const [color, setColor] = useState('');
   const [harness, setHarness] = useState('opencode');
+  const [harnessTouched, setHarnessTouched] = useState(false);
   const [model, setModel] = useState('');
   const [loadingModels, setLoadingModels] = useState(false);
   const [instructions, setInstructions] = useState('');
@@ -47,8 +48,10 @@ export default function CreateBotScreen() {
   useEffect(() => {
     if (!settings) {
       loadSettings().catch(() => {});
+    } else if (!harnessTouched) {
+      setHarness(settings.defaultHarness || settings.harnesses?.[0]?.id || 'opencode');
     }
-  }, [loadSettings, settings]);
+  }, [harnessTouched, loadSettings, settings]);
 
   useEffect(() => {
     if ((models[harness] || []).length > 0) return;
@@ -194,7 +197,10 @@ export default function CreateBotScreen() {
                   return (
                     <Pressable
                       key={h.id}
-                      onPress={() => setHarness(h.id)}
+                      onPress={() => {
+                        setHarness(h.id);
+                        setHarnessTouched(true);
+                      }}
                       style={[
                         styles.pill,
                         { backgroundColor: active ? theme.accentSoft : theme.s1 },

@@ -735,6 +735,7 @@ func (s *HTTPServer) handleInterrupt(w http.ResponseWriter, r *http.Request) {
 }
 
 type settingsBody struct {
+	DefaultHarness      *string           `json:"defaultHarness,omitempty"`
 	DefaultModel        *string           `json:"defaultModel,omitempty"`
 	DefaultModels       map[string]string `json:"defaultModels,omitempty"`
 	DesktopHarness      *string           `json:"desktopHarness,omitempty"`
@@ -794,6 +795,7 @@ func (s *HTTPServer) handleSettings(w http.ResponseWriter, r *http.Request) {
 		},
 		"desktopHarness": deskHarness,
 		"desktopModel":   deskModel,
+		"defaultHarness": s.hub.DefaultHarness(),
 		"defaultModel":   defaultModel,
 		"defaultModels":  defaultModels,
 		"sharedUserMd":   s.hub.SharedUserMD(),
@@ -821,6 +823,12 @@ func (s *HTTPServer) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 			curModel = *body.DesktopModel
 		}
 		if err := s.hub.SetDesktopWorker(curHarness, curModel); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
+	}
+	if body.DefaultHarness != nil {
+		if err := s.hub.SetDefaultHarness(*body.DefaultHarness); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
 			return
 		}

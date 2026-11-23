@@ -170,6 +170,7 @@ interface HubContextValue {
   loadModels: (harness: string) => Promise<string[]>;
   saveSettings: (opts: {
     settingsChanged: boolean;
+    defaultHarness: string;
     defaultModel: string;
     defaultModels: Record<string, string>;
     sharedUserMd: string;
@@ -874,6 +875,7 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
   const saveSettings = useCallback(
     async (opts: {
       settingsChanged: boolean;
+      defaultHarness: string;
       defaultModel: string;
       defaultModels: Record<string, string>;
       sharedUserMd: string;
@@ -883,6 +885,7 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
         const s = await apiRequest<SettingsData>(baseURLRef.current, authTokenRef.current, '/api/settings', {
           method: 'PUT',
           body: {
+            defaultHarness: opts.defaultHarness,
             defaultModel: opts.defaultModel,
             defaultModels: opts.defaultModels,
             sharedUserMd: opts.sharedUserMd,

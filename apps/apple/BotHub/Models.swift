@@ -120,6 +120,7 @@ struct SettingsData: Codable {
     var magpie: MagpieInfo?
     var desktopHarness: String?
     var desktopModel: String?
+    var defaultHarness: String?
     var defaultModel: String?
     var defaultModels: [String: String]?
     var sharedUserMd: String?

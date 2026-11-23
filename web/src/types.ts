@@ -102,6 +102,7 @@ export interface SettingsData {
     completed?: boolean;
     needsSetup?: boolean;
   };
+  defaultHarness?: string;
   defaultModel?: string;
   defaultModels?: Record<string, string>;
   sharedUserMd?: string;
@@ -299,6 +300,7 @@ export interface ConfirmOptions {
 }
 
 export interface SettingsDraft {
+  defaultHarness: string;
   defaultModel: string;
   defaultModels: Record<string, string>;
   sharedUserMd: string;

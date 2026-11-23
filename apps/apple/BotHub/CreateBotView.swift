@@ -12,6 +12,7 @@ struct CreateBotView: View {
     @State private var avatar = ""
     @State private var color = ""
     @State private var harness = "opencode"
+    @State private var harnessTouched = false
     @State private var model = ""
     @State private var loadingModels = false
     @State private var instructions = ""
@@ -57,7 +58,10 @@ struct CreateBotView: View {
                 )
             }
             Section {
-                Picker(hub.t("harnessBackend"), selection: $harness) {
+                Picker(hub.t("harnessBackend"), selection: Binding(
+                    get: { harness },
+                    set: { harness = $0; harnessTouched = true }
+                )) {
                     ForEach(harnesses) { Text($0.title).tag($0.id) }
                 }
                 let cands = hub.models[harness] ?? []
@@ -96,7 +100,12 @@ struct CreateBotView: View {
         .navigationTitle(hub.t("newBot"))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { SheetToolbar(actionTitle: hub.t("create"), loading: submitting) { create() } }
-        .task { if hub.settings == nil { _ = try? await hub.loadSettings() } }
+        .task {
+            if hub.settings == nil { _ = try? await hub.loadSettings() }
+            if !harnessTouched {
+                harness = hub.settings?.defaultHarness ?? harnesses.first?.id ?? "opencode"
+            }
+        }
         .task(id: harness) {
             if hub.isConnected && (hub.models[harness] ?? []).isEmpty {
                 loadCands(for: harness)

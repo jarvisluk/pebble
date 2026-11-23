@@ -134,11 +134,12 @@ func TestSettingsPreserveDefaultsAndDeleteBotRoute(t *testing.T) {
 	reg.Register(noopHarness{kind: "claude"})
 
 	cfg := &config.HubConfig{
-		ProjectRoot:   tmp,
-		SharedDir:     filepath.Join(tmp, "workspaces", "_shared"),
-		StateFile:     filepath.Join(tmp, "sessions.json"),
-		MessagesDir:   filepath.Join(tmp, "messages"),
-		DefaultModel:  "global-model",
+		ProjectRoot:    tmp,
+		SharedDir:      filepath.Join(tmp, "workspaces", "_shared"),
+		StateFile:      filepath.Join(tmp, "sessions.json"),
+		MessagesDir:    filepath.Join(tmp, "messages"),
+		DefaultHarness: "claude",
+		DefaultModel:   "global-model",
 		DefaultModels: map[string]string{"claude": "claude-sonnet"},
 		Bots: []config.BotConfig{
 			{ID: "a", Name: "A", Workspace: filepath.Join(tmp, "a"), Harness: "opencode"},
@@ -161,15 +162,16 @@ func TestSettingsPreserveDefaultsAndDeleteBotRoute(t *testing.T) {
 		t.Fatalf("PUT /api/settings failed: %d %s", rec.Code, rec.Body.String())
 	}
 	var got struct {
-		DefaultModel  string            `json:"defaultModel"`
-		DefaultModels map[string]string `json:"defaultModels"`
-		SharedUserMD  string            `json:"sharedUserMd"`
+		DefaultHarness string            `json:"defaultHarness"`
+		DefaultModel   string            `json:"defaultModel"`
+		DefaultModels  map[string]string `json:"defaultModels"`
+		SharedUserMD   string            `json:"sharedUserMd"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.DefaultModel != "global-model" || got.DefaultModels["claude"] != "claude-sonnet" {
-		t.Fatalf("expected defaults preserved, got model=%q models=%v", got.DefaultModel, got.DefaultModels)
+	if got.DefaultHarness != "claude" || got.DefaultModel != "global-model" || got.DefaultModels["claude"] != "claude-sonnet" {
+		t.Fatalf("expected defaults preserved, got harness=%q model=%q models=%v", got.DefaultHarness, got.DefaultModel, got.DefaultModels)
 	}
 	if got.SharedUserMD != "# User\nNotes\n" {
 		t.Fatalf("unexpected sharedUserMd: %q", got.SharedUserMD)

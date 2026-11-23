@@ -588,11 +588,11 @@ final class HubStore {
         return models[harness]!
     }
 
-    func saveSettings(changed: Bool, defaultModel: String, defaultModels: [String: String], sharedUserMd: String,
+    func saveSettings(changed: Bool, defaultHarness: String, defaultModel: String, defaultModels: [String: String], sharedUserMd: String,
                       botUpdates: [(id: String, harness: String, model: String)]) async throws {
         if changed {
             settings = try await api.call("/api/settings", method: "PUT",
-                                          body: ["defaultModel": defaultModel, "defaultModels": defaultModels, "sharedUserMd": sharedUserMd])
+                                          body: ["defaultHarness": defaultHarness, "defaultModel": defaultModel, "defaultModels": defaultModels, "sharedUserMd": sharedUserMd])
         }
         for u in botUpdates { try await updateBot(u.id, ["harness": u.harness, "model": u.model]) }
         try await loadSettings()

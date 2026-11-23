@@ -73,6 +73,22 @@ func TestDefaultModelFor(t *testing.T) {
 	}
 }
 
+func TestNormalizeBotDefaultHarness(t *testing.T) {
+	root := t.TempDir()
+	cfg := &HubConfig{ProjectRoot: root}
+	b1 := BotConfig{ID: "a"}
+	NormalizeBot(&b1, cfg)
+	if b1.Harness != "opencode" {
+		t.Fatalf("expected fallback harness opencode, got %q", b1.Harness)
+	}
+	cfg.DefaultHarness = "agy"
+	b2 := BotConfig{ID: "b"}
+	NormalizeBot(&b2, cfg)
+	if b2.Harness != "agy" {
+		t.Fatalf("expected configured default harness agy, got %q", b2.Harness)
+	}
+}
+
 func TestAPITokenHelpers(t *testing.T) {
 	root := t.TempDir()
 	cfgPath := filepath.Join(root, "config", "bots.json")

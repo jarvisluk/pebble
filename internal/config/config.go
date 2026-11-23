@@ -280,9 +280,11 @@ func (d DesktopConfig) ShouldStopOnlyWhenNoWindows() bool {
 type HubConfig struct {
 	ProjectRoot string `json:"-"`
 	ConfigPath  string `json:"-"`
+	// DefaultHarness selects the default backend harness when creating a bot.
+	DefaultHarness string `json:"defaultHarness,omitempty"`
 	// DefaultModel applies to opencode and pi bots (they share provider/model
 	// IDs); DefaultModels overrides it per harness.
-	DefaultModel        string            `json:"defaultModel,omitempty"`
+	DefaultModel string `json:"defaultModel,omitempty"`
 	DefaultModels       map[string]string `json:"defaultModels,omitempty"`
 	OnboardingCompleted bool              `json:"onboardingCompleted,omitempty"`
 	DesktopHarness      string            `json:"desktopHarness,omitempty"`
@@ -546,7 +548,7 @@ func NormalizeBot(b *BotConfig, cfg *HubConfig) {
 		b.Color = color
 	}
 	if b.Harness == "" {
-		b.Harness = "opencode"
+		b.Harness = cfg.EffectiveDefaultHarness()
 	}
 	b.Model = expandEnv(b.Model)
 	b.ModelInherited = b.Model == ""
@@ -598,6 +600,16 @@ func NormalizeSchedules(in []ScheduleConfig) []ScheduleConfig {
 		out[j] = sc
 	}
 	return out
+}
+
+// EffectiveDefaultHarness returns the configured default harness, falling back to "opencode".
+func (c *HubConfig) EffectiveDefaultHarness() string {
+	if c != nil {
+		if h := strings.TrimSpace(c.DefaultHarness); h != "" {
+			return h
+		}
+	}
+	return "opencode"
 }
 
 // DefaultModelFor returns the model a bot of this harness inherits; empty

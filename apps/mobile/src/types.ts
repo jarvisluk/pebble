@@ -108,6 +108,7 @@ export interface SettingsData {
   };
   desktopHarness?: string;
   desktopModel?: string;
+  defaultHarness?: string;
   defaultModel: string;
   defaultModels?: Record<string, string>;
   sharedUserMd?: string;

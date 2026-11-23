@@ -8,6 +8,8 @@ struct SettingsView: View {
 
     struct BotDraft: Equatable { var harness: String; var model: String }
 
+    @State private var defaultHarness = "opencode"
+    @State private var defaultHarnessTouched = false
     @State private var defaultModel = ""
     @State private var defaultTouched = false
     @State private var perHarness: [String: String] = [:]
@@ -59,7 +61,8 @@ struct SettingsView: View {
     private var settingsChanged: Bool {
         let s = hub.settings
         func rtrim(_ x: String) -> String { x.replacingOccurrences(of: "\\s+$", with: "", options: .regularExpression) }
-        return defaultModel.trimmingCharacters(in: .whitespaces) != (s?.defaultModel ?? "")
+        return defaultHarness != (s?.defaultHarness ?? primaryHarness)
+            || defaultModel.trimmingCharacters(in: .whitespaces) != (s?.defaultModel ?? "")
             || clean(perHarness) != clean(s?.defaultModels)
             || rtrim(userMd) != rtrim(s?.sharedUserMd ?? "")
     }
@@ -117,6 +120,7 @@ struct SettingsView: View {
             await loadMem("")
         }
         .onAppear { sync() }
+        .onChange(of: hub.settings?.defaultHarness) { _, _ in sync() }
         .onChange(of: hub.settings?.defaultModel) { _, _ in sync() }
         .onChange(of: hub.settings?.sharedUserMd) { _, _ in sync() }
         .onChange(of: hub.settings?.desktopModel) { _, _ in sync() }
@@ -126,6 +130,7 @@ struct SettingsView: View {
 
     private func sync() {
         guard let s = hub.settings else { return }
+        if !defaultHarnessTouched { defaultHarness = s.defaultHarness ?? primaryHarness }
         if !defaultTouched { defaultModel = s.defaultModel ?? "" }
         if !deskTouched { deskHarness = s.desktopHarness ?? ""; deskModel = s.desktopModel ?? "" }
         if !perTouched {
@@ -146,9 +151,9 @@ struct SettingsView: View {
         error = ""; saved = ""; saving = true
         Task {
             do {
-                try await hub.saveSettings(changed: settingsChanged, defaultModel: defaultModel.trimmingCharacters(in: .whitespaces),
+                try await hub.saveSettings(changed: settingsChanged, defaultHarness: defaultHarness, defaultModel: defaultModel.trimmingCharacters(in: .whitespaces),
                                            defaultModels: clean(perHarness), sharedUserMd: userMd, botUpdates: botUpdates)
-                defaultTouched = false; perTouched = false; userMdTouched = false
+                defaultHarnessTouched = false; defaultTouched = false; perTouched = false; userMdTouched = false
                 drafts = [:]
                 sync()
                 saved = hub.t("settingsSaved")
@@ -417,6 +422,12 @@ struct SettingsView: View {
 
     private var defaultModelSection: some View {
         Section(hub.t("globalDefaultModel")) {
+            Picker(hub.t("defaultHarness"), selection: Binding(
+                get: { defaultHarness },
+                set: { defaultHarness = $0; defaultHarnessTouched = true; saved = "" }
+            )) {
+                ForEach(harnesses) { Text($0.title).tag($0.id) }
+            }
             HStack {
                 TextField(hub.t("globalDefaultModel"), text: Binding(get: { defaultModel }, set: { defaultModel = $0; defaultTouched = true; saved = "" }),
                           prompt: Text("magpie/claude-sonnet-4"))
