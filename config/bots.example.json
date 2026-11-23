@@ -13,7 +13,7 @@
   "bots": [
     {
       "id": "assistant",
-      "name": "Personal Assistant",
+      "name": "Pebble",
       "description": "日常助理：待办、日程、信息整理与日常问答",
       "workspace": "./workspaces/assistant",
       "harness": "opencode",

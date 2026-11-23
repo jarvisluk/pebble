@@ -90,14 +90,14 @@ type desktop struct {
 
 func (d *desktop) run() {
 	d.app = application.New(application.Options{
-		Name:        "Bot Hub",
+		Name:        "Pebble",
 		Description: "Personal bot hub",
 		Assets:      application.AssetOptions{Handler: http.HandlerFunc(d.serveSetup), DisableLogging: true},
 		Mac:         application.MacOptions{ApplicationShouldTerminateAfterLastWindowClosed: false},
 		OnShutdown:  d.halt,
 	})
 	d.win = d.app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Title:            "Bot Hub",
+		Title:            "Pebble",
 		Width:            1100,
 		Height:           760,
 		MinWidth:         680,
@@ -128,7 +128,7 @@ func (d *desktop) run() {
 		tray.SetIcon(icons.SystrayLight)
 	}
 	menu := d.app.NewMenu()
-	menu.Add("打开 Bot Hub").OnClick(func(*application.Context) { d.win.Show(); d.win.Focus() })
+	menu.Add("打开 Pebble").OnClick(func(*application.Context) { d.win.Show(); d.win.Focus() })
 	menu.Add("切换模式…").OnClick(func(*application.Context) { d.reset(); d.win.Show() })
 	menu.Add("打开数据目录").OnClick(func(*application.Context) { _ = d.app.Browser.OpenFile(d.dir) })
 	d.nodeItem = menu.AddCheckbox("允许主电脑操控本机", d.prefs.AllowNode)

@@ -10,7 +10,7 @@ build:
 desktop:
 	go build -trimpath -ldflags="-s -w" -o bin/bot-hub-desktop ./cmd/bot-hub-desktop
 
-APP = bin/Bot Hub.app
+APP = bin/Pebble.app
 RES_BIN = $(APP)/Contents/Resources/bin
 CODESIGN_IDENTITY ?=
 app: desktop

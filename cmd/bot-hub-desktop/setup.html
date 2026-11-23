@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Bot Hub</title>
+<title>Pebble</title>
 <style>
   :root {
     --page: #efece8;
@@ -211,7 +211,7 @@
 <div id="dragBar"></div>
 <main>
   <header class="head">
-    <h1>Bot Hub</h1>
+    <h1>Pebble</h1>
     <p class="sub" data-i18n="sub">选择这台电脑的使用方式，之后可从菜单栏图标「切换模式」更改</p>
   </header>
 
@@ -229,7 +229,7 @@
 
   <section class="card">
     <div class="card-hd">
-      <h2 data-i18n="remoteTitle">连接远端 Bot Hub</h2>
+      <h2 data-i18n="remoteTitle">连接远端 Pebble</h2>
     </div>
     <p class="desc" data-i18n="remoteDesc">粘贴主电脑「远程访问」中的 tailcat:// 配对链接，无需安装 Tailscale。</p>
     <textarea id="link" placeholder="tailcat://connect/tc…?port=3789" spellcheck="false"></textarea>
@@ -252,7 +252,7 @@ const dict = isEn ? {
   detectedPrefix: 'Detected: ',
   noneDetected: 'No installed agent harness detected; setup wizard will guide installation',
   localBtn: 'Run Locally',
-  remoteTitle: 'Connect to remote Bot Hub',
+  remoteTitle: 'Connect to remote Pebble',
   remoteDesc: 'Paste the tailcat:// pairing link from Remote Access. No Tailscale install needed.',
   linkHint: 'Supports full pairing links containing #token=',
   tokenDetected: 'Access token detected from link',

@@ -534,7 +534,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
         </button>
         <div id="hdAv">{activeBot ? <BotAvatar id={activeBot.id} bots={bots} /> : null}</div>
         <div className="who">
-          <h1 id="hdName">{activeBot ? activeBot.name : 'bot-hub'}</h1>
+          <h1 id="hdName">{activeBot ? activeBot.name : 'Pebble'}</h1>
         </div>
         <div className="hd-acts">
           <button

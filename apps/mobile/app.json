@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Bot Hub",
+    "name": "Pebble",
     "slug": "bot-hub",
     "scheme": "bothub",
     "version": "1.0.0",
@@ -13,7 +13,7 @@
       "bundleIdentifier": "local.bothub.mobile",
       "infoPlist": {
         "NSCameraUsageDescription": "扫描主电脑远程访问二维码以配对连接",
-        "NSLocalNetworkUsageDescription": "连接同一局域网内的 Bot Hub 主电脑",
+        "NSLocalNetworkUsageDescription": "连接同一局域网内的 Pebble 主电脑",
         "NSAppTransportSecurity": {
           "NSAllowsArbitraryLoads": true,
           "NSAllowsLocalNetworking": true

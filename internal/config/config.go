@@ -443,7 +443,7 @@ func EnsureStarterConfig(projectRoot, preferredHarness string) (string, bool, er
 		Bots: []BotConfig{
 			{
 				ID:          "assistant",
-				Name:        "通用助理",
+				Name:        "Pebble",
 				Description: "日常问答、信息整理与任务协助",
 				Workspace:   "./workspaces/assistant",
 				Harness:     hKind,

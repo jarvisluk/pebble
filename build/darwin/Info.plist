@@ -2,8 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>CFBundleName</key><string>Bot Hub</string>
-  <key>CFBundleDisplayName</key><string>Bot Hub</string>
+  <key>CFBundleName</key><string>Pebble</string>
+  <key>CFBundleDisplayName</key><string>Pebble</string>
   <key>CFBundleIdentifier</key><string>local.bothub.desktop</string>
   <key>CFBundleExecutable</key><string>bot-hub-desktop</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
@@ -18,9 +18,9 @@
   </array>
   <key>LSMinimumSystemVersion</key><string>12.0</string>
   <key>NSHighResolutionCapable</key><true/>
-  <key>NSAppleEventsUsageDescription</key><string>Bot Hub needs Automation permission to control apps on this Mac when remote computer control is enabled.</string>
-  <key>NSDesktopFolderUsageDescription</key><string>Bot Hub needs access to your Desktop folder to read and write files when remote computer control is enabled.</string>
-  <key>NSDocumentsFolderUsageDescription</key><string>Bot Hub needs access to your Documents folder to read and write files when remote computer control is enabled.</string>
-  <key>NSDownloadsFolderUsageDescription</key><string>Bot Hub needs access to your Downloads folder to read and write files when remote computer control is enabled.</string>
+  <key>NSAppleEventsUsageDescription</key><string>Pebble needs Automation permission to control apps on this Mac when remote computer control is enabled.</string>
+  <key>NSDesktopFolderUsageDescription</key><string>Pebble needs access to your Desktop folder to read and write files when remote computer control is enabled.</string>
+  <key>NSDocumentsFolderUsageDescription</key><string>Pebble needs access to your Documents folder to read and write files when remote computer control is enabled.</string>
+  <key>NSDownloadsFolderUsageDescription</key><string>Pebble needs access to your Downloads folder to read and write files when remote computer control is enabled.</string>
 </dict>
 </plist>

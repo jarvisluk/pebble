@@ -1,4 +1,4 @@
-"NSAppleEventsUsageDescription" = "Bot Hub needs Automation permission to control apps on this Mac when remote computer control is enabled.";
-"NSDesktopFolderUsageDescription" = "Bot Hub needs access to your Desktop folder to read and write files when remote computer control is enabled.";
-"NSDocumentsFolderUsageDescription" = "Bot Hub needs access to your Documents folder to read and write files when remote computer control is enabled.";
-"NSDownloadsFolderUsageDescription" = "Bot Hub needs access to your Downloads folder to read and write files when remote computer control is enabled.";
+"NSAppleEventsUsageDescription" = "Pebble needs Automation permission to control apps on this Mac when remote computer control is enabled.";
+"NSDesktopFolderUsageDescription" = "Pebble needs access to your Desktop folder to read and write files when remote computer control is enabled.";
+"NSDocumentsFolderUsageDescription" = "Pebble needs access to your Documents folder to read and write files when remote computer control is enabled.";
+"NSDownloadsFolderUsageDescription" = "Pebble needs access to your Downloads folder to read and write files when remote computer control is enabled.";

@@ -44,7 +44,7 @@ struct ConnectView: View {
                     .background(p.page)
             }
         }
-        .navigationTitle(isGate ? "Bot Hub" : hub.t("connectHost"))
+        .navigationTitle(isGate ? "Pebble" : hub.t("connectHost"))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { connectToolbar }
         .confirmAlert($confirm)

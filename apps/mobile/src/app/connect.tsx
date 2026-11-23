@@ -284,7 +284,7 @@ export function ConnectContent({ standalone = false }: { standalone?: boolean })
         <View style={standalone ? styles.standaloneInner : styles.modalInner}>
           {standalone && (
             <View style={styles.gateHeader}>
-              <Text style={[styles.gateTitle, { color: theme.text }]}>Bot Hub</Text>
+              <Text style={[styles.gateTitle, { color: theme.text }]}>Pebble</Text>
               <Text style={[styles.gateSub, { color: theme.text2 }]}>{t('connectHost')}</Text>
             </View>
           )}
