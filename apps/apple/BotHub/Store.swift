@@ -73,6 +73,37 @@ func plainPreview(_ s: String) -> String {
     return out.trimmingCharacters(in: .whitespaces)
 }
 
+func formatClockTime(_ iso: String?) -> String {
+    guard let d = parseISO(iso) else { return "" }
+    return hhmm(d)
+}
+
+func countToolCalls(_ tools: [String]?) -> Int {
+    guard let tools, !tools.isEmpty else { return 0 }
+    var total = 0
+    for item in tools {
+        if let idx = item.lastIndex(of: "\u{00d7}"), let n = Int(item[item.index(after: idx)...]), n > 0 {
+            total += n
+        } else {
+            total += 1
+        }
+    }
+    return total
+}
+
+func formatDurationMs(_ ms: Double?) -> String {
+    guard let ms, ms > 0 else { return "" }
+    let sec = ms / 1000.0
+    if sec < 60 { return String(format: "%.1fs", sec) }
+    var mins = Int(sec / 60.0)
+    var rem = Int((sec.truncatingRemainder(dividingBy: 60.0)).rounded())
+    if rem == 60 {
+        mins += 1
+        rem = 0
+    }
+    return "\(mins)m \(rem)s"
+}
+
 @MainActor
 @Observable
 final class HubStore {
@@ -182,6 +213,16 @@ final class HubStore {
         }
     }
 
+    private func updateIncoming(_ botId: String, _ msg: ChatMessage) {
+        if var list = msgs[botId], let idx = list.firstIndex(where: { $0.id == msg.id }) {
+            list[idx] = msg
+            msgs[botId] = list
+        }
+        if last[botId]?.id == msg.id {
+            last[botId] = msg
+        }
+    }
+
     private func upsertBot(_ st: BotStatus) {
         if let i = bots.firstIndex(where: { $0.id == st.id }) { bots[i] = st } else { bots.append(st) }
     }
@@ -200,6 +241,8 @@ final class HubStore {
         switch type {
         case "message":
             if let bid = p["botId"] as? String, let m = decodeAny(p, as: ChatMessage.self) { pushIncoming(bid, m) }
+        case "message_updated":
+            if let bid = p["botId"] as? String, let m = decodeAny(p, as: ChatMessage.self) { updateIncoming(bid, m) }
         case "bot_status":
             if let st = decodeAny(p, as: BotStatus.self) {
                 upsertBot(st)

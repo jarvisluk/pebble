@@ -29,7 +29,7 @@ import { QuestionCard } from '../../components/QuestionCard';
 import { fetchCollabMessages, getMediaSource, requestMediaDownloadURL } from '../../api';
 import { confirmAction } from '../../confirm';
 import { useI18n } from '../../i18n';
-import { formatStamp, useHub } from '../../store';
+import { countToolCalls, formatClockTime, formatDurationMs, formatStamp, useHub } from '../../store';
 import { getBotPalette, MONO_FONT, useTheme } from '../../theme';
 import type {
   BotDetail,
@@ -649,9 +649,12 @@ export default function BotChatScreen() {
         );
       } else if (item.role === 'assistant') {
         const metaParts: string[] = [];
-        if (item.durationMs && item.durationMs > 0) {
-          metaParts.push(`${(item.durationMs / 1000).toFixed(1)}s`);
-        }
+        const clock = formatClockTime(item.createdAt);
+        if (clock) metaParts.push(clock);
+        const toolCount = countToolCalls(item.tools);
+        if (toolCount > 0) metaParts.push(t('msgToolCalls', { count: toolCount }));
+        const durText = formatDurationMs(item.durationMs);
+        if (durText) metaParts.push(t('msgDuration', { dur: durText }));
         if (item.costUsd && item.costUsd > 0) {
           metaParts.push(`$${item.costUsd.toFixed(4)}`);
         }

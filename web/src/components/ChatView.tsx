@@ -2,7 +2,7 @@ import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 're
 import type { BotStatus, ChatMessage, MessageMedia, PendingQuestion, ResolvedLang, TakeoverRequest } from '../types';
 import { translate } from '../lib/i18n';
 import { renderMarkdownHtml } from '../lib/markdown';
-import { botColor, contrastText, formatStamp } from '../lib/theme';
+import { botColor, contrastText, countToolCalls, formatClockTime, formatDurationMs, formatStamp } from '../lib/theme';
 import type { ViewDir, ViewState } from '../lib/useViewTransition';
 import { BotAvatar } from './BotAvatar';
 import { QuestionCard } from './QuestionCard';
@@ -475,8 +475,12 @@ export const ChatView: React.FC<ChatViewProps> = ({
 
                     const m = entry.msg;
                     const fresh = seenIds.has(m.id) ? '' : ' fresh';
+                    const toolCount = countToolCalls(m.tools);
+                    const durText = formatDurationMs(m.durationMs);
                     const foot = [
-                      m.durationMs ? `${(m.durationMs / 1000).toFixed(1)}s` : '',
+                      formatClockTime(m.createdAt),
+                      toolCount > 0 ? t('msgToolCalls', { count: toolCount }) : '',
+                      durText ? t('msgDuration', { dur: durText }) : '',
                       m.costUsd ? `$${Number(m.costUsd).toFixed(4)}` : '',
                     ]
                       .filter(Boolean)

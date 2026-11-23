@@ -649,6 +649,44 @@ func (s *Store) ReassignMessageSession(msgID, sessionID string, turn int) error 
 	return tx.Commit()
 }
 
+// UpdateMessageMeta updates the turn-level execution metadata (tools, duration,
+// cost, and token counts) on an already-persisted message (e.g. sent via send_message).
+func (s *Store) UpdateMessageMeta(msgID string, tools []string, durationMs int64, costUSD float64, inTok, outTok int) (ChatMessage, bool, error) {
+	if msgID == "" {
+		return ChatMessage{}, false, nil
+	}
+	toolsJSON := "[]"
+	if len(tools) > 0 {
+		if b, err := json.Marshal(tools); err == nil {
+			toolsJSON = string(b)
+		}
+	}
+	res, err := s.db.Exec(`
+		UPDATE messages
+		SET tools_json = ?, duration_ms = ?, cost_usd = ?, input_tokens = ?, output_tokens = ?
+		WHERE msg_uid = ?
+	`, toolsJSON, durationMs, costUSD, inTok, outTok, msgID)
+	if err != nil {
+		return ChatMessage{}, false, err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return ChatMessage{}, false, err
+	}
+	if affected == 0 {
+		return ChatMessage{}, false, nil
+	}
+	row := s.db.QueryRow(`SELECT `+messageSelectCols+` FROM messages WHERE msg_uid = ? LIMIT 1`, msgID)
+	msg, err := scanMessageRow(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ChatMessage{}, false, nil
+		}
+		return ChatMessage{}, false, err
+	}
+	return msg, true, nil
+}
+
 func (s *Store) ListMessages(botID string, limit int) ([]ChatMessage, error) {
 	if limit <= 0 {
 		limit = 200

@@ -128,3 +128,40 @@ export function plainPreviewText(s: string | undefined, lang: ResolvedLang): str
     .replace(/\s+/g, ' ')
     .trim();
 }
+
+export function formatClockTime(iso: string | undefined): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  return `${hh}:${mm}`;
+}
+
+export function countToolCalls(tools?: string[]): number {
+  if (!tools || tools.length === 0) return 0;
+  let total = 0;
+  for (const item of tools) {
+    const idx = item.lastIndexOf('\u00d7');
+    if (idx >= 0) {
+      const n = Number.parseInt(item.slice(idx + 1), 10);
+      total += Number.isFinite(n) && n > 0 ? n : 1;
+    } else {
+      total += 1;
+    }
+  }
+  return total;
+}
+
+export function formatDurationMs(ms?: number): string {
+  if (!ms || ms <= 0) return '';
+  const sec = ms / 1000;
+  if (sec < 60) return `${sec.toFixed(1)}s`;
+  let mins = Math.floor(sec / 60);
+  let rem = Math.round(sec % 60);
+  if (rem === 60) {
+    mins += 1;
+    rem = 0;
+  }
+  return `${mins}m ${rem}s`;
+}

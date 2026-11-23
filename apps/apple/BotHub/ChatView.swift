@@ -341,8 +341,13 @@ struct MessageBubble: View {
                 .background(soft, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
             }
         case "assistant":
+            let clock = formatClockTime(msg.createdAt)
+            let toolCalls = countToolCalls(msg.tools)
+            let dur = formatDurationMs(msg.durationMs)
             let meta = [
-                (msg.durationMs ?? 0) > 0 ? String(format: "%.1fs", msg.durationMs! / 1000) : nil,
+                clock.isEmpty ? nil : clock,
+                toolCalls > 0 ? hub.t("msgToolCalls", ["count": "\(toolCalls)"]) : nil,
+                dur.isEmpty ? nil : hub.t("msgDuration", ["dur": dur]),
                 (msg.costUsd ?? 0) > 0 ? String(format: "$%.4f", msg.costUsd!) : nil,
             ].compactMap { $0 }
             VStack(alignment: .leading, spacing: 6) {

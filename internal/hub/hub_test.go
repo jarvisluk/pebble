@@ -1223,3 +1223,71 @@ func TestStreamlineOutputAndMedia(t *testing.T) {
 	}
 }
 
+func TestSendOutboundMessageBackfillsMeta(t *testing.T) {
+	tmp := t.TempDir()
+	store, err := state.NewStore(filepath.Join(tmp, "hub.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	cfg := &config.HubConfig{
+		SharedDir: filepath.Join(tmp, "_shared"),
+		Bots: []config.BotConfig{
+			{ID: "alpha", Name: "Alpha", Harness: "opencode", Workspace: filepath.Join(tmp, "ws-alpha")},
+		},
+	}
+	_ = os.MkdirAll(cfg.Bots[0].Workspace, 0o755)
+
+	var h *Hub
+	reg := harness.NewRegistry()
+	reg.Register(&questionTestHarness{
+		run: func(_ context.Context, opts harness.RunOptions) (*harness.TurnResult, error) {
+			opts.OnToolUse("bash")
+			opts.OnToolUse("bash")
+			opts.OnToolUse("send_message")
+			if _, err := h.SendOutboundMessage(opts.Bot.ID, "final answer", nil); err != nil {
+				return nil, err
+			}
+			// Empty res.Text still triggers metadata backfill on the outbound message.
+			return &harness.TurnResult{
+				DurationMs: 3450,
+				Usage:      harness.Usage{CostUSD: 0.0042, InputTokens: 120, OutputTokens: 30},
+			}, nil
+		},
+	})
+	h = New(cfg, store, nil, reg)
+	defer h.Close()
+
+	subID, evCh := h.Subscribe()
+	defer h.Unsubscribe(subID)
+
+	if _, err := h.Send(context.Background(), "alpha", "hello", SendOptions{Source: "web"}); err != nil {
+		t.Fatal(err)
+	}
+
+	msgs, err := h.Messages("alpha", 50)
+	if err != nil || len(msgs) != 2 {
+		t.Fatalf("expected 2 messages, got %+v err=%v", msgs, err)
+	}
+	reply := msgs[1]
+	if reply.DurationMs != 3450 || len(reply.Tools) != 2 || reply.Tools[0] != "bash×2" || reply.Tools[1] != "send_message" || reply.CostUSD != 0.0042 {
+		t.Fatalf("expected backfilled metadata on outbound reply, got %+v", reply)
+	}
+
+	var sawUpdated bool
+	timeout := time.After(2 * time.Second)
+	for !sawUpdated {
+		select {
+		case ev := <-evCh:
+			if ev.Type == "message_updated" {
+				if m, ok := ev.Payload.(state.ChatMessage); ok && m.ID == reply.ID && m.DurationMs == 3450 && len(m.Tools) == 2 {
+					sawUpdated = true
+				}
+			}
+		case <-timeout:
+			t.Fatal("timed out waiting for message_updated event")
+		}
+	}
+}
+
