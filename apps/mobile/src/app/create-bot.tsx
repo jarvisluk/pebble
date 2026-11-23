@@ -29,7 +29,7 @@ function toSlug(name: string): string {
 export default function CreateBotScreen() {
   const theme = useTheme();
   const { t } = useI18n();
-  const { settings, loadSettings, createBot } = useHub();
+  const { settings, loadSettings, createBot, models, loadModels } = useHub();
 
   const [name, setName] = useState('');
   const [botId, setBotId] = useState('');
@@ -39,6 +39,7 @@ export default function CreateBotScreen() {
   const [color, setColor] = useState('');
   const [harness, setHarness] = useState('opencode');
   const [model, setModel] = useState('');
+  const [loadingModels, setLoadingModels] = useState(false);
   const [instructions, setInstructions] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -48,6 +49,20 @@ export default function CreateBotScreen() {
       loadSettings().catch(() => {});
     }
   }, [loadSettings, settings]);
+
+  useEffect(() => {
+    if ((models[harness] || []).length > 0) return;
+    let alive = true;
+    setLoadingModels(true);
+    loadModels(harness)
+      .catch(() => {})
+      .finally(() => {
+        if (alive) setLoadingModels(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [harness, loadModels, models]);
 
   const harnessOptions = useMemo(() => {
     if (settings?.harnesses?.length) return settings.harnesses;
@@ -195,7 +210,23 @@ export default function CreateBotScreen() {
             </View>
 
             <View style={styles.field}>
-              <Text style={[styles.lbl, { color: theme.text2 }]}>{t('modelOptional')}</Text>
+              <View style={styles.rowBetween}>
+                <Text style={[styles.lbl, { color: theme.text2 }]}>{t('modelOptional')}</Text>
+                <Pressable
+                  disabled={loadingModels}
+                  onPress={() => {
+                    setLoadingModels(true);
+                    loadModels(harness)
+                      .catch((err: any) => setError(err?.message || t('loadModelsFailed')))
+                      .finally(() => setLoadingModels(false));
+                  }}
+                  style={[styles.smallBtn, { backgroundColor: theme.s1 }]}
+                >
+                  <Text style={[styles.smallBtnTxt, { color: theme.text2 }]}>
+                    {loadingModels ? t('loading') : t('optionalModels')}
+                  </Text>
+                </Pressable>
+              </View>
               <TextInput
                 value={model}
                 onChangeText={setModel}
@@ -205,6 +236,29 @@ export default function CreateBotScreen() {
                 autoCorrect={false}
                 style={[styles.input, { backgroundColor: theme.s1, color: theme.text, fontFamily: MONO_FONT }]}
               />
+              {(models[harness] || []).length > 0 && (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.pillRow}>
+                  {(models[harness] || []).slice(0, 32).map((m) => (
+                    <Pressable
+                      key={m}
+                      onPress={() => setModel(model.trim() === m ? '' : m)}
+                      style={[
+                        styles.pill,
+                        { backgroundColor: model.trim() === m ? theme.accentSoft : theme.s1 },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.modelChipTxt,
+                          { color: model.trim() === m ? theme.accent : theme.text2, fontFamily: MONO_FONT },
+                        ]}
+                      >
+                        {m}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </ScrollView>
+              )}
             </View>
 
             <View style={styles.field}>
@@ -287,6 +341,28 @@ const styles = StyleSheet.create({
   pillTxt: {
     fontSize: 15,
     fontWeight: '700',
+  },
+  rowBetween: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  smallBtn: {
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  smallBtnTxt: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  pillRow: {
+    gap: 8,
+    paddingVertical: 2,
+  },
+  modelChipTxt: {
+    fontSize: 13,
   },
   errTxt: {
     fontSize: 15,

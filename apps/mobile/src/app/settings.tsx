@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -128,11 +128,30 @@ export default function SettingsScreen() {
     }
   };
 
+  const autoLoadedRef = useRef<Set<string>>(new Set());
+
   useEffect(() => {
     loadSettings().catch(() => {});
     refreshBots().catch(() => {});
     void loadGlobalMemories('');
   }, [loadSettings, refreshBots]);
+
+  useEffect(() => {
+    const needed = new Set<string>();
+    if (primaryHarness) needed.add(primaryHarness);
+    for (const b of bots) {
+      const h = botDrafts[b.id]?.harness || b.harness;
+      if (h) needed.add(h);
+    }
+    if (perHarnessExpanded) {
+      for (const h of harnessOptions) needed.add(h.id);
+    }
+    for (const hId of needed) {
+      if ((models[hId] || []).length > 0 || autoLoadedRef.current.has(hId)) continue;
+      autoLoadedRef.current.add(hId);
+      loadModels(hId).catch(() => {});
+    }
+  }, [botDrafts, bots, harnessOptions, loadModels, models, perHarnessExpanded, primaryHarness]);
 
   useEffect(() => {
     if (settings && !defaultModelTouched) {
@@ -657,24 +676,69 @@ export default function SettingsScreen() {
                 <Text style={[styles.subLabel, { color: theme.text2 }]}>
                   {t('perHarnessTitle')}
                 </Text>
-                {harnessOptions.map((h) => (
-                  <View key={h.id} style={styles.perHarnessItem}>
-                    <Text style={[styles.magpieSub, { color: theme.mute }]}>{h.label || h.id}</Text>
-                    <TextInput
-                      value={defaultModelsDraft[h.id] || ''}
-                      onChangeText={(val) => {
-                        setDefaultModelsTouched(true);
-                        setSavedMsg('');
-                        setDefaultModelsDraft((prev) => ({ ...prev, [h.id]: val }));
-                      }}
-                      placeholder={t('followGlobalPh')}
-                      placeholderTextColor={theme.mute}
-                      autoCapitalize="none"
-                      autoCorrect={false}
-                      style={[styles.input, { backgroundColor: theme.card, color: theme.text, fontFamily: MONO_FONT }]}
-                    />
-                  </View>
-                ))}
+                {harnessOptions.map((h) => {
+                  const hModels = models[h.id] || [];
+                  const curHVal = defaultModelsDraft[h.id] || '';
+                  return (
+                    <View key={h.id} style={styles.perHarnessItem}>
+                      <View style={styles.rowBetween}>
+                        <Text style={[styles.magpieSub, { color: theme.mute }]}>{h.label || h.id}</Text>
+                        <Pressable
+                          disabled={loadingModelsFor === h.id}
+                          onPress={() => void onLoadModels(h.id)}
+                          style={[styles.smallBtn, { backgroundColor: theme.card }]}
+                        >
+                          <Text style={[styles.smallBtnTxt, { color: theme.text2 }]}>
+                            {loadingModelsFor === h.id ? t('loading') : t('optionalModels')}
+                          </Text>
+                        </Pressable>
+                      </View>
+                      <TextInput
+                        value={curHVal}
+                        onChangeText={(val) => {
+                          setDefaultModelsTouched(true);
+                          setSavedMsg('');
+                          setDefaultModelsDraft((prev) => ({ ...prev, [h.id]: val }));
+                        }}
+                        placeholder={t('followGlobalPh')}
+                        placeholderTextColor={theme.mute}
+                        autoCapitalize="none"
+                        autoCorrect={false}
+                        style={[styles.input, { backgroundColor: theme.card, color: theme.text, fontFamily: MONO_FONT }]}
+                      />
+                      {hModels.length > 0 && (
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.pillRow}>
+                          {hModels.slice(0, 20).map((m) => (
+                            <Pressable
+                              key={m}
+                              onPress={() => {
+                                setDefaultModelsTouched(true);
+                                setSavedMsg('');
+                                setDefaultModelsDraft((prev) => ({
+                                  ...prev,
+                                  [h.id]: curHVal.trim() === m ? '' : m,
+                                }));
+                              }}
+                              style={[
+                                styles.pill,
+                                { backgroundColor: curHVal.trim() === m ? theme.accentSoft : theme.card },
+                              ]}
+                            >
+                              <Text
+                                style={[
+                                  styles.modelChipTxt,
+                                  { color: curHVal.trim() === m ? theme.accent : theme.text2, fontFamily: MONO_FONT },
+                                ]}
+                              >
+                                {m}
+                              </Text>
+                            </Pressable>
+                          ))}
+                        </ScrollView>
+                      )}
+                    </View>
+                  );
+                })}
               </View>
             )}
             {candidateModels.length > 0 && (
@@ -759,21 +823,64 @@ export default function SettingsScreen() {
                         })}
                       </View>
 
-                      <TextInput
-                        value={draft.model}
-                        onChangeText={(val) => {
-                          setSavedMsg('');
-                          setBotDrafts((prev) => ({
-                            ...prev,
-                            [b.id]: { ...draft, model: val },
-                          }));
-                        }}
-                        placeholder={ph}
-                        placeholderTextColor={theme.mute}
-                        autoCapitalize="none"
-                        autoCorrect={false}
-                        style={[styles.input, { backgroundColor: theme.card, color: theme.text, fontFamily: MONO_FONT }]}
-                      />
+                      <View style={styles.rowBetween}>
+                        <TextInput
+                          value={draft.model}
+                          onChangeText={(val) => {
+                            setSavedMsg('');
+                            setBotDrafts((prev) => ({
+                              ...prev,
+                              [b.id]: { ...draft, model: val },
+                            }));
+                          }}
+                          placeholder={ph}
+                          placeholderTextColor={theme.mute}
+                          autoCapitalize="none"
+                          autoCorrect={false}
+                          style={[
+                            styles.input,
+                            { flex: 1, backgroundColor: theme.card, color: theme.text, fontFamily: MONO_FONT },
+                          ]}
+                        />
+                        <Pressable
+                          disabled={loadingModelsFor === draft.harness}
+                          onPress={() => void onLoadModels(draft.harness)}
+                          style={[styles.smallBtn, { backgroundColor: theme.card }]}
+                        >
+                          <Text style={[styles.smallBtnTxt, { color: theme.text2 }]}>
+                            {loadingModelsFor === draft.harness ? t('loading') : t('optionalModels')}
+                          </Text>
+                        </Pressable>
+                      </View>
+                      {(models[draft.harness] || []).length > 0 && (
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.pillRow}>
+                          {(models[draft.harness] || []).slice(0, 24).map((m) => (
+                            <Pressable
+                              key={m}
+                              onPress={() => {
+                                setSavedMsg('');
+                                setBotDrafts((prev) => ({
+                                  ...prev,
+                                  [b.id]: { ...draft, model: draft.model.trim() === m ? '' : m },
+                                }));
+                              }}
+                              style={[
+                                styles.pill,
+                                { backgroundColor: draft.model.trim() === m ? theme.accentSoft : theme.card },
+                              ]}
+                            >
+                              <Text
+                                style={[
+                                  styles.modelChipTxt,
+                                  { color: draft.model.trim() === m ? theme.accent : theme.text2, fontFamily: MONO_FONT },
+                                ]}
+                              >
+                                {m}
+                              </Text>
+                            </Pressable>
+                          ))}
+                        </ScrollView>
+                      )}
                     </View>
                   );
                 })}
