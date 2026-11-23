@@ -10,6 +10,17 @@
     "apiToken": "${BOT_HUB_API_TOKEN}",
     "tailcat": { "enabled": false }
   },
+  "push": {
+    "enabled": true,
+    "relayUrl": "${BOT_HUB_PUSH_RELAY_URL}",
+    "apns": {
+      "keyPath": "${APNS_KEY_PATH}",
+      "keyId": "${APNS_KEY_ID}",
+      "teamId": "${APNS_TEAM_ID}",
+      "bundleId": "${APNS_BUNDLE_ID}",
+      "defaultEnv": "production"
+    }
+  },
   "bots": [
     {
       "id": "assistant",

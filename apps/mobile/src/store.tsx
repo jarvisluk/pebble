@@ -10,6 +10,12 @@ import {
   tailscaleStatus,
   type MobileTailscaleState,
 } from '../modules/bothub-tunnel';
+import {
+  cancelTakeoverAlert,
+  endBotActivity,
+  showTakeoverAlert,
+  updateBotActivity,
+} from '../modules/bothub-notifications';
 import { apiRequest, connectSSE, normalizeAddress, UnauthorizedError } from './api';
 import { tStatic, type ResolvedLang } from './i18n';
 import { loadSavedServers, loadTailscaleBindPref, saveServers, saveTailscaleBindPref } from './storage';
@@ -252,11 +258,15 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
   const authTokenRef = useRef('');
   const serversRef = useRef<ServerProfile[]>([]);
   const activeServerIdRef = useRef<string | null>(null);
+  const botsRef = useRef<BotStatus[]>([]);
+  const botStepsRef = useRef<Record<string, number>>({});
+  const knownTakeoversRef = useRef<Set<string>>(new Set());
 
   baseURLRef.current = baseURL;
   authTokenRef.current = authToken;
   serversRef.current = servers;
   activeServerIdRef.current = activeServerId;
+  botsRef.current = bots;
 
   const setActiveChatBot = useCallback((botId: string | null) => {
     activeChatRef.current = botId;
@@ -338,6 +348,7 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
             setLast((prev) => (prev[m.botId]?.id === m.id ? { ...prev, [m.botId]: m } : prev));
           } else if (type === 'bot_status' && payload?.id) {
             const st = payload as BotStatus;
+            const prevBusy = botsRef.current.find((b) => b.id === st.id)?.busy;
             setBots((prev) => {
               const i = prev.findIndex((b) => b.id === st.id);
               if (i >= 0) {
@@ -347,6 +358,13 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
               }
               return [...prev, st];
             });
+            if (st.busy && !prevBusy) {
+              botStepsRef.current[st.id] = 0;
+              updateBotActivity(st.id, st.name || st.id, '正在思考', 0);
+            } else if (!st.busy && prevBusy) {
+              delete botStepsRef.current[st.id];
+              endBotActivity(st.id, st.name || st.id, '任务已完成', AppState.currentState !== 'active');
+            }
             if (!st.busy) {
               setTools((prev) => {
                 if (!prev[st.id]) return prev;
@@ -356,7 +374,18 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
               });
             }
           } else if (type === 'tool_use' && payload?.botId) {
-            setTools((prev) => ({ ...prev, [payload.botId]: String(payload.tool || '') }));
+            const bid = String(payload.botId);
+            const toolName = String(payload.tool || '');
+            setTools((prev) => ({ ...prev, [bid]: toolName }));
+            const nextSteps = (botStepsRef.current[bid] || 0) + 1;
+            botStepsRef.current[bid] = nextSteps;
+            const b = botsRef.current.find((x) => x.id === bid);
+            updateBotActivity(
+              bid,
+              b?.name || bid,
+              toolName ? `正在运行 ${toolName}` : '正在运行工具',
+              nextSteps
+            );
           } else if (type === 'bot_created' && payload?.id) {
             const st = payload as BotStatus;
             setBots((prev) => (prev.some((b) => b.id === st.id) ? prev : [...prev, st]));
@@ -373,7 +402,18 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
               expiresAt: payload.expiresAt ? String(payload.expiresAt) : undefined,
             });
           } else if (type === 'takeover' && Array.isArray(payload?.items)) {
-            setTakeovers(payload.items);
+            const items = payload.items as TakeoverRequest[];
+            setTakeovers(items);
+            const nextIds = new Set(items.map((it) => it.id));
+            for (const prevId of knownTakeoversRef.current) {
+              if (!nextIds.has(prevId)) cancelTakeoverAlert(prevId);
+            }
+            for (const it of items) {
+              if (!knownTakeoversRef.current.has(it.id)) {
+                showTakeoverAlert(it.id, it.reason || '', it.target || 'local');
+              }
+            }
+            knownTakeoversRef.current = nextIds;
           } else if (type === 'questions' && Array.isArray(payload?.items)) {
             setQuestions(payload.items);
           } else if ((type === 'routine_updated' || type === 'routine_run') && payload?.botId) {

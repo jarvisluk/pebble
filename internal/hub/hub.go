@@ -25,6 +25,7 @@ import (
 	"bot-hub/internal/desktop"
 	"bot-hub/internal/harness"
 	"bot-hub/internal/node"
+	"bot-hub/internal/push"
 	"bot-hub/internal/state"
 )
 
@@ -277,6 +278,8 @@ type Hub struct {
 	subs   map[uint64]chan Event
 	subSeq atomic.Uint64
 
+	push *push.Manager
+
 	closeMu sync.Mutex
 	closed  bool
 
@@ -332,6 +335,7 @@ func New(cfg *config.HubConfig, store *state.Store, messages *state.MessageStore
 		hops:               make(map[string]int),
 		questions:          make(map[string]*pendingQuestionEntry),
 		inboundAtts:        make(map[string]inboundAttEntry),
+		push:               push.NewManager(cfg, store),
 	}
 	h.nodes = node.NewRegistry(func() {
 		h.reconcileActiveDesktopTarget()
@@ -401,6 +405,9 @@ func (h *Hub) Close() {
 	h.desktopTargetMu.Unlock()
 	h.localDesk.Close()
 	h.registry.Close()
+	if h.push != nil {
+		h.push.Close()
+	}
 	if h.store != nil {
 		_ = h.store.Close()
 	}
@@ -468,6 +475,9 @@ func (h *Hub) Unsubscribe(id uint64) {
 }
 
 func (h *Hub) broadcast(evt Event) {
+	if h.push != nil {
+		h.push.EnqueueEvent(evt.Type, evt.BotID, evt.Payload)
+	}
 	h.subsMu.Lock()
 	defer h.subsMu.Unlock()
 	for _, ch := range h.subs {
@@ -477,6 +487,34 @@ func (h *Hub) broadcast(evt Event) {
 			// Drop if a slow web client lags behind.
 		}
 	}
+}
+
+func (h *Hub) PushStatus() push.Status {
+	if h.push == nil {
+		return push.Status{Mode: "disabled"}
+	}
+	return h.push.Status()
+}
+
+func (h *Hub) UpsertPushDevice(d state.PushDevice) error {
+	if h.store == nil {
+		return errors.New("state store unavailable")
+	}
+	return h.store.UpsertPushDevice(d)
+}
+
+func (h *Hub) SetPushActivityToken(deviceID, activityKey, token string) error {
+	if h.store == nil {
+		return errors.New("state store unavailable")
+	}
+	return h.store.SetPushActivityToken(deviceID, activityKey, token)
+}
+
+func (h *Hub) DeletePushDevice(deviceID string) error {
+	if h.store == nil {
+		return errors.New("state store unavailable")
+	}
+	return h.store.DeletePushDevice(deviceID)
 }
 
 func (h *Hub) appendMessage(msg state.ChatMessage) state.ChatMessage {
