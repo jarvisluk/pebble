@@ -14,7 +14,7 @@ function ConnectionGuard() {
   const { ready, activeServer, connState, bots, interruptBot } = useHub();
 
   useEffect(() => {
-    const handleUrl = (raw: string | null) => {
+    const handleUrl = (raw: string | null | undefined) => {
       if (!raw || !raw.startsWith('bothub://')) return;
       const stripped = raw.slice('bothub://'.length);
       const [pathPart, queryPart] = stripped.split('?');
