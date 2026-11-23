@@ -14,6 +14,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { isNativeTunnelAvailable, type TailscalePeer } from '../../modules/bothub-tunnel';
 import { normalizeAddress } from '../api';
@@ -24,7 +25,7 @@ import { useI18n } from '../i18n';
 import { useHub } from '../store';
 import { MONO_FONT, useTheme } from '../theme';
 
-export default function ConnectScreen() {
+export function ConnectContent({ standalone = false }: { standalone?: boolean }) {
   const theme = useTheme();
   const { t } = useI18n();
   const {
@@ -41,6 +42,7 @@ export default function ConnectScreen() {
     bindTailscale,
     refreshMobileTailscale,
     logoutTailscale,
+    reconnect,
   } = useHub();
 
   const [permission, requestPermission] = useCameraPermissions();
@@ -115,16 +117,18 @@ export default function ConnectScreen() {
     if (!submitting) return;
     if (connState === 'connected') {
       setSubmitting(false);
-      if (router.canGoBack()) {
-        router.back();
-      } else {
-        router.replace('/');
+      if (!standalone) {
+        if (router.canGoBack()) {
+          router.back();
+        } else {
+          router.replace('/');
+        }
       }
     } else if (connState === 'error' || connState === 'unauthorized') {
       setSubmitting(false);
       setLocalError(connError || t('connFailed'));
     }
-  }, [connError, connState, submitting, t]);
+  }, [connError, connState, standalone, submitting, t]);
 
   const parsedPreview = useMemo(() => {
     if (!address.trim()) return null;
@@ -268,17 +272,66 @@ export default function ConnectScreen() {
     setInfoHint(t('tsPeerSelectedHint'));
   };
 
-  return (
-    <View style={[styles.root, { backgroundColor: theme.page }]}>
-      <ModalHeader title={t('connectHost')} onClose={closeSheet} />
-      <KeyboardAvoidingView
-        style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+  const content = (
+    <KeyboardAvoidingView
+      style={styles.flex}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        keyboardShouldPersistTaps="handled"
       >
-        <ScrollView
-          contentContainerStyle={styles.scroll}
-          keyboardShouldPersistTaps="handled"
-        >
+        <View style={standalone ? styles.standaloneInner : styles.modalInner}>
+          {standalone && (
+            <View style={styles.gateHeader}>
+              <Text style={[styles.gateTitle, { color: theme.text }]}>Bot Hub</Text>
+              <Text style={[styles.gateSub, { color: theme.text2 }]}>{t('connectHost')}</Text>
+            </View>
+          )}
+
+          {standalone && !activeServer && (
+            <View style={[styles.card, { backgroundColor: theme.card }]}>
+              <View style={styles.onboardSteps}>
+                <View style={[styles.onboardStepRow, { backgroundColor: theme.s1 }]}>
+                  <View style={[styles.stepBadge, { backgroundColor: theme.card }]}>
+                    <Text style={[styles.stepBadgeTxt, { color: theme.text }]}>1</Text>
+                  </View>
+                  <Text style={[styles.onboardStepTxt, { color: theme.text2 }]}>
+                    {t('onboardStep1')}
+                  </Text>
+                </View>
+                <View style={[styles.onboardStepRow, { backgroundColor: theme.s1 }]}>
+                  <View style={[styles.stepBadge, { backgroundColor: theme.card }]}>
+                    <Text style={[styles.stepBadgeTxt, { color: theme.text }]}>2</Text>
+                  </View>
+                  <Text style={[styles.onboardStepTxt, { color: theme.text2 }]}>
+                    {t('onboardStep2')}
+                  </Text>
+                </View>
+              </View>
+            </View>
+          )}
+
+          {standalone && !!activeServer && (connState === 'unauthorized' || connState === 'error') && (
+            <View style={[styles.card, { backgroundColor: theme.card }]}>
+              <Text style={[styles.cardTitle, { color: theme.text }]}>
+                {connState === 'unauthorized' ? t('tokenRequired') : t('cantConnectHost')}
+              </Text>
+              <Text style={[styles.cardSub, { color: theme.text2 }]}>
+                {connState === 'error' && connError ? connError : t('onboardDesc')}
+              </Text>
+              <Pressable
+                onPress={() => {
+                  setLocalError('');
+                  void reconnect();
+                }}
+                style={[styles.retryBtn, { backgroundColor: theme.s1 }]}
+              >
+                <Text style={[styles.retryBtnTxt, { color: theme.text2 }]}>{t('retry')}</Text>
+              </Pressable>
+            </View>
+          )}
+
           {Platform.OS !== 'web' && (
             <View style={[styles.card, { backgroundColor: theme.card }]}>
               <View style={styles.rowBetween}>
@@ -581,10 +634,29 @@ export default function ConnectScreen() {
               </View>
             </View>
           )}
-        </ScrollView>
-      </KeyboardAvoidingView>
+        </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
+  );
+
+  if (standalone) {
+    return (
+      <SafeAreaView style={[styles.root, { backgroundColor: theme.page }]} edges={['top', 'left', 'right', 'bottom']}>
+        {content}
+      </SafeAreaView>
+    );
+  }
+
+  return (
+    <View style={[styles.root, { backgroundColor: theme.page }]}>
+      <ModalHeader title={t('connectHost')} onClose={closeSheet} />
+      {content}
     </View>
   );
+}
+
+export default function ConnectScreen() {
+  return <ConnectContent standalone={false} />;
 }
 
 const styles = StyleSheet.create({
@@ -592,8 +664,69 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   scroll: {
     padding: 16,
-    gap: 12,
     paddingBottom: 36,
+  },
+  modalInner: {
+    gap: 12,
+  },
+  standaloneInner: {
+    width: '100%',
+    maxWidth: 560,
+    alignSelf: 'center',
+    gap: 12,
+  },
+  gateHeader: {
+    paddingHorizontal: 4,
+    paddingTop: 6,
+    paddingBottom: 2,
+    gap: 2,
+  },
+  gateTitle: {
+    fontSize: 28,
+    fontWeight: '700',
+    letterSpacing: -0.7,
+  },
+  gateSub: {
+    fontSize: 16,
+  },
+  onboardSteps: {
+    gap: 8,
+  },
+  onboardStepRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  stepBadge: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepBadgeTxt: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  onboardStepTxt: {
+    flex: 1,
+    fontSize: 15,
+    lineHeight: 21,
+  },
+  retryBtn: {
+    alignSelf: 'flex-start',
+    borderRadius: 999,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  retryBtnTxt: {
+    fontSize: 16,
+    fontWeight: '600',
   },
   card: {
     borderRadius: 22,

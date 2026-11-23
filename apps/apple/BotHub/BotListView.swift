@@ -22,23 +22,13 @@ struct BotListView: View {
 
     var body: some View {
         Group {
-            if hub.activeServer == nil {
-                onboarding
-            } else if hub.connState == .connecting && hub.bots.isEmpty {
-                ProgressView(hub.t("connectingHost")).frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if hub.connState == .unauthorized || (hub.connState == .error && hub.bots.isEmpty) {
-                disconnected
-            } else {
-                Group {
-                    if router.compact {
-                        List { rows }.navigationDestination(for: String.self) { ChatView(botId: $0) }
-                    } else { List { rows } }
-                }
-                .hubList(sidebar: !router.compact)
-                .refreshable {
-                    if hub.isConnected { try? await hub.refreshBots() } else { await hub.reconnect() }
-                }
-            }
+            if router.compact {
+                List { rows }.navigationDestination(for: String.self) { ChatView(botId: $0) }
+            } else { List { rows } }
+        }
+        .hubList(sidebar: !router.compact)
+        .refreshable {
+            if hub.isConnected { try? await hub.refreshBots() } else { await hub.reconnect() }
         }
         .navigationTitle("Bots")
         .navigationBarTitleDisplayMode(.inline)
@@ -129,32 +119,6 @@ struct BotListView: View {
             .padding(.vertical, 4)
         }
         .selectionDisabled()
-    }
-
-    private var onboarding: some View {
-        ContentUnavailableView {
-            Label(hub.t("connectHost"), systemImage: "desktopcomputer")
-        } description: {
-            Text("1. \(hub.t("onboardStep1"))\n2. \(hub.t("onboardStep2"))")
-        } actions: {
-            Button(hub.t("scanConnect")) { router.sheet = .connect(scan: true) }.buttonStyle(.borderedProminent)
-            Button(hub.t("manualEnterAddr")) { router.sheet = .connect(scan: false) }.buttonStyle(.bordered)
-        }
-    }
-
-    private var disconnected: some View {
-        ContentUnavailableView {
-            Label(hub.connState == .unauthorized ? hub.t("tokenRequired") : hub.t("cantConnectHost"),
-                  systemImage: hub.connState == .unauthorized ? "key" : "wifi.exclamationmark")
-        } description: {
-            Text(hub.connState == .error && !hub.connError.isEmpty ? hub.connError : hub.t("onboardDesc"))
-        } actions: {
-            Button(hub.connState == .unauthorized ? hub.t("updateToken") : hub.t("scanOrEnterAddr")) {
-                router.sheet = .connect(scan: false)
-            }
-            .buttonStyle(.borderedProminent)
-            Button(hub.t("retry")) { Task { await hub.reconnect() } }.buttonStyle(.bordered)
-        }
     }
 }
 

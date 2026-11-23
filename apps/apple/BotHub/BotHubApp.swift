@@ -61,12 +61,23 @@ struct RootView: View {
 
     private var scheme0: ColorScheme? { hub.themePref == "light" ? .light : hub.themePref == "dark" ? .dark : nil }
 
+    private var showGate: Bool {
+        hub.activeServer == nil
+            || hub.connState == .unauthorized
+            || (hub.connState == .error && hub.bots.isEmpty)
+            || (hub.connState == .connecting && hub.bots.isEmpty)
+    }
+
     var body: some View {
         let dark = hub.themePref == "dark" || (hub.themePref == "system" && scheme == .dark)
         let palette = Palette(dark: dark, accent: hub.accentHex)
         @Bindable var r = router
         Group {
-            if isCompact {
+            if showGate {
+                NavigationStack {
+                    ConnectView(startScan: false, isGate: true)
+                }
+            } else if isCompact {
                 NavigationStack(path: $r.path) {
                     BotListView()
                 }
@@ -111,6 +122,12 @@ struct RootView: View {
         }
         .onChange(of: router.path) { _, path in
             if router.compact, path.isEmpty { router.selected = nil }
+        }
+        .onChange(of: showGate) { _, gate in
+            if gate {
+                router.sheet = nil
+                router.closeBot()
+            }
         }
         .onChange(of: phase) { old, new in
             if new == .active, old == .background { Task { await hub.resume() } }
