@@ -1,4 +1,5 @@
 import { tStatic } from './i18n';
+import type { MentionCandidate, MessageMedia, SlashCommandItem } from './types';
 
 export class UnauthorizedError extends Error {
   constructor() {
@@ -97,6 +98,65 @@ export async function fetchCollabMessages<T = unknown>(
 export function getMediaSource(baseURL: string, token: string, url: string) {
   const fullUri = url.startsWith('http://') || url.startsWith('https://') ? url : `${baseURL}${url}`;
   return token ? { uri: fullUri, headers: { Authorization: `Bearer ${token}` } } : { uri: fullUri };
+}
+
+export async function fetchBotCommands(
+  baseURL: string,
+  token: string,
+  botId: string
+): Promise<SlashCommandItem[]> {
+  const res = await apiRequest<{ commands?: SlashCommandItem[] }>(
+    baseURL,
+    token,
+    `/api/bots/${encodeURIComponent(botId)}/commands`
+  );
+  return res.commands || [];
+}
+
+export async function fetchBotMentions(
+  baseURL: string,
+  token: string,
+  botId: string,
+  query: string,
+  limit = 30
+): Promise<MentionCandidate[]> {
+  const res = await apiRequest<{ items?: MentionCandidate[] }>(
+    baseURL,
+    token,
+    `/api/bots/${encodeURIComponent(botId)}/mentions?q=${encodeURIComponent(query)}&limit=${limit}`
+  );
+  return res.items || [];
+}
+
+export async function uploadBotAttachment(
+  baseURL: string,
+  token: string,
+  botId: string,
+  file: { uri: string; name: string; mimeType?: string }
+): Promise<{ media: MessageMedia; workspacePath?: string }> {
+  const form = new FormData();
+  form.append('file', {
+    uri: file.uri,
+    name: file.name || 'file',
+    type: file.mimeType || 'application/octet-stream',
+  } as unknown as Blob);
+  const headers: Record<string, string> = {};
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+  const res = await fetch(`${baseURL}/api/bots/${encodeURIComponent(botId)}/attachments`, {
+    method: 'POST',
+    headers,
+    body: form,
+  });
+  if (res.status === 401) {
+    throw new UnauthorizedError();
+  }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.error || `HTTP ${res.status}`);
+  }
+  return data as { media: MessageMedia; workspacePath?: string };
 }
 
 export async function requestMediaDownloadURL(

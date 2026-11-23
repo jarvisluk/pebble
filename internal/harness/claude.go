@@ -2,6 +2,7 @@ package harness
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,15 +12,18 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"bot-hub/internal/config"
 )
 
 // ClaudeHarness keeps one long-lived Claude Code process per bot, talking
 // stream-json over stdin/stdout. The process is restarted (resuming the
 // session) when the model changes, the session is reset, or it dies.
 type ClaudeHarness struct {
-	binary string
-	mu     sync.Mutex
-	procs  map[string]*claudeProc
+	binary   string
+	mu       sync.Mutex
+	procs    map[string]*claudeProc
+	cmdCache map[string][]SlashCommand
 }
 
 type claudeProc struct {
@@ -29,9 +33,12 @@ type claudeProc struct {
 }
 
 type claudeEvent struct {
-	Type      string `json:"type"`
-	SessionID string `json:"session_id"`
-	Message   *struct {
+	Type          string   `json:"type"`
+	Subtype       string   `json:"subtype"`
+	SessionID     string   `json:"session_id"`
+	SlashCommands []string `json:"slash_commands"`
+	Skills        []string `json:"skills"`
+	Message       *struct {
 		Content []struct {
 			Type string `json:"type"`
 			Text string `json:"text"`
@@ -49,7 +56,11 @@ type claudeEvent struct {
 }
 
 func NewClaudeHarness() *ClaudeHarness {
-	return &ClaudeHarness{binary: envOr("CLAUDE_BIN", "claude"), procs: make(map[string]*claudeProc)}
+	return &ClaudeHarness{
+		binary:   envOr("CLAUDE_BIN", "claude"),
+		procs:    make(map[string]*claudeProc),
+		cmdCache: make(map[string][]SlashCommand),
+	}
 }
 
 func envOr(key, def string) string {
@@ -66,6 +77,37 @@ func (h *ClaudeHarness) Label() string { return "Claude Code" }
 // (e.g. one routed through a gateway) can also be typed in.
 func (h *ClaudeHarness) Models(context.Context) ([]string, error) {
 	return []string{"sonnet", "opus", "haiku"}, nil
+}
+
+func (h *ClaudeHarness) ListCommands(_ context.Context, bot config.BotConfig) ([]SlashCommand, error) {
+	builtins := []SlashCommand{
+		{Name: "compact", Description: "压缩当前会话上下文", Source: "harness"},
+		{Name: "clear", Description: "清空会话历史", Source: "harness"},
+		{Name: "cost", Description: "查看本次会话费用统计", Source: "harness"},
+		{Name: "context", Description: "查看当前上下文占用", Source: "harness"},
+		{Name: "memory", Description: "查看或编辑记忆文件", Source: "harness"},
+		{Name: "review", Description: "代码评审", Source: "harness"},
+		{Name: "init", Description: "初始化项目 CLAUDE.md", Source: "harness"},
+		{Name: "plan", Description: "进入计划模式", Source: "harness"},
+		{Name: "mcp", Description: "查看 MCP 服务状态", Source: "harness"},
+		{Name: "doctor", Description: "检查运行环境健康状态", Source: "harness"},
+	}
+
+	h.mu.Lock()
+	cached := append([]SlashCommand(nil), h.cmdCache[bot.ID]...)
+	h.mu.Unlock()
+
+	var localCmds, localSkills []SlashCommand
+	if bot.Workspace != "" {
+		localCmds = append(localCmds, scanMarkdownCommands(filepath.Join(bot.Workspace, ".claude", "commands"), "harness")...)
+		localSkills = append(localSkills, scanSkillDirs(filepath.Join(bot.Workspace, ".claude", "skills"))...)
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		localCmds = append(localCmds, scanMarkdownCommands(filepath.Join(home, ".claude", "commands"), "harness")...)
+		localSkills = append(localSkills, scanSkillDirs(filepath.Join(home, ".claude", "skills"))...)
+	}
+
+	return mergeSlashCommands(cached, builtins, localCmds, localSkills), nil
 }
 
 func (h *ClaudeHarness) Close() {
@@ -194,9 +236,41 @@ func (h *ClaudeHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnResu
 		}
 	}
 
+	promptText := AppendAttachmentContext(opts.Prompt, opts.Attachments)
+	var userContent any = promptText
+	var blocks []map[string]any
+	for _, att := range opts.Attachments {
+		if att.Kind != "image" || att.Path == "" {
+			continue
+		}
+		raw, err := os.ReadFile(att.Path)
+		if err != nil || len(raw) == 0 {
+			continue
+		}
+		mt := att.MimeType
+		if mt == "" {
+			mt = "image/png"
+		}
+		blocks = append(blocks, map[string]any{
+			"type": "image",
+			"source": map[string]any{
+				"type":       "base64",
+				"media_type": mt,
+				"data":       base64.StdEncoding.EncodeToString(raw),
+			},
+		})
+	}
+	if len(blocks) > 0 {
+		blocks = append(blocks, map[string]any{
+			"type": "text",
+			"text": promptText,
+		})
+		userContent = blocks
+	}
+
 	err = p.send(map[string]any{
 		"type":    "user",
-		"message": map[string]any{"role": "user", "content": opts.Prompt},
+		"message": map[string]any{"role": "user", "content": userContent},
 	})
 	if err != nil {
 		dropProc()
@@ -228,6 +302,22 @@ func (h *ClaudeHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnResu
 				p.sessionID = evt.SessionID
 			}
 			switch evt.Type {
+			case "system":
+				if evt.Subtype == "init" && (len(evt.SlashCommands) > 0 || len(evt.Skills) > 0) {
+					var list []SlashCommand
+					for _, name := range evt.SlashCommands {
+						list = append(list, SlashCommand{Name: name, Source: "harness"})
+					}
+					for _, name := range evt.Skills {
+						list = append(list, SlashCommand{Name: name, Source: "skill"})
+					}
+					h.mu.Lock()
+					if h.cmdCache == nil {
+						h.cmdCache = make(map[string][]SlashCommand)
+					}
+					h.cmdCache[bot.ID] = list
+					h.mu.Unlock()
+				}
 			case "assistant":
 				if evt.Message == nil {
 					continue

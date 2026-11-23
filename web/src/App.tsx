@@ -679,7 +679,7 @@ export default function App() {
               closeAllOverlays();
               setCreateOpen(true);
             }}
-            onSendMessage={async (text) => {
+            onSendMessage={async (text, mediaIds) => {
               if (!activeBotId) return;
               const pushLocal = (from: string, msgText: string) => {
                 const msg: ChatMessage = {
@@ -693,9 +693,13 @@ export default function App() {
                 setMsgsMap((prev) => ({ ...prev, [activeBotId]: [...(prev[activeBotId] || []), msg] }));
               };
               try {
+                const body: Record<string, unknown> = { message: text, source: 'web' };
+                if (mediaIds && mediaIds.length > 0) {
+                  body.mediaIds = mediaIds;
+                }
                 const data = await api<{ text?: string }>(
                   `/api/bots/${encodeURIComponent(activeBotId)}/message`,
-                  { method: 'POST', body: { message: text, source: 'web' } }
+                  { method: 'POST', body }
                 );
                 if (/^\/(bots|status|reset)$/.test(text) && data.text) {
                   pushLocal('command', data.text);

@@ -97,6 +97,34 @@ struct APIClient {
         let data = try await raw(path, method: method, body: body)
         return try JSONDecoder().decode(T.self, from: data.isEmpty ? Data("{}".utf8) : data)
     }
+
+    func uploadAttachment(_ path: String, data: Data, filename: String, mimeType: String) async throws -> InboundAttachmentResponse {
+        guard let url = URL(string: base + path) else { throw HubError(message: L.t("enterValidAddr")) }
+        let boundary = "Boundary-\(UUID().uuidString)"
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.timeoutInterval = 60
+        req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        if !token.isEmpty { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+
+        var body = Data()
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        let safeFilename = filename.replacingOccurrences(of: "\"", with: "_")
+        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"\(safeFilename)\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: \(mimeType)\r\n\r\n".data(using: .utf8)!)
+        body.append(data)
+        body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
+        req.httpBody = body
+
+        let (respData, resp) = try await URLSession.shared.data(for: req)
+        let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        if code == 401 { throw HubError(message: L.t("invalidTokenErr"), unauthorized: true, status: 401) }
+        if !(200..<300).contains(code) {
+            let obj = try? JSONSerialization.jsonObject(with: respData) as? [String: Any]
+            throw HubError(message: (obj?["error"] as? String) ?? "HTTP \(code)", status: code)
+        }
+        return try JSONDecoder().decode(InboundAttachmentResponse.self, from: respData)
+    }
 }
 
 /// `/api/events` SSE：ready 事件表示在线，断开后按 1s 起、×1.8、上限 12s 重连，401 停止。

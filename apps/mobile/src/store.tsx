@@ -149,7 +149,7 @@ interface HubContextValue {
   reconnect: () => Promise<void>;
   refreshBots: () => Promise<void>;
   loadMessages: (botId: string) => Promise<void>;
-  sendMessage: (botId: string, text: string) => Promise<void>;
+  sendMessage: (botId: string, text: string, mediaIds?: string[]) => Promise<void>;
   interruptBot: (botId: string) => Promise<boolean>;
   resetBot: (botId: string) => Promise<void>;
   getBotDetail: (botId: string) => Promise<BotDetail>;
@@ -657,12 +657,16 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const sendMessage = useCallback(
-    async (botId: string, text: string) => {
+    async (botId: string, text: string, mediaIds?: string[]) => {
+      const body: Record<string, unknown> = { message: text, source: 'mobile' };
+      if (mediaIds && mediaIds.length > 0) {
+        body.mediaIds = mediaIds;
+      }
       const data = await apiRequest<{ text?: string }>(
         baseURLRef.current,
         authTokenRef.current,
         `/api/bots/${encodeURIComponent(botId)}/message`,
-        { method: 'POST', body: { message: text, source: 'mobile' } }
+        { method: 'POST', body }
       );
       if (/^\/(bots|status|reset)$/.test(text) && data.text) {
         pushIncomingMessage(botId, {

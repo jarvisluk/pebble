@@ -119,6 +119,30 @@ export interface NodeInfo {
   connected: boolean;
 }
 
+export interface SlashCommandItem {
+  name: string;
+  description?: string;
+  argumentHint?: string;
+  source: 'harness' | 'skill' | 'workflow' | 'hub' | string;
+}
+
+export interface MentionCandidate {
+  kind: 'file' | 'bot' | 'agent' | string;
+  value: string;
+  label: string;
+  description?: string;
+}
+
+export interface PendingAttachment {
+  id: string;
+  media?: MessageMedia;
+  name: string;
+  kind: 'image' | 'file';
+  previewUrl?: string;
+  uploading?: boolean;
+  error?: string;
+}
+
 export interface LocalNodeState {
   available?: boolean;
   enabled?: boolean;

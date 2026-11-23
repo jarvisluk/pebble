@@ -16,10 +16,13 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
+
+	"bot-hub/internal/config"
 )
 
 // OpenCodeHarness keeps one long-lived `opencode serve` (or a configured
@@ -327,8 +330,54 @@ func (h *OpenCodeHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnRe
 	ch := h.subscribe(sid)
 	defer h.unsubscribe(sid)
 
-	if _, err := api.do(ctx, http.MethodPost, "/api/session/"+sid+"/prompt", map[string]any{"text": opts.Prompt}, nil); err != nil {
-		return partial, fmt.Errorf("send prompt: %w", err)
+	var ocFiles []map[string]any
+	for _, att := range opts.Attachments {
+		if att.Path != "" {
+			ocFiles = append(ocFiles, map[string]any{
+				"uri":  "file://" + att.Path,
+				"name": att.Name,
+			})
+		}
+	}
+
+	isCompact := false
+	if cmdName, cmdArgs, ok := ParseSlashCommand(opts.Prompt); ok {
+		if cmdName == "compact" {
+			isCompact = true
+			if _, err := api.do(ctx, http.MethodPost, "/api/session/"+sid+"/compact", map[string]any{}, nil); err != nil {
+				return partial, fmt.Errorf("compact session: %w", err)
+			}
+		} else {
+			cmdBody := map[string]any{
+				"name": cmdName,
+				"text": cmdArgs,
+			}
+			if len(ocFiles) > 0 {
+				cmdBody["files"] = ocFiles
+			}
+			code, err := api.do(ctx, http.MethodPost, "/api/session/"+sid+"/command", cmdBody, nil)
+			if err != nil {
+				if code == http.StatusBadRequest || code == http.StatusNotFound {
+					promptBody := map[string]any{"text": AppendAttachmentContext(opts.Prompt, opts.Attachments)}
+					if len(ocFiles) > 0 {
+						promptBody["files"] = ocFiles
+					}
+					if _, perr := api.do(ctx, http.MethodPost, "/api/session/"+sid+"/prompt", promptBody, nil); perr != nil {
+						return partial, fmt.Errorf("send prompt: %w", perr)
+					}
+				} else {
+					return partial, fmt.Errorf("send command: %w", err)
+				}
+			}
+		}
+	} else {
+		promptBody := map[string]any{"text": AppendAttachmentContext(opts.Prompt, opts.Attachments)}
+		if len(ocFiles) > 0 {
+			promptBody["files"] = ocFiles
+		}
+		if _, err := api.do(ctx, http.MethodPost, "/api/session/"+sid+"/prompt", promptBody, nil); err != nil {
+			return partial, fmt.Errorf("send prompt: %w", err)
+		}
 	}
 
 	var texts []string
@@ -507,10 +556,14 @@ func (h *OpenCodeHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnRe
 				return partial, fmt.Errorf("bot %q interrupted", bot.ID)
 			case "session.execution.succeeded":
 				dur := time.Since(started)
+				text := strings.Join(texts, "\n")
+				if isCompact && text == "" {
+					text = "会话上下文已压缩。"
+				}
 				return &TurnResult{
 					BotID:      bot.ID,
 					SessionID:  sid,
-					Text:       strings.Join(texts, "\n"),
+					Text:       text,
 					DurationMs: dur.Milliseconds(),
 					Duration:   dur,
 					Usage:      usage,
@@ -539,6 +592,93 @@ func (h *OpenCodeHarness) Models(ctx context.Context) ([]string, error) {
 		ids = append(ids, m.ProviderID+"/"+m.ID)
 	}
 	return ids, nil
+}
+
+func (h *OpenCodeHarness) ListCommands(ctx context.Context, bot config.BotConfig) ([]SlashCommand, error) {
+	builtins := []SlashCommand{
+		{Name: "compact", Description: "压缩当前会话上下文", Source: "harness"},
+	}
+	var remoteCmds, remoteSkills []SlashCommand
+	if base, pw, err := h.ensure(ctx); err == nil {
+		api := &ocAPI{base: base, pw: pw}
+		q := ""
+		if bot.Workspace != "" {
+			q = "?location[directory]=" + url.QueryEscape(bot.Workspace)
+		}
+		var cmdOut struct {
+			Data []struct {
+				Name        string `json:"name"`
+				Description string `json:"description"`
+			} `json:"data"`
+		}
+		if _, err := api.do(ctx, http.MethodGet, "/api/command"+q, nil, &cmdOut); err == nil {
+			for _, c := range cmdOut.Data {
+				remoteCmds = append(remoteCmds, SlashCommand{
+					Name:        c.Name,
+					Description: c.Description,
+					Source:      "harness",
+				})
+			}
+		}
+		var skillOut struct {
+			Data []struct {
+				Name        string `json:"name"`
+				Description string `json:"description"`
+			} `json:"data"`
+		}
+		if _, err := api.do(ctx, http.MethodGet, "/api/skill"+q, nil, &skillOut); err == nil {
+			for _, s := range skillOut.Data {
+				remoteSkills = append(remoteSkills, SlashCommand{
+					Name:        s.Name,
+					Description: s.Description,
+					Source:      "skill",
+				})
+			}
+		}
+	}
+
+	var localCmds, localSkills []SlashCommand
+	if bot.Workspace != "" {
+		localCmds = append(localCmds, scanMarkdownCommands(filepath.Join(bot.Workspace, ".opencode", "commands"), "harness")...)
+		localSkills = append(localSkills, scanSkillDirs(filepath.Join(bot.Workspace, ".opencode", "skills"))...)
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		localCmds = append(localCmds, scanMarkdownCommands(filepath.Join(home, ".config", "opencode", "commands"), "harness")...)
+		localSkills = append(localSkills, scanSkillDirs(filepath.Join(home, ".config", "opencode", "skills"))...)
+	}
+
+	return mergeSlashCommands(builtins, remoteCmds, remoteSkills, localCmds, localSkills), nil
+}
+
+func (h *OpenCodeHarness) ListAgents(ctx context.Context, bot config.BotConfig) ([]AgentInfo, error) {
+	h.mu.Lock()
+	base, pw := h.baseURL, h.password
+	h.mu.Unlock()
+	if base == "" {
+		return nil, nil
+	}
+	q := ""
+	if bot.Workspace != "" {
+		q = "?location[directory]=" + url.QueryEscape(bot.Workspace)
+	}
+	var out struct {
+		Data []struct {
+			Name        string `json:"name"`
+			Description string `json:"description"`
+			Hidden      bool   `json:"hidden"`
+		} `json:"data"`
+	}
+	if _, err := (&ocAPI{base: base, pw: pw}).do(ctx, http.MethodGet, "/api/agent"+q, nil, &out); err != nil {
+		return nil, err
+	}
+	var agents []AgentInfo
+	for _, a := range out.Data {
+		if a.Hidden || a.Name == "" {
+			continue
+		}
+		agents = append(agents, AgentInfo{Name: a.Name, Description: a.Description})
+	}
+	return agents, nil
 }
 
 // modelRef splits "provider/model/id" into opencode's {providerID, id}.

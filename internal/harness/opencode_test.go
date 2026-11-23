@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -143,4 +144,111 @@ func TestOpenCodeQuestionCardFlow(t *testing.T) {
 		t.Fatalf("expected cancel query message=non-interactive, got %+v", cancels)
 	}
 	mu.Unlock()
+}
+
+func TestOpenCodeSlashCommandAndCompactAndFiles(t *testing.T) {
+	evCh := make(chan string, 16)
+	var mu sync.Mutex
+	var hits []string
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/info":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/event":
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = w.Write([]byte("data: {\"type\":\"server.connected\",\"data\":{}}\n\n"))
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
+			for {
+				select {
+				case <-r.Context().Done():
+					return
+				case msg := <-evCh:
+					_, _ = w.Write([]byte("data: " + msg + "\n\n"))
+					if f, ok := w.(http.Flusher); ok {
+						f.Flush()
+					}
+				}
+			}
+		case r.Method == http.MethodPost && r.URL.Path == "/api/session":
+			_, _ = w.Write([]byte(`{"data":{"id":"ses_cmd"}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/command":
+			_, _ = w.Write([]byte(`{"data":[{"name":"review","description":"Code review"}]}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/skill":
+			_, _ = w.Write([]byte(`{"data":[{"name":"pdf","description":"PDF skill"}]}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/session/ses_cmd/command":
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			mu.Lock()
+			hits = append(hits, "command:"+fmt.Sprint(body["name"]))
+			mu.Unlock()
+			if body["name"] == "unknown" {
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"message":"command not found"}`))
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+			evCh <- `{"type":"session.text.ended","data":{"sessionID":"ses_cmd","text":"cmd ok"}}`
+			evCh <- `{"type":"session.execution.succeeded","data":{"sessionID":"ses_cmd"}}`
+		case r.Method == http.MethodPost && r.URL.Path == "/api/session/ses_cmd/prompt":
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			files, _ := body["files"].([]any)
+			mu.Lock()
+			hits = append(hits, fmt.Sprintf("prompt:%v:files=%d", body["text"], len(files)))
+			mu.Unlock()
+			_, _ = w.Write([]byte(`{}`))
+			evCh <- `{"type":"session.text.ended","data":{"sessionID":"ses_cmd","text":"prompt ok"}}`
+			evCh <- `{"type":"session.execution.succeeded","data":{"sessionID":"ses_cmd"}}`
+		case r.Method == http.MethodPost && r.URL.Path == "/api/session/ses_cmd/compact":
+			mu.Lock()
+			hits = append(hits, "compact")
+			mu.Unlock()
+			_, _ = w.Write([]byte(`{}`))
+			evCh <- `{"type":"session.execution.succeeded","data":{"sessionID":"ses_cmd"}}`
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	h := NewOpenCodeHarness(srv.URL)
+	defer h.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	bot := config.BotConfig{ID: "b1", Workspace: t.TempDir()}
+
+	cmds, err := h.ListCommands(ctx, bot)
+	if err != nil || len(cmds) < 3 {
+		t.Fatalf("expected compact+review+pdf commands, got %+v err=%v", cmds, err)
+	}
+
+	if _, err := h.RunTurn(ctx, RunOptions{Bot: bot, Prompt: "/review src/main.go"}); err != nil {
+		t.Fatalf("command RunTurn failed: %v", err)
+	}
+	if _, err := h.RunTurn(ctx, RunOptions{
+		Bot:         bot,
+		Prompt:      "/unknown fallback",
+		Attachments: []Attachment{{ID: "a1", Kind: "file", Name: "doc.txt", Path: "/tmp/doc.txt", WorkspacePath: ".uploads/doc.txt"}},
+	}); err != nil {
+		t.Fatalf("fallback RunTurn failed: %v", err)
+	}
+	resCompact, err := h.RunTurn(ctx, RunOptions{Bot: bot, Prompt: "/compact"})
+	if err != nil {
+		t.Fatalf("compact RunTurn failed: %v", err)
+	}
+	if resCompact.Text == "" {
+		t.Fatalf("expected non-empty compact result text")
+	}
+
+	mu.Lock()
+	joined := strings.Join(hits, "|")
+	mu.Unlock()
+	if !strings.Contains(joined, "command:review") || !strings.Contains(joined, "command:unknown") || !strings.Contains(joined, "files=1") || !strings.Contains(joined, "compact") {
+		t.Fatalf("unexpected hit sequence: %s", joined)
+	}
 }

@@ -3,7 +3,9 @@ package harness
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,15 +13,18 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"bot-hub/internal/config"
 )
 
 // PiHarness keeps one long-lived `pi --mode rpc` process per bot. The hub
 // picks the session ID, so a restarted process reopens the same session.
 type PiHarness struct {
-	binary string
-	mu     sync.Mutex
-	mcpMu  sync.Mutex
-	procs  map[string]*piProc
+	binary   string
+	mu       sync.Mutex
+	mcpMu    sync.Mutex
+	procs    map[string]*piProc
+	commands map[string][]SlashCommand
 
 	modelsOnce sync.Once
 	models     []string
@@ -40,6 +45,12 @@ type piEvent struct {
 	Error   string `json:"error"`
 	Data    struct {
 		Disposition string `json:"disposition"`
+		Summary     string `json:"summary"`
+		Commands    []struct {
+			Name        string `json:"name"`
+			Description string `json:"description"`
+			Source      string `json:"source"`
+		} `json:"commands"`
 	} `json:"data"`
 	Method      string          `json:"method"`
 	Title       string          `json:"title"`
@@ -70,12 +81,38 @@ type piEventMessage struct {
 	} `json:"usage"`
 }
 
+var errPiCommandHandled = errors.New("prompt was handled by a pi command, no run started")
+
 func NewPiHarness() *PiHarness {
-	return &PiHarness{binary: envOr("PI_BIN", "pi"), procs: make(map[string]*piProc)}
+	return &PiHarness{
+		binary:   envOr("PI_BIN", "pi"),
+		procs:    make(map[string]*piProc),
+		commands: make(map[string][]SlashCommand),
+	}
 }
 
 func (h *PiHarness) Kind() string  { return "pi" }
 func (h *PiHarness) Label() string { return "Pi" }
+
+func (h *PiHarness) ListCommands(_ context.Context, bot config.BotConfig) ([]SlashCommand, error) {
+	builtins := []SlashCommand{
+		{Name: "compact", Description: "压缩当前会话上下文", Source: "harness"},
+	}
+	h.mu.Lock()
+	cached := append([]SlashCommand(nil), h.commands[bot.ID]...)
+	h.mu.Unlock()
+
+	var local []SlashCommand
+	if bot.Workspace != "" {
+		local = append(local, scanMarkdownCommands(filepath.Join(bot.Workspace, ".pi", "prompts"), "harness")...)
+		local = append(local, scanSkillDirs(filepath.Join(bot.Workspace, ".pi", "skills"))...)
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		local = append(local, scanMarkdownCommands(filepath.Join(home, ".pi", "agent", "prompts"), "harness")...)
+		local = append(local, scanSkillDirs(filepath.Join(home, ".pi", "agent", "skills"))...)
+	}
+	return mergeSlashCommands(cached, builtins, local), nil
+}
 
 // Models lists `pi --list-models` as provider/model IDs (cached).
 func (h *PiHarness) Models(ctx context.Context) ([]string, error) {
@@ -267,7 +304,77 @@ func (h *PiHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnResult, 
 		p.model = bot.Model
 	}
 
-	if _, err := h.call(ctx, p, map[string]any{"type": "prompt", "message": opts.Prompt}); err != nil {
+	h.mu.Lock()
+	_, hasCachedCmds := h.commands[bot.ID]
+	h.mu.Unlock()
+	if !hasCachedCmds && !opts.Ephemeral {
+		if evt, err := h.call(ctx, p, map[string]any{"type": "get_commands"}); err == nil && evt != nil {
+			var list []SlashCommand
+			for _, c := range evt.Data.Commands {
+				src := "harness"
+				if c.Source == "skill" {
+					src = "skill"
+				}
+				list = append(list, SlashCommand{
+					Name:        c.Name,
+					Description: c.Description,
+					Source:      src,
+				})
+			}
+			h.mu.Lock()
+			if h.commands == nil {
+				h.commands = make(map[string][]SlashCommand)
+			}
+			h.commands[bot.ID] = list
+			h.mu.Unlock()
+		}
+	}
+
+	if cmdName, cmdArgs, ok := ParseSlashCommand(opts.Prompt); ok && cmdName == "compact" {
+		req := map[string]any{"type": "compact"}
+		if cmdArgs != "" {
+			req["customInstructions"] = cmdArgs
+		}
+		evt, err := h.call(ctx, p, req)
+		if err != nil {
+			return partial, fmt.Errorf("pi compact for bot %q: %w", bot.ID, err)
+		}
+		text := "会话上下文已压缩。"
+		if evt != nil && strings.TrimSpace(evt.Data.Summary) != "" {
+			text = strings.TrimSpace(evt.Data.Summary)
+		}
+		return finish(partial, text, Usage{}, started), nil
+	}
+
+	promptText := AppendAttachmentContext(opts.Prompt, opts.Attachments)
+	promptReq := map[string]any{"type": "prompt", "message": promptText}
+	var piImages []map[string]any
+	for _, att := range opts.Attachments {
+		if att.Kind != "image" || att.Path == "" {
+			continue
+		}
+		raw, err := os.ReadFile(att.Path)
+		if err != nil || len(raw) == 0 {
+			continue
+		}
+		mt := att.MimeType
+		if mt == "" {
+			mt = "image/png"
+		}
+		piImages = append(piImages, map[string]any{
+			"type":     "image",
+			"data":     base64.StdEncoding.EncodeToString(raw),
+			"mimeType": mt,
+		})
+	}
+	if len(piImages) > 0 {
+		promptReq["images"] = piImages
+	}
+
+	if _, err := h.call(ctx, p, promptReq); err != nil {
+		if errors.Is(err, errPiCommandHandled) {
+			return finish(partial, "已执行命令。", Usage{}, started), nil
+		}
 		return partial, fmt.Errorf("pi failed for bot %q: %w", bot.ID, err)
 	}
 
@@ -434,7 +541,7 @@ func (h *PiHarness) call(ctx context.Context, p *piProc, cmd map[string]any) (*p
 				return nil, fmt.Errorf("%s", evt.Error)
 			}
 			if evt.Data.Disposition == "handled" {
-				return nil, fmt.Errorf("prompt was handled by a pi command, no run started")
+				return nil, errPiCommandHandled
 			}
 			return &evt, nil
 		}
