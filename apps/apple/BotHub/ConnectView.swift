@@ -1,6 +1,9 @@
 import SwiftUI
 import AVFoundation
 
+private let desktopDownloadMacURL = URL(string: "https://github.com/pebble-ai/bot-hub/releases/latest")!
+private let desktopDownloadWinURL = URL(string: "https://github.com/pebble-ai/bot-hub/releases/latest")!
+
 struct ConnectView: View {
     @Environment(HubStore.self) private var hub
     @Environment(Router.self) private var router
@@ -21,6 +24,12 @@ struct ConnectView: View {
     @State private var tsAdvOpen = false
     @State private var tsAuthKey = ""
     @State private var tsControlUrl = ""
+    @State private var desktopGuideOpen = true
+    @State private var manualOpen = false
+
+    private var isFreshOnboarding: Bool {
+        isGate && hub.servers.isEmpty && hub.activeServer == nil
+    }
 
     private var isConnectingGate: Bool {
         isGate && hub.activeServer != nil && hub.connState == .connecting && hub.bots.isEmpty && !showFormWhileConnecting && !submitting
@@ -95,9 +104,11 @@ struct ConnectView: View {
         return Form {
             if isGate {
                 if hub.activeServer == nil {
-                    Section(hub.t("connectHost")) {
-                        Text("1. \(hub.t("onboardStep1"))\n2. \(hub.t("onboardStep2"))")
+                    Section {
+                        Text(hub.t("onboardMobileLead"))
                             .foregroundStyle(p.text2)
+                    } header: {
+                        Text(hub.t("connectHost"))
                     }
                 } else if hub.connState == .unauthorized || hub.connState == .error {
                     Section(hub.connState == .unauthorized ? hub.t("tokenRequired") : hub.t("cantConnectHost")) {
@@ -128,18 +139,76 @@ struct ConnectView: View {
             } footer: {
                 Text(hub.t("scanPairDesc"))
             }
-            Section {
-                TextField(hub.t("labelOptional"), text: $label, prompt: Text(hub.t("labelExamplePh")))
-                TextField(hub.t("connAddr"), text: $address, prompt: Text("tailcat://… / tailscale://… / 192.168.1.10:3789")).monoInput()
-                SecureField(hub.t("tokenOptionalLbl"), text: $token, prompt: Text(hub.t("tokenFillHint")))
-            } header: {
-                Text(hub.t("manualAddrTitle"))
-            } footer: {
-                Text(!infoHint.isEmpty ? infoHint : !norm.token.isEmpty ? hub.t("tokenRecognized") : hub.t("tokenAutoHint"))
-                    .foregroundStyle((!infoHint.isEmpty || !norm.token.isEmpty) ? p.sageInk : .secondary)
+            if isFreshOnboarding {
+                Section {
+                    Button {
+                        withAnimation { desktopGuideOpen.toggle() }
+                    } label: {
+                        HStack {
+                            Label(hub.t("noDesktopYet"), systemImage: "laptopcomputer")
+                            Spacer()
+                            Image(systemName: desktopGuideOpen ? "chevron.up" : "chevron.down")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    if desktopGuideOpen {
+                        Text(hub.t("noDesktopHint"))
+                            .font(.subheadline)
+                            .foregroundStyle(p.text2)
+                        Button {
+                            openURL(desktopDownloadMacURL)
+                        } label: {
+                            Label(hub.t("downloadMac"), systemImage: "desktopcomputer")
+                        }
+                        Button {
+                            openURL(desktopDownloadWinURL)
+                        } label: {
+                            Label(hub.t("downloadWin"), systemImage: "pc")
+                        }
+                        ShareLink(item: desktopDownloadMacURL) {
+                            Label(hub.t("sendToComputer"), systemImage: "square.and.arrow.up")
+                        }
+                        Button {
+                            UIPasteboard.general.string = desktopDownloadMacURL.absoluteString
+                            infoHint = hub.t("downloadLinkCopied")
+                        } label: {
+                            Label(hub.t("copyDownloadLink"), systemImage: "doc.on.doc")
+                        }
+                        Text(hub.t("desktopStepsHint"))
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
-            if !err.isEmpty { Section { StatusText(text: err) } }
-            tailscaleSection
+            if !isFreshOnboarding || manualOpen {
+                Section {
+                    TextField(hub.t("labelOptional"), text: $label, prompt: Text(hub.t("labelExamplePh")))
+                    TextField(hub.t("connAddr"), text: $address, prompt: Text("tailcat://… / tailscale://… / 192.168.1.10:3789")).monoInput()
+                    SecureField(hub.t("tokenOptionalLbl"), text: $token, prompt: Text(hub.t("tokenFillHint")))
+                } header: {
+                    Text(hub.t("manualAddrTitle"))
+                } footer: {
+                    Text(!infoHint.isEmpty ? infoHint : !norm.token.isEmpty ? hub.t("tokenRecognized") : hub.t("tokenAutoHint"))
+                        .foregroundStyle((!infoHint.isEmpty || !norm.token.isEmpty) ? p.sageInk : .secondary)
+                }
+                if !err.isEmpty { Section { StatusText(text: err) } }
+                tailscaleSection
+            } else {
+                if !infoHint.isEmpty {
+                    Section {
+                        Text(infoHint).foregroundStyle(p.sageInk)
+                    }
+                }
+                if !err.isEmpty { Section { StatusText(text: err) } }
+                Section {
+                    Button {
+                        withAnimation { manualOpen = true }
+                    } label: {
+                        Label(hub.t("manualAdvancedToggle"), systemImage: "slider.horizontal.3")
+                    }
+                }
+            }
             if !hub.servers.isEmpty {
                 Section(hub.t("savedHosts")) {
                     ForEach(hub.servers) { s in

@@ -1,4 +1,5 @@
 import { CameraView, useCameraPermissions, type BarcodeScanningResult } from 'expo-camera';
+import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -9,11 +10,15 @@ import {
   Platform,
   Pressable,
   ScrollView,
+  Share,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
+
+const DESKTOP_DOWNLOAD_MAC_URL = 'https://github.com/pebble-ai/bot-hub/releases/latest';
+const DESKTOP_DOWNLOAD_WIN_URL = 'https://github.com/pebble-ai/bot-hub/releases/latest';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { isNativeTunnelAvailable, type TailscalePeer } from '../../modules/bothub-tunnel';
@@ -56,6 +61,9 @@ export function ConnectContent({ standalone = false }: { standalone?: boolean })
   const [tsAdvOpen, setTsAdvOpen] = useState(false);
   const [tsAuthKey, setTsAuthKey] = useState('');
   const [tsControlUrl, setTsControlUrl] = useState('');
+  const [desktopGuideOpen, setDesktopGuideOpen] = useState(true);
+  const [manualOpen, setManualOpen] = useState(false);
+  const isFreshOnboarding = standalone && servers.length === 0 && !activeServer;
 
   const {
     address: paramAddr,
@@ -291,24 +299,7 @@ export function ConnectContent({ standalone = false }: { standalone?: boolean })
 
           {standalone && !activeServer && (
             <View style={[styles.card, { backgroundColor: theme.card }]}>
-              <View style={styles.onboardSteps}>
-                <View style={[styles.onboardStepRow, { backgroundColor: theme.s1 }]}>
-                  <View style={[styles.stepBadge, { backgroundColor: theme.card }]}>
-                    <Text style={[styles.stepBadgeTxt, { color: theme.text }]}>1</Text>
-                  </View>
-                  <Text style={[styles.onboardStepTxt, { color: theme.text2 }]}>
-                    {t('onboardStep1')}
-                  </Text>
-                </View>
-                <View style={[styles.onboardStepRow, { backgroundColor: theme.s1 }]}>
-                  <View style={[styles.stepBadge, { backgroundColor: theme.card }]}>
-                    <Text style={[styles.stepBadgeTxt, { color: theme.text }]}>2</Text>
-                  </View>
-                  <Text style={[styles.onboardStepTxt, { color: theme.text2 }]}>
-                    {t('onboardStep2')}
-                  </Text>
-                </View>
-              </View>
+              <Text style={[styles.cardSub, { color: theme.text2 }]}>{t('onboardMobileLead')}</Text>
             </View>
           )}
 
@@ -375,8 +366,72 @@ export function ConnectContent({ standalone = false }: { standalone?: boolean })
             </View>
           )}
 
-          <View style={[styles.card, { backgroundColor: theme.card }]}>
-            <Text style={[styles.cardTitle, { color: theme.text }]}>{t('manualAddrTitle')}</Text>
+          {isFreshOnboarding && (
+            <View style={[styles.card, { backgroundColor: theme.card }]}>
+              <Pressable
+                onPress={() => setDesktopGuideOpen((v) => !v)}
+                style={styles.rowBetween}
+              >
+                <Text style={[styles.cardTitle, { color: theme.text }]}>{t('noDesktopYet')}</Text>
+                <Text style={[styles.cardSub, { color: theme.mute }]}>
+                  {desktopGuideOpen ? t('collapse') : t('expand')}
+                </Text>
+              </Pressable>
+              {desktopGuideOpen && (
+                <View style={{ gap: 10 }}>
+                  <Text style={[styles.cardSub, { color: theme.text2 }]}>{t('noDesktopHint')}</Text>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                    <Pressable
+                      onPress={() => void Linking.openURL(DESKTOP_DOWNLOAD_MAC_URL)}
+                      style={[styles.qrBtn, { backgroundColor: theme.s1 }]}
+                    >
+                      <Text style={[styles.qrBtnTxt, { color: theme.text }]}>{t('downloadMac')}</Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => void Linking.openURL(DESKTOP_DOWNLOAD_WIN_URL)}
+                      style={[styles.qrBtn, { backgroundColor: theme.s1 }]}
+                    >
+                      <Text style={[styles.qrBtnTxt, { color: theme.text }]}>{t('downloadWin')}</Text>
+                    </Pressable>
+                  </View>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                    <Pressable
+                      onPress={() => void Share.share({ message: DESKTOP_DOWNLOAD_MAC_URL, url: DESKTOP_DOWNLOAD_MAC_URL })}
+                      style={[styles.qrBtn, { backgroundColor: theme.accentSoft }]}
+                    >
+                      <Text style={[styles.qrBtnTxt, { color: theme.accent }]}>{t('sendToComputer')}</Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() =>
+                        void Clipboard.setStringAsync(DESKTOP_DOWNLOAD_MAC_URL).then(() =>
+                          setInfoHint(t('downloadLinkCopied'))
+                        )
+                      }
+                      style={[styles.qrBtn, { backgroundColor: theme.s1 }]}
+                    >
+                      <Text style={[styles.qrBtnTxt, { color: theme.text2 }]}>{t('copyDownloadLink')}</Text>
+                    </Pressable>
+                  </View>
+                  {!!infoHint && (
+                    <Text style={[styles.fieldHint, { color: theme.sageInk }]}>{infoHint}</Text>
+                  )}
+                  <Text style={[styles.cardSub, { color: theme.mute }]}>{t('desktopStepsHint')}</Text>
+                </View>
+              )}
+            </View>
+          )}
+
+          {isFreshOnboarding && !manualOpen ? (
+            <Pressable
+              onPress={() => setManualOpen(true)}
+              style={[styles.card, { backgroundColor: theme.card }]}
+            >
+              <Text style={[styles.cardSub, { color: theme.text2 }]}>{t('manualAdvancedToggle')}</Text>
+            </Pressable>
+          ) : (
+            <>
+              <View style={[styles.card, { backgroundColor: theme.card }]}>
+                <Text style={[styles.cardTitle, { color: theme.text }]}>{t('manualAddrTitle')}</Text>
 
             <View style={styles.field}>
               <Text style={[styles.fieldLbl, { color: theme.text2 }]}>{t('labelOptional')}</Text>
@@ -570,6 +625,8 @@ export function ConnectContent({ standalone = false }: { standalone?: boolean })
                 </>
               )}
             </View>
+          )}
+            </>
           )}
 
           {servers.length > 0 && (

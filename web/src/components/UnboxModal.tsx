@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type { BotStatus, HarnessInfo, ResolvedLang, SettingsData, SetupTaskStatus, TailcatStatus } from '../types';
 import { api } from '../lib/api';
+import { DOWNLOAD_LINKS } from '../lib/downloads';
 import { translate } from '../lib/i18n';
 import { MagpieInstallBanner } from './MagpieInstallBanner';
 
@@ -892,6 +893,19 @@ export const UnboxModal: React.FC<UnboxModalProps> = ({
                     </div>
                   </>
                 )}
+              </div>
+              <div className="note">
+                <div className="row-between row-wrap">
+                  <span className="set-card-desc">{t('ubGetMobileApp')}</span>
+                  <div className="row-inline row-wrap">
+                    <a className="mp" href={DOWNLOAD_LINKS.iosAppStore} target="_blank" rel="noopener noreferrer">
+                      {t('ubAppStore')}
+                    </a>
+                    <a className="mp" href={DOWNLOAD_LINKS.androidPlayStore} target="_blank" rel="noopener noreferrer">
+                      {t('ubGooglePlay')}
+                    </a>
+                  </div>
+                </div>
               </div>
             </div>
           )}
