@@ -1446,5 +1446,21 @@ func TestSlashPassthroughCommandsMentionsAndAttachments(t *testing.T) {
 	if !sawUserMedia {
 		t.Fatalf("expected user message to persist attachment media, got %+v", msgs)
 	}
+
+	// 5. @bot shortcut delegates to target bot, while @unknown or @file goes to current bot.
+	resMentionBot, err := h.HandleInput(context.Background(), "alpha", "@beta please check", SendOptions{Source: "web"})
+	if err != nil {
+		t.Fatalf("@beta HandleInput failed: %v", err)
+	}
+	if !strings.HasPrefix(resMentionBot.Text, "[beta]\n") {
+		t.Fatalf("expected delegated [beta] response, got %q", resMentionBot.Text)
+	}
+	resMentionFile, err := h.HandleInput(context.Background(), "alpha", "@README.md summarize", SendOptions{Source: "web"})
+	if err != nil {
+		t.Fatalf("@README.md HandleInput failed: %v", err)
+	}
+	if resMentionFile.BotID != "alpha" || strings.HasPrefix(resMentionFile.Text, "[beta]") {
+		t.Fatalf("expected @README.md to stay on alpha, got %+v", resMentionFile)
+	}
 }
 

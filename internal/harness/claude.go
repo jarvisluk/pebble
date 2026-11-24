@@ -89,6 +89,17 @@ func (h *ClaudeHarness) ListCommands(_ context.Context, bot config.BotConfig) ([
 		{Name: "plan", Description: "进入计划模式", Source: "harness"},
 		{Name: "mcp", Description: "查看 MCP 服务状态", Source: "harness"},
 		{Name: "doctor", Description: "检查运行环境健康状态", Source: "harness"},
+		{Name: "help", Description: "查看可用命令帮助", Source: "harness"},
+		{Name: "model", Description: "查看或切换模型", Source: "harness"},
+		{Name: "fast", Description: "切换快速输出模式", Source: "harness"},
+		{Name: "export", Description: "导出当前会话", Source: "harness"},
+		{Name: "permissions", Description: "查看权限配置", Source: "harness"},
+		{Name: "agents", Description: "查看或管理 Subagent", Source: "harness"},
+		{Name: "skills", Description: "查看已安装 Skill", Source: "harness"},
+		{Name: "hooks", Description: "查看钩子配置", Source: "harness"},
+		{Name: "usage", Description: "查看订阅额度与用量", Source: "harness"},
+		{Name: "rewind", Description: "回退会话到历史节点", Source: "harness"},
+		{Name: "rename", Description: "重命名当前会话", Source: "harness"},
 	}
 
 	h.mu.Lock()
@@ -104,8 +115,25 @@ func (h *ClaudeHarness) ListCommands(_ context.Context, bot config.BotConfig) ([
 		localCmds = append(localCmds, scanMarkdownCommands(filepath.Join(home, ".claude", "commands"), "harness")...)
 		localSkills = append(localSkills, scanSkillDirs(filepath.Join(home, ".claude", "skills"))...)
 	}
+	localSkills = append(localSkills, scanSharedSkills(bot.Workspace)...)
 
 	return mergeSlashCommands(cached, builtins, localCmds, localSkills), nil
+}
+
+func (h *ClaudeHarness) ListAgents(_ context.Context, bot config.BotConfig) ([]AgentInfo, error) {
+	builtins := []AgentInfo{
+		{Name: "Explore", Description: "快速只读检索代码库"},
+		{Name: "Plan", Description: "只读调研与方案设计"},
+		{Name: "general-purpose", Description: "通用多步调研与执行代理"},
+	}
+	var local []AgentInfo
+	if bot.Workspace != "" {
+		local = append(local, scanAgentsDir(filepath.Join(bot.Workspace, ".claude", "agents"))...)
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		local = append(local, scanAgentsDir(filepath.Join(home, ".claude", "agents"))...)
+	}
+	return mergeAgents(local, builtins), nil
 }
 
 func (h *ClaudeHarness) Close() {

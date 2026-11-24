@@ -93,6 +93,19 @@ func (h *PiHarness) Label() string { return "Pi" }
 func (h *PiHarness) ListCommands(_ context.Context, bot config.BotConfig) ([]SlashCommand, error) {
 	builtins := []SlashCommand{
 		{Name: "compact", Description: "压缩当前会话上下文", Source: "harness"},
+		{Name: "new", Description: "开启新会话", Source: "harness"},
+		{Name: "clear", Description: "清空当前会话", Source: "harness"},
+		{Name: "model", Description: "查看或切换模型", Source: "harness"},
+		{Name: "thinking", Description: "调整思考强度", Source: "harness"},
+		{Name: "tree", Description: "查看会话分支树", Source: "harness"},
+		{Name: "fork", Description: "从当前节点分叉新会话", Source: "harness"},
+		{Name: "resume", Description: "恢复历史会话", Source: "harness"},
+		{Name: "export", Description: "导出当前会话", Source: "harness"},
+		{Name: "session", Description: "查看当前会话信息", Source: "harness"},
+		{Name: "reload", Description: "重载扩展与配置", Source: "harness"},
+		{Name: "settings", Description: "查看或修改设置", Source: "harness"},
+		{Name: "hotkeys", Description: "查看快捷键说明", Source: "harness"},
+		{Name: "help", Description: "查看可用命令帮助", Source: "harness"},
 	}
 	h.mu.Lock()
 	cached := append([]SlashCommand(nil), h.commands[bot.ID]...)
@@ -107,7 +120,19 @@ func (h *PiHarness) ListCommands(_ context.Context, bot config.BotConfig) ([]Sla
 		local = append(local, scanMarkdownCommands(filepath.Join(home, ".pi", "agent", "prompts"), "harness")...)
 		local = append(local, scanSkillDirs(filepath.Join(home, ".pi", "agent", "skills"))...)
 	}
+	local = append(local, scanSharedSkills(bot.Workspace)...)
 	return mergeSlashCommands(cached, builtins, local), nil
+}
+
+func (h *PiHarness) ListAgents(_ context.Context, bot config.BotConfig) ([]AgentInfo, error) {
+	var local []AgentInfo
+	if bot.Workspace != "" {
+		local = append(local, scanAgentsDir(filepath.Join(bot.Workspace, ".pi", "agents"))...)
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		local = append(local, scanAgentsDir(filepath.Join(home, ".pi", "agent", "agents"))...)
+	}
+	return mergeAgents(local), nil
 }
 
 // Models lists `pi --list-models` as provider/model IDs (cached on success).

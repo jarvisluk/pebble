@@ -303,6 +303,7 @@ type Hub struct {
 }
 
 var askCmdRe = regexp.MustCompile(`(?s)^/ask\s+([a-zA-Z0-9_-]+)\s+(.+)$`)
+var mentionBotRe = regexp.MustCompile(`(?s)^@([A-Za-z0-9_.-]+)\s+(.+)$`)
 
 func New(cfg *config.HubConfig, store *state.Store, messages *state.MessageStore, reg *harness.Registry) *Hub {
 	if reg == nil {
@@ -1217,6 +1218,21 @@ func (h *Hub) HandleInput(ctx context.Context, botID, rawInput string, opts Send
 		}
 		res.Text = fmt.Sprintf("[%s]\n%s", targetID, res.Text)
 		return res, nil
+	}
+
+	if m := mentionBotRe.FindStringSubmatch(input); len(m) == 3 {
+		targetID := m[1]
+		forwarded := m[2]
+		if targetID != botID {
+			if _, exists := h.GetBot(targetID); exists {
+				res, err := h.MessageBot(ctx, botID, targetID, forwarded, opts.Hop)
+				if err != nil {
+					return nil, err
+				}
+				res.Text = fmt.Sprintf("[%s]\n%s", targetID, res.Text)
+				return res, nil
+			}
+		}
 	}
 
 	return h.Send(ctx, botID, input, opts)

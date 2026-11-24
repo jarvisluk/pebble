@@ -253,7 +253,7 @@ func scanMarkdownCommands(dir, source string) []SlashCommand {
 	return out
 }
 
-// scanSkillDirs scans */SKILL.md inside dir as skill commands.
+// scanSkillDirs scans */SKILL.md inside dir as skill commands (following symlinks to directories).
 func scanSkillDirs(dir string) []SlashCommand {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -261,7 +261,16 @@ func scanSkillDirs(dir string) []SlashCommand {
 	}
 	var out []SlashCommand
 	for _, ent := range entries {
-		if !ent.IsDir() || strings.HasPrefix(ent.Name(), ".") {
+		if strings.HasPrefix(ent.Name(), ".") {
+			continue
+		}
+		isDir := ent.IsDir()
+		if !isDir && ent.Type()&os.ModeSymlink != 0 {
+			if info, err := os.Stat(filepath.Join(dir, ent.Name())); err == nil {
+				isDir = info.IsDir()
+			}
+		}
+		if !isDir {
 			continue
 		}
 		skillPath := filepath.Join(dir, ent.Name(), "SKILL.md")
@@ -278,6 +287,120 @@ func scanSkillDirs(dir string) []SlashCommand {
 			Description: desc,
 			Source:      "skill",
 		})
+	}
+	return out
+}
+
+// scanSharedSkills scans the cross-tool .agents/skills directories in workspace and $HOME.
+func scanSharedSkills(workspace string) []SlashCommand {
+	var out []SlashCommand
+	if workspace != "" {
+		out = append(out, scanSkillDirs(filepath.Join(workspace, ".agents", "skills"))...)
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		out = append(out, scanSkillDirs(filepath.Join(home, ".agents", "skills"))...)
+	}
+	return out
+}
+
+// parseTOMLTopFields extracts top-level name and description string fields before any [section].
+func parseTOMLTopFields(content string) (name, desc string) {
+	s := strings.TrimPrefix(content, "\ufeff")
+	for _, line := range strings.Split(s, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if strings.HasPrefix(line, "[") {
+			break
+		}
+		if k, v, ok := strings.Cut(line, "="); ok {
+			key := strings.TrimSpace(k)
+			val := strings.TrimSpace(v)
+			if i := strings.Index(val, "#"); i >= 0 && !strings.HasPrefix(val, `"`) && !strings.HasPrefix(val, `'`) {
+				val = strings.TrimSpace(val[:i])
+			}
+			val = strings.Trim(val, `"'`)
+			switch key {
+			case "name":
+				name = val
+			case "description":
+				desc = val
+			}
+		}
+	}
+	return name, desc
+}
+
+// scanAgentsDir scans top-level *.md and *.toml agent definitions in dir.
+func scanAgentsDir(dir string) []AgentInfo {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var out []AgentInfo
+	for _, ent := range entries {
+		name := ent.Name()
+		if strings.HasPrefix(name, ".") {
+			continue
+		}
+		isDir := ent.IsDir()
+		if !isDir && ent.Type()&os.ModeSymlink != 0 {
+			if info, err := os.Stat(filepath.Join(dir, name)); err == nil {
+				isDir = info.IsDir()
+			}
+		}
+		if isDir {
+			continue
+		}
+		ext := strings.ToLower(filepath.Ext(name))
+		if ext != ".md" && ext != ".toml" {
+			continue
+		}
+		base := strings.TrimSuffix(name, filepath.Ext(name))
+		if base == "" {
+			continue
+		}
+		var parsedName, desc string
+		if raw, err := readFrontmatterHead(filepath.Join(dir, name), frontmatterHeadBytes); err == nil {
+			if ext == ".md" {
+				parsedName, desc = parseFrontmatter(raw)
+			} else {
+				parsedName, desc = parseTOMLTopFields(raw)
+			}
+			if parsedName != "" {
+				base = parsedName
+			}
+		}
+		out = append(out, AgentInfo{
+			Name:        base,
+			Description: desc,
+		})
+	}
+	return out
+}
+
+func mergeAgents(groups ...[]AgentInfo) []AgentInfo {
+	seen := make(map[string]AgentInfo)
+	var order []string
+	for _, g := range groups {
+		for _, a := range g {
+			name := strings.TrimSpace(a.Name)
+			if name == "" {
+				continue
+			}
+			a.Name = name
+			if prev, exists := seen[name]; !exists {
+				seen[name] = a
+				order = append(order, name)
+			} else if prev.Description == "" && a.Description != "" {
+				seen[name] = a
+			}
+		}
+	}
+	out := make([]AgentInfo, 0, len(order))
+	for _, name := range order {
+		out = append(out, seen[name])
 	}
 	return out
 }

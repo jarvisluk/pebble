@@ -357,3 +357,64 @@ func TestOpenCodeSkipsPreflightAndRecoversOn404(t *testing.T) {
 		t.Fatalf("unexpected recovery result: %+v", res3)
 	}
 }
+
+func TestOpenCodeListCommandsAndAgentsArrayAndLocalFallback(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	ws := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(ws, ".opencode", "agents"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ws, ".opencode", "agents", "local-ag.md"), []byte("---\ndescription: 本地代理\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/info":
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		case "/api/event":
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = w.Write([]byte("data: {\"type\":\"server.connected\",\"data\":{}}\n\n"))
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
+			<-r.Context().Done()
+		case "/api/command":
+			_, _ = w.Write([]byte(`[{"name":"arr-cmd","description":"数组命令"}]`))
+		case "/api/skill":
+			_, _ = w.Write([]byte(`[{"name":"arr-skill","description":"数组技能"}]`))
+		case "/api/agent":
+			_, _ = w.Write([]byte(`[{"name":"build","description":"构建"},{"name":"hidden-ag","hidden":true}]`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	h := NewOpenCodeHarness(srv.URL)
+	defer h.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	bot := config.BotConfig{ID: "b1", Workspace: ws}
+	cmds, err := h.ListCommands(ctx, bot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertHasCommand(t, cmds, "arr-cmd")
+	assertHasCommand(t, cmds, "arr-skill")
+	assertHasCommand(t, cmds, "review")
+
+	agents, err := h.ListAgents(ctx, bot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertHasAgent(t, agents, "build")
+	assertHasAgent(t, agents, "local-ag")
+	for _, a := range agents {
+		if a.Name == "hidden-ag" {
+			t.Fatalf("hidden agent should be filtered: %+v", agents)
+		}
+	}
+}

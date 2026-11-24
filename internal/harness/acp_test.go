@@ -159,3 +159,42 @@ done
 		t.Fatalf("expected session/new to include bot-hub mcpServers, got:\n%s", raw)
 	}
 }
+
+func TestACPHarnessListCommandsAndAgents(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	ws := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(ws, ".codebuddy", "skills", "cb-skill"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ws, ".codebuddy", "skills", "cb-skill", "SKILL.md"), []byte("---\ndescription: CB技能\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(ws, ".codebuddy", "agents"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ws, ".codebuddy", "agents", "helper.md"), []byte("---\ndescription: 助手\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	h := NewCodeBuddyHarness()
+	h.captureUpdateCommands("b1", rpcMessage{
+		Method: "session/update",
+		Params: json.RawMessage(`{"update":{"sessionUpdate":"available_commands_update","availableCommands":[{"name":"deploy","description":"发布","input":{"hint":"<env>"}}]}}`),
+	})
+
+	bot := config.BotConfig{ID: "b1", Workspace: ws}
+	cmds, err := h.ListCommands(context.Background(), bot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertHasCommand(t, cmds, "deploy")
+	assertHasCommand(t, cmds, "compact")
+	assertHasCommand(t, cmds, "cb-skill")
+
+	agents, err := h.ListAgents(context.Background(), bot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertHasAgent(t, agents, "helper")
+}

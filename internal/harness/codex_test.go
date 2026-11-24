@@ -104,3 +104,38 @@ echo '{"type":"turn.completed"}'
 		t.Fatalf("expected BOT_ONLY_VAR=from-bot, got %q", string(rawEnv))
 	}
 }
+
+func TestCodexListCommandsAndAgents(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	ws := t.TempDir()
+
+	if err := os.MkdirAll(filepath.Join(ws, ".codex", "prompts"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ws, ".codex", "prompts", "audit.md"), []byte("---\ndescription: 安全审计\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(ws, ".codex", "agents"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ws, ".codex", "agents", "rev.toml"), []byte("name = \"reviewer\"\ndescription = \"评审\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	h := NewCodexHarness()
+	bot := config.BotConfig{ID: "b1", Workspace: ws}
+	cmds, err := h.ListCommands(context.Background(), bot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertHasCommand(t, cmds, "compact")
+	assertHasCommand(t, cmds, "review")
+	assertHasCommand(t, cmds, "audit")
+
+	agents, err := h.ListAgents(context.Background(), bot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertHasAgent(t, agents, "reviewer")
+}

@@ -86,12 +86,18 @@ func (h *DshHarness) Kind() string  { return "dsh" }
 func (h *DshHarness) Label() string { return "DeepSeek Harness" }
 
 func (h *DshHarness) ListCommands(_ context.Context, bot config.BotConfig) ([]SlashCommand, error) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if h.botCommands == nil {
-		return nil, nil
+	builtins := []SlashCommand{
+		{Name: "compact", Description: "压缩当前会话上下文", Source: "harness"},
+		{Name: "clear", Description: "清空会话历史", Source: "harness"},
+		{Name: "help", Description: "查看可用命令帮助", Source: "harness"},
 	}
-	return append([]SlashCommand(nil), h.botCommands[bot.ID]...), nil
+	h.mu.Lock()
+	var cached []SlashCommand
+	if h.botCommands != nil {
+		cached = append([]SlashCommand(nil), h.botCommands[bot.ID]...)
+	}
+	h.mu.Unlock()
+	return mergeSlashCommands(cached, builtins, scanSharedSkills(bot.Workspace)), nil
 }
 
 // Models returns the model choices dsh advertised on the last session it
