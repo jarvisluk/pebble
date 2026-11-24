@@ -7,6 +7,7 @@ import {
   ActivityIndicator,
   FlatList,
   Image,
+  Keyboard,
   KeyboardAvoidingView,
   Linking,
   Modal,
@@ -229,6 +230,42 @@ export default function BotChatScreen() {
   const listRef = useRef<FlatList<TimelineEntry>>(null);
   const inputRef = useRef<React.ComponentRef<typeof TextInput>>(null);
   const [composerHeight, setComposerHeight] = useState(76);
+  const [keyboardOffset, setKeyboardOffset] = useState(0);
+  const kbHeightRef = useRef(0);
+  const baseChatHeightRef = useRef(0);
+  const curChatHeightRef = useRef(0);
+
+  const recomputeKeyboardOffset = useCallback(() => {
+    const kbH = kbHeightRef.current;
+    if (kbH <= 0) {
+      setKeyboardOffset(0);
+      return;
+    }
+    const resized = Math.max(0, baseChatHeightRef.current - curChatHeightRef.current);
+    setKeyboardOffset(Math.max(0, Math.round(kbH - resized)));
+  }, []);
+
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSub = Keyboard.addListener(showEvent, (e) => {
+      kbHeightRef.current = Math.max(0, e.endCoordinates?.height || 0);
+      recomputeKeyboardOffset();
+      setTimeout(() => {
+        if (chatList.length > 0) {
+          listRef.current?.scrollToEnd({ animated: true });
+        }
+      }, 80);
+    });
+    const hideSub = Keyboard.addListener(hideEvent, () => {
+      kbHeightRef.current = 0;
+      setKeyboardOffset(0);
+    });
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, [chatList.length, recomputeKeyboardOffset]);
 
   useEffect(() => {
     if (bots.length > 0 && !bot) {
@@ -915,10 +952,18 @@ export default function BotChatScreen() {
         </View>
       )}
 
-      <KeyboardAvoidingView
+      <View
         style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={0}
+        onLayout={(e) => {
+          const h = Math.round(e.nativeEvent.layout.height);
+          if (h <= 0) return;
+          curChatHeightRef.current = h;
+          if (kbHeightRef.current <= 0) {
+            baseChatHeightRef.current = h;
+          } else {
+            recomputeKeyboardOffset();
+          }
+        }}
       >
         <FlatList
           ref={listRef}
@@ -927,7 +972,7 @@ export default function BotChatScreen() {
           renderItem={renderTimelineEntry}
           contentContainerStyle={[
             styles.listContent,
-            { paddingBottom: composerHeight + 12 },
+            { paddingBottom: composerHeight + keyboardOffset + 12 },
             timelineEntries.length === 0 && styles.emptyGrow,
           ]}
           ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
@@ -981,7 +1026,13 @@ export default function BotChatScreen() {
               setComposerHeight(h);
             }
           }}
-          style={[styles.composerOverlay, { paddingBottom: Math.max(insets.bottom, 10) }]}
+          style={[
+            styles.composerOverlay,
+            {
+              bottom: keyboardOffset,
+              paddingBottom: keyboardOffset > 0 ? 8 : Math.max(insets.bottom, 10),
+            },
+          ]}
         >
           {sendErr ? (
             <View style={[styles.errBanner, { backgroundColor: theme.pink }]}>
@@ -1123,7 +1174,7 @@ export default function BotChatScreen() {
           </View>
         </View>
         </View>
-      </KeyboardAvoidingView>
+      </View>
 
       <Modal
         visible={detailOpen}
