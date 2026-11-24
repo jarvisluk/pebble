@@ -544,7 +544,7 @@ struct RootView: View {
     }
 
     private func handleDeepLink(_ url: URL) {
-        guard url.scheme?.lowercased() == "bothub" else { return }
+        guard let scheme = url.scheme?.lowercased(), scheme == "pebble" || scheme == "bothub" else { return }
         let host = (url.host ?? "").lowercased()
         let parts = url.pathComponents.filter { $0 != "/" }
         switch host {

@@ -1,4 +1,4 @@
-<h1 align="center">bot-hub</h1>
+<h1 align="center">Pebble</h1>
 
 <p align="center"><b>A minimal personal bot orchestrator running locally on your computer.</b></p>
 
@@ -25,7 +25,7 @@
 
 ### Isolated workspaces, shared memory: `1 Bot = 1 Workspace = 1 Session`
 
-Mixing daily tasks, deep research, and ops checks in a single chat thread pollutes context fast. `bot-hub` gives every bot an isolated workspace on disk, one persistent session, and a dedicated serial lane (`botLane`): messages from the Web UI, schedules, or other bots run in order without stepping on each other, and any running turn can be interrupted on the spot.
+Mixing daily tasks, deep research, and ops checks in a single chat thread pollutes context fast. `pebble` gives every bot an isolated workspace on disk, one persistent session, and a dedicated serial lane (`botLane`): messages from the Web UI, schedules, or other bots run in order without stepping on each other, and any running turn can be interrupted on the spot.
 
 Every workspace also symlinks a shared `_shared/` folder while keeping its own `memory/` directory. Write your preferences once in `_shared/USER.md` and every bot reads them; save ongoing decisions in `memory/` and they survive even when a session is reset.
 
@@ -33,19 +33,20 @@ Every workspace also symlinks a shared `_shared/` folder while keeping its own `
 <summary><b>On disk:</b> how workspaces, memory, and state are laid out</summary>
 
 ```text
-bot-hub/
+pebble/
 ├── config/bots.json              # Bot roster, model access & schedules (keeps ${VAR} refs)
 ├── state/
 │   ├── hub.db                    # SQLite store (active + archived sessions, FTS5 message search)
 │   ├── sessions.json             # Legacy session snapshot (auto-imported on first run)
 │   └── messages/                 # Legacy JSONL chat logs (kept read-only after import)
 └── workspaces/
-    ├── _shared/                  # Global context (USER.md + hub-managed BOT_HUB.md)
+    ├── _shared/                  # Global context (USER.md + hub-managed PEBBLE.md)
     └── assistant/                # Dedicated workspace for one bot
         ├── AGENTS.md             # Role definition and workspace rules
         ├── memory/               # Durable local notes (complemented by Magpie Memory)
         ├── _shared -> ../_shared # Automatic symlink to shared context
-        └── opencode.json         # Auto-wired local bot-hub MCP & BOT_HUB.md instructions
+        ├── .agents/skills/pebble-setup/SKILL.md # Managed Pebble setup/CLI skill
+        └── opencode.json         # Auto-wired local pebble MCP & PEBBLE.md instructions
 ```
 
 Resetting a bot (`POST /api/bots/{id}/reset` or `/reset`) archives the current session into `state/hub.db` so a clean session starts while `AGENTS.md`, `memory/`, workspace files, and sliced session recall remain intact.
@@ -54,12 +55,12 @@ Resetting a bot (`POST /api/bots/{id}/reset` or `/reset`) archives the current s
 
 ### Self-organizing bots: Spin up specialists and delegate work
 
-Every bot automatically receives the built-in `bot-hub mcp` server (stdio JSON-RPC 2.0). When a task goes beyond one bot's role, it can inspect existing teammates, hot-create a new persistent specialist bot with its own workspace and instructions, or message another bot directly and wait for its answer.
+Every bot automatically receives the built-in `pebble mcp` server (stdio JSON-RPC 2.0). When a task goes beyond one bot's role, it can inspect existing teammates, hot-create a new persistent specialist bot with its own workspace and instructions, or message another bot directly and wait for its answer.
 
 Bot-to-bot calls enforce `hop <= 4` loop protection and appear live in **both** bots' chat timelines. You can also delegate directly from any chat input with `/ask <bot> <message>`.
 
 <details>
-<summary><b>MCP core tools &amp; full CLI:</b> 6 runtime MCP primitives + full <code>bot-hub</code> CLI</summary>
+<summary><b>MCP core tools &amp; full CLI:</b> runtime MCP primitives + full <code>pebble</code> CLI</summary>
 
 <table>
   <tr>
@@ -92,7 +93,7 @@ Bot-to-bot calls enforce `hop <= 4` loop protection and appear live in **both** 
   </tr>
 </table>
 
-<p><b>Full <code>bot-hub</code> CLI</b> (auto-detects current bot context from env or workspace MCP config, outputs JSON): <code>bot-hub bot list|get|create|update|delete|message</code>, <code>bot-hub session list|recall|rotate</code>, <code>bot-hub routine list|upsert|delete|run</code>, <code>bot-hub node list|exec|file</code>, <code>bot-hub desktop task|takeover</code>.</p>
+<p><b>Full <code>pebble</code> CLI</b> (auto-detects current bot context from env or workspace MCP config, outputs JSON): <code>pebble bot list|get|create|update|delete|message|send</code>, <code>pebble settings get|models|set</code>, <code>pebble session list|recall|rotate</code>, <code>pebble routine list|upsert|delete|run</code>, <code>pebble node list|exec|file</code>, <code>pebble desktop targets|task|takeover|setup|power</code>.</p>
 
 <p>For GUI and web automation, bots call <code>agent-desktop</code> and <code>agent-browser</code> directly via shell (or via <code>node_exec</code> on remote nodes), preferring <code>agent-browser --auto-connect --pin-tab</code> to attach to the running Chromium browser before falling back to headless or headed isolated profiles.</p>
 
@@ -100,7 +101,7 @@ Bot-to-bot calls enforce `hop <= 4` loop protection and appear live in **both** 
 
 ### Bring your own harness: OpenCode, Claude Code, Pi or DeepSeek
 
-`bot-hub` does not lock you into a custom agent loop or provider SDK. Different bots in the same hub can run on different harnesses side by side, with two `modelAccess` modes switchable straight from the Web UI:
+`pebble` does not lock you into a custom agent loop or provider SDK. Different bots in the same hub can run on different harnesses side by side, with two `modelAccess` modes switchable straight from the Web UI:
 
 - **Magpie gateway (`magpie`, default):** Shares [Magpie](https://usemagpie.ai)'s local model catalog, routing rules, and quota fallback across harnesses, with one-click CLI binding from the settings panel.
 - **Native CLI config (`self`):** Leaves global CLI configs untouched so each runtime uses its own subscription or API keys as-is.
@@ -112,7 +113,7 @@ Bot-to-bot calls enforce `hop <= 4` loop protection and appear live in **both** 
   <tr>
     <th align="left" width="120">Harness</th>
     <th align="left" width="180">Runtime</th>
-    <th align="left" width="400">How bot-hub drives it</th>
+    <th align="left" width="400">How Pebble drives it</th>
   </tr>
   <tr>
     <td><code>opencode</code></td>
@@ -151,8 +152,8 @@ Bots do not just wait in a browser tab. Built-in `schedules` wake a bot up at a 
   "http": {
     "host": "127.0.0.1",
     "port": 3789,
-    "apiToken": "${BOT_HUB_API_TOKEN}",
-    "webhookSecret": "${BOT_HUB_WEBHOOK_SECRET}",
+    "apiToken": "${PEBBLE_API_TOKEN}",
+    "webhookSecret": "${PEBBLE_WEBHOOK_SECRET}",
     "tailcat": { "enabled": false }
   },
   "bots": [
@@ -181,9 +182,9 @@ Bots do not just wait in a browser tab. Built-in `schedules` wake a bot up at a 
 ### More features
 
 - **Account-free remote access (Tailcat):** Built-in [tailcat](https://github.com/tailscale/tailcat) punches through NAT over WireGuard + DERP without a Tailscale account, login, or system-wide VPN on either machine. Open **远程访问** in the Web UI to copy the `tailcat://` link or scan the QR code.
-- **Native desktop app (Wails):** Lives in the system menu bar / tray and switches cleanly between **Run on this computer** and **Connect to remote Bot Hub**.
+- **Native desktop app:** Lives in the system menu bar / tray and switches cleanly between **Run on this computer** and **Connect to remote Pebble**.
 - **Single-file embedded Web UI:** Ships inside the binary (`internal/web/index.html`) with zero frontend frameworks, CDNs, or web fonts—instant to load offline or over a tunnel, with light and pure-black dark modes, live SSE streaming, tool-call indicators, and slash commands (`/status`, `/reset`, `/bots`, `/ask`).
-- **Terminal CLI & cost tracking:** Chat directly from a shell with `bot-hub chat` and track per-bot session turns, latency, and cumulative USD cost with `bot-hub status`.
+- **Terminal CLI & cost tracking:** Chat directly from a shell with `pebble chat` and track per-bot session turns, latency, and cumulative USD cost with `pebble status`.
 
 ## Quick start
 
@@ -194,29 +195,29 @@ You need **Go** and at least one supported agent CLI on `PATH` (`opencode` by de
 Best for running the hub on your workstation, Mac mini, or home server:
 
 ```bash
-# 1. Build bin/bot-hub
+# 1. Build bin/pebble (with bin/bot-hub compatibility symlink)
 make build
 
 # 2. (Optional) Create your local config from the example
 cp config/bots.example.json config/bots.json
 
 # 3. Start Web UI, HTTP/SSE API, and scheduler
-./bin/bot-hub serve
+./bin/pebble serve
 ```
 
 Open <http://127.0.0.1:3789> in your browser. To chat or inspect sessions straight from the terminal:
 
 ```bash
-./bin/bot-hub chat assistant
-./bin/bot-hub status
+./bin/pebble chat assistant
+./bin/pebble status
 ```
 
 ### Option 2: the desktop app
 
-Best for everyday single-machine use, or as a native window connected to a remote `bot-hub`:
+Best for everyday single-machine use, or as a native window connected to a remote `pebble` hub:
 
 ```bash
-# macOS: build ad-hoc signed bin/Bot Hub.app (bundles agent-desktop, agent-browser, and optional bot-host into Contents/Resources/bin)
+# macOS: build ad-hoc signed bin/Pebble.app (bundles agent-desktop, agent-browser, and optional bot-host into Contents/Resources/bin)
 make app
 
 # Other platforms: build native bin/bot-hub-desktop binary
@@ -226,18 +227,18 @@ make desktop
 On macOS, the desktop app keeps system `PATH` binaries first and appends `Contents/Resources/bin` as a self-contained fallback, while automatically pointing `AGENT_BROWSER_EXECUTABLE_PATH` at your default Chromium browser (Edge/Chrome/Brave/Arc) when unset. On first launch, pick how this computer should run (you can switch anytime from the menu bar icon):
 
 1. **Run locally:** Initializes `config/bots.json`, `state/`, and `workspaces/` under your OS user config directory and starts the hub in-process.
-2. **Connect to a remote Bot Hub:** Paste a `tailcat://` link from another machine—no Tailscale installation required.
+2. **Connect to a remote Pebble:** Paste a `tailcat://` link from another machine—no Tailscale installation required.
 
 ### Option 3: remote access over Tailcat
 
-To reach a `bot-hub` running at home or in the office from your laptop:
+To reach a `pebble` hub running at home or in the office from your laptop:
 
-1. Set `BOT_HUB_API_TOKEN` and `"tailcat": { "enabled": true }` on the server, then start `./bin/bot-hub serve`.
+1. Set `PEBBLE_API_TOKEN` and `"tailcat": { "enabled": true }` on the server, then start `./bin/pebble serve`.
 2. Click **远程访问** in the server's Web UI and copy the `tailcat://connect/...` link.
 3. Paste the link into the Desktop App on your second machine, or forward it to a local port via CLI:
 
 ```bash
-./bin/bot-hub connect '<tailcat-link>'
+./bin/pebble connect '<tailcat-link>'
 # Open http://127.0.0.1:3790 in your browser
 ```
 
@@ -247,11 +248,11 @@ To reach a `bot-hub` running at home or in the office from your laptop:
 
 | Command | Description |
 | --- | --- |
-| `bot-hub serve [-config path]` | Start Web UI, HTTP/SSE API, and scheduler |
-| `bot-hub chat [-config path] [bot]` | Interactive terminal chat (`/status`, `/reset`, `/bots`, `/ask`, `/exit`) |
-| `bot-hub status [-config path]` | Show configured bots, workspaces, and persisted session stats |
-| `bot-hub connect [-listen addr] <link>` | Expose a remote `bot-hub` over Tailcat on a local address (default `127.0.0.1:3790`) |
-| `bot-hub mcp [--hub-url url] [--bot-id id]` | Run stdio MCP server (auto-wired into bots by the hub) |
+| `pebble serve [-config path]` | Start Web UI, HTTP/SSE API, and scheduler |
+| `pebble chat [-config path] [bot]` | Interactive terminal chat (`/status`, `/reset`, `/bots`, `/ask`, `/exit`) |
+| `pebble status [-config path]` | Show configured bots, workspaces, and persisted session stats |
+| `pebble connect [-listen addr] <link>` | Expose a remote Pebble hub over Tailcat on a local address (default `127.0.0.1:3790`) |
+| `pebble mcp [--hub-url url] [--bot-id id]` | Run stdio MCP server (auto-wired into bots by the hub) |
 
 ### HTTP / SSE API (listens on `127.0.0.1:3789` by default)
 
@@ -306,13 +307,13 @@ To reach a `bot-hub` running at home or in the office from your laptop:
 ## Security
 
 - **CSRF & DNS-rebinding protection:** Every request checks `Origin` and rejects cross-origin calls; when bound to a loopback address, the server also validates `Host` against loopback names.
-- **API token enforcement:** When `http.apiToken` (e.g. `${BOT_HUB_API_TOKEN}`) is set, `/api/*` requires `Authorization: Bearer <token>` or a `SameSite=Strict`, `HttpOnly` login cookie. Binding to a non-loopback `host` without `http.apiToken` refuses to start. Bots' `bot-hub mcp` subprocesses receive the token automatically.
+- **API token enforcement:** When `http.apiToken` (e.g. `${PEBBLE_API_TOKEN}`) is set, `/api/*` requires `Authorization: Bearer <token>` or a `SameSite=Strict`, `HttpOnly` login cookie. Binding to a non-loopback `host` without `http.apiToken` refuses to start. Bots' `pebble mcp` subprocesses receive the token automatically.
 - **Authenticated Tailcat tunnel:** Enabling `http.tailcat.enabled` requires `http.apiToken`, and every tunneled request must present the token. The `tailcat://` link embeds the server identity key—share it only with your own devices; delete `state/tailcat-identity.json` and restart to revoke old links immediately. Tailscale's public DERP map is used by default, or point `derpMapURL` at a self-hosted DERP server.
 - **Webhook & secret hygiene:** `http.webhookSecret` is verified in constant time on `/hooks/{id}`. Creating or updating bots rewrites `config/bots.json` from the unexpanded source so `${VAR}` references never turn into plaintext secrets on disk.
 
 ## Acknowledgements
 
-`bot-hub` builds on these projects:
+`Pebble` builds on these projects:
 
 - **[OpenCode](https://opencode.ai)**, **Claude Code**, **Pi**, and **DeepSeek Harness:** The agent runtimes that execute tools and turns inside each workspace.
 - **[Magpie](https://usemagpie.ai):** Local model gateway providing a unified model catalog, routing rules, and quota fallback across CLIs.

@@ -1,4 +1,4 @@
-<h1 align="center">bot-hub</h1>
+<h1 align="center">Pebble</h1>
 
 <p align="center"><b>运行在你自己电脑上的极简个人 Bot 编排底座。</b></p>
 
@@ -25,7 +25,7 @@
 
 ### 隔离工作区与共享记忆：`1 Bot = 1 Workspace = 1 Session`
 
-把日常杂事、深度调研、运维巡检塞进同一个聊天窗口，上下文很快就会腐化。`bot-hub` 为每个 Bot 分配独立的磁盘工作区、唯一的长期会话与专属串行队列（`botLane`）：同一时刻来自网页、定时任务或其他 Bot 的请求按序执行，支持随时中断当前轮次。
+把日常杂事、深度调研、运维巡检塞进同一个聊天窗口，上下文很快就会腐化。`pebble` 为每个 Bot 分配独立的磁盘工作区、唯一的长期会话与专属串行队列（`botLane`）：同一时刻来自网页、定时任务或其他 Bot 的请求按序执行，支持随时中断当前轮次。
 
 与此同时，每个工作区自动软链 `_shared/` 公共目录并维护各自的 `memory/`：在 `_shared/USER.md` 写一次全局偏好，所有 Bot 都能读到；把关键结论沉淀进 `memory/`，即使重置会话（`/reset`）也不会丢失长期记忆。
 
@@ -33,19 +33,20 @@
 <summary><b>工作区布局：</b>每个 Bot 在磁盘上的目录结构与生命周期</summary>
 
 ```text
-bot-hub/
+pebble/
 ├── config/bots.json              # Bot 列表、模型接入与定时规则（保留 ${VAR} 引用）
 ├── state/
 │   ├── hub.db                    # 单文件 SQLite 状态库（会话归档与 FTS5 检索）
 │   ├── sessions.json             # 历史兼容会话快照（首次启动自动导入 hub.db）
 │   └── messages/                 # 历史兼容 JSONL 记录（导入后保持只读）
 └── workspaces/
-    ├── _shared/                  # 共享全局上下文（USER.md 与托管版 BOT_HUB.md）
+    ├── _shared/                  # 共享全局上下文（USER.md 与托管版 PEBBLE.md）
     └── assistant/                # 单个 Bot 的专属工作区
         ├── AGENTS.md             # 该 Bot 的角色定义与行为边界
         ├── memory/               # 本地笔记（配合 Magpie Memory 使用）
         ├── _shared -> ../_shared # 自动创建的共享目录软链
-        └── opencode.json         # 自动注入的 bot-hub MCP 与 BOT_HUB.md 指令
+        ├── .agents/skills/pebble-setup/SKILL.md # 自动下发的 Pebble 接口与配置 Skill
+        └── opencode.json         # 自动注入的 pebble MCP 与 PEBBLE.md 指令
 ```
 
 调用 `POST /api/bots/{id}/reset` 或发送 `/reset` 时，会将当前会话归档进 `state/hub.db` 并开启干净的新会话；工作区文件、`AGENTS.md`、`memory/` 与历史会话切片召回均保留。
@@ -54,12 +55,12 @@ bot-hub/
 
 ### 多 Bot 自治与协作：一句话拉起新成员，跨 Bot 委派任务
 
-每个 Bot 启动时都会自动挂载内置的 `bot-hub mcp`（stdio JSON-RPC 2.0）工具集。当一项任务超出单个 Bot 的职责范围时，它可以查看现有团队成员、热创建一个具备专属指令与模型的新 Bot，或直接向另一个 Bot 发消息请求协助。
+每个 Bot 启动时都会自动挂载内置的 `pebble mcp`（stdio JSON-RPC 2.0）工具集。当一项任务超出单个 Bot 的职责范围时，它可以查看现有团队成员、热创建一个具备专属指令与模型的新 Bot，或直接向另一个 Bot 发消息请求协助。
 
 跨 Bot 调用自带 `hop <= 4` 防死循环保护，且双方的聊天时间线都会实时展示协作记录；你也可以在对话框里直接用 `/ask <bot> <消息>` 点名协作。
 
 <details>
-<summary><b>MCP 核心工具与全量 CLI：</b>6 个运行时 MCP 原语 + 全量 <code>bot-hub</code> CLI</summary>
+<summary><b>MCP 核心工具与全量 CLI：</b>运行时 MCP 原语 + 全量 <code>pebble</code> CLI</summary>
 
 <table>
   <tr>
@@ -92,21 +93,21 @@ bot-hub/
   </tr>
 </table>
 
-<p><b>全量 <code>bot-hub</code> CLI</b>（自动从环境变量或工作区 MCP 配置识别当前 Bot 上下文，输出 JSON）：<code>bot-hub bot list|get|create|update|delete|message</code>、<code>bot-hub session list|recall|rotate</code>、<code>bot-hub routine list|upsert|delete|run</code>、<code>bot-hub node list|exec|file</code>、<code>bot-hub desktop task|takeover</code>。</p>
+<p><b>全量 <code>pebble</code> CLI</b>（自动从环境变量或工作区 MCP 配置识别当前 Bot 上下文，输出 JSON）：<code>pebble bot list|get|create|update|delete|message|send</code>、<code>pebble settings get|models|set</code>、<code>pebble session list|recall|rotate</code>、<code>pebble routine list|upsert|delete|run</code>、<code>pebble node list|exec|file</code>、<code>pebble desktop targets|task|takeover|setup|power</code>。</p>
 
-<p>桌面与网页自动化直接复用 <code>agent-desktop</code> 与 <code>agent-browser</code> CLI（远端设备经 <code>node_exec</code> 调用）：浏览器优先用 <code>agent-browser --auto-connect --pin-tab</code> 接管正在运行的 Chromium 标签页，连不上时按需回退到无头模式或 <code>--headed --profile ~/.bot-hub/browser/&lt;bot-id&gt;</code>。</p>
+<p>桌面与网页自动化直接复用 <code>agent-desktop</code> 与 <code>agent-browser</code> CLI（远端设备经 <code>node_exec</code> 调用）：浏览器优先用 <code>agent-browser --auto-connect --pin-tab</code> 接管正在运行的 Chromium 标签页，连不上时按需回退到无头模式或 <code>--headed --profile ~/.pebble/browsers/&lt;bot-id&gt;</code>。</p>
 
 </details>
 
 ### 自带运行时（BYO Harness）与模型网关
 
-`bot-hub` 不重复造 Agent Loop，而是直接编排你机器上最成熟的 Agent CLI。同一个 Hub 内的不同 Bot 可以混用不同运行时，并支持在 Web UI 设置面板中切换两种模型接入模式（`modelAccess`）：
+`pebble` 不重复造 Agent Loop，而是直接编排你机器上最成熟的 Agent CLI。同一个 Hub 内的不同 Bot 可以混用不同运行时，并支持在 Web UI 设置面板中切换两种模型接入模式（`modelAccess`）：
 
 - **Magpie 网关模式（`magpie`，默认）**：复用本机 [Magpie](https://usemagpie.ai) 的模型目录、路由策略与配额 Fallback，支持在界面内一键将各 Harness 绑定到网关。
 - **自有配置模式（`self`）**：不改动任何全局配置，直接沿用各 CLI 自身的订阅账号或 API Key。
 
 <details>
-<summary><b>运行时一览：</b>内置支持的 4 种执行后端与通信机制</summary>
+<summary><b>运行时一览：</b>内置支持的执行后端与通信机制</summary>
 
 <table>
   <tr>
@@ -151,8 +152,8 @@ Bot 不必只在浏览器标签页里被动等待输入。通过内置调度器�
   "http": {
     "host": "127.0.0.1",
     "port": 3789,
-    "apiToken": "${BOT_HUB_API_TOKEN}",
-    "webhookSecret": "${BOT_HUB_WEBHOOK_SECRET}",
+    "apiToken": "${PEBBLE_API_TOKEN}",
+    "webhookSecret": "${PEBBLE_WEBHOOK_SECRET}",
     "tailcat": { "enabled": false }
   },
   "bots": [
@@ -181,9 +182,9 @@ Bot 不必只在浏览器标签页里被动等待输入。通过内置调度器�
 ### 更多特性
 
 - **零账号远程访问（Tailcat）**：内置 [tailcat](https://github.com/tailscale/tailcat)，经 WireGuard 与 DERP 中继打洞直连，服务端与客户端均无需注册 Tailscale 账号或开启系统 VPN。点开 Web UI 左上角「远程访问」扫码或复制 `tailcat://` 链接即可在另一台电脑连接。
-- **原生桌面应用（Wails）**：提供系统菜单栏常驻应用，支持**在这台电脑上运行**与**连接远端 Bot Hub** 两种模式随时切换。
+- **原生桌面应用**：提供系统菜单栏常驻应用，支持**在这台电脑上运行**与**连接远端 Pebble** 两种模式随时切换。
 - **单文件零依赖 Web UI**：整个前端内嵌于单个 `internal/web/index.html`，无框架、无 CDN、无外部 Web 字体，离线与隧道环境秒开；自适应浅色与纯黑深色模式，支持实时流式输出、工具调用提示与快捷指令（`/status`、`/reset`、`/bots`、`/ask`）。
-- **终端交互与用量统计**：支持 `bot-hub chat` 终端直连对话与 `bot-hub status` 状态巡检，持久化记录每个会话的轮次数、耗时与累计成本。
+- **终端交互与用量统计**：支持 `pebble chat` 终端直连对话与 `pebble status` 状态巡检，持久化记录每个会话的轮次数、耗时与累计成本。
 
 ## 快速开始
 
@@ -194,29 +195,29 @@ Bot 不必只在浏览器标签页里被动等待输入。通过内置调度器�
 适合在本机或常驻主机（如 Mac mini、家庭服务器）上运行完整 Hub：
 
 ```bash
-# 1. 编译二进制到 bin/bot-hub
+# 1. 编译二进制到 bin/pebble（并自动创建 bin/bot-hub 兼容软链）
 make build
 
 # 2. （可选）从模板准备自己的配置与环境变量
 cp config/bots.example.json config/bots.json
 
 # 3. 启动 Web UI、HTTP/SSE API 与定时调度器
-./bin/bot-hub serve
+./bin/pebble serve
 ```
 
 打开浏览器访问 <http://127.0.0.1:3789>。如果只想在终端快速试聊或查看状态：
 
 ```bash
-./bin/bot-hub chat assistant
-./bin/bot-hub status
+./bin/pebble chat assistant
+./bin/pebble status
 ```
 
 ### 方式二：桌面应用
 
-适合日常在单机使用，或作为轻量客户端连接另一台主机上的 `bot-hub`：
+适合日常在单机使用，或作为轻量客户端连接另一台主机上的 `pebble`：
 
 ```bash
-# macOS：构建签名后的 bin/Bot Hub.app（自动将 agent-desktop、agent-browser 与可选 bot-host 打入 Contents/Resources/bin）
+# macOS：构建签名后的 bin/Pebble.app（自动将 pebble、agent-desktop、agent-browser 与可选 bot-host 打入 Contents/Resources/bin）
 make app
 
 # 其他平台：构建原生桌面可执行文件 bin/bot-hub-desktop
@@ -226,18 +227,18 @@ make desktop
 macOS 桌面端采用「系统 `PATH` 优先、App 内置 `Contents/Resources/bin` 兜底」的混合策略，并在未指定 `AGENT_BROWSER_EXECUTABLE_PATH` 时自动探测系统默认 Chromium 浏览器（Edge/Chrome/Brave/Arc）。首次打开桌面端时可选择工作模式（之后可随时从系统菜单栏图标「切换模式…」更改）：
 
 1. **在这台电脑上运行**：在系统用户配置目录自动初始化 `config/bots.json`、`state/` 与 `workspaces/` 并启动本机服务。
-2. **连接远端 Bot Hub**：粘贴远端主机生成的 `tailcat://` 链接直接打开聊天界面，无需安装 Tailscale 或配置端口转发。
+2. **连接远端 Pebble**：粘贴远端主机生成的 `tailcat://` 链接直接打开聊天界面，无需安装 Tailscale 或配置端口转发。
 
 ### 方式三：跨设备远程连接（Tailcat）
 
-当 `bot-hub` 运行在家中或办公室主机上，需要在外出笔记本上访问时：
+当 `pebble` 运行在家中或办公室主机上，需要在外出笔记本上访问时：
 
-1. 在服务端配置 `BOT_HUB_API_TOKEN` 并将 `http.tailcat.enabled` 设为 `true`，启动 `./bin/bot-hub serve`。
+1. 在服务端配置 `PEBBLE_API_TOKEN` 并将 `http.tailcat.enabled` 设为 `true`，启动 `./bin/pebble serve`。
 2. 在服务端 Web UI 左上角点开「远程访问」，复制 `tailcat://connect/...` 链接。
-3. 在另一台电脑使用桌面应用的「连接远端 Bot Hub」，或直接运行 CLI 在本地端口打开：
+3. 在另一台电脑使用桌面应用的「连接远端 Pebble」，或直接运行 CLI 在本地端口打开：
 
 ```bash
-./bin/bot-hub connect '<tailcat-link>'
+./bin/pebble connect '<tailcat-link>'
 # 连接成功后在浏览器打开 http://127.0.0.1:3790
 ```
 
@@ -247,11 +248,11 @@ macOS 桌面端采用「系统 `PATH` 优先、App 内置 `Contents/Resources/bi
 
 | 命令 | 说明 |
 | --- | --- |
-| `bot-hub serve [-config path]` | 启动内嵌 Web UI、HTTP/SSE API 与定时调度器 |
-| `bot-hub chat [-config path] [bot]` | 在终端与指定 Bot 交互对话（支持 `/status`、`/reset`、`/bots`、`/ask`、`/exit`） |
-| `bot-hub status [-config path]` | 查看所有已配置 Bot、工作区路径与持久化 Session 统计 |
-| `bot-hub connect [-listen addr] <link>` | 通过 Tailcat 链接将远端 `bot-hub` 映射到本地地址（默认 `127.0.0.1:3790`） |
-| `bot-hub mcp [--hub-url url] [--bot-id id]` | 启动 stdio MCP 服务（由 Hub 自动为各 Bot 挂载，一般无需手动运行） |
+| `pebble serve [-config path]` | 启动内嵌 Web UI、HTTP/SSE API 与定时调度器 |
+| `pebble chat [-config path] [bot]` | 在终端与指定 Bot 交互对话（支持 `/status`、`/reset`、`/bots`、`/ask`、`/exit`） |
+| `pebble status [-config path]` | 查看所有已配置 Bot、工作区路径与持久化 Session 统计 |
+| `pebble connect [-listen addr] <link>` | 通过 Tailcat 链接将远端 `pebble` 映射到本地地址（默认 `127.0.0.1:3790`） |
+| `pebble mcp [--hub-url url] [--bot-id id]` | 启动 stdio MCP 服务（由 Hub 自动为各 Bot 挂载，一般无需手动运行） |
 
 ### HTTP / SSE API（默认仅监听 `127.0.0.1:3789`）
 
@@ -301,13 +302,13 @@ macOS 桌面端采用「系统 `PATH` 优先、App 内置 `Contents/Resources/bi
 ## 安全
 
 - **防跨站与防重绑定**：所有请求校验 `Origin`，拒绝跨站请求（防 CSRF）；仅监听回环地址时同时校验 `Host`（防 DNS rebinding）。
-- **令牌强校验**：`http.apiToken`（如 `${BOT_HUB_API_TOKEN}`）启用后，`/api/*` 需要 `Authorization: Bearer <token>` 或 `SameSite=Strict` 的 `HttpOnly` 登录 Cookie；当 `host` 不是回环地址时必须设置 `apiToken`，否则拒绝启动。Bot 内的 `bot-hub mcp` 会自动携带令牌。
+- **令牌强校验**：`http.apiToken`（如 `${PEBBLE_API_TOKEN}`）启用后，`/api/*` 需要 `Authorization: Bearer <token>` 或 `SameSite=Strict` 的 `HttpOnly` 登录 Cookie；当 `host` 不是回环地址时必须设置 `apiToken`，否则拒绝启动。Bot 内的 `pebble mcp` 会自动携带令牌。
 - **Tailcat 隧道鉴权**：启用 `http.tailcat.enabled` 必须配合 `http.apiToken`，经隧道进入的所有请求一律强制校验令牌。连接链接内含服务端身份密钥，只应发给自己的设备；删除 `state/tailcat-identity.json` 并重启服务即可立即作废旧链接。默认使用 Tailscale 公共 DERP，也可通过 `derpMapURL` 指向自建 DERP。
 - **Webhook 签名与密钥保护**：配置 `http.webhookSecret` 后，`/hooks/{id}` 采用常量时间比对校验密钥；新建或修改 Bot 写回 `config/bots.json` 时始终保留原始 `${VAR}` 引用，密钥绝不以明文落盘。
 
 ## 致谢
 
-`bot-hub` 站在以下优秀开源项目与工具之上构建：
+`Pebble` 站在以下优秀开源项目与工具之上构建：
 
 - **[OpenCode](https://opencode.ai)**、**Claude Code**、**Pi** 与 **DeepSeek Harness**：提供强大的本地 Agent Loop 与工具执行能力。
 - **[Magpie](https://usemagpie.ai)**：统一本地模型网关、多订阅路由与配额自动回退。

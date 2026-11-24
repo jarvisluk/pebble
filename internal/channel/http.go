@@ -17,6 +17,7 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -171,6 +172,7 @@ func NewHTTPServer(h *hub.Hub, cfg config.HTTPConfig) *HTTPServer {
 	mux.HandleFunc("GET /api/bots/{id}/routine-runs", s.handleListRoutineRuns)
 	mux.HandleFunc("GET /api/settings", s.handleSettings)
 	mux.HandleFunc("PUT /api/settings", s.handlePutSettings)
+	mux.HandleFunc("PATCH /api/settings", s.handlePutSettings)
 	mux.HandleFunc("POST /api/desktop/reset", s.handleDesktopReset)
 	mux.HandleFunc("POST /api/push/register", s.handlePushRegister)
 	mux.HandleFunc("POST /api/push/activity-token", s.handlePushActivityToken)
@@ -476,11 +478,27 @@ func (s *HTTPServer) handleStatus(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
+func queryBool(r *http.Request, name string) bool {
+	if r == nil || r.URL == nil {
+		return false
+	}
+	v := strings.TrimSpace(r.URL.Query().Get(name))
+	return v == "1" || strings.EqualFold(v, "true")
+}
+
 func (s *HTTPServer) handleCreateBot(w http.ResponseWriter, r *http.Request) {
 	var req hub.CreateBotRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json body"})
 		return
+	}
+	if queryBool(r, "validate") {
+		vctx, vcancel := context.WithTimeout(r.Context(), 30*time.Second)
+		defer vcancel()
+		if err := s.hub.ValidateCreateBot(vctx, req, true); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
 	}
 	st, err := s.hub.CreateBot(req)
 	if err != nil {
@@ -992,7 +1010,27 @@ func (s *HTTPServer) handleUpdateBot(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json body"})
 		return
 	}
-	st, err := s.hub.UpdateBot(r.PathValue("id"), upd)
+	botID := r.PathValue("id")
+	validate := queryBool(r, "validate")
+	dryRun := queryBool(r, "dryRun")
+	if validate || dryRun {
+		vctx, vcancel := context.WithTimeout(r.Context(), 30*time.Second)
+		defer vcancel()
+		preview, err := s.hub.ValidateBotUpdate(vctx, botID, upd, validate)
+		if err != nil {
+			status := http.StatusBadRequest
+			if errors.Is(err, hub.ErrBotNotFound) {
+				status = http.StatusNotFound
+			}
+			writeJSON(w, status, map[string]any{"error": err.Error()})
+			return
+		}
+		if dryRun {
+			writeJSON(w, http.StatusOK, preview)
+			return
+		}
+	}
+	st, err := s.hub.UpdateBot(botID, upd)
 	if err != nil {
 		status := http.StatusBadRequest
 		if errors.Is(err, hub.ErrBotNotFound) {
@@ -1029,6 +1067,7 @@ type settingsBody struct {
 	DefaultHarness      *string           `json:"defaultHarness,omitempty"`
 	DefaultModel        *string           `json:"defaultModel,omitempty"`
 	DefaultModels       map[string]string `json:"defaultModels,omitempty"`
+	DefaultModelsPatch  map[string]string `json:"defaultModelsPatch,omitempty"`
 	DesktopHarness      *string           `json:"desktopHarness,omitempty"`
 	DesktopModel        *string           `json:"desktopModel,omitempty"`
 	SharedUserMD        *string           `json:"sharedUserMd,omitempty"`
@@ -1126,21 +1165,199 @@ func (s *HTTPServer) handleSettings(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func sortedMapKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
 func (s *HTTPServer) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	var body settingsBody
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json body"})
 		return
 	}
+	if body.DefaultModels != nil && body.DefaultModelsPatch != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "cannot specify both defaultModels and defaultModelsPatch"})
+		return
+	}
+
+	curDefaultHarness := s.hub.DefaultHarness()
+	nextDefaultHarness := curDefaultHarness
+	if body.DefaultHarness != nil {
+		trimmed := strings.TrimSpace(*body.DefaultHarness)
+		if trimmed != "" {
+			if err := s.hub.ValidateHarnessKey(trimmed); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+				return
+			}
+			nextDefaultHarness = trimmed
+		} else {
+			nextDefaultHarness = "opencode"
+		}
+	}
+
+	curDefaultModel, curPerHarness := s.hub.DefaultModelsSnapshot()
+	nextDefaultModel := curDefaultModel
+	if body.DefaultModel != nil {
+		nextDefaultModel = strings.TrimSpace(*body.DefaultModel)
+		if err := config.ValidateModelID(nextDefaultModel); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
+	}
+
+	nextPerHarness := make(map[string]string, len(curPerHarness))
+	for k, v := range curPerHarness {
+		nextPerHarness[k] = v
+	}
+	if body.DefaultModels != nil {
+		nextPerHarness = make(map[string]string, len(body.DefaultModels))
+		for _, k := range sortedMapKeys(body.DefaultModels) {
+			v := strings.TrimSpace(body.DefaultModels[k])
+			if v == "" {
+				continue
+			}
+			if err := s.hub.ValidateHarnessKey(k); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+				return
+			}
+			if err := config.ValidateModelID(v); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+				return
+			}
+			nextPerHarness[k] = v
+		}
+	} else if body.DefaultModelsPatch != nil {
+		for _, rawK := range sortedMapKeys(body.DefaultModelsPatch) {
+			k := strings.TrimSpace(rawK)
+			if err := s.hub.ValidateHarnessKey(k); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+				return
+			}
+			v := strings.TrimSpace(body.DefaultModelsPatch[rawK])
+			if err := config.ValidateModelID(v); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+				return
+			}
+			if v == "" {
+				delete(nextPerHarness, k)
+			} else {
+				nextPerHarness[k] = v
+			}
+		}
+	}
+
+	curDeskHarness, curDeskModel := s.hub.DesktopWorkerSnapshot()
+	nextDeskHarness, nextDeskModel := curDeskHarness, curDeskModel
+	if body.DesktopHarness != nil {
+		nextDeskHarness = strings.TrimSpace(*body.DesktopHarness)
+		if nextDeskHarness != "" {
+			if err := s.hub.ValidateHarnessKey(nextDeskHarness); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+				return
+			}
+		}
+	}
+	if body.DesktopModel != nil {
+		nextDeskModel = strings.TrimSpace(*body.DesktopModel)
+		if err := config.ValidateModelID(nextDeskModel); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
+	}
+	if body.MagpieWebURL != nil {
+		if _, err := hub.ValidateMagpieWebURL(*body.MagpieWebURL); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
+	}
+
+	if queryBool(r, "validate") {
+		vctx, vcancel := context.WithTimeout(r.Context(), 30*time.Second)
+		defer vcancel()
+		if body.DefaultHarness != nil && strings.TrimSpace(*body.DefaultHarness) != "" {
+			if err := s.hub.ValidateHarnessReady(vctx, nextDefaultHarness); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+				return
+			}
+		}
+		if body.DefaultModel != nil && nextDefaultModel != "" {
+			if err := s.hub.ValidateGlobalDefaultModel(vctx, nextDefaultHarness, nextDefaultModel); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+				return
+			}
+		}
+		if body.DefaultModelsPatch != nil {
+			for _, rawK := range sortedMapKeys(body.DefaultModelsPatch) {
+				k := strings.TrimSpace(rawK)
+				v := strings.TrimSpace(body.DefaultModelsPatch[rawK])
+				if v == "" {
+					continue
+				}
+				if err := s.hub.ValidateHarnessReady(vctx, k); err != nil {
+					writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+					return
+				}
+				if err := s.hub.ValidateModelForHarness(vctx, k, v); err != nil {
+					writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+					return
+				}
+			}
+		} else if body.DefaultModels != nil {
+			for _, k := range sortedMapKeys(nextPerHarness) {
+				v := nextPerHarness[k]
+				if v == "" {
+					continue
+				}
+				if err := s.hub.ValidateHarnessReady(vctx, k); err != nil {
+					writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+					return
+				}
+				if err := s.hub.ValidateModelForHarness(vctx, k, v); err != nil {
+					writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+					return
+				}
+			}
+		}
+		if body.DesktopHarness != nil && nextDeskHarness != "" {
+			if err := s.hub.ValidateHarnessReady(vctx, nextDeskHarness); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+				return
+			}
+		}
+		desktopTargetChanged := nextDeskHarness != curDeskHarness || (nextDeskHarness == "" && nextDefaultHarness != curDefaultHarness)
+		if (body.DesktopModel != nil || desktopTargetChanged) && nextDeskModel != "" {
+			target := nextDeskHarness
+			if target == "" {
+				target = nextDefaultHarness
+			}
+			if err := s.hub.ValidateModelForHarness(vctx, target, nextDeskModel); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+				return
+			}
+		}
+	}
+
+	if queryBool(r, "dryRun") {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"dryRun":         true,
+			"valid":          true,
+			"defaultHarness": nextDefaultHarness,
+			"defaultModel":   nextDefaultModel,
+			"defaultModels":  nextPerHarness,
+			"desktopHarness": nextDeskHarness,
+			"desktopModel":   nextDeskModel,
+			"affectedBots":   s.hub.PreviewDefaultModelsImpact(nextDefaultModel, nextPerHarness),
+		})
+		return
+	}
+
 	if body.DesktopHarness != nil || body.DesktopModel != nil {
-		curHarness, curModel := s.hub.DesktopWorkerSnapshot()
-		if body.DesktopHarness != nil {
-			curHarness = *body.DesktopHarness
-		}
-		if body.DesktopModel != nil {
-			curModel = *body.DesktopModel
-		}
-		if err := s.hub.SetDesktopWorker(curHarness, curModel); err != nil {
+		if err := s.hub.SetDesktopWorker(nextDeskHarness, nextDeskModel); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
 			return
 		}
@@ -1151,15 +1368,8 @@ func (s *HTTPServer) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if body.DefaultModel != nil || body.DefaultModels != nil {
-		curDefault, curPerHarness := s.hub.DefaultModelsSnapshot()
-		if body.DefaultModel != nil {
-			curDefault = *body.DefaultModel
-		}
-		if body.DefaultModels != nil {
-			curPerHarness = body.DefaultModels
-		}
-		if err := s.hub.SetDefaultModels(curDefault, curPerHarness); err != nil {
+	if body.DefaultModel != nil || body.DefaultModels != nil || body.DefaultModelsPatch != nil {
+		if err := s.hub.SetDefaultModels(nextDefaultModel, nextPerHarness); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
 			return
 		}

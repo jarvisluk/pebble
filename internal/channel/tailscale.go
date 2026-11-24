@@ -60,7 +60,7 @@ func (s *HTTPServer) startTailscale(handler http.Handler) {
 	}
 	hostname := strings.TrimSpace(tc.Hostname)
 	if hostname == "" {
-		hostname = tunnel.DefaultTailscaleHostname("bothub")
+		hostname = tunnel.DefaultTailscaleHostname("pebble")
 	}
 	node := tunnel.NewTailscaleNode(tunnel.TailscaleOptions{
 		StateDir:   s.tailscaleStateDir(),

@@ -354,7 +354,7 @@ final class HubStore {
                     botId: botId,
                     title: botName,
                     body: preview.isEmpty ? L.t("newMessage") : preview,
-                    deepLink: "bothub://bot/\(botId)"
+                    deepLink: "pebble://bot/\(botId)"
                 )
             }
             #endif
@@ -456,7 +456,7 @@ final class HubStore {
                         botId: nil,
                         title: botName,
                         body: reason,
-                        deepLink: "bothub://desktop?target=\(enc(tgt))"
+                        deepLink: "pebble://desktop?target=\(enc(tgt))"
                     )
                 }
                 #endif

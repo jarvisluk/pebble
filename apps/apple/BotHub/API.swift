@@ -195,7 +195,7 @@ struct APIClient {
         if !(200..<300).contains(code) {
             throw HubError(message: "HTTP \(code)", status: code)
         }
-        let destDir = FileManager.default.temporaryDirectory.appendingPathComponent("bothub-files", isDirectory: true)
+        let destDir = FileManager.default.temporaryDirectory.appendingPathComponent("pebble-files", isDirectory: true)
         try FileManager.default.createDirectory(at: destDir, withIntermediateDirectories: true)
         let safeName = fileName.replacingOccurrences(of: "/", with: "_")
         let dest = destDir.appendingPathComponent(safeName)
@@ -393,7 +393,17 @@ enum SecureStore {
         guard let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
             return nil
         }
-        let dir = base.appendingPathComponent("bot-hub", isDirectory: true)
+        let pebbleDir = base.appendingPathComponent("pebble", isDirectory: true)
+        let legacyDir = base.appendingPathComponent("bot-hub", isDirectory: true)
+        var isDir: ObjCBool = false
+        let dir: URL
+        if FileManager.default.fileExists(atPath: pebbleDir.path, isDirectory: &isDir), isDir.boolValue {
+            dir = pebbleDir
+        } else if FileManager.default.fileExists(atPath: legacyDir.path, isDirectory: &isDir), isDir.boolValue {
+            dir = legacyDir
+        } else {
+            dir = pebbleDir
+        }
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         let safeKey = key.replacingOccurrences(of: "[^a-zA-Z0-9._-]", with: "_", options: .regularExpression)
         return dir.appendingPathComponent("apple-\(safeKey).json")

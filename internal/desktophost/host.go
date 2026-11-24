@@ -950,7 +950,7 @@ func (h *Host) TailscaleStart(ctx context.Context, authKey, controlURL string, o
 	if existing == nil {
 		n := tunnel.NewTailscaleNode(tunnel.TailscaleOptions{
 			StateDir:   filepath.Join(h.dir, "tailscale-client"),
-			Hostname:   tunnel.DefaultTailscaleHostname("bothub-desktop"),
+			Hostname:   tunnel.DefaultTailscaleHostname("pebble-desktop"),
 			ControlURL: ctrl,
 			AuthKey:    key,
 		})

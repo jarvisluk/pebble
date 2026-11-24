@@ -8,9 +8,10 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
+
+	"bot-hub/internal/config"
 )
 
 type Server struct {
@@ -25,7 +26,7 @@ func NewServer(hubURL, selfBotID string) *Server {
 func NewServerWithConfig(hubURL, selfBotID, configPath string) *Server {
 	return &Server{
 		client: NewClient(hubURL, selfBotID, configPath, ""),
-		role:   strings.TrimSpace(os.Getenv("BOT_HUB_MCP_ROLE")),
+		role:   config.LookupEnv("PEBBLE_MCP_ROLE", "BOT_HUB_MCP_ROLE"),
 	}
 }
 
@@ -95,7 +96,7 @@ func (s *Server) handle(ctx context.Context, req rpcRequest) rpcResponse {
 					"tools": map[string]any{},
 				},
 				"serverInfo": map[string]any{
-					"name":    "bot-hub",
+					"name":    config.MCPServerName,
 					"version": "0.1.0",
 				},
 			},
@@ -148,7 +149,7 @@ func toolDefinitions() []map[string]any {
 	return []map[string]any{
 		{
 			"name":        "send_message",
-			"description": "Send a visible message (text, images, and/or files) to the user in bot-hub. Your ordinary text output is internal and hidden from the user; call this tool whenever you want the user to see a reply, progress update, image, or file.",
+			"description": "Send a visible message (text, images, and/or files) to the user in Pebble. Your ordinary text output is internal and hidden from the user; call this tool whenever you want the user to see a reply, progress update, image, or file.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -207,7 +208,7 @@ func toolDefinitions() []map[string]any {
 		},
 		{
 			"name":        "message_bot",
-			"description": "Send a message to another bot in bot-hub and return its reply. Both bots' chat timelines will record the collaboration.",
+			"description": "Send a message to another bot in Pebble and return its reply. Both bots' chat timelines will record the collaboration.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -491,7 +492,7 @@ func (s *Server) callTool(ctx context.Context, name string, rawArgs json.RawMess
 		if err := json.Unmarshal(rawArgs, &args); err != nil || strings.TrimSpace(args.BotID) == "" || strings.TrimSpace(args.Message) == "" {
 			return "botId and message are required", true
 		}
-		hop, _ := strconv.Atoi(os.Getenv("BOT_HUB_HOP"))
+		hop, _ := strconv.Atoi(config.LookupEnv("PEBBLE_HOP", "BOT_HUB_HOP"))
 		payload := map[string]any{
 			"message":   args.Message,
 			"fromBotId": selfBotID,
