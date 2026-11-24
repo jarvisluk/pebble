@@ -5,6 +5,7 @@ import type {
   ConfirmOptions,
   DesktopTarget,
   MemoryResponse,
+  PermissionMode,
   ResolvedLang,
   RoutineItem,
   RoutineRun,
@@ -69,6 +70,7 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
   const [editPrivate, setEditPrivate] = useState(false);
   const [editDesktopTarget, setEditDesktopTarget] = useState('');
   const [editBrowserMode, setEditBrowserMode] = useState('');
+  const [editPermissionMode, setEditPermissionMode] = useState<PermissionMode>('auto');
   const [desktopTargets, setDesktopTargets] = useState<DesktopTarget[]>([]);
   const [editInst, setEditInst] = useState('');
   const [editErr, setEditErr] = useState('');
@@ -100,6 +102,7 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
   const [rtClearSecret, setRtClearSecret] = useState(false);
   const [rtWebhookUrl, setRtWebhookUrl] = useState('');
   const [rtDelivery, setRtDelivery] = useState('receipt');
+  const [rtPermMode, setRtPermMode] = useState('');
   const [rtPrompt, setRtPrompt] = useState('');
   const [rtEnabled, setRtEnabled] = useState(true);
   const [rtSaving, setRtSaving] = useState(false);
@@ -163,6 +166,7 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
     setEditPrivate(Boolean(detail.privateSessions));
     setEditDesktopTarget(detail.desktopTarget || '');
     setEditBrowserMode(detail.browserMode || '');
+    setEditPermissionMode((detail.permissionMode as PermissionMode) || 'auto');
     setEditInst(detail.instructions || '');
     setEditErr('');
   }, [
@@ -175,6 +179,7 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
     detail?.privateSessions,
     detail?.desktopTarget,
     detail?.browserMode,
+    detail?.permissionMode,
     detail?.instructions,
   ]);
 
@@ -203,6 +208,7 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
         editPrivate !== Boolean(detail.privateSessions) ||
         editDesktopTarget !== (detail.desktopTarget || '') ||
         editBrowserMode !== (detail.browserMode || '') ||
+        editPermissionMode !== ((detail.permissionMode as PermissionMode) || 'auto') ||
         editInst !== (detail.instructions || ''))
   );
 
@@ -228,6 +234,7 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
           privateSessions: editPrivate,
           desktopTarget: editDesktopTarget,
           browserMode: editBrowserMode,
+          permissionMode: editPermissionMode,
         },
       });
       onBotUpdated(st);
@@ -261,6 +268,7 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
     setRtClearSecret(false);
     setRtWebhookUrl(rt?.webhookUrl || '');
     setRtDelivery(rt?.mainDelivery || 'receipt');
+    setRtPermMode(rt?.permissionMode || '');
     setRtPrompt(rt?.prompt || '');
     setRtEnabled(rt ? rt.enabled !== false : true);
     setRtFormOpen(true);
@@ -306,6 +314,7 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
       webhookUrl: rtWebhookUrl.trim(),
       prompt,
       mainDelivery: rtDelivery,
+      permissionMode: rtPermMode,
       enabled: rtEnabled,
     };
     if (rtClearSecret) {
@@ -702,13 +711,23 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
                     onChange={(e) => setRtWebhookUrl(e.target.value)}
                   />
                 </div>
-                <div className="fld">
-                  <label>{t('rtMainDelivery')}</label>
-                  <select id="pRtDelivery" value={rtDelivery} onChange={(e) => setRtDelivery(e.target.value)}>
-                    <option value="receipt">{t('rtDeliveryReceiptFull')}</option>
-                    <option value="notify">{t('rtDeliveryNotifyFull')}</option>
-                    <option value="none">{t('rtDeliveryNoneFull')}</option>
-                  </select>
+                <div className="two">
+                  <div className="fld">
+                    <label>{t('rtMainDelivery')}</label>
+                    <select id="pRtDelivery" value={rtDelivery} onChange={(e) => setRtDelivery(e.target.value)}>
+                      <option value="receipt">{t('rtDeliveryReceiptFull')}</option>
+                      <option value="notify">{t('rtDeliveryNotifyFull')}</option>
+                      <option value="none">{t('rtDeliveryNoneFull')}</option>
+                    </select>
+                  </div>
+                  <div className="fld">
+                    <label>{t('rtPermMode')}</label>
+                    <select id="pRtPermMode" value={rtPermMode} onChange={(e) => setRtPermMode(e.target.value)}>
+                      <option value="">{t('rtPermFollow')}</option>
+                      <option value="auto">{t('rtPermAuto')}</option>
+                      <option value="plan">{t('rtPermPlan')}</option>
+                    </select>
+                  </div>
                 </div>
                 <div className="fld">
                   <label>{t('rtPrompt')}</label>
@@ -793,7 +812,15 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
                   const lastTxt = rt.lastRun
                     ? `${formatStamp(rt.lastRun.finishedAt, lang)} · ${(rt.lastRun.durationMs / 1000).toFixed(1)}s`
                     : '';
-                  const meta = [trig, delivLbl, rt.webhookUrl ? t('rtWebhookPushTag') : '', rt.model, nextTxt, lastTxt]
+                  const meta = [
+                    trig,
+                    delivLbl,
+                    rt.permissionMode ? t(`permMode_${rt.permissionMode}`) : '',
+                    rt.webhookUrl ? t('rtWebhookPushTag') : '',
+                    rt.model,
+                    nextTxt,
+                    lastTxt,
+                  ]
                     .filter(Boolean)
                     .join(' · ');
                   const runsOpen = runsOpenId === rt.id;
@@ -1082,6 +1109,33 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
                           <option value="attach">{t('browserModeAttach')}</option>
                         </select>
                       </div>
+                      {(() => {
+                        const hCaps = settings?.harnesses.find((h) => h.id === detail.harness)?.permissions?.modes;
+                        const supported: PermissionMode[] = hCaps && hCaps.length > 0 ? hCaps : ['auto', 'edit', 'ask', 'plan'];
+                        const activeVal = supported.includes(editPermissionMode) ? editPermissionMode : supported[0] || 'auto';
+                        return (
+                          <div className="fld">
+                            <label htmlFor="pePermissionMode">{t('permMode')}</label>
+                            <select
+                              id="pePermissionMode"
+                              disabled={supported.length <= 1}
+                              value={activeVal}
+                              onChange={(e) => setEditPermissionMode(e.target.value as PermissionMode)}
+                            >
+                              {supported.map((m) => (
+                                <option key={m} value={m}>
+                                  {t(`permMode_${m}`)}
+                                </option>
+                              ))}
+                            </select>
+                            <div className="set-card-desc mt-4">
+                              {supported.length <= 1
+                                ? t('permModeUnsupported', { mode: t(`permMode_${supported[0] || 'auto'}`) })
+                                : t(`permDesc_${activeVal}`)}
+                            </div>
+                          </div>
+                        );
+                      })()}
                     </div>
                   );
                 })()}

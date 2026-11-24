@@ -1,5 +1,13 @@
 import React from 'react';
-import type { BotStatus, ChatMessage, PendingQuestion, ResolvedLang, SettingsTab } from '../types';
+import type {
+  BotStatus,
+  ChatMessage,
+  PendingApproval,
+  PendingQuestion,
+  ResolvedLang,
+  SettingsTab,
+  TakeoverRequest,
+} from '../types';
 import { translate } from '../lib/i18n';
 import { formatShortTime, plainPreviewText } from '../lib/theme';
 import type { ViewDir, ViewState } from '../lib/useViewTransition';
@@ -18,6 +26,8 @@ interface SidebarProps {
   lastMessages: Record<string, ChatMessage>;
   unread: Record<string, number>;
   toolUse: Record<string, string>;
+  takeovers: TakeoverRequest[];
+  approvals: PendingApproval[];
   questions: PendingQuestion[];
   filter: string;
   lang: ResolvedLang;
@@ -44,6 +54,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   lastMessages,
   unread,
   toolUse,
+  takeovers,
+  approvals,
   questions,
   filter,
   lang,
@@ -143,9 +155,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
               const count = unread[b.id] || 0;
               const m = lastMessages[b.id];
               const tool = toolUse[b.id];
+              const hasTakeover = takeovers.some((item) => item.botId === b.id);
+              const hasApproval = approvals.some((item) => item.botId === b.id);
               const hasQuestion = questions.some((item) => item.botId === b.id);
               let previewNode: React.ReactNode;
-              if (hasQuestion) {
+              if (hasTakeover) {
+                previewNode = (
+                  <div className="pv run">
+                    <span>{t('takeoverWaitingBadge')}</span>
+                    {count > 0 && <i className="badge">{count}</i>}
+                  </div>
+                );
+              } else if (hasApproval) {
+                previewNode = (
+                  <div className="pv run">
+                    <span>{t('approvalWaitingBadge')}</span>
+                    {count > 0 && <i className="badge">{count}</i>}
+                  </div>
+                );
+              } else if (hasQuestion) {
                 previewNode = (
                   <div className="pv run">
                     <span>{t('questionWaitingBadge')}</span>

@@ -2,6 +2,34 @@ export type LangPref = 'system' | 'zh-CN' | 'en';
 export type ResolvedLang = 'zh-CN' | 'en';
 export type ThemePref = 'system' | 'light' | 'dark';
 export type SettingsTab = 'general' | 'models' | 'memory' | 'desktop' | 'remote';
+export type PermissionMode = 'auto' | 'edit' | 'ask' | 'plan';
+
+export interface PermissionCapabilities {
+  modes?: PermissionMode[];
+  interactiveApproval?: boolean;
+  supportsAllowAlways?: boolean;
+}
+
+export interface PermissionOption {
+  id: string;
+  kind: 'allow_once' | 'allow_always' | 'reject' | string;
+  label: string;
+  description?: string;
+}
+
+export interface PendingApproval {
+  id: string;
+  botId: string;
+  botName?: string;
+  toolName: string;
+  kind: 'shell' | 'write' | 'read' | 'mcp' | 'network' | 'other' | string;
+  title?: string;
+  summary?: string;
+  rawInput?: Record<string, unknown>;
+  options?: PermissionOption[];
+  mode?: PermissionMode | string;
+  createdAt: string;
+}
 
 export interface BotSessionInfo {
   sessionId?: string;
@@ -23,6 +51,7 @@ export interface BotStatus {
   privateSessions?: boolean;
   desktopTarget?: string;
   browserMode?: 'auto' | 'isolated' | 'attach' | string;
+  permissionMode?: PermissionMode;
 }
 
 export interface BotDetail extends BotStatus {
@@ -82,6 +111,7 @@ export interface HarnessInfo {
   canAutoInstall?: boolean;
   category?: 'recommended' | 'advanced' | string;
   summary?: string;
+  permissions?: PermissionCapabilities;
   install?: {
     command?: string;
     url?: string;
@@ -124,6 +154,7 @@ export interface SettingsData {
   };
   defaultHarness?: string;
   defaultModel?: string;
+  defaultPermissionMode?: PermissionMode;
   defaultModels?: Record<string, string>;
   sharedUserMd?: string;
   desktopHarness?: string;
@@ -249,6 +280,7 @@ export interface RoutineItem {
   webhookUrl?: string;
   prompt: string;
   model?: string;
+  permissionMode?: string;
   mainDelivery: 'receipt' | 'notify' | 'none' | string;
   enabled: boolean;
   running?: boolean;
@@ -365,6 +397,7 @@ export interface ConfirmOptions {
 
 export interface SettingsDraft {
   defaultHarness: string;
+  defaultPermissionMode: PermissionMode;
   defaultModel: string;
   defaultModels: Record<string, string>;
   sharedUserMd: string;

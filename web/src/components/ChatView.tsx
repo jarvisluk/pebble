@@ -3,10 +3,13 @@ import type {
   ActiveDesktopTarget,
   BotStatus,
   ChatMessage,
+  HarnessInfo,
   MentionCandidate,
   MessageMedia,
+  PendingApproval,
   PendingAttachment,
   PendingQuestion,
+  PermissionMode,
   ResolvedLang,
   SlashCommandItem,
   TakeoverRequest,
@@ -16,6 +19,7 @@ import { translate } from '../lib/i18n';
 import { renderMarkdownHtml } from '../lib/markdown';
 import { botColor, contrastText, countToolCalls, formatClockTime, formatDurationMs, formatStamp } from '../lib/theme';
 import type { ViewDir, ViewState } from '../lib/useViewTransition';
+import { ApprovalCard } from './ApprovalCard';
 import { BotAvatar } from './BotAvatar';
 import { QuestionCard } from './QuestionCard';
 
@@ -125,7 +129,9 @@ interface ChatViewProps {
   toolName?: string;
   takeovers: TakeoverRequest[];
   activeDeskTarget?: ActiveDesktopTarget;
+  approvals: PendingApproval[];
   questions: PendingQuestion[];
+  harnesses?: HarnessInfo[];
   deskOpen: boolean;
   inDesktopSidebar?: boolean;
   lang: ResolvedLang;
@@ -137,7 +143,14 @@ interface ChatViewProps {
   onOpenDesktopTarget: (target: string) => void;
   onSwitchBackLocal?: () => void;
   onResolveTakeover: (to: TakeoverRequest) => void;
+  onReplyApproval: (
+    id: string,
+    decision: 'allow_once' | 'allow_always' | 'reject',
+    optionId?: string,
+    reason?: string
+  ) => Promise<void>;
   onReplyQuestion: (id: string, answers: Record<string, unknown>, cancelled: boolean) => Promise<void>;
+  onChangePermissionMode?: (botId: string, mode: PermissionMode) => Promise<void>;
   onOpenDetail: () => void;
   onOpenCollab?: (peerId: string) => void;
   onOpenCreate: () => void;
@@ -159,7 +172,9 @@ export const ChatView: React.FC<ChatViewProps> = ({
   toolName,
   takeovers,
   activeDeskTarget,
+  approvals,
   questions,
+  harnesses,
   deskOpen,
   inDesktopSidebar = false,
   lang,
@@ -171,7 +186,9 @@ export const ChatView: React.FC<ChatViewProps> = ({
   onOpenDesktopTarget,
   onSwitchBackLocal,
   onResolveTakeover,
+  onReplyApproval,
   onReplyQuestion,
+  onChangePermissionMode,
   onOpenDetail,
   onOpenCollab,
   onOpenCreate,
@@ -330,7 +347,31 @@ export const ChatView: React.FC<ChatViewProps> = ({
       sc.scrollTop = sc.scrollHeight;
     }
     messages.forEach((m) => seenIds.add(m.id));
-  }, [messages, questions.length, activeBot?.id, activeBot?.busy, toolName, seenIds]);
+  }, [messages, approvals.length, questions.length, activeBot?.id, activeBot?.busy, toolName, seenIds]);
+
+  const availableModes = useMemo<PermissionMode[]>(() => {
+    const hInfo = harnesses?.find((h) => h.id === activeBot?.harness);
+    const modes = hInfo?.permissions?.modes;
+    if (modes && modes.length > 0) return modes;
+    return ['auto', 'edit', 'ask', 'plan'];
+  }, [harnesses, activeBot?.harness]);
+
+  const currentMode: PermissionMode =
+    activeBot?.permissionMode && availableModes.includes(activeBot.permissionMode)
+      ? activeBot.permissionMode
+      : availableModes[0] || 'auto';
+
+  const [modeBusy, setModeBusy] = useState(false);
+
+  const switchMode = async (next: PermissionMode) => {
+    if (!activeBot || !onChangePermissionMode || next === currentMode || modeBusy) return;
+    setModeBusy(true);
+    try {
+      await onChangePermissionMode(activeBot.id, next);
+    } finally {
+      setModeBusy(false);
+    }
+  };
 
   const acContext = useMemo(() => {
     if (acDismissed) return null;
@@ -878,6 +919,9 @@ export const ChatView: React.FC<ChatViewProps> = ({
                       <span className="shimmer">{t('processing')}</span>
                     </div>
                   )}
+                  {approvals.map((apr) => (
+                    <ApprovalCard key={apr.id} approval={apr} lang={lang} onReply={onReplyApproval} />
+                  ))}
                   {questions.map((q) => (
                     <QuestionCard key={q.id} question={q} lang={lang} onReply={onReplyQuestion} />
                   ))}
@@ -1014,12 +1058,37 @@ export const ChatView: React.FC<ChatViewProps> = ({
                       return;
                     }
                   }
+                  if (e.key === 'Tab' && e.shiftKey && !draft && !e.nativeEvent.isComposing && availableModes.length > 1) {
+                    e.preventDefault();
+                    const curIdx = availableModes.indexOf(currentMode);
+                    const nextMode = availableModes[(curIdx + 1) % availableModes.length];
+                    void switchMode(nextMode);
+                    return;
+                  }
                   if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
                     e.preventDefault();
                     void handleSend();
                   }
                 }}
               />
+              {activeBot && availableModes.length > 1 && onChangePermissionMode && (
+                <select
+                  id={inDesktopSidebar ? undefined : 'composerModeSel'}
+                  className="composer-mode-sel"
+                  aria-label={t('permMode')}
+                  title={`${t('permMode')} (Shift+Tab)`}
+                  data-mode={currentMode}
+                  disabled={modeBusy}
+                  value={currentMode}
+                  onChange={(e) => void switchMode(e.target.value as PermissionMode)}
+                >
+                  {availableModes.map((m) => (
+                    <option key={m} value={m}>
+                      {t(`permMode_${m}`)}
+                    </option>
+                  ))}
+                </select>
+              )}
               <button
                 id="sendBtn"
                 type="button"

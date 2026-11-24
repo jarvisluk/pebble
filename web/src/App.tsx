@@ -7,7 +7,9 @@ import type {
   ConfirmOptions,
   LangPref,
   NodeInfo,
+  PendingApproval,
   PendingQuestion,
+  PermissionMode,
   ResolvedLang,
   ScreenState,
   SettingsData,
@@ -53,6 +55,7 @@ export default function App() {
   const [modelsMap, setModelsMap] = useState<Record<string, string[]>>({});
   const [nodesFromEvents, setNodesFromEvents] = useState<NodeInfo[] | null>(null);
   const [takeovers, setTakeovers] = useState<TakeoverRequest[]>([]);
+  const [approvals, setApprovals] = useState<PendingApproval[]>([]);
   const [questions, setQuestions] = useState<PendingQuestion[]>([]);
   const [liveScreen, setLiveScreen] = useState<ScreenState | null>(null);
   const [screenSeq, setScreenSeq] = useState(0);
@@ -332,6 +335,13 @@ export default function App() {
     } catch {}
   }, []);
 
+  const refreshApprovals = useCallback(async () => {
+    try {
+      const d = await api<{ items?: PendingApproval[] }>('/api/approvals');
+      setApprovals(d.items || []);
+    } catch {}
+  }, []);
+
   const removeBotLocally = useCallback(
     (id: string) => {
       setBots((prev) => {
@@ -520,6 +530,10 @@ export default function App() {
       setQuestions(payload?.items || []);
     });
 
+    on('approvals', ({ payload }: { payload?: { items?: PendingApproval[] } }) => {
+      setApprovals(payload?.items || []);
+    });
+
     on('routine_updated', ({ botId }: { botId?: string }) => {
       if (panelOpenRef.current && panelDetailRef.current?.id === botId) {
         setRoutineRefreshSeq((n) => n + 1);
@@ -548,6 +562,7 @@ export default function App() {
         connectEvents();
         void refreshTakeovers();
         void refreshActiveDesktopTarget();
+        void refreshApprovals();
         void refreshQuestions();
         maybeAutoOpenUnbox(s);
         setBootReady(true);
@@ -650,6 +665,42 @@ export default function App() {
     }
   };
 
+  const handleReplyApproval = async (
+    id: string,
+    decision: 'allow_once' | 'allow_always' | 'reject',
+    optionId?: string,
+    reason?: string
+  ) => {
+    try {
+      const res = await api<{ items?: PendingApproval[] }>(`/api/approvals/${encodeURIComponent(id)}/reply`, {
+        method: 'POST',
+        body: { decision, optionId, reason },
+      });
+      setApprovals(res.items || []);
+    } catch (e) {
+      await refreshApprovals();
+      if (e instanceof Error && e.message !== 'unauthorized') {
+        showToast(e.message);
+        throw e;
+      }
+    }
+  };
+
+  const handleChangePermissionMode = async (botId: string, mode: PermissionMode) => {
+    try {
+      const st = await api<BotStatus>(`/api/bots/${encodeURIComponent(botId)}`, {
+        method: 'PATCH',
+        body: { permissionMode: mode },
+      });
+      setBots((prev) => prev.map((b) => (b.id === st.id ? { ...b, ...st } : b)));
+      if (panelDetailRef.current?.id === st.id) {
+        setPanelDetail((prev) => (prev ? { ...prev, permissionMode: st.permissionMode } : prev));
+      }
+    } catch (e) {
+      if (e instanceof Error && e.message !== 'unauthorized') showToast(e.message);
+    }
+  };
+
   const handleReplyQuestion = async (id: string, answers: Record<string, unknown>, cancelled: boolean) => {
     try {
       const res = await api<{ items?: PendingQuestion[] }>(`/api/questions/${encodeURIComponent(id)}/reply`, {
@@ -698,10 +749,10 @@ export default function App() {
           `/api/bots/${encodeURIComponent(activeBotId)}/message`,
           { method: 'POST', body }
         );
-        if (/^\/(bots|status|reset)$/.test(text) && data.text) {
+        if ((/^\/(bots|status|reset|mode)$/.test(text) || /^\/mode\s+/.test(text)) && data.text) {
           pushLocal('command', data.text);
         }
-        if (text === '/reset') void loadBots();
+        if (text === '/reset' || text === '/mode' || /^\/mode\s+/.test(text)) void loadBots();
       } catch (e) {
         if (
           e instanceof Error &&
@@ -822,6 +873,8 @@ export default function App() {
           lastMessages={lastMap}
           unread={unreadMap}
           toolUse={toolMap}
+          takeovers={takeovers}
+          approvals={approvals}
           questions={questions}
           filter={filter}
           lang={lang}
@@ -879,11 +932,15 @@ export default function App() {
             toolName={activeBotId ? toolMap[activeBotId] : undefined}
             takeovers={takeovers}
             activeDeskTarget={activeDeskTarget}
+            approvals={activeBotId ? approvals.filter((a) => a.botId === activeBotId) : []}
             questions={activeBotId ? questions.filter((q) => q.botId === activeBotId) : []}
+            harnesses={settings?.harnesses}
             deskOpen={deskOpen}
             lang={lang}
             inputRef={inputRef}
+            onReplyApproval={handleReplyApproval}
             onReplyQuestion={handleReplyQuestion}
+            onChangePermissionMode={handleChangePermissionMode}
             onOpenMenu={() => {
               if (matchMedia('(min-width: 821px)').matches) {
                 toggleDesktopSidebar(false);
@@ -995,13 +1052,17 @@ export default function App() {
               seenIds={seenIdsRef.current}
               toolName={activeBotId ? toolMap[activeBotId] : undefined}
               takeovers={takeovers}
+              approvals={activeBotId ? approvals.filter((a) => a.botId === activeBotId) : []}
               questions={activeBotId ? questions.filter((q) => q.botId === activeBotId) : []}
+              harnesses={settings?.harnesses}
               deskOpen={deskOpen}
               inDesktopSidebar
               lang={lang}
               inputRef={deskInputRef}
               pendingInsert={stageInsert}
+              onReplyApproval={handleReplyApproval}
               onReplyQuestion={handleReplyQuestion}
+              onChangePermissionMode={handleChangePermissionMode}
               onOpenMenu={() => {}}
               onToggleDesktop={() => {}}
               onOpenDesktopTarget={(target) => {
@@ -1237,6 +1298,8 @@ export default function App() {
           await loadBots();
           void refreshTakeovers();
           void refreshActiveDesktopTarget();
+          void refreshApprovals();
+          void refreshQuestions();
           loadSettings()
             .then((s) => maybeAutoOpenUnbox(s))
             .catch(() => {});

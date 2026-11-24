@@ -10,6 +10,7 @@ import type {
   LocalNodeState,
   MemoryResponse,
   NodeInfo,
+  PermissionMode,
   ResolvedLang,
   SettingsData,
   SettingsTab,
@@ -81,6 +82,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   // Models & Bots draft
   const [defaultHarness, setDefaultHarness] = useState('opencode');
+  const [defaultPermMode, setDefaultPermMode] = useState<PermissionMode>('auto');
   const [defaultModel, setDefaultModel] = useState('');
   const [perHarnessOpen, setPerHarnessOpen] = useState(false);
   const [defaultModelsDraft, setDefaultModelsDraft] = useState<Record<string, string>>({});
@@ -88,6 +90,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [botDrafts, setBotDrafts] = useState<Record<string, { harness: string; model: string }>>({});
   const [touchedFields, setTouchedFields] = useState({
     defaultHarness: false,
+    defaultPermMode: false,
     defaultModel: false,
     defaultModels: false,
     sharedUserMd: false,
@@ -173,6 +176,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     }
     return {
       defaultHarness: settings?.defaultHarness || settings?.harnesses?.[0]?.id || 'opencode',
+      defaultPermMode: (settings?.defaultPermissionMode || 'auto') as PermissionMode,
       defaultModel: (settings?.defaultModel || '').trim(),
       defaultModels: cleanPer,
       sharedUserMd: settings?.sharedUserMd || '',
@@ -183,6 +187,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const isDirty = useMemo(() => {
     if (!settings) return false;
     if (touchedFields.defaultHarness && defaultHarness !== baseline.defaultHarness) return true;
+    if (touchedFields.defaultPermMode && defaultPermMode !== baseline.defaultPermMode) return true;
     if (touchedFields.defaultModel && defaultModel.trim() !== baseline.defaultModel) return true;
     if (touchedFields.defaultModels) {
       const ka = Object.keys(defaultModelsDraft).filter((k) => defaultModelsDraft[k]?.trim());
@@ -202,7 +207,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       if (cur.harness !== base.harness || cur.model.trim() !== base.model) return true;
     }
     return false;
-  }, [settings, touchedFields, touchedBots, defaultHarness, defaultModel, defaultModelsDraft, sharedUserMd, botDrafts, baseline, bots]);
+  }, [settings, touchedFields, touchedBots, defaultHarness, defaultPermMode, defaultModel, defaultModelsDraft, sharedUserMd, botDrafts, baseline, bots]);
 
   useEffect(() => {
     onDirtyChange?.(isDirty);
@@ -211,12 +216,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const resetDraftsToBaseline = useCallback(() => {
     setTouchedFields({
       defaultHarness: false,
+      defaultPermMode: false,
       defaultModel: false,
       defaultModels: false,
       sharedUserMd: false,
     });
     setTouchedBots(new Set());
     setDefaultHarness(baseline.defaultHarness);
+    setDefaultPermMode(baseline.defaultPermMode);
     setDefaultModel(baseline.defaultModel);
     setDefaultModelsDraft({ ...baseline.defaultModels });
     setPerHarnessOpen(Object.values(baseline.defaultModels).some(Boolean));
@@ -235,6 +242,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   useEffect(() => {
     if (!settings) return;
     if (!touchedFields.defaultHarness) setDefaultHarness(baseline.defaultHarness);
+    if (!touchedFields.defaultPermMode) setDefaultPermMode(baseline.defaultPermMode);
     if (!touchedFields.defaultModel) setDefaultModel(baseline.defaultModel);
     if (!touchedFields.defaultModels) {
       setDefaultModelsDraft({ ...baseline.defaultModels });
@@ -543,13 +551,20 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         Object.keys(perHarness).every((k) => perHarness[k] === baseline.defaultModels[k]);
       if (
         defaultHarness !== baseline.defaultHarness ||
+        defaultPermMode !== baseline.defaultPermMode ||
         general !== baseline.defaultModel ||
         !equalPer ||
         sharedUserMd.replace(/\s+$/, '') !== baseline.sharedUserMd.replace(/\s+$/, '')
       ) {
         const next = await api<SettingsData>('/api/settings', {
           method: 'PUT',
-          body: { defaultHarness, defaultModel: general, defaultModels: perHarness, sharedUserMd },
+          body: {
+            defaultHarness,
+            defaultPermissionMode: defaultPermMode,
+            defaultModel: general,
+            defaultModels: perHarness,
+            sharedUserMd,
+          },
         });
         onSettingsUpdated(next);
       }
@@ -565,6 +580,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       }
       setTouchedFields({
         defaultHarness: false,
+        defaultPermMode: false,
         defaultModel: false,
         defaultModels: false,
         sharedUserMd: false,
@@ -579,7 +595,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     } finally {
       setSaving(false);
     }
-  }, [defaultHarness, defaultModelsDraft, defaultModel, baseline, sharedUserMd, onSettingsUpdated, bots, botDrafts, onToast, t, onReloadBots]);
+  }, [defaultHarness, defaultPermMode, defaultModelsDraft, defaultModel, baseline, sharedUserMd, onSettingsUpdated, bots, botDrafts, onToast, t, onReloadBots]);
 
   useEffect(() => {
     if (saveRef) saveRef.current = saveSettingsChanges;
@@ -947,26 +963,49 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   {perHarnessOpen ? t('collapse') : t('perHarness')}
                 </button>
               </div>
-              <div className="fld">
-                <label>
-                  {t('defaultHarness')} <em>{t('defaultHarnessDesc')}</em>
-                </label>
-                <select
-                  id="sDefaultHarness"
-                  value={defaultHarness}
-                  onChange={(e) => {
-                    const nextVal = e.target.value;
-                    if (nextVal === defaultHarness) return;
-                    setTouchedFields((prev) => ({ ...prev, defaultHarness: true }));
-                    setDefaultHarness(nextVal);
-                  }}
-                >
-                  {(settings?.harnesses || [{ id: 'opencode', label: 'opencode' }]).map((h) => (
-                    <option key={h.id} value={h.id}>
-                      {h.label}
-                    </option>
-                  ))}
-                </select>
+              <div className="two">
+                <div className="fld">
+                  <label>
+                    {t('defaultHarness')} <em>{t('defaultHarnessDesc')}</em>
+                  </label>
+                  <select
+                    id="sDefaultHarness"
+                    value={defaultHarness}
+                    onChange={(e) => {
+                      const nextVal = e.target.value;
+                      if (nextVal === defaultHarness) return;
+                      setTouchedFields((prev) => ({ ...prev, defaultHarness: true }));
+                      setDefaultHarness(nextVal);
+                    }}
+                  >
+                    {(settings?.harnesses || [{ id: 'opencode', label: 'opencode' }]).map((h) => (
+                      <option key={h.id} value={h.id}>
+                        {h.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="fld">
+                  <label>
+                    {t('permDefaultMode')} <em>{t('permDefaultModeDesc')}</em>
+                  </label>
+                  <select
+                    id="sDefaultPermMode"
+                    value={defaultPermMode}
+                    onChange={(e) => {
+                      const nextVal = e.target.value as PermissionMode;
+                      if (nextVal === defaultPermMode) return;
+                      setTouchedFields((prev) => ({ ...prev, defaultPermMode: true }));
+                      setDefaultPermMode(nextVal);
+                    }}
+                  >
+                    {(['auto', 'edit', 'ask', 'plan'] as PermissionMode[]).map((m) => (
+                      <option key={m} value={m}>
+                        {t(`permMode_${m}`)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
               <div className="fld">
                 <label dangerouslySetInnerHTML={{ __html: t('globalDefaultModel') }} />
