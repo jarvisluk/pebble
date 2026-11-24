@@ -26,11 +26,14 @@ struct ConnectView: View {
     @State private var tsAdvOpen = false
     @State private var tsAuthKey = ""
     @State private var tsControlUrl = ""
-    @State private var desktopGuideOpen = true
     @State private var manualOpen = false
 
     private var isFreshOnboarding: Bool {
         isGate && hub.servers.isEmpty && hub.activeServer == nil
+    }
+
+    private var showFreshHero: Bool {
+        isFreshOnboarding && !manualOpen
     }
 
     private var isConnectingGate: Bool {
@@ -47,6 +50,10 @@ struct ConnectView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(p.page)
+            } else if showFreshHero {
+                freshHeroContent
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(p.page)
             } else {
                 formContent
                     .frame(maxWidth: isGate ? 560 : .infinity)
@@ -54,7 +61,7 @@ struct ConnectView: View {
                     .background(p.page)
             }
         }
-        .navigationTitle(isGate ? "Pebble" : hub.t("connectHost"))
+        .navigationTitle(showFreshHero ? "" : (isGate ? "Pebble" : hub.t("connectHost")))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { connectToolbar }
         .confirmAlert($confirm)
@@ -87,7 +94,14 @@ struct ConnectView: View {
     @ToolbarContentBuilder
     private var connectToolbar: some ToolbarContent {
         if isGate {
-            if !isConnectingGate {
+            if isFreshOnboarding && manualOpen {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(hub.t("backBtn")) {
+                        withAnimation { manualOpen = false }
+                    }
+                }
+            }
+            if !isConnectingGate && !showFreshHero {
                 ToolbarItem(placement: .confirmationAction) {
                     if submitting {
                         ProgressView().controlSize(.small)
@@ -101,26 +115,114 @@ struct ConnectView: View {
         }
     }
 
+    private var freshHeroContent: some View {
+        ScrollView {
+            VStack(spacing: 0) {
+                Spacer(minLength: 48)
+
+                VStack(spacing: 14) {
+                    BotAvatar(id: "assistant", size: 84, busy: submitting)
+                    Text("Pebble")
+                        .font(.system(size: 20, weight: .bold))
+                        .foregroundStyle(p.text)
+                    Text(hub.t("onboardHeroSub"))
+                        .font(.system(size: 14))
+                        .foregroundStyle(p.text2)
+                        .multilineTextAlignment(.center)
+                }
+                .padding(.bottom, 28)
+
+                if scanning {
+                    QRScanner { onScanned($0) }
+                        .frame(height: 240)
+                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .padding(.bottom, 16)
+                }
+
+                VStack(spacing: 10) {
+                    Button {
+                        toggleScanner()
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "qrcode.viewfinder")
+                                .font(.system(size: 16, weight: .semibold))
+                            Text(scanning ? hub.t("collapse") : hub.t("scanConnect"))
+                                .font(.system(size: 15, weight: .semibold))
+                        }
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 48)
+                        .background(p.accent, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .foregroundStyle(p.card)
+                    }
+                    .buttonStyle(.plain)
+
+                    Button {
+                        scanning = false
+                        withAnimation { manualOpen = true }
+                    } label: {
+                        Text(hub.t("manualPairingBtn"))
+                            .font(.system(size: 15, weight: .medium))
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 48)
+                            .background(p.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .foregroundStyle(p.text)
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                if !err.isEmpty {
+                    Text(err)
+                        .font(.system(size: 13))
+                        .foregroundStyle(p.danger)
+                        .multilineTextAlignment(.center)
+                        .padding(.top, 12)
+                } else if !infoHint.isEmpty {
+                    Text(infoHint)
+                        .font(.system(size: 13))
+                        .foregroundStyle(p.sageInk)
+                        .multilineTextAlignment(.center)
+                        .padding(.top, 12)
+                }
+
+                Spacer(minLength: 40)
+
+                VStack(spacing: 6) {
+                    Text(hub.t("noDesktopYet"))
+                        .font(.system(size: 12))
+                        .foregroundStyle(p.mute)
+                    HStack(spacing: 10) {
+                        Button("macOS") { openURL(desktopDownloadMacURL) }
+                        Text("·").foregroundStyle(p.mute)
+                        Button("Windows") { openURL(desktopDownloadWinURL) }
+                        Text("·").foregroundStyle(p.mute)
+                        ShareLink(item: desktopDownloadMacURL) {
+                            Text(hub.t("sendToComputer"))
+                        }
+                    }
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(p.text2)
+                    .buttonStyle(.plain)
+                }
+                .padding(.top, 16)
+                .padding(.bottom, 24)
+            }
+            .frame(maxWidth: 360)
+            .padding(.horizontal, 24)
+            .frame(maxWidth: .infinity, minHeight: 540)
+        }
+    }
+
     private var formContent: some View {
         let norm = normalizeAddress(address)
         return Form {
-            if isGate {
-                if hub.activeServer == nil {
-                    Section {
-                        Text(hub.t("onboardMobileLead"))
-                            .foregroundStyle(p.text2)
-                    } header: {
-                        Text(hub.t("connectHost"))
-                    }
-                } else if hub.connState == .unauthorized || hub.connState == .error {
-                    Section(hub.connState == .unauthorized ? hub.t("tokenRequired") : hub.t("cantConnectHost")) {
-                        Text(hub.connState == .error && !hub.connError.isEmpty ? hub.connError : hub.t("onboardDesc"))
-                            .foregroundStyle(p.text2)
-                        Button(hub.t("retry")) {
-                            err = ""
-                            showFormWhileConnecting = false
-                            Task { await hub.reconnect() }
-                        }
+            if isGate && hub.activeServer != nil && (hub.connState == .unauthorized || hub.connState == .error) {
+                Section(hub.connState == .unauthorized ? hub.t("tokenRequired") : hub.t("cantConnectHost")) {
+                    Text(hub.connState == .error && !hub.connError.isEmpty ? hub.connError : hub.t("onboardDesc"))
+                        .foregroundStyle(p.text2)
+                    Button(hub.t("retry")) {
+                        err = ""
+                        showFormWhileConnecting = false
+                        Task { await hub.reconnect() }
                     }
                 }
             }
@@ -141,78 +243,20 @@ struct ConnectView: View {
             } footer: {
                 Text(hub.t("scanPairDesc"))
             }
-            if isFreshOnboarding {
-                Section {
-                    Button {
-                        withAnimation { desktopGuideOpen.toggle() }
-                    } label: {
-                        HStack {
-                            Label(hub.t("noDesktopYet"), systemImage: "laptopcomputer")
-                            Spacer()
-                            Image(systemName: desktopGuideOpen ? "chevron.up" : "chevron.down")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    if desktopGuideOpen {
-                        Text(hub.t("noDesktopHint"))
-                            .font(.subheadline)
-                            .foregroundStyle(p.text2)
-                        Button {
-                            openURL(desktopDownloadMacURL)
-                        } label: {
-                            Label(hub.t("downloadMac"), systemImage: "desktopcomputer")
-                        }
-                        Button {
-                            openURL(desktopDownloadWinURL)
-                        } label: {
-                            Label(hub.t("downloadWin"), systemImage: "pc")
-                        }
-                        ShareLink(item: desktopDownloadMacURL) {
-                            Label(hub.t("sendToComputer"), systemImage: "square.and.arrow.up")
-                        }
-                        Button {
-                            UIPasteboard.general.string = desktopDownloadMacURL.absoluteString
-                            infoHint = hub.t("downloadLinkCopied")
-                        } label: {
-                            Label(hub.t("copyDownloadLink"), systemImage: "doc.on.doc")
-                        }
-                        Text(hub.t("desktopStepsHint"))
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-                }
+            Section {
+                TextField(hub.t("labelOptional"), text: $label, prompt: Text(hub.t("labelExamplePh")))
+                TextField(hub.t("connAddr"), text: $address, prompt: Text("tailcat://… / tailscale://… / 192.168.1.10:3789")).monoInput()
+                SecureField(hub.t("tokenOptionalLbl"), text: $token, prompt: Text(hub.t("tokenFillHint")))
+                TextField(hub.t("standbyAddress"), text: $standbyAddress, prompt: Text("tailcat://… / 192.168.x.x:3789")).monoInput()
+                SecureField(hub.t("standbyToken"), text: $standbyToken, prompt: Text(hub.t("tokenFillHint")))
+            } header: {
+                Text(hub.t("manualAddrTitle"))
+            } footer: {
+                Text(!infoHint.isEmpty ? infoHint : !norm.token.isEmpty ? hub.t("tokenRecognized") : hub.t("tokenAutoHint"))
+                    .foregroundStyle((!infoHint.isEmpty || !norm.token.isEmpty) ? p.sageInk : .secondary)
             }
-            if !isFreshOnboarding || manualOpen {
-                Section {
-                    TextField(hub.t("labelOptional"), text: $label, prompt: Text(hub.t("labelExamplePh")))
-                    TextField(hub.t("connAddr"), text: $address, prompt: Text("tailcat://… / tailscale://… / 192.168.1.10:3789")).monoInput()
-                    SecureField(hub.t("tokenOptionalLbl"), text: $token, prompt: Text(hub.t("tokenFillHint")))
-                    TextField(hub.t("standbyAddress"), text: $standbyAddress, prompt: Text("tailcat://… / 192.168.x.x:3789")).monoInput()
-                    SecureField(hub.t("standbyToken"), text: $standbyToken, prompt: Text(hub.t("tokenFillHint")))
-                } header: {
-                    Text(hub.t("manualAddrTitle"))
-                } footer: {
-                    Text(!infoHint.isEmpty ? infoHint : !norm.token.isEmpty ? hub.t("tokenRecognized") : hub.t("tokenAutoHint"))
-                        .foregroundStyle((!infoHint.isEmpty || !norm.token.isEmpty) ? p.sageInk : .secondary)
-                }
-                if !err.isEmpty { Section { StatusText(text: err) } }
-                tailscaleSection
-            } else {
-                if !infoHint.isEmpty {
-                    Section {
-                        Text(infoHint).foregroundStyle(p.sageInk)
-                    }
-                }
-                if !err.isEmpty { Section { StatusText(text: err) } }
-                Section {
-                    Button {
-                        withAnimation { manualOpen = true }
-                    } label: {
-                        Label(hub.t("manualAdvancedToggle"), systemImage: "slider.horizontal.3")
-                    }
-                }
-            }
+            if !err.isEmpty { Section { StatusText(text: err) } }
+            tailscaleSection
             if !hub.servers.isEmpty {
                 Section(hub.t("savedHosts")) {
                     ForEach(hub.servers) { s in

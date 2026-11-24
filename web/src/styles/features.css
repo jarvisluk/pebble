@@ -988,6 +988,37 @@
 .unbox-full-head {
   padding: 0 2px;
 }
+.unbox-guide-lead {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+.pebble-guide-av {
+  width: 48px !important;
+  height: 48px !important;
+  flex: none;
+}
+.pebble-guide-av-lg {
+  width: 68px !important;
+  height: 68px !important;
+  flex: none;
+}
+.dsetup-hero {
+  align-items: center;
+  text-align: center;
+  gap: 6px;
+  padding-bottom: 10px;
+}
+.unbox-group-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.unbox-group-row .unbox-group-hd {
+  margin-top: 0;
+}
 .unbox-full-head h1 {
   font-size: var(--fs-xl);
   font-weight: 700;

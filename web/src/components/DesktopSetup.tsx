@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { resolveLang, translate } from '../lib/i18n';
 import { applyThemePref, getThemePref } from '../lib/theme';
+import { BotAvatar } from './BotAvatar';
 
 interface DesktopStateResponse {
   mode?: string;
@@ -295,7 +296,8 @@ export default function DesktopSetup() {
         }}
       />
       <main className="dsetup-main">
-        <header className="dsetup-head">
+        <header className="dsetup-head dsetup-hero">
+          <BotAvatar id="assistant" bots={[]} className="pebble-guide-av-lg" busy={busy} />
           <h1>Pebble</h1>
           <p className="dsetup-sub">{t('desktopSetupSub')}</p>
         </header>

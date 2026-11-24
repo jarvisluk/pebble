@@ -3,6 +3,7 @@ import type { BotStatus, HarnessInfo, ResolvedLang, SettingsData, SetupTaskStatu
 import { api } from '../lib/api';
 import { DOWNLOAD_LINKS } from '../lib/downloads';
 import { translate } from '../lib/i18n';
+import { BotAvatar } from './BotAvatar';
 import { HarnessIcon } from './HarnessIcon';
 import { MagpieInstallBanner } from './MagpieInstallBanner';
 import { ModelCombo } from './ModelCombo';
@@ -580,18 +581,21 @@ export const UnboxModal: React.FC<UnboxModalProps> = ({
     <>
           {step === 1 && (
             <div id="ubStep1" className="set-stack">
-              <div className="set-card-hd">
-                <span className="set-card-desc">{t('ubStep1Hint')}</span>
-                <button type="button" id="ubRecheck" className="mp" disabled={busy} onClick={() => void recheck()}>
-                  {t('ubRecheck')}
-                </button>
-              </div>
-
               {harnesses.length === 0 ? (
-                <div className="set-card-desc">{t('ubNoHarnesses')}</div>
+                <div className="set-card-hd">
+                  <span className="set-card-desc">{t('ubNoHarnesses')}</span>
+                  <button type="button" id="ubRecheck" className="mp" disabled={busy} onClick={() => void recheck()}>
+                    {t('ubRecheck')}
+                  </button>
+                </div>
               ) : (
                 <>
-                  <div className="unbox-group-hd">{t('ubInstalledGroup')}</div>
+                  <div className="unbox-group-row">
+                    <div className="unbox-group-hd">{t('ubInstalledGroup')}</div>
+                    <button type="button" id="ubRecheck" className="mp" disabled={busy} onClick={() => void recheck()}>
+                      {t('ubRecheck')}
+                    </button>
+                  </div>
                   <div id="ubHarnessInstalled" className={listClass}>
                     {installedHarnesses.length === 0 ? (
                       <div className="set-card-desc unbox-grid-span">{t('ubNoInstalledYet')}</div>
@@ -652,7 +656,6 @@ export const UnboxModal: React.FC<UnboxModalProps> = ({
 
           {step === 2 && (
             <div id="ubStep2" className="set-stack">
-              <div className="set-card-desc">{t('ubMagpieOptionalHint')}</div>
               <div id="ubMagpiePanel" className="note">
                 {!mp?.installed ? (
                   <MagpieInstallBanner
@@ -914,7 +917,6 @@ export const UnboxModal: React.FC<UnboxModalProps> = ({
 
           {step === 3 && (
             <div id="ubStep3" className="set-stack">
-              <p className="set-card-desc">{t('ubStep3Hint')}</p>
               <div className="note">
                 <div className="row-between">
                   <span>
@@ -1059,9 +1061,12 @@ export const UnboxModal: React.FC<UnboxModalProps> = ({
           <main className="unbox-full-main">
             <header className="unbox-full-head">
               <div className="unbox-top">
-                <div>
-                  <h1 id="ubTitle">{headerMeta.title}</h1>
-                  <p id="ubSub">{headerMeta.sub}</p>
+                <div className="unbox-guide-lead">
+                  <BotAvatar id={bots[0]?.id || 'assistant'} bots={bots} className="pebble-guide-av" busy={busy} />
+                  <div>
+                    <h1 id="ubTitle">{headerMeta.title}</h1>
+                    <p id="ubSub">{headerMeta.sub}</p>
+                  </div>
                 </div>
                 <button type="button" id="ubSkipTop" className="link-btn" onClick={() => void handleSkip()}>
                   {t('ubSkip')}

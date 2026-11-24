@@ -23,6 +23,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { isNativeTunnelAvailable, type TailscalePeer } from '../../modules/bothub-tunnel';
 import { normalizeAddress } from '../api';
+import { BotAvatar } from '../components/BotAvatar';
 import { QrCodeIcon } from '../components/Icons';
 import { ModalHeader } from '../components/ModalHeader';
 import { confirmAction } from '../confirm';
@@ -63,9 +64,9 @@ export function ConnectContent({ standalone = false }: { standalone?: boolean })
   const [tsAdvOpen, setTsAdvOpen] = useState(false);
   const [tsAuthKey, setTsAuthKey] = useState('');
   const [tsControlUrl, setTsControlUrl] = useState('');
-  const [desktopGuideOpen, setDesktopGuideOpen] = useState(true);
   const [manualOpen, setManualOpen] = useState(false);
   const isFreshOnboarding = standalone && servers.length === 0 && !activeServer;
+  const showFreshHero = isFreshOnboarding && !manualOpen;
 
   const {
     address: paramAddr,
@@ -284,7 +285,88 @@ export function ConnectContent({ standalone = false }: { standalone?: boolean })
     setInfoHint(t('tsPeerSelectedHint'));
   };
 
-  const content = (
+  const freshHero = (
+    <ScrollView
+      contentContainerStyle={styles.heroScroll}
+      keyboardShouldPersistTaps="handled"
+    >
+      <View style={styles.heroInner}>
+        <View style={styles.heroTop}>
+          <BotAvatar id="assistant" size={84} busy={submitting} />
+          <Text style={[styles.heroTitle, { color: theme.text }]}>Pebble</Text>
+          <Text style={[styles.heroSub, { color: theme.text2 }]}>{t('onboardHeroSub')}</Text>
+        </View>
+
+        {scanning && Platform.OS !== 'web' && (
+          <View style={styles.camWrap}>
+            <CameraView
+              style={styles.cam}
+              facing="back"
+              barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+              onBarcodeScanned={onBarcodeScanned}
+            />
+          </View>
+        )}
+
+        <View style={styles.heroActions}>
+          {Platform.OS !== 'web' && (
+            <Pressable
+              onPress={toggleScanner}
+              style={[styles.heroPrimaryBtn, { backgroundColor: theme.accent }]}
+            >
+              <QrCodeIcon size={17} color={theme.accentText} />
+              <Text style={[styles.heroPrimaryTxt, { color: theme.accentText }]}>
+                {scanning ? t('collapse') : t('scanConnect')}
+              </Text>
+            </Pressable>
+          )}
+          <Pressable
+            onPress={() => {
+              setScanning(false);
+              setManualOpen(true);
+            }}
+            style={[styles.heroSecondaryBtn, { backgroundColor: theme.card }]}
+          >
+            <Text style={[styles.heroSecondaryTxt, { color: theme.text }]}>
+              {t('manualPairingBtn')}
+            </Text>
+          </Pressable>
+        </View>
+
+        {localError ? (
+          <Text style={[styles.heroMsg, { color: theme.danger }]}>{localError}</Text>
+        ) : infoHint ? (
+          <Text style={[styles.heroMsg, { color: theme.sageInk }]}>{infoHint}</Text>
+        ) : null}
+
+        <View style={styles.heroFooter}>
+          <Text style={[styles.heroFooterHint, { color: theme.mute }]}>{t('noDesktopYet')}</Text>
+          <View style={styles.heroFooterLinks}>
+            <Pressable onPress={() => void Linking.openURL(DESKTOP_DOWNLOAD_MAC_URL)} hitSlop={8}>
+              <Text style={[styles.heroFooterLink, { color: theme.text2 }]}>macOS</Text>
+            </Pressable>
+            <Text style={[styles.heroFooterDot, { color: theme.mute }]}>·</Text>
+            <Pressable onPress={() => void Linking.openURL(DESKTOP_DOWNLOAD_WIN_URL)} hitSlop={8}>
+              <Text style={[styles.heroFooterLink, { color: theme.text2 }]}>Windows</Text>
+            </Pressable>
+            <Text style={[styles.heroFooterDot, { color: theme.mute }]}>·</Text>
+            <Pressable
+              onPress={() =>
+                void Share.share({ message: DESKTOP_DOWNLOAD_MAC_URL, url: DESKTOP_DOWNLOAD_MAC_URL })
+              }
+              hitSlop={8}
+            >
+              <Text style={[styles.heroFooterLink, { color: theme.text2 }]}>{t('sendToComputer')}</Text>
+            </Pressable>
+          </View>
+        </View>
+      </View>
+    </ScrollView>
+  );
+
+  const content = showFreshHero ? (
+    freshHero
+  ) : (
     <KeyboardAvoidingView
       style={styles.flex}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -296,14 +378,20 @@ export function ConnectContent({ standalone = false }: { standalone?: boolean })
         <View style={standalone ? styles.standaloneInner : styles.modalInner}>
           {standalone && (
             <View style={styles.gateHeader}>
-              <Text style={[styles.gateTitle, { color: theme.text }]}>Pebble</Text>
-              <Text style={[styles.gateSub, { color: theme.text2 }]}>{t('connectHost')}</Text>
-            </View>
-          )}
-
-          {standalone && !activeServer && (
-            <View style={[styles.card, { backgroundColor: theme.card }]}>
-              <Text style={[styles.cardSub, { color: theme.text2 }]}>{t('onboardMobileLead')}</Text>
+              <View style={styles.rowBetween}>
+                <View style={styles.col}>
+                  <Text style={[styles.gateTitle, { color: theme.text }]}>Pebble</Text>
+                  <Text style={[styles.gateSub, { color: theme.text2 }]}>{t('connectHost')}</Text>
+                </View>
+                {isFreshOnboarding && manualOpen && (
+                  <Pressable
+                    onPress={() => setManualOpen(false)}
+                    style={[styles.qrBtn, { backgroundColor: theme.card }]}
+                  >
+                    <Text style={[styles.qrBtnTxt, { color: theme.text }]}>{t('backBtn')}</Text>
+                  </Pressable>
+                )}
+              </View>
             </View>
           )}
 
@@ -370,72 +458,9 @@ export function ConnectContent({ standalone = false }: { standalone?: boolean })
             </View>
           )}
 
-          {isFreshOnboarding && (
+          <>
             <View style={[styles.card, { backgroundColor: theme.card }]}>
-              <Pressable
-                onPress={() => setDesktopGuideOpen((v) => !v)}
-                style={styles.rowBetween}
-              >
-                <Text style={[styles.cardTitle, { color: theme.text }]}>{t('noDesktopYet')}</Text>
-                <Text style={[styles.cardSub, { color: theme.mute }]}>
-                  {desktopGuideOpen ? t('collapse') : t('expand')}
-                </Text>
-              </Pressable>
-              {desktopGuideOpen && (
-                <View style={{ gap: 10 }}>
-                  <Text style={[styles.cardSub, { color: theme.text2 }]}>{t('noDesktopHint')}</Text>
-                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-                    <Pressable
-                      onPress={() => void Linking.openURL(DESKTOP_DOWNLOAD_MAC_URL)}
-                      style={[styles.qrBtn, { backgroundColor: theme.s1 }]}
-                    >
-                      <Text style={[styles.qrBtnTxt, { color: theme.text }]}>{t('downloadMac')}</Text>
-                    </Pressable>
-                    <Pressable
-                      onPress={() => void Linking.openURL(DESKTOP_DOWNLOAD_WIN_URL)}
-                      style={[styles.qrBtn, { backgroundColor: theme.s1 }]}
-                    >
-                      <Text style={[styles.qrBtnTxt, { color: theme.text }]}>{t('downloadWin')}</Text>
-                    </Pressable>
-                  </View>
-                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-                    <Pressable
-                      onPress={() => void Share.share({ message: DESKTOP_DOWNLOAD_MAC_URL, url: DESKTOP_DOWNLOAD_MAC_URL })}
-                      style={[styles.qrBtn, { backgroundColor: theme.accentSoft }]}
-                    >
-                      <Text style={[styles.qrBtnTxt, { color: theme.accent }]}>{t('sendToComputer')}</Text>
-                    </Pressable>
-                    <Pressable
-                      onPress={() =>
-                        void Clipboard.setStringAsync(DESKTOP_DOWNLOAD_MAC_URL).then(() =>
-                          setInfoHint(t('downloadLinkCopied'))
-                        )
-                      }
-                      style={[styles.qrBtn, { backgroundColor: theme.s1 }]}
-                    >
-                      <Text style={[styles.qrBtnTxt, { color: theme.text2 }]}>{t('copyDownloadLink')}</Text>
-                    </Pressable>
-                  </View>
-                  {!!infoHint && (
-                    <Text style={[styles.fieldHint, { color: theme.sageInk }]}>{infoHint}</Text>
-                  )}
-                  <Text style={[styles.cardSub, { color: theme.mute }]}>{t('desktopStepsHint')}</Text>
-                </View>
-              )}
-            </View>
-          )}
-
-          {isFreshOnboarding && !manualOpen ? (
-            <Pressable
-              onPress={() => setManualOpen(true)}
-              style={[styles.card, { backgroundColor: theme.card }]}
-            >
-              <Text style={[styles.cardSub, { color: theme.text2 }]}>{t('manualAdvancedToggle')}</Text>
-            </Pressable>
-          ) : (
-            <>
-              <View style={[styles.card, { backgroundColor: theme.card }]}>
-                <Text style={[styles.cardTitle, { color: theme.text }]}>{t('manualAddrTitle')}</Text>
+              <Text style={[styles.cardTitle, { color: theme.text }]}>{t('manualAddrTitle')}</Text>
 
             <View style={styles.field}>
               <Text style={[styles.fieldLbl, { color: theme.text2 }]}>{t('labelOptional')}</Text>
@@ -657,8 +682,7 @@ export function ConnectContent({ standalone = false }: { standalone?: boolean })
               )}
             </View>
           )}
-            </>
-          )}
+          </>
 
           {servers.length > 0 && (
             <View style={[styles.card, { backgroundColor: theme.card }]}>
@@ -750,6 +774,81 @@ export default function ConnectScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1 },
   flex: { flex: 1 },
+  heroScroll: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+    paddingVertical: 32,
+  },
+  heroInner: {
+    width: '100%',
+    maxWidth: 360,
+    alignSelf: 'center',
+    gap: 20,
+  },
+  heroTop: {
+    alignItems: 'center',
+    gap: 10,
+    paddingBottom: 8,
+  },
+  heroTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  heroSub: {
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: 'center',
+  },
+  heroActions: {
+    gap: 10,
+  },
+  heroPrimaryBtn: {
+    height: 48,
+    borderRadius: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  heroPrimaryTxt: {
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  heroSecondaryBtn: {
+    height: 48,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  heroSecondaryTxt: {
+    fontSize: 15,
+    fontWeight: '500',
+  },
+  heroMsg: {
+    fontSize: 13,
+    textAlign: 'center',
+  },
+  heroFooter: {
+    alignItems: 'center',
+    gap: 6,
+    paddingTop: 18,
+  },
+  heroFooterHint: {
+    fontSize: 12,
+  },
+  heroFooterLinks: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  heroFooterLink: {
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  heroFooterDot: {
+    fontSize: 12,
+  },
   scroll: {
     padding: 16,
     paddingBottom: 36,
