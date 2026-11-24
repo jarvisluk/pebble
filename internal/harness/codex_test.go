@@ -60,3 +60,47 @@ echo '{"type":"turn.completed","usage":{"input_tokens":10,"output_tokens":5,"cac
 		t.Fatalf("unexpected args: %q", string(rawArgs))
 	}
 }
+
+func TestCodexEphemeralAndBotEnv(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "mock-codex")
+	argsLog := filepath.Join(dir, "args.txt")
+	envLog := filepath.Join(dir, "env.txt")
+	body := `#!/bin/sh
+echo "$*" >> "` + argsLog + `"
+echo "$BOT_ONLY_VAR" > "` + envLog + `"
+cat >/dev/null
+echo '{"type":"thread.started","thread_id":"th-eph"}'
+echo '{"type":"item.completed","item":{"id":"i1","type":"agent_message","text":"done"}}'
+echo '{"type":"turn.completed"}'
+`
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	h := &CodexHarness{binary: script}
+	res, err := h.RunTurn(context.Background(), RunOptions{
+		Bot: config.BotConfig{
+			ID:        "b1",
+			Workspace: dir,
+			Env:       map[string]string{"BOT_ONLY_VAR": "from-bot"},
+		},
+		Prompt:    "ping",
+		SessionID: "th-prev",
+		Ephemeral: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Text != "done" {
+		t.Fatalf("Text = %q, want done", res.Text)
+	}
+	rawArgs, _ := os.ReadFile(argsLog)
+	if strings.Contains(string(rawArgs), "resume") {
+		t.Fatalf("ephemeral codex run must not resume session, got %q", string(rawArgs))
+	}
+	rawEnv, _ := os.ReadFile(envLog)
+	if strings.TrimSpace(string(rawEnv)) != "from-bot" {
+		t.Fatalf("expected BOT_ONLY_VAR=from-bot, got %q", string(rawEnv))
+	}
+}

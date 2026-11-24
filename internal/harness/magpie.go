@@ -88,7 +88,11 @@ type ttlCache[T any] struct {
 func (c *ttlCache[T]) get(load func() (T, bool)) T {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if !c.fetched.IsZero() && time.Since(c.fetched) < c.ttl {
+	ttl := c.ttl
+	if ttl <= 0 {
+		ttl = 5 * time.Minute
+	}
+	if !c.fetched.IsZero() && time.Since(c.fetched) < ttl {
 		return c.val
 	}
 	val, ok := load()

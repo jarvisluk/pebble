@@ -17,10 +17,8 @@ import (
 // AgyHarness keeps one long-lived Antigravity CLI (`agy`) process per bot,
 // speaking NDJSON stream-json over stdin/stdout.
 type AgyHarness struct {
-	binary string
-	mu     sync.Mutex
-	procs  map[string]*agyProc
-
+	binary   string
+	pool     procPool[*agyProc]
 	modelsMu sync.Mutex
 	models   []string
 }
@@ -60,7 +58,7 @@ type agyEvent struct {
 }
 
 func NewAgyHarness() *AgyHarness {
-	return &AgyHarness{binary: resolveAgyBin(), procs: make(map[string]*agyProc)}
+	return &AgyHarness{binary: resolveAgyBin()}
 }
 
 func resolveAgyBin() string {
@@ -134,55 +132,46 @@ func (h *AgyHarness) Models(ctx context.Context) ([]string, error) {
 }
 
 func (h *AgyHarness) Close() {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	for id, p := range h.procs {
-		p.kill()
-		delete(h.procs, id)
-	}
+	h.pool.close()
 }
 
 // Reload terminates cached agy processes and clears the cached model list so
 // updated provider or Magpie settings apply on the next turn.
 func (h *AgyHarness) Reload() {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	for id, p := range h.procs {
-		p.kill()
-		delete(h.procs, id)
-	}
+	h.pool.clear()
 	h.modelsMu.Lock()
 	h.models = nil
 	h.modelsMu.Unlock()
 }
 
 func (h *AgyHarness) drop(botID string, p *agyProc) {
-	h.mu.Lock()
-	if h.procs[botID] == p {
-		delete(h.procs, botID)
-	}
-	h.mu.Unlock()
-	p.kill()
+	h.pool.drop(botID, p)
 }
 
-func (h *AgyHarness) proc(ctx context.Context, opts RunOptions) (*agyProc, error) {
+func (h *AgyHarness) viaMagpie(ctx context.Context, model string) bool {
+	if !magpieInstalled() {
+		return false
+	}
+	st := GetMagpieStatus(ctx, "agy")
+	return st.Connected && (model == "" || strings.HasPrefix(model, "magpie/"))
+}
+
+func (h *AgyHarness) proc(ctx context.Context, opts RunOptions) (*agyProc, func(), error) {
 	bot := opts.Bot
-	viaMagpie := false
-	if magpieInstalled() {
-		st := GetMagpieStatus(ctx, "agy")
-		viaMagpie = st.Connected && (bot.Model == "" || strings.HasPrefix(bot.Model, "magpie/"))
-	}
+	viaMagpie := h.viaMagpie(ctx, bot.Model)
+	return h.pool.acquire(
+		bot.ID,
+		func(p *agyProc) bool {
+			return p.model == bot.Model && p.sessionID == opts.SessionID && p.viaMagpie == viaMagpie
+		},
+		func() (*agyProc, error) {
+			return h.startProc(opts, viaMagpie, false)
+		},
+	)
+}
 
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if p := h.procs[bot.ID]; p != nil {
-		if p.alive() && p.model == bot.Model && p.sessionID == opts.SessionID && p.viaMagpie == viaMagpie {
-			return p, nil
-		}
-		p.kill()
-		delete(h.procs, bot.ID)
-	}
-
+func (h *AgyHarness) startProc(opts RunOptions, viaMagpie, ephemeral bool) (*agyProc, error) {
+	bot := opts.Bot
 	if err := writeAgyWorkspaceFiles(bot.Workspace, opts); err != nil {
 		return nil, err
 	}
@@ -191,7 +180,7 @@ func (h *AgyHarness) proc(ctx context.Context, opts RunOptions) (*agyProc, error
 	if bot.Model != "" {
 		args = append(args, "--model", bot.Model)
 	}
-	if opts.SessionID != "" {
+	if !ephemeral && opts.SessionID != "" {
 		args = append(args, "--conversation", opts.SessionID)
 	}
 	if bot.ShouldAutoApprove() {
@@ -212,47 +201,15 @@ func (h *AgyHarness) proc(ctx context.Context, opts RunOptions) (*agyProc, error
 	if err != nil {
 		return nil, err
 	}
-	p := &agyProc{lineProc: lp, model: bot.Model, sessionID: opts.SessionID, viaMagpie: viaMagpie}
-	h.procs[bot.ID] = p
-	return p, nil
+	return &agyProc{lineProc: lp, model: bot.Model, sessionID: opts.SessionID, viaMagpie: viaMagpie}, nil
 }
 
 // writeAgyWorkspaceFiles configures workspace-local .agents/mcp_config.json and
 // .agents/rules/bot-hub.md for Antigravity CLI without touching global configs.
 func writeAgyWorkspaceFiles(workspace string, opts RunOptions) error {
 	agentsDir := filepath.Join(workspace, ".agents")
-	if len(opts.MCPCommand) > 0 {
-		if err := os.MkdirAll(agentsDir, 0o755); err != nil {
-			return err
-		}
-		mcpPath := filepath.Join(agentsDir, "mcp_config.json")
-		doc := map[string]any{}
-		if raw, err := os.ReadFile(mcpPath); err == nil {
-			_ = json.Unmarshal(raw, &doc)
-		}
-		servers, _ := doc["mcpServers"].(map[string]any)
-		if servers == nil {
-			servers = map[string]any{}
-		}
-		entry := map[string]any{
-			"command": opts.MCPCommand[0],
-			"args":    opts.MCPCommand[1:],
-		}
-		if len(opts.MCPEnv) > 0 {
-			entry["env"] = opts.MCPEnv
-		}
-		servers["bot-hub"] = entry
-		doc["mcpServers"] = servers
-		b, err := json.MarshalIndent(doc, "", "  ")
-		if err != nil {
-			return err
-		}
-		if err := os.WriteFile(mcpPath, append(b, '\n'), 0o600); err != nil {
-			return err
-		}
-		if err := os.Chmod(mcpPath, 0o600); err != nil {
-			return err
-		}
+	if err := upsertMCPConfig(filepath.Join(agentsDir, "mcp_config.json"), opts); err != nil {
+		return err
 	}
 
 	if opts.PlatformInstructionsPath != "" {
@@ -278,22 +235,41 @@ func writeAgyWorkspaceFiles(workspace string, opts RunOptions) error {
 func (h *AgyHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnResult, error) {
 	started := time.Now()
 	bot := opts.Bot
-	if bot.TimeoutSec > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, time.Duration(bot.TimeoutSec)*time.Second)
-		defer cancel()
+	ctx, cancel := withBotTimeout(ctx, bot.TimeoutSec)
+	defer cancel()
+
+	var (
+		p   *agyProc
+		err error
+	)
+	if opts.Ephemeral {
+		p, err = h.startProc(opts, h.viaMagpie(ctx, bot.Model), true)
+		if err != nil {
+			return nil, err
+		}
+		defer p.kill()
+	} else {
+		var release func()
+		p, release, err = h.proc(ctx, opts)
+		if err != nil {
+			return nil, err
+		}
+		defer release()
+	}
+	dropProc := func() {
+		if opts.Ephemeral {
+			p.kill()
+		} else {
+			h.drop(bot.ID, p)
+		}
 	}
 
-	p, err := h.proc(ctx, opts)
-	if err != nil {
-		return nil, err
-	}
 	err = p.send(map[string]any{
 		"event":   "user",
 		"message": map[string]any{"content": AppendAttachmentContext(opts.Prompt, opts.Attachments)},
 	})
 	if err != nil {
-		h.drop(bot.ID, p)
+		dropProc()
 		return nil, fmt.Errorf("agy process: %w", err)
 	}
 
@@ -305,13 +281,13 @@ func (h *AgyHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnResult,
 		select {
 		case <-ctx.Done():
 			partial.Text = strings.TrimSpace(textBuf.String())
-			h.drop(bot.ID, p)
+			dropProc()
 			return partial, ctxErr(ctx, bot.ID, bot.TimeoutSec)
 
 		case line, ok := <-p.lines:
 			if !ok {
 				partial.Text = strings.TrimSpace(textBuf.String())
-				h.drop(bot.ID, p)
+				dropProc()
 				return partial, fmt.Errorf("agy failed for bot %q: %s", bot.ID, p.exitDetail())
 			}
 			var evt agyEvent

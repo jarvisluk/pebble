@@ -29,8 +29,10 @@ import (
 // external server) and drives sessions over its HTTP API, receiving output
 // from a single shared SSE event stream.
 type OpenCodeHarness struct {
-	binary   string
-	external string
+	binary      string
+	external    string
+	httpClient  *http.Client
+	modelsCache ttlCache[[]string]
 
 	mu       sync.Mutex
 	baseURL  string
@@ -70,10 +72,16 @@ func NewOpenCodeHarness(externalURL string) *OpenCodeHarness {
 		binary = "opencode"
 	}
 	return &OpenCodeHarness{
-		binary:   binary,
-		external: strings.TrimRight(externalURL, "/"),
-		subs:     make(map[string]chan ocEvent),
+		binary:      binary,
+		external:    strings.TrimRight(externalURL, "/"),
+		httpClient:  &http.Client{Timeout: 60 * time.Second},
+		modelsCache: ttlCache[[]string]{ttl: time.Minute},
+		subs:        make(map[string]chan ocEvent),
 	}
+}
+
+func (h *OpenCodeHarness) apiClient(base, pw string) *ocAPI {
+	return &ocAPI{base: base, pw: pw, client: h.httpClient}
 }
 
 func (h *OpenCodeHarness) Kind() string  { return "opencode" }
@@ -173,6 +181,7 @@ func (h *OpenCodeHarness) Reload() {
 		_ = syscall.Kill(-h.cmd.Process.Pid, syscall.SIGTERM)
 	}
 	h.resetLocked()
+	h.modelsCache.invalidate()
 	h.applied.Range(func(k, _ any) bool {
 		h.applied.Delete(k)
 		return true
@@ -265,28 +274,17 @@ func (h *OpenCodeHarness) unsubscribe(sid string) {
 func (h *OpenCodeHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnResult, error) {
 	started := time.Now()
 	bot := opts.Bot
-	if bot.TimeoutSec > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, time.Duration(bot.TimeoutSec)*time.Second)
-		defer cancel()
-	}
+	ctx, cancel := withBotTimeout(ctx, bot.TimeoutSec)
+	defer cancel()
 
 	base, pw, err := h.ensure(ctx)
 	if err != nil {
 		return nil, err
 	}
-	api := &ocAPI{base: base, pw: pw}
+	api := h.apiClient(base, pw)
 	model := modelRef(bot.Model)
 
-	sid := opts.SessionID
-	if opts.Ephemeral {
-		sid = ""
-	} else if sid != "" {
-		if code, _ := api.do(ctx, http.MethodGet, "/api/session/"+sid, nil, nil); code == http.StatusNotFound {
-			sid = ""
-		}
-	}
-	if sid == "" {
+	createSession := func() (string, error) {
 		title := "bot:" + bot.ID
 		if opts.Ephemeral {
 			title = "routine:" + bot.ID
@@ -307,15 +305,44 @@ func (h *OpenCodeHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnRe
 			} `json:"data"`
 		}
 		if _, err := api.do(ctx, http.MethodPost, "/api/session", body, &out); err != nil {
-			return nil, fmt.Errorf("create opencode session: %w", err)
+			return "", fmt.Errorf("create opencode session: %w", err)
 		}
-		sid = out.Data.ID
-		h.applied.Store(sid, bot.Model)
-	} else if prev, _ := h.applied.Load(sid); model != nil && prev != bot.Model {
-		if _, err := api.do(ctx, http.MethodPost, "/api/session/"+sid+"/model", map[string]any{"model": model}, nil); err != nil {
-			return nil, fmt.Errorf("switch model: %w", err)
+		h.applied.Store(out.Data.ID, bot.Model)
+		return out.Data.ID, nil
+	}
+
+	sid := opts.SessionID
+	reusedKnown := false
+	if opts.Ephemeral {
+		sid = ""
+	} else if sid != "" {
+		if _, known := h.applied.Load(sid); known {
+			reusedKnown = true
+		} else if code, _ := api.do(ctx, http.MethodGet, "/api/session/"+sid, nil, nil); code == http.StatusNotFound {
+			sid = ""
 		}
-		h.applied.Store(sid, bot.Model)
+	}
+	if sid != "" {
+		if prev, _ := h.applied.Load(sid); model != nil && prev != bot.Model {
+			if code, err := api.do(ctx, http.MethodPost, "/api/session/"+sid+"/model", map[string]any{"model": model}, nil); err != nil {
+				if code == http.StatusNotFound {
+					h.applied.Delete(sid)
+					sid = ""
+					reusedKnown = false
+				} else {
+					return nil, fmt.Errorf("switch model: %w", err)
+				}
+			} else {
+				h.applied.Store(sid, bot.Model)
+			}
+		}
+	}
+	if sid == "" {
+		var cerr error
+		sid, cerr = createSession()
+		if cerr != nil {
+			return nil, cerr
+		}
 	}
 	if opts.Ephemeral && sid != "" {
 		defer func(ephemeralSID string) {
@@ -328,7 +355,7 @@ func (h *OpenCodeHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnRe
 
 	partial := &TurnResult{BotID: bot.ID, SessionID: sid}
 	ch := h.subscribe(sid)
-	defer h.unsubscribe(sid)
+	defer func() { h.unsubscribe(partial.SessionID) }()
 
 	var ocFiles []map[string]any
 	for _, att := range opts.Attachments {
@@ -340,14 +367,15 @@ func (h *OpenCodeHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnRe
 		}
 	}
 
-	isCompact := false
-	if cmdName, cmdArgs, ok := ParseSlashCommand(opts.Prompt); ok {
-		if cmdName == "compact" {
-			isCompact = true
-			if _, err := api.do(ctx, http.MethodPost, "/api/session/"+sid+"/compact", map[string]any{}, nil); err != nil {
-				return partial, fmt.Errorf("compact session: %w", err)
+	sendTurn := func(targetSID string) (bool, int, error) {
+		if cmdName, cmdArgs, ok := ParseSlashCommand(opts.Prompt); ok {
+			if cmdName == "compact" {
+				code, err := api.do(ctx, http.MethodPost, "/api/session/"+targetSID+"/compact", map[string]any{}, nil)
+				if err != nil {
+					return true, code, fmt.Errorf("compact session: %w", err)
+				}
+				return true, code, nil
 			}
-		} else {
 			cmdBody := map[string]any{
 				"name": cmdName,
 				"text": cmdArgs,
@@ -355,29 +383,49 @@ func (h *OpenCodeHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnRe
 			if len(ocFiles) > 0 {
 				cmdBody["files"] = ocFiles
 			}
-			code, err := api.do(ctx, http.MethodPost, "/api/session/"+sid+"/command", cmdBody, nil)
+			code, err := api.do(ctx, http.MethodPost, "/api/session/"+targetSID+"/command", cmdBody, nil)
 			if err != nil {
 				if code == http.StatusBadRequest || code == http.StatusNotFound {
 					promptBody := map[string]any{"text": AppendAttachmentContext(opts.Prompt, opts.Attachments)}
 					if len(ocFiles) > 0 {
 						promptBody["files"] = ocFiles
 					}
-					if _, perr := api.do(ctx, http.MethodPost, "/api/session/"+sid+"/prompt", promptBody, nil); perr != nil {
-						return partial, fmt.Errorf("send prompt: %w", perr)
+					pcode, perr := api.do(ctx, http.MethodPost, "/api/session/"+targetSID+"/prompt", promptBody, nil)
+					if perr != nil {
+						return false, pcode, fmt.Errorf("send prompt: %w", perr)
 					}
-				} else {
-					return partial, fmt.Errorf("send command: %w", err)
+					return false, pcode, nil
 				}
+				return false, code, fmt.Errorf("send command: %w", err)
 			}
+			return false, code, nil
 		}
-	} else {
 		promptBody := map[string]any{"text": AppendAttachmentContext(opts.Prompt, opts.Attachments)}
 		if len(ocFiles) > 0 {
 			promptBody["files"] = ocFiles
 		}
-		if _, err := api.do(ctx, http.MethodPost, "/api/session/"+sid+"/prompt", promptBody, nil); err != nil {
-			return partial, fmt.Errorf("send prompt: %w", err)
+		code, err := api.do(ctx, http.MethodPost, "/api/session/"+targetSID+"/prompt", promptBody, nil)
+		if err != nil {
+			return false, code, fmt.Errorf("send prompt: %w", err)
 		}
+		return false, code, nil
+	}
+
+	isCompact, code, err := sendTurn(sid)
+	if err != nil && code == http.StatusNotFound && reusedKnown {
+		h.applied.Delete(sid)
+		h.unsubscribe(sid)
+		newSID, cerr := createSession()
+		if cerr != nil {
+			return partial, cerr
+		}
+		sid = newSID
+		partial.SessionID = sid
+		ch = h.subscribe(sid)
+		isCompact, _, err = sendTurn(sid)
+	}
+	if err != nil {
+		return partial, err
 	}
 
 	var texts []string
@@ -574,66 +622,90 @@ func (h *OpenCodeHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnRe
 }
 
 func (h *OpenCodeHarness) Models(ctx context.Context) ([]string, error) {
-	base, pw, err := h.ensure(ctx)
-	if err != nil {
-		return nil, err
+	var fetchErr error
+	ids := h.modelsCache.get(func() ([]string, bool) {
+		base, pw, err := h.ensure(ctx)
+		if err != nil {
+			fetchErr = err
+			return nil, false
+		}
+		var out struct {
+			Data []struct {
+				ID         string `json:"id"`
+				ProviderID string `json:"providerID"`
+			} `json:"data"`
+		}
+		if _, err := h.apiClient(base, pw).do(ctx, http.MethodGet, "/api/model", nil, &out); err != nil {
+			fetchErr = err
+			return nil, false
+		}
+		list := make([]string, 0, len(out.Data))
+		for _, m := range out.Data {
+			list = append(list, m.ProviderID+"/"+m.ID)
+		}
+		return list, len(list) > 0
+	})
+	if len(ids) == 0 && fetchErr != nil {
+		return nil, fetchErr
 	}
-	var out struct {
-		Data []struct {
-			ID         string `json:"id"`
-			ProviderID string `json:"providerID"`
-		} `json:"data"`
-	}
-	if _, err := (&ocAPI{base: base, pw: pw}).do(ctx, http.MethodGet, "/api/model", nil, &out); err != nil {
-		return nil, err
-	}
-	ids := make([]string, 0, len(out.Data))
-	for _, m := range out.Data {
-		ids = append(ids, m.ProviderID+"/"+m.ID)
-	}
-	return ids, nil
+	return append([]string(nil), ids...), nil
 }
 
 func (h *OpenCodeHarness) ListCommands(ctx context.Context, bot config.BotConfig) ([]SlashCommand, error) {
 	builtins := []SlashCommand{
 		{Name: "compact", Description: "压缩当前会话上下文", Source: "harness"},
 	}
+	h.mu.Lock()
+	ready := h.baseURL != "" || h.external != ""
+	h.mu.Unlock()
+
 	var remoteCmds, remoteSkills []SlashCommand
-	if base, pw, err := h.ensure(ctx); err == nil {
-		api := &ocAPI{base: base, pw: pw}
-		q := ""
-		if bot.Workspace != "" {
-			q = "?location[directory]=" + url.QueryEscape(bot.Workspace)
-		}
-		var cmdOut struct {
-			Data []struct {
-				Name        string `json:"name"`
-				Description string `json:"description"`
-			} `json:"data"`
-		}
-		if _, err := api.do(ctx, http.MethodGet, "/api/command"+q, nil, &cmdOut); err == nil {
-			for _, c := range cmdOut.Data {
-				remoteCmds = append(remoteCmds, SlashCommand{
-					Name:        c.Name,
-					Description: c.Description,
-					Source:      "harness",
-				})
+	if ready {
+		if base, pw, err := h.ensure(ctx); err == nil {
+			api := h.apiClient(base, pw)
+			q := ""
+			if bot.Workspace != "" {
+				q = "?location[directory]=" + url.QueryEscape(bot.Workspace)
 			}
-		}
-		var skillOut struct {
-			Data []struct {
-				Name        string `json:"name"`
-				Description string `json:"description"`
-			} `json:"data"`
-		}
-		if _, err := api.do(ctx, http.MethodGet, "/api/skill"+q, nil, &skillOut); err == nil {
-			for _, s := range skillOut.Data {
-				remoteSkills = append(remoteSkills, SlashCommand{
-					Name:        s.Name,
-					Description: s.Description,
-					Source:      "skill",
-				})
-			}
+			var wg sync.WaitGroup
+			wg.Add(2)
+			go func() {
+				defer wg.Done()
+				var cmdOut struct {
+					Data []struct {
+						Name        string `json:"name"`
+						Description string `json:"description"`
+					} `json:"data"`
+				}
+				if _, err := api.do(ctx, http.MethodGet, "/api/command"+q, nil, &cmdOut); err == nil {
+					for _, c := range cmdOut.Data {
+						remoteCmds = append(remoteCmds, SlashCommand{
+							Name:        c.Name,
+							Description: c.Description,
+							Source:      "harness",
+						})
+					}
+				}
+			}()
+			go func() {
+				defer wg.Done()
+				var skillOut struct {
+					Data []struct {
+						Name        string `json:"name"`
+						Description string `json:"description"`
+					} `json:"data"`
+				}
+				if _, err := api.do(ctx, http.MethodGet, "/api/skill"+q, nil, &skillOut); err == nil {
+					for _, s := range skillOut.Data {
+						remoteSkills = append(remoteSkills, SlashCommand{
+							Name:        s.Name,
+							Description: s.Description,
+							Source:      "skill",
+						})
+					}
+				}
+			}()
+			wg.Wait()
 		}
 	}
 
@@ -668,7 +740,7 @@ func (h *OpenCodeHarness) ListAgents(ctx context.Context, bot config.BotConfig) 
 			Hidden      bool   `json:"hidden"`
 		} `json:"data"`
 	}
-	if _, err := (&ocAPI{base: base, pw: pw}).do(ctx, http.MethodGet, "/api/agent"+q, nil, &out); err != nil {
+	if _, err := h.apiClient(base, pw).do(ctx, http.MethodGet, "/api/agent"+q, nil, &out); err != nil {
 		return nil, err
 	}
 	var agents []AgentInfo
@@ -692,6 +764,7 @@ func modelRef(model string) map[string]string {
 
 type ocAPI struct {
 	base, pw string
+	client   *http.Client
 }
 
 func (a *ocAPI) do(ctx context.Context, method, path string, body, out any) (int, error) {
@@ -711,7 +784,11 @@ func (a *ocAPI) do(ctx context.Context, method, path string, body, out any) (int
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	resp, err := (&http.Client{Timeout: 60 * time.Second}).Do(req)
+	client := a.client
+	if client == nil {
+		client = &http.Client{Timeout: 60 * time.Second}
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return 0, err
 	}

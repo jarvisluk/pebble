@@ -3,6 +3,7 @@ package harness
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -203,6 +204,23 @@ func parseFrontmatter(content string) (name, desc string) {
 	return name, desc
 }
 
+const frontmatterHeadBytes = 4096
+
+// readFrontmatterHead reads at most maxBytes from path so command/skill
+// scanning never loads full markdown bodies into memory.
+func readFrontmatterHead(path string, maxBytes int) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	buf, err := io.ReadAll(io.LimitReader(f, int64(maxBytes)))
+	if err != nil {
+		return "", err
+	}
+	return string(buf), nil
+}
+
 // scanMarkdownCommands scans top-level *.md files in dir as slash commands.
 func scanMarkdownCommands(dir, source string) []SlashCommand {
 	entries, err := os.ReadDir(dir)
@@ -219,8 +237,8 @@ func scanMarkdownCommands(dir, source string) []SlashCommand {
 			continue
 		}
 		var desc string
-		if raw, err := os.ReadFile(filepath.Join(dir, ent.Name())); err == nil {
-			n, d := parseFrontmatter(string(raw))
+		if raw, err := readFrontmatterHead(filepath.Join(dir, ent.Name()), frontmatterHeadBytes); err == nil {
+			n, d := parseFrontmatter(raw)
 			if n != "" {
 				base = n
 			}
@@ -247,11 +265,11 @@ func scanSkillDirs(dir string) []SlashCommand {
 			continue
 		}
 		skillPath := filepath.Join(dir, ent.Name(), "SKILL.md")
-		raw, err := os.ReadFile(skillPath)
+		raw, err := readFrontmatterHead(skillPath, frontmatterHeadBytes)
 		if err != nil {
 			continue
 		}
-		name, desc := parseFrontmatter(string(raw))
+		name, desc := parseFrontmatter(raw)
 		if name == "" {
 			name = ent.Name()
 		}

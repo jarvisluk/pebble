@@ -100,7 +100,7 @@ func (h *DshHarness) Models(context.Context) ([]string, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if len(h.models) > 0 {
-		return h.models, nil
+		return append([]string(nil), h.models...), nil
 	}
 	return []string{"deepseek-account/deepseek-flash", "deepseek-account/deepseek-v4-pro", "deepseek-official/deepseek-v4-flash"}, nil
 }
@@ -376,11 +376,8 @@ func acpModels(opts []acpConfigOption) []string {
 func (h *DshHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnResult, error) {
 	started := time.Now()
 	bot := opts.Bot
-	if bot.TimeoutSec > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, time.Duration(bot.TimeoutSec)*time.Second)
-		defer cancel()
-	}
+	ctx, cancel := withBotTimeout(ctx, bot.TimeoutSec)
+	defer cancel()
 	p, err := h.ensure(ctx)
 	if err != nil {
 		return nil, err
@@ -426,11 +423,14 @@ func (h *DshHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnResult,
 		raw json.RawMessage
 		err error
 	}
+	reqCtx, cancelReq := context.WithCancel(context.Background())
+	defer cancelReq()
 	done := make(chan promptResult, 1)
 	go func() {
 		// Not tied to ctx: an interrupt is session/cancel, and the prompt
-		// still answers (with stopReason "cancelled").
-		raw, err := h.request(context.Background(), p, "session/prompt", map[string]any{
+		// still answers (with stopReason "cancelled"). reqCtx is cancelled if
+		// cancelDeadline expires so pending map entries never leak.
+		raw, err := h.request(reqCtx, p, "session/prompt", map[string]any{
 			"sessionId": sid,
 			"prompt":    []map[string]string{{"type": "text", "text": AppendAttachmentContext(opts.Prompt, opts.Attachments)}},
 		})
@@ -447,6 +447,7 @@ func (h *DshHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnResult,
 			_ = p.send(map[string]any{"jsonrpc": "2.0", "method": "session/cancel", "params": map[string]any{"sessionId": sid}})
 			cancelDeadline = time.After(15 * time.Second)
 		case <-cancelDeadline:
+			cancelReq()
 			partial.Text = strings.TrimSpace(texts.String())
 			return partial, ctxErr(ctx, bot.ID, bot.TimeoutSec)
 		case u := <-updates:
@@ -470,6 +471,9 @@ func (h *DshHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnResult,
 				case u := <-updates:
 					if u.SessionUpdate == "agent_message_chunk" && u.Content.Type == "text" {
 						texts.WriteString(u.Content.Text)
+						if opts.OnText != nil && u.Content.Text != "" {
+							opts.OnText(u.Content.Text)
+						}
 					}
 				default:
 					drained = true

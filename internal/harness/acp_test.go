@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -84,5 +85,77 @@ func TestACPHarnessRunTurn(t *testing.T) {
 	}
 	if len(tools) != 1 || tools[0] != "read_file" {
 		t.Fatalf("tools = %v, want [read_file]", tools)
+	}
+}
+
+func TestACPHarnessPassesMCPAndIsolatesEphemeral(t *testing.T) {
+	dir := t.TempDir()
+	logFile := filepath.Join(dir, "acp.log")
+	script := filepath.Join(dir, "mock-acp")
+	body := `#!/bin/sh
+echo "START $$" >> "` + logFile + `"
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1}}\n' "$id"
+      ;;
+    *'"method":"session/new"'*)
+      echo "NEW_SESSION $line" >> "` + logFile + `"
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"acp-ses-1"}}\n' "$id"
+      ;;
+    *'"method":"session/prompt"'*)
+      printf '{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"ok"}}}}\n'
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$id"
+      ;;
+  esac
+done
+`
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	h := NewACPHarness(ACPOptions{
+		Kind:      "codebuddy",
+		Label:     "CodeBuddy CLI",
+		Binaries:  []string{script},
+		EnvPrefix: "CODEBUDDY",
+	})
+	defer h.Close()
+
+	bot := config.BotConfig{ID: "b1", Workspace: dir}
+	opts := RunOptions{
+		Bot:        bot,
+		Prompt:     "hi",
+		MCPCommand: []string{"/usr/local/bin/bot-hub", "mcp", "--bot-id", "b1"},
+		MCPEnv:     map[string]string{"BOT_HUB_API_TOKEN": "tok-acp"},
+	}
+	if _, err := h.RunTurn(context.Background(), opts); err != nil {
+		t.Fatal(err)
+	}
+	opts.Ephemeral = true
+	if _, err := h.RunTurn(context.Background(), opts); err != nil {
+		t.Fatal(err)
+	}
+	opts.Ephemeral = false
+	if _, err := h.RunTurn(context.Background(), opts); err != nil {
+		t.Fatal(err)
+	}
+
+	raw, err := os.ReadFile(logFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	starts := 0
+	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		if strings.HasPrefix(line, "START ") {
+			starts++
+		}
+	}
+	if starts != 2 {
+		t.Fatalf("expected 2 ACP process starts (1 pooled + 1 ephemeral), got %d:\n%s", starts, raw)
+	}
+	if !strings.Contains(string(raw), `"name":"bot-hub"`) || !strings.Contains(string(raw), `"BOT_HUB_API_TOKEN"`) {
+		t.Fatalf("expected session/new to include bot-hub mcpServers, got:\n%s", raw)
 	}
 }

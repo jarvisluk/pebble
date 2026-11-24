@@ -2,6 +2,7 @@ package harness
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -55,6 +56,8 @@ type codexEvent struct {
 func (h *CodexHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnResult, error) {
 	started := time.Now()
 	bot := opts.Bot
+	ctx, cancel := withBotTimeout(ctx, bot.TimeoutSec)
+	defer cancel()
 
 	bin := h.binary
 	if bin == "codex" {
@@ -64,7 +67,7 @@ func (h *CodexHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnResul
 	}
 
 	args := []string{"exec"}
-	if opts.SessionID != "" {
+	if !opts.Ephemeral && opts.SessionID != "" {
 		args = append(args, "resume", opts.SessionID)
 	}
 	args = append(args, "--json", "--full-auto")
@@ -83,8 +86,8 @@ func (h *CodexHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnResul
 	if bot.Workspace != "" {
 		cmd.Dir = bot.Workspace
 	}
-	cmd.Env = augmentedEnv(opts.ExtraEnv)
-	cmd.Stdin = strings.NewReader(opts.Prompt)
+	cmd.Env = mergedEnv(bot.Env, opts.ExtraEnv)
+	cmd.Stdin = strings.NewReader(AppendAttachmentContext(opts.Prompt, opts.Attachments))
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	stdout, err := cmd.StdoutPipe()
@@ -119,10 +122,10 @@ func (h *CodexHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnResul
 	r := bufio.NewReaderSize(stdout, 64*1024)
 	for {
 		line, readErr := r.ReadBytes('\n')
-		trimmed := strings.TrimSpace(string(line))
-		if trimmed != "" {
+		trimmed := bytes.TrimSpace(line)
+		if len(trimmed) > 0 {
 			var evt codexEvent
-			if json.Unmarshal([]byte(trimmed), &evt) == nil {
+			if json.Unmarshal(trimmed, &evt) == nil {
 				if evt.ThreadID != "" {
 					partial.SessionID = evt.ThreadID
 				}

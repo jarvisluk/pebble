@@ -1,9 +1,7 @@
 package harness
 
 import (
-	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,8 +20,7 @@ import (
 type PiHarness struct {
 	binary   string
 	mu       sync.Mutex
-	mcpMu    sync.Mutex
-	procs    map[string]*piProc
+	pool     procPool[*piProc]
 	commands map[string][]SlashCommand
 
 	modelsMu sync.Mutex
@@ -86,7 +83,6 @@ var errPiCommandHandled = errors.New("prompt was handled by a pi command, no run
 func NewPiHarness() *PiHarness {
 	return &PiHarness{
 		binary:   envOr("PI_BIN", "pi"),
-		procs:    make(map[string]*piProc),
 		commands: make(map[string][]SlashCommand),
 	}
 }
@@ -142,55 +138,33 @@ func (h *PiHarness) Models(ctx context.Context) ([]string, error) {
 }
 
 func (h *PiHarness) Close() {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	for id, p := range h.procs {
-		p.kill()
-		delete(h.procs, id)
-	}
+	h.pool.close()
 }
 
 // Reload terminates cached pi RPC processes and clears the cached model list so
 // updated provider settings take effect on the next call.
 func (h *PiHarness) Reload() {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	for id, p := range h.procs {
-		p.kill()
-		delete(h.procs, id)
-	}
+	h.pool.clear()
 	h.modelsMu.Lock()
 	h.models = nil
 	h.modelsMu.Unlock()
 }
 
 func (h *PiHarness) drop(botID string, p *piProc) {
-	h.mu.Lock()
-	if h.procs[botID] == p {
-		delete(h.procs, botID)
-	}
-	h.mu.Unlock()
-	p.kill()
+	h.pool.drop(botID, p)
 }
 
-func (h *PiHarness) proc(opts RunOptions, sessionID string) (*piProc, error) {
+func (h *PiHarness) proc(opts RunOptions, sessionID string) (*piProc, func(), error) {
 	bot := opts.Bot
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if p := h.procs[bot.ID]; p != nil {
-		if p.alive() && p.sessionID == sessionID {
-			return p, nil
-		}
-		p.kill()
-		delete(h.procs, bot.ID)
-	}
-
-	p, err := h.startProc(opts, sessionID, false)
-	if err != nil {
-		return nil, err
-	}
-	h.procs[bot.ID] = p
-	return p, nil
+	return h.pool.acquire(
+		bot.ID,
+		func(p *piProc) bool {
+			return p.sessionID == sessionID
+		},
+		func() (*piProc, error) {
+			return h.startProc(opts, sessionID, false)
+		},
+	)
 }
 
 func (h *PiHarness) startProc(opts RunOptions, sessionID string, ephemeral bool) (*piProc, error) {
@@ -227,55 +201,14 @@ func (h *PiHarness) startProc(opts RunOptions, sessionID string, ephemeral bool)
 // .pi/mcp.json while preserving any user-configured servers. It may hold the
 // hub API token, so it is written with 0600 permissions.
 func (h *PiHarness) writePiMCPConfig(workspace string, opts RunOptions) error {
-	if len(opts.MCPCommand) == 0 {
-		return nil
-	}
-	h.mcpMu.Lock()
-	defer h.mcpMu.Unlock()
-
-	dir := filepath.Join(workspace, ".pi")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
-	path := filepath.Join(dir, "mcp.json")
-	doc := map[string]any{}
-	if raw, err := os.ReadFile(path); err == nil && len(raw) > 0 {
-		_ = json.Unmarshal(raw, &doc)
-	}
-	servers, _ := doc["mcpServers"].(map[string]any)
-	if servers == nil {
-		servers = map[string]any{}
-	}
-	server := map[string]any{"command": opts.MCPCommand[0], "args": opts.MCPCommand[1:]}
-	if len(opts.MCPEnv) > 0 {
-		server["env"] = opts.MCPEnv
-	}
-	servers["bot-hub"] = server
-	doc["mcpServers"] = servers
-	b, _ := json.MarshalIndent(doc, "", "  ")
-	want := append(b, '\n')
-	if cur, err := os.ReadFile(path); err == nil && bytes.Equal(cur, want) {
-		return nil
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, want, 0o600); err != nil {
-		return err
-	}
-	if err := os.Chmod(tmp, 0o600); err != nil {
-		_ = os.Remove(tmp)
-		return err
-	}
-	return os.Rename(tmp, path)
+	return upsertMCPConfig(filepath.Join(workspace, ".pi", "mcp.json"), opts)
 }
 
 func (h *PiHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnResult, error) {
 	started := time.Now()
 	bot := opts.Bot
-	if bot.TimeoutSec > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, time.Duration(bot.TimeoutSec)*time.Second)
-		defer cancel()
-	}
+	ctx, cancel := withBotTimeout(ctx, bot.TimeoutSec)
+	defer cancel()
 	var (
 		sessionID string
 		p         *piProc
@@ -292,10 +225,12 @@ func (h *PiHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnResult, 
 		if sessionID == "" {
 			sessionID = newUUID()
 		}
-		p, err = h.proc(opts, sessionID)
+		var release func()
+		p, release, err = h.proc(opts, sessionID)
 		if err != nil {
 			return nil, err
 		}
+		defer release()
 	}
 	dropProc := func() {
 		if opts.Ephemeral {
@@ -359,22 +294,11 @@ func (h *PiHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnResult, 
 	promptText := AppendAttachmentContext(opts.Prompt, opts.Attachments)
 	promptReq := map[string]any{"type": "prompt", "message": promptText}
 	var piImages []map[string]any
-	for _, att := range opts.Attachments {
-		if att.Kind != "image" || att.Path == "" {
-			continue
-		}
-		raw, err := os.ReadFile(att.Path)
-		if err != nil || len(raw) == 0 {
-			continue
-		}
-		mt := att.MimeType
-		if mt == "" {
-			mt = "image/png"
-		}
+	for _, img := range readImageAttachments(opts.Attachments) {
 		piImages = append(piImages, map[string]any{
 			"type":     "image",
-			"data":     base64.StdEncoding.EncodeToString(raw),
-			"mimeType": mt,
+			"data":     img.DataB64,
+			"mimeType": img.MimeType,
 		})
 	}
 	if len(piImages) > 0 {

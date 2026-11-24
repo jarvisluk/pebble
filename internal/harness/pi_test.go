@@ -138,7 +138,7 @@ done
 		t.Fatal(err)
 	}
 
-	h := &PiHarness{binary: script, procs: make(map[string]*piProc), commands: make(map[string][]SlashCommand)}
+	h := &PiHarness{binary: script, commands: make(map[string][]SlashCommand)}
 	defer h.Close()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

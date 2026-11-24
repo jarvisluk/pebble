@@ -7,11 +7,8 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
-
-	"bot-hub/internal/config"
 )
 
 // ACPOptions configures a generic ACP (Agent Client Protocol) stdio harness.
@@ -26,16 +23,16 @@ type ACPOptions struct {
 
 // ACPHarness runs an Agent Client Protocol (JSON-RPC 2.0 over stdio) agent CLI.
 type ACPHarness struct {
-	opts  ACPOptions
-	mu    sync.Mutex
-	procs map[string]*acpProc
+	opts ACPOptions
+	pool procPool[*acpProc]
 }
 
 type acpProc struct {
 	*lineProc
-	workspace string
-	sessionID string
-	nextID    atomic.Int64
+	workspace   string
+	sessionID   string
+	nextID      atomic.Int64
+	autoApprove atomic.Bool
 }
 
 type rpcMessage struct {
@@ -97,10 +94,7 @@ func NewGrokHarness() *ACPHarness {
 }
 
 func NewACPHarness(opts ACPOptions) *ACPHarness {
-	return &ACPHarness{
-		opts:  opts,
-		procs: make(map[string]*acpProc),
-	}
+	return &ACPHarness{opts: opts}
 }
 
 func (h *ACPHarness) Kind() string  { return h.opts.Kind }
@@ -111,12 +105,12 @@ func (h *ACPHarness) Models(context.Context) ([]string, error) {
 }
 
 func (h *ACPHarness) Close() {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	for id, p := range h.procs {
-		p.kill()
-		delete(h.procs, id)
-	}
+	h.pool.close()
+}
+
+// Reload terminates cached ACP processes so updated settings apply on the next turn.
+func (h *ACPHarness) Reload() {
+	h.pool.clear()
 }
 
 func (h *ACPHarness) resolveBinary() (string, error) {
@@ -136,20 +130,21 @@ func (h *ACPHarness) resolveBinary() (string, error) {
 	return "", fmt.Errorf("no binary configured for harness %q", h.opts.Kind)
 }
 
-func (h *ACPHarness) getOrStartProc(ctx context.Context, opts RunOptions) (*acpProc, error) {
+func (h *ACPHarness) getOrStartProc(ctx context.Context, opts RunOptions) (*acpProc, func(), error) {
 	bot := opts.Bot
-	h.mu.Lock()
-	p := h.procs[bot.ID]
-	if p != nil && p.alive() && p.workspace == bot.Workspace && (opts.SessionID == "" || p.sessionID == opts.SessionID) {
-		h.mu.Unlock()
-		return p, nil
-	}
-	if p != nil {
-		p.kill()
-		delete(h.procs, bot.ID)
-	}
-	h.mu.Unlock()
+	return h.pool.acquire(
+		bot.ID,
+		func(p *acpProc) bool {
+			return p.workspace == bot.Workspace && (opts.SessionID == "" || p.sessionID == opts.SessionID)
+		},
+		func() (*acpProc, error) {
+			return h.startProc(ctx, opts)
+		},
+	)
+}
 
+func (h *ACPHarness) startProc(ctx context.Context, opts RunOptions) (*acpProc, error) {
+	bot := opts.Bot
 	bin, err := h.resolveBinary()
 	if err != nil {
 		return nil, err
@@ -158,7 +153,7 @@ func (h *ACPHarness) getOrStartProc(ctx context.Context, opts RunOptions) (*acpP
 	if bot.Workspace != "" {
 		cmd.Dir = bot.Workspace
 	}
-	cmd.Env = augmentedEnv(opts.ExtraEnv)
+	cmd.Env = mergedEnv(bot.Env, opts.ExtraEnv)
 
 	lp, err := startLineProc(cmd)
 	if err != nil {
@@ -173,26 +168,17 @@ func (h *ACPHarness) getOrStartProc(ctx context.Context, opts RunOptions) (*acpP
 		ap.kill()
 		return nil, err
 	}
-	sid, err := ap.newSession(ctx, bot.Workspace)
+	sid, err := ap.newSession(ctx, bot.Workspace, opts)
 	if err != nil {
 		ap.kill()
 		return nil, err
 	}
 	ap.sessionID = sid
-
-	h.mu.Lock()
-	h.procs[bot.ID] = ap
-	h.mu.Unlock()
 	return ap, nil
 }
 
 func (h *ACPHarness) dropProc(botID string, p *acpProc) {
-	h.mu.Lock()
-	if cur, ok := h.procs[botID]; ok && cur == p {
-		delete(h.procs, botID)
-	}
-	h.mu.Unlock()
-	p.kill()
+	h.pool.drop(botID, p)
 }
 
 func (p *acpProc) call(ctx context.Context, method string, params any, onMsg func(rpcMessage)) (json.RawMessage, error) {
@@ -252,24 +238,33 @@ func (p *acpProc) handleServerRequest(msg rpcMessage) {
 			} `json:"options"`
 		}
 		_ = json.Unmarshal(msg.Params, &req)
+		allow := p.autoApprove.Load()
 		selected := ""
 		for _, opt := range req.Options {
-			if opt.Kind == "allow_once" || opt.Kind == "allow_always" {
+			if allow && (opt.Kind == "allow_once" || opt.Kind == "allow_always") {
+				selected = opt.OptionID
+				break
+			}
+			if !allow && (opt.Kind == "reject_once" || opt.Kind == "reject_always") {
 				selected = opt.OptionID
 				break
 			}
 		}
-		if selected == "" && len(req.Options) > 0 {
+		if allow && selected == "" && len(req.Options) > 0 {
 			selected = req.Options[0].OptionID
+		}
+		outcome := map[string]any{"outcome": "cancelled"}
+		if selected != "" {
+			outcome = map[string]any{
+				"outcome":  "selected",
+				"optionId": selected,
+			}
 		}
 		_ = p.send(map[string]any{
 			"jsonrpc": "2.0",
 			"id":      json.RawMessage(msg.ID),
 			"result": map[string]any{
-				"outcome": map[string]any{
-					"outcome":  "selected",
-					"optionId": selected,
-				},
+				"outcome": outcome,
 			},
 		})
 		return
@@ -299,7 +294,7 @@ func (p *acpProc) initialize(ctx context.Context) error {
 	return err
 }
 
-func (p *acpProc) newSession(ctx context.Context, workspace string) (string, error) {
+func (p *acpProc) newSession(ctx context.Context, workspace string, opts RunOptions) (string, error) {
 	sessCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	cwd := workspace
@@ -308,7 +303,7 @@ func (p *acpProc) newSession(ctx context.Context, workspace string) (string, err
 	}
 	res, err := p.call(sessCtx, "session/new", map[string]any{
 		"cwd":        cwd,
-		"mcpServers": []any{},
+		"mcpServers": acpMCPServers(opts),
 	}, nil)
 	if err != nil {
 		return "", err
@@ -324,12 +319,38 @@ func (p *acpProc) newSession(ctx context.Context, workspace string) (string, err
 
 func (h *ACPHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnResult, error) {
 	started := time.Now()
-	p, err := h.getOrStartProc(ctx, opts)
-	if err != nil {
-		return nil, err
-	}
+	bot := opts.Bot
+	ctx, cancel := withBotTimeout(ctx, bot.TimeoutSec)
+	defer cancel()
 
-	promptText := buildPromptWithAttachments(opts.Prompt, opts.Attachments)
+	var (
+		p   *acpProc
+		err error
+	)
+	if opts.Ephemeral {
+		p, err = h.startProc(ctx, opts)
+		if err != nil {
+			return nil, err
+		}
+		defer p.kill()
+	} else {
+		var release func()
+		p, release, err = h.getOrStartProc(ctx, opts)
+		if err != nil {
+			return nil, err
+		}
+		defer release()
+	}
+	dropProc := func() {
+		if opts.Ephemeral {
+			p.kill()
+		} else {
+			h.dropProc(bot.ID, p)
+		}
+	}
+	p.autoApprove.Store(bot.ShouldAutoApprove())
+
+	promptText := AppendAttachmentContext(opts.Prompt, opts.Attachments)
 	var textBuf strings.Builder
 	var tools []string
 
@@ -389,7 +410,7 @@ func (h *ACPHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnResult,
 			Text:      strings.TrimSpace(textBuf.String()),
 			Tools:     tools,
 		}
-		h.dropProc(opts.Bot.ID, p)
+		dropProc()
 		if ctx.Err() != nil {
 			return partial, ctxErr(ctx, opts.Bot.ID, opts.Bot.TimeoutSec)
 		}
@@ -431,52 +452,4 @@ func extractACPChunkText(raw json.RawMessage) string {
 	return ""
 }
 
-func buildPromptWithAttachments(prompt string, attachments []Attachment) string {
-	if len(attachments) == 0 {
-		return prompt
-	}
-	var sb strings.Builder
-	sb.WriteString(prompt)
-	sb.WriteString("\n\nAttachments:\n")
-	for _, att := range attachments {
-		p := att.WorkspacePath
-		if p == "" {
-			p = att.Path
-		}
-		sb.WriteString(fmt.Sprintf("- %s (%s): %s\n", att.Name, att.Kind, p))
-	}
-	return sb.String()
-}
-
-func augmentedEnv(extra map[string]string) []string {
-	env := os.Environ()
-	pathVal := os.Getenv("PATH")
-	extraPaths := defaultExtraBinDirs()
-	if len(extraPaths) > 0 {
-		joined := strings.Join(extraPaths, string(os.PathListSeparator))
-		if pathVal != "" {
-			pathVal = pathVal + string(os.PathListSeparator) + joined
-		} else {
-			pathVal = joined
-		}
-		env = setEnvVar(env, "PATH", pathVal)
-	}
-	for k, v := range extra {
-		env = setEnvVar(env, k, v)
-	}
-	return env
-}
-
-func setEnvVar(env []string, key, val string) []string {
-	prefix := key + "="
-	for i, entry := range env {
-		if strings.HasPrefix(entry, prefix) {
-			env[i] = prefix + val
-			return env
-		}
-	}
-	return append(env, prefix+val)
-}
-
 var _ Harness = (*ACPHarness)(nil)
-var _ config.BotConfig = config.BotConfig{}

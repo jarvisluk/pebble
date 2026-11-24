@@ -140,12 +140,73 @@ func TestAgyModelsStripsSpinner(t *testing.T) {
 	if err := os.WriteFile(fakeAgy, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	h := &AgyHarness{binary: fakeAgy, procs: make(map[string]*agyProc)}
+	h := &AgyHarness{binary: fakeAgy}
 	models, err := h.Models(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(models) != 2 || models[0] != "gemini-4-neon-high" || models[1] != "claude-opus-5-5-high" {
 		t.Fatalf("unexpected parsed agy models: %#v", models)
+	}
+}
+
+func TestAgyEphemeralDoesNotReuseOrPollutePool(t *testing.T) {
+	tmp := t.TempDir()
+	ws := filepath.Join(tmp, "ws")
+	if err := os.MkdirAll(ws, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	pidLog := filepath.Join(tmp, "pids.log")
+	fakeAgy := filepath.Join(tmp, "agy")
+	script := `#!/bin/sh
+echo "$$:$*" >> ` + pidLog + `
+while IFS= read -r line; do
+  echo '{"event":"result","result":{"conversation_id":"conv-1","status":"SUCCESS","response":"ok"}}'
+done
+`
+	if err := os.WriteFile(fakeAgy, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MAGPIE_BIN", filepath.Join(tmp, "missing-magpie"))
+
+	h := &AgyHarness{binary: fakeAgy}
+	defer h.Close()
+
+	if _, err := h.RunTurn(context.Background(), RunOptions{
+		Bot:       config.BotConfig{ID: "dev", Workspace: ws},
+		SessionID: "conv-1",
+		Prompt:    "main",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.RunTurn(context.Background(), RunOptions{
+		Bot:       config.BotConfig{ID: "dev", Workspace: ws},
+		SessionID: "conv-1",
+		Ephemeral: true,
+		Prompt:    "routine",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.RunTurn(context.Background(), RunOptions{
+		Bot:       config.BotConfig{ID: "dev", Workspace: ws},
+		SessionID: "conv-1",
+		Prompt:    "main2",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	raw, err := os.ReadFile(pidLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 process launches (1 persistent + 1 ephemeral), got %d:\n%s", len(lines), raw)
+	}
+	if !strings.Contains(lines[0], "--conversation conv-1") {
+		t.Fatalf("expected persistent launch to include --conversation, got %q", lines[0])
+	}
+	if strings.Contains(lines[1], "--conversation") {
+		t.Fatalf("expected ephemeral launch to omit --conversation, got %q", lines[1])
 	}
 }

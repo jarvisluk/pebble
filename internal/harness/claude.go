@@ -2,7 +2,6 @@ package harness
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,7 +21,7 @@ import (
 type ClaudeHarness struct {
 	binary   string
 	mu       sync.Mutex
-	procs    map[string]*claudeProc
+	pool     procPool[*claudeProc]
 	cmdCache map[string][]SlashCommand
 }
 
@@ -58,7 +57,6 @@ type claudeEvent struct {
 func NewClaudeHarness() *ClaudeHarness {
 	return &ClaudeHarness{
 		binary:   envOr("CLAUDE_BIN", "claude"),
-		procs:    make(map[string]*claudeProc),
 		cmdCache: make(map[string][]SlashCommand),
 	}
 }
@@ -111,37 +109,25 @@ func (h *ClaudeHarness) ListCommands(_ context.Context, bot config.BotConfig) ([
 }
 
 func (h *ClaudeHarness) Close() {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	for id, p := range h.procs {
-		p.kill()
-		delete(h.procs, id)
-	}
+	h.pool.close()
 }
 
 // Reload terminates cached claude processes so updated settings apply on the next turn.
 func (h *ClaudeHarness) Reload() {
-	h.Close()
+	h.pool.clear()
 }
 
-func (h *ClaudeHarness) proc(opts RunOptions) (*claudeProc, error) {
+func (h *ClaudeHarness) proc(opts RunOptions) (*claudeProc, func(), error) {
 	bot := opts.Bot
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if p := h.procs[bot.ID]; p != nil {
-		if p.alive() && p.model == bot.Model && p.sessionID == opts.SessionID {
-			return p, nil
-		}
-		p.kill()
-		delete(h.procs, bot.ID)
-	}
-
-	p, err := h.startProc(opts, false)
-	if err != nil {
-		return nil, err
-	}
-	h.procs[bot.ID] = p
-	return p, nil
+	return h.pool.acquire(
+		bot.ID,
+		func(p *claudeProc) bool {
+			return p.model == bot.Model && p.sessionID == opts.SessionID
+		},
+		func() (*claudeProc, error) {
+			return h.startProc(opts, false)
+		},
+	)
 }
 
 func (h *ClaudeHarness) startProc(opts RunOptions, ephemeral bool) (*claudeProc, error) {
@@ -195,22 +181,14 @@ func (h *ClaudeHarness) startProc(opts RunOptions, ephemeral bool) (*claudeProc,
 }
 
 func (h *ClaudeHarness) drop(botID string, p *claudeProc) {
-	h.mu.Lock()
-	if h.procs[botID] == p {
-		delete(h.procs, botID)
-	}
-	h.mu.Unlock()
-	p.kill()
+	h.pool.drop(botID, p)
 }
 
 func (h *ClaudeHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnResult, error) {
 	started := time.Now()
 	bot := opts.Bot
-	if bot.TimeoutSec > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, time.Duration(bot.TimeoutSec)*time.Second)
-		defer cancel()
-	}
+	ctx, cancel := withBotTimeout(ctx, bot.TimeoutSec)
+	defer cancel()
 
 	var (
 		p   *claudeProc
@@ -223,10 +201,12 @@ func (h *ClaudeHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnResu
 		}
 		defer p.kill()
 	} else {
-		p, err = h.proc(opts)
+		var release func()
+		p, release, err = h.proc(opts)
 		if err != nil {
 			return nil, err
 		}
+		defer release()
 	}
 	dropProc := func() {
 		if opts.Ephemeral {
@@ -239,24 +219,13 @@ func (h *ClaudeHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnResu
 	promptText := AppendAttachmentContext(opts.Prompt, opts.Attachments)
 	var userContent any = promptText
 	var blocks []map[string]any
-	for _, att := range opts.Attachments {
-		if att.Kind != "image" || att.Path == "" {
-			continue
-		}
-		raw, err := os.ReadFile(att.Path)
-		if err != nil || len(raw) == 0 {
-			continue
-		}
-		mt := att.MimeType
-		if mt == "" {
-			mt = "image/png"
-		}
+	for _, img := range readImageAttachments(opts.Attachments) {
 		blocks = append(blocks, map[string]any{
 			"type": "image",
 			"source": map[string]any{
 				"type":       "base64",
-				"media_type": mt,
-				"data":       base64.StdEncoding.EncodeToString(raw),
+				"media_type": img.MimeType,
+				"data":       img.DataB64,
 			},
 		})
 	}

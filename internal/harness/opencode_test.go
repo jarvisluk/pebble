@@ -6,8 +6,11 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -250,5 +253,107 @@ func TestOpenCodeSlashCommandAndCompactAndFiles(t *testing.T) {
 	mu.Unlock()
 	if !strings.Contains(joined, "command:review") || !strings.Contains(joined, "command:unknown") || !strings.Contains(joined, "files=1") || !strings.Contains(joined, "compact") {
 		t.Fatalf("unexpected hit sequence: %s", joined)
+	}
+}
+
+func TestOpenCodeListCommandsSkipsColdStart(t *testing.T) {
+	tmp := t.TempDir()
+	marker := filepath.Join(tmp, "started")
+	fakeOC := filepath.Join(tmp, "opencode")
+	if err := os.WriteFile(fakeOC, []byte("#!/bin/sh\ntouch "+marker+"\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("OPENCODE_BIN", fakeOC)
+
+	h := NewOpenCodeHarness("")
+	defer h.Close()
+
+	cmds, err := h.ListCommands(context.Background(), config.BotConfig{ID: "b1", Workspace: tmp})
+	if err != nil {
+		t.Fatalf("ListCommands failed: %v", err)
+	}
+	if len(cmds) == 0 || cmds[0].Name != "compact" {
+		t.Fatalf("expected builtin compact command, got %+v", cmds)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("ListCommands must not cold-start opencode serve when unstarted")
+	}
+}
+
+func TestOpenCodeSkipsPreflightAndRecoversOn404(t *testing.T) {
+	evCh := make(chan string, 16)
+	var sessionGetCount atomic.Int32
+	var sessionCreateCount atomic.Int32
+	var dropFirstSession atomic.Bool
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/info":
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/event":
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = w.Write([]byte("data: {\"type\":\"server.connected\",\"data\":{}}\n\n"))
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
+			for {
+				select {
+				case <-r.Context().Done():
+					return
+				case msg := <-evCh:
+					_, _ = w.Write([]byte("data: " + msg + "\n\n"))
+					if f, ok := w.(http.Flusher); ok {
+						f.Flush()
+					}
+				}
+			}
+		case r.Method == http.MethodPost && r.URL.Path == "/api/session":
+			n := sessionCreateCount.Add(1)
+			_, _ = fmt.Fprintf(w, `{"data":{"id":"ses_%d"}}`, n)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/session/ses_1":
+			sessionGetCount.Add(1)
+			_, _ = w.Write([]byte(`{"data":{"id":"ses_1"}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/session/ses_1/prompt":
+			if dropFirstSession.Load() {
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"message":"session not found"}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{}`))
+			evCh <- `{"type":"session.text.ended","data":{"sessionID":"ses_1","text":"ok1"}}`
+			evCh <- `{"type":"session.execution.succeeded","data":{"sessionID":"ses_1"}}`
+		case r.Method == http.MethodPost && r.URL.Path == "/api/session/ses_2/prompt":
+			_, _ = w.Write([]byte(`{}`))
+			evCh <- `{"type":"session.text.ended","data":{"sessionID":"ses_2","text":"recovered"}}`
+			evCh <- `{"type":"session.execution.succeeded","data":{"sessionID":"ses_2"}}`
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	h := NewOpenCodeHarness(srv.URL)
+	defer h.Close()
+
+	bot := config.BotConfig{ID: "b1", Workspace: t.TempDir()}
+	res1, err := h.RunTurn(context.Background(), RunOptions{Bot: bot, Prompt: "first"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.RunTurn(context.Background(), RunOptions{Bot: bot, SessionID: res1.SessionID, Prompt: "second"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := sessionGetCount.Load(); got != 0 {
+		t.Fatalf("expected 0 preflight GET /api/session calls for known session, got %d", got)
+	}
+
+	// Simulate server restarting and forgetting ses_1; known session should recover via 404 -> create ses_2.
+	dropFirstSession.Store(true)
+	res3, err := h.RunTurn(context.Background(), RunOptions{Bot: bot, SessionID: res1.SessionID, Prompt: "third"})
+	if err != nil {
+		t.Fatalf("expected 404 recovery to succeed, got %v", err)
+	}
+	if res3.SessionID != "ses_2" || res3.Text != "recovered" {
+		t.Fatalf("unexpected recovery result: %+v", res3)
 	}
 }
