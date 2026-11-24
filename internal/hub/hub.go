@@ -26,6 +26,7 @@ import (
 	"bot-hub/internal/desktop"
 	"bot-hub/internal/harness"
 	"bot-hub/internal/node"
+	"bot-hub/internal/protocol"
 	"bot-hub/internal/push"
 	"bot-hub/internal/state"
 )
@@ -46,6 +47,9 @@ var ErrLocalDesktopDisabled = errors.New("本机桌面操控已在「设置 › 
 
 // ErrBoundDesktopOffline indicates a bot's explicitly bound desktop target is offline or unavailable.
 var ErrBoundDesktopOffline = errors.New("绑定的桌面节点当前离线或未开启桌面权限")
+
+// ErrNodeUpgradeRequired indicates the target remote node is running an older version that lacks a required capability.
+var ErrNodeUpgradeRequired = errors.New("远端节点版本过低，不支持此功能，请升级该节点")
 
 // ErrForbidden indicates the caller is not permitted to access another bot's private sessions.
 var ErrForbidden = errors.New("forbidden")
@@ -3347,7 +3351,7 @@ func (h *Hub) ActiveDesktopTarget() ActiveDesktopTarget {
 	h.desktopTargetMu.Unlock()
 
 	if !expired {
-		if n, ok := h.findRemoteDesktopNode(spec.NodeID); ok && (!spec.IsVirtualSlot() || n.OS == "linux") {
+		if n, ok := h.findRemoteDesktopNode(spec.NodeID); ok && (!spec.IsVirtualSlot() || n.HasCapability(protocol.CapNodeVirtualSlots)) {
 			return ActiveDesktopTarget{
 				Target:    spec.Raw,
 				Name:      formatVirtualTargetName(n.Name, spec.VirtualSlot),
@@ -3377,7 +3381,7 @@ func (h *Hub) ActiveDesktopTarget() ActiveDesktopTarget {
 		} else if !specNow.IsLocal() {
 			expNow := h.activeDesktopExpires
 			h.desktopTargetMu.Unlock()
-			if n, ok := h.findRemoteDesktopNode(specNow.NodeID); ok && (!specNow.IsVirtualSlot() || n.OS == "linux") {
+			if n, ok := h.findRemoteDesktopNode(specNow.NodeID); ok && (!specNow.IsVirtualSlot() || n.HasCapability(protocol.CapNodeVirtualSlots)) {
 				return ActiveDesktopTarget{
 					Target:    specNow.Raw,
 					Name:      formatVirtualTargetName(n.Name, specNow.VirtualSlot),
@@ -3430,8 +3434,11 @@ func (h *Hub) SetActiveDesktopTarget(target string, ttl time.Duration) (ActiveDe
 	if !ok {
 		return ActiveDesktopTarget{}, fmt.Errorf("remote desktop target %q unavailable", spec.NodeID)
 	}
-	if spec.IsVirtualSlot() && n.OS != "linux" {
-		return ActiveDesktopTarget{}, fmt.Errorf("remote node %q (%s) does not support virtual screens", spec.NodeID, n.OS)
+	if spec.IsVirtualSlot() && !n.HasCapability(protocol.CapNodeVirtualSlots) {
+		if n.OS != "linux" {
+			return ActiveDesktopTarget{}, fmt.Errorf("remote node %q (%s) does not support virtual screens", spec.NodeID, n.OS)
+		}
+		return ActiveDesktopTarget{}, fmt.Errorf("远端节点 %q 版本过低，不支持独立虚拟屏，请升级该节点或在 Bot 详情中改绑其主桌面: %w", spec.NodeID, ErrNodeUpgradeRequired)
 	}
 	if ttl <= 0 {
 		ttl = defaultDesktopTargetTTL
@@ -3530,8 +3537,11 @@ func (h *Hub) ResolveBotDesktopTarget(botID, explicitTarget string) (string, err
 		}
 		return "", fmt.Errorf("remote desktop target %q unavailable: %w", spec.NodeID, ErrBoundDesktopOffline)
 	}
-	if spec.IsVirtualSlot() && n.OS != "linux" {
-		return "", fmt.Errorf("remote node %q (%s) does not support virtual screens", spec.NodeID, n.OS)
+	if spec.IsVirtualSlot() && !n.HasCapability(protocol.CapNodeVirtualSlots) {
+		if n.OS != "linux" {
+			return "", fmt.Errorf("remote node %q (%s) does not support virtual screens", spec.NodeID, n.OS)
+		}
+		return "", fmt.Errorf("远端节点 %q 版本过低，不支持独立虚拟屏，请升级该节点或在 Bot 详情中改绑其主桌面: %w", spec.NodeID, ErrNodeUpgradeRequired)
 	}
 	return spec.Raw, nil
 }

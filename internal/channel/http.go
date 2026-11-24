@@ -27,6 +27,7 @@ import (
 	"bot-hub/internal/harness"
 	"bot-hub/internal/hub"
 	"bot-hub/internal/node"
+	"bot-hub/internal/protocol"
 	"bot-hub/internal/scheduler"
 	"bot-hub/internal/state"
 	"bot-hub/internal/syncer"
@@ -100,8 +101,9 @@ func NewHTTPServer(h *hub.Hub, cfg config.HTTPConfig) *HTTPServer {
 	// Web UI
 	mux.HandleFunc("GET /", s.handleIndex)
 
-	// Health & SSE
+	// Health, Meta & SSE
 	mux.HandleFunc("GET /healthz", s.handleHealth)
+	mux.HandleFunc("GET /api/meta", s.handleMeta)
 	mux.HandleFunc("GET /api/events", s.handleEvents)
 
 	// Bots API
@@ -301,6 +303,9 @@ func (s *HTTPServer) guard(next http.Handler) http.Handler {
 			writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "unauthorized"})
 			return
 		}
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			w.Header().Set(protocol.HeaderProtocol, strconv.Itoa(protocol.CurrentProtocol))
+		}
 		next.ServeHTTP(w, r)
 	})
 }
@@ -416,13 +421,28 @@ func (s *HTTPServer) handleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (s *HTTPServer) serverInfo() protocol.ServerInfo {
+	virtualSupported := false
+	if pool := s.localDeskPool(); pool != nil {
+		virtualSupported = pool.VirtualSupported()
+	}
+	return protocol.BuildServerInfo(virtualSupported)
+}
+
+func (s *HTTPServer) handleMeta(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, s.serverInfo())
+}
+
 func (s *HTTPServer) handleStatus(w http.ResponseWriter, _ *http.Request) {
 	sts, err := s.hub.Status("")
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"bots": sts})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"bots":   sts,
+		"server": s.serverInfo(),
+	})
 }
 
 func (s *HTTPServer) handleCreateBot(w http.ResponseWriter, r *http.Request) {

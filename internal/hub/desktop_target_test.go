@@ -275,3 +275,32 @@ func TestPerBotBrowserEnvIsolation(t *testing.T) {
 		t.Fatalf("expected explicit AGENT_BROWSER_PROFILE override to prevent extraEnv overwrite, got %+v", envCustom)
 	}
 }
+
+func TestLegacyLinuxNodeRejectsVirtualSlotWithoutFallback(t *testing.T) {
+	h := newTestHubForDesktop(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		_, _ = h.Nodes().Poll(ctx, node.PollRequest{
+			ID:          "legacy-linux",
+			Name:        "Legacy Linux",
+			OS:          "linux",
+			Arch:        "amd64",
+			Permissions: []string{node.PermDesktop},
+		}, 2*time.Second)
+	}()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if n, ok := h.Nodes().Get("legacy-linux"); ok && n.Connected {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if _, err := h.SetActiveDesktopTarget("legacy-linux:virtual:assistant", time.Minute); !errors.Is(err, ErrNodeUpgradeRequired) {
+		t.Fatalf("expected ErrNodeUpgradeRequired on SetActiveDesktopTarget, got %v", err)
+	}
+	if _, err := h.ResolveBotDesktopTarget("assistant", "legacy-linux:virtual:assistant"); !errors.Is(err, ErrNodeUpgradeRequired) {
+		t.Fatalf("expected ErrNodeUpgradeRequired on ResolveBotDesktopTarget, got %v", err)
+	}
+}
