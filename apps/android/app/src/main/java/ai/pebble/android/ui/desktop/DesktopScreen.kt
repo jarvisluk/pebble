@@ -1,6 +1,15 @@
 package ai.pebble.android.ui.desktop
 
 import android.app.Activity
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -234,7 +243,7 @@ fun DesktopScreen(
                 ModalBottomSheet(
                     onDismissRequest = { showChatSidebar = false },
                     sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-                    containerColor = p.page,
+                    containerColor = p.card,
                 ) {
                     Box(modifier = Modifier.heightIn(min = 380.dp, max = 660.dp)) {
                         if (resolvedBotId != null) {
@@ -251,191 +260,222 @@ fun DesktopScreen(
                 }
             }
 
-            Row(modifier = Modifier.fillMaxSize()) {
-                if (isWide && showChatSidebar && resolvedBotId != null) {
-                    Box(
-                        modifier = Modifier
-                            .width(340.dp)
-                            .fillMaxHeight(),
-                    ) {
-                        ChatScreen(
-                            store = store,
-                            botId = resolvedBotId,
-                            compact = false,
-                            inDesktopSidebar = true,
-                            onSelectBot = { chatBotId = it },
-                            onCloseSidebar = { showChatSidebar = false },
-                        )
-                    }
-                    Box(
-                        modifier = Modifier
-                            .width(0.5.dp)
-                            .fillMaxHeight()
-                            .background(p.s2),
-                    )
-                }
-
-                Scaffold(
-                    modifier = Modifier.weight(1f).fillMaxHeight(),
-                    containerColor = barContainer,
-                    topBar = {
-                        TopAppBar(
-                            colors = TopAppBarDefaults.topAppBarColors(
-                                containerColor = barContainer,
-                                titleContentColor = barFg,
-                            ),
-                            navigationIcon = {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    IconButton(onClick = onClose, modifier = Modifier.size(40.dp)) {
-                                        Icon(Icons.Rounded.ArrowBackIosNew, contentDescription = store.t("close"), tint = barFg, modifier = Modifier.size(20.dp))
+            Scaffold(
+                modifier = Modifier.fillMaxSize(),
+                containerColor = barContainer,
+                topBar = {
+                    TopAppBar(
+                        colors = TopAppBarDefaults.topAppBarColors(
+                            containerColor = barContainer,
+                            titleContentColor = barFg,
+                        ),
+                        navigationIcon = {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                IconButton(onClick = onClose, modifier = Modifier.size(40.dp)) {
+                                    Icon(Icons.Rounded.ArrowBackIosNew, contentDescription = store.t("close"), tint = barFg, modifier = Modifier.size(20.dp))
+                                }
+                                IconButton(
+                                    onClick = { showChatSidebar = !showChatSidebar },
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clip(CircleShape)
+                                        .background(
+                                            if (showChatSidebar) {
+                                                if (activeTab == StageKind.DESKTOP) pillBg else p.s1
+                                            } else {
+                                                Color.Transparent
+                                            },
+                                        ),
+                                ) {
+                                    Icon(Icons.AutoMirrored.Rounded.Chat, contentDescription = store.t("deskChatSidebar"), tint = barFg, modifier = Modifier.size(20.dp))
+                                }
+                            }
+                        },
+                        title = {
+                            StageTabSwitcher(
+                                activeTab = activeTab,
+                                filesLabel = store.t("stageFilesTab"),
+                                desktopLabel = store.t("stageDesktopTab"),
+                                isDarkStage = activeTab == StageKind.DESKTOP,
+                                onSelect = { activeTab = it },
+                            )
+                        },
+                        actions = {
+                            if (activeTab == StageKind.FILES) {
+                                IconButton(onClick = { showHiddenFiles = !showHiddenFiles }, modifier = Modifier.size(36.dp)) {
+                                    Icon(
+                                        imageVector = if (showHiddenFiles) Icons.Rounded.Visibility else Icons.Rounded.VisibilityOff,
+                                        contentDescription = store.t("showHiddenFiles"),
+                                        tint = barFg,
+                                        modifier = Modifier.size(20.dp),
+                                    )
+                                }
+                                IconButton(onClick = { filesRefreshSeq += 1 }, modifier = Modifier.size(36.dp)) {
+                                    Icon(Icons.Rounded.Refresh, contentDescription = store.t("refreshFiles"), tint = barFg, modifier = Modifier.size(20.dp))
+                                }
+                            } else {
+                                IconButton(onClick = { streaming = !streaming }, modifier = Modifier.size(36.dp)) {
+                                    Icon(
+                                        imageVector = if (streaming) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                                        contentDescription = store.t(if (streaming) "pause" else "resume"),
+                                        tint = barFg,
+                                        modifier = Modifier.size(20.dp),
+                                    )
+                                }
+                                Box {
+                                    IconButton(onClick = { keyMenuOpen = true }, modifier = Modifier.size(36.dp)) {
+                                        Icon(Icons.Rounded.Keyboard, contentDescription = store.t("aaInput"), tint = barFg, modifier = Modifier.size(20.dp))
                                     }
-                                    IconButton(onClick = { showChatSidebar = !showChatSidebar }, modifier = Modifier.size(36.dp)) {
-                                        Icon(Icons.AutoMirrored.Rounded.Chat, contentDescription = store.t("deskChatSidebar"), tint = barFg, modifier = Modifier.size(20.dp))
+                                    DropdownMenu(
+                                        expanded = keyMenuOpen,
+                                        onDismissRequest = { keyMenuOpen = false },
+                                        containerColor = pillBg,
+                                    ) {
+                                        DropdownMenuItem(
+                                            text = { Text(store.t("aaInput"), color = pillText) },
+                                            trailingIcon = {
+                                                if (showText) Icon(Icons.Rounded.Check, contentDescription = null, tint = pillText, modifier = Modifier.size(16.dp))
+                                            },
+                                            onClick = {
+                                                showText = !showText
+                                                keyMenuOpen = false
+                                            },
+                                        )
+                                        HorizontalDivider(color = Color(0xFF333333))
+                                        DropdownMenuItem(
+                                            text = { Text(store.t("keyEnter"), color = pillText) },
+                                            onClick = { keyMenuOpen = false; send(mapOf("kind" to "key", "key" to "Return")) },
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text(store.t("keyBackspace"), color = pillText) },
+                                            onClick = { keyMenuOpen = false; send(mapOf("kind" to "key", "key" to "Backspace")) },
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text(store.t("hotkeyEsc"), color = pillText) },
+                                            onClick = { keyMenuOpen = false; send(mapOf("kind" to "key", "key" to "Escape")) },
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text(store.t("hotkeyTab"), color = pillText) },
+                                            onClick = { keyMenuOpen = false; send(mapOf("kind" to "key", "key" to "Tab")) },
+                                        )
+                                        HorizontalDivider(color = Color(0xFF333333))
+                                        DropdownMenuItem(
+                                            text = { Text(store.t("keyScrollUp"), color = pillText) },
+                                            onClick = { keyMenuOpen = false; send(mapOf("kind" to "scroll", "deltaY" to 8)) },
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text(store.t("keyScrollDown"), color = pillText) },
+                                            onClick = { keyMenuOpen = false; send(mapOf("kind" to "scroll", "deltaY" to -8)) },
+                                        )
                                     }
                                 }
-                            },
-                            title = {
-                                StageTabSwitcher(
-                                    activeTab = activeTab,
-                                    filesLabel = store.t("stageFilesTab"),
-                                    desktopLabel = store.t("stageDesktopTab"),
-                                    isDarkStage = activeTab == StageKind.DESKTOP,
-                                    onSelect = { activeTab = it },
-                                )
-                            },
-                            actions = {
-                                if (activeTab == StageKind.FILES) {
-                                    IconButton(onClick = { showHiddenFiles = !showHiddenFiles }, modifier = Modifier.size(36.dp)) {
-                                        Icon(
-                                            imageVector = if (showHiddenFiles) Icons.Rounded.Visibility else Icons.Rounded.VisibilityOff,
-                                            contentDescription = store.t("showHiddenFiles"),
-                                            tint = barFg,
-                                            modifier = Modifier.size(20.dp),
-                                        )
+                                Box {
+                                    IconButton(onClick = { settingsMenuOpen = true }, modifier = Modifier.size(36.dp)) {
+                                        Icon(Icons.Rounded.Tune, contentDescription = store.t("settings"), tint = barFg, modifier = Modifier.size(20.dp))
                                     }
-                                    IconButton(onClick = { filesRefreshSeq += 1 }, modifier = Modifier.size(36.dp)) {
-                                        Icon(Icons.Rounded.Refresh, contentDescription = store.t("refreshFiles"), tint = barFg, modifier = Modifier.size(20.dp))
-                                    }
-                                } else {
-                                    IconButton(onClick = { streaming = !streaming }, modifier = Modifier.size(36.dp)) {
-                                        Icon(
-                                            imageVector = if (streaming) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                                            contentDescription = store.t(if (streaming) "pause" else "resume"),
-                                            tint = barFg,
-                                            modifier = Modifier.size(20.dp),
-                                        )
-                                    }
-                                    Box {
-                                        IconButton(onClick = { keyMenuOpen = true }, modifier = Modifier.size(36.dp)) {
-                                            Icon(Icons.Rounded.Keyboard, contentDescription = store.t("aaInput"), tint = barFg, modifier = Modifier.size(20.dp))
-                                        }
-                                        DropdownMenu(
-                                            expanded = keyMenuOpen,
-                                            onDismissRequest = { keyMenuOpen = false },
-                                            containerColor = pillBg,
-                                        ) {
+                                    DropdownMenu(
+                                        expanded = settingsMenuOpen,
+                                        onDismissRequest = { settingsMenuOpen = false },
+                                        containerColor = pillBg,
+                                    ) {
+                                        if (streamConnected) {
                                             DropdownMenuItem(
-                                                text = { Text(store.t("aaInput"), color = pillText) },
+                                                text = { Text("H.264 · $streamFps fps", color = pillMute, fontSize = PebbleFont.secondary) },
+                                                enabled = false,
+                                                onClick = {},
+                                            )
+                                            HorizontalDivider(color = Color(0xFF333333))
+                                        }
+                                        val presets = listOf(
+                                            "auto" to store.t("deskPresetAuto"),
+                                            "ultra" to store.t("deskPresetUltra"),
+                                            "high" to store.t("deskPresetHigh"),
+                                            "medium" to store.t("deskPresetMedium"),
+                                            "low" to store.t("deskPresetLow"),
+                                        )
+                                        presets.forEach { (id, lbl) ->
+                                            DropdownMenuItem(
+                                                text = { Text(lbl, color = pillText) },
                                                 trailingIcon = {
-                                                    if (showText) Icon(Icons.Rounded.Check, contentDescription = null, tint = pillText, modifier = Modifier.size(16.dp))
+                                                    if (preset == id) Icon(Icons.Rounded.Check, contentDescription = null, tint = pillText, modifier = Modifier.size(16.dp))
                                                 },
                                                 onClick = {
-                                                    showText = !showText
-                                                    keyMenuOpen = false
+                                                    preset = id
+                                                    settingsMenuOpen = false
                                                 },
                                             )
-                                            HorizontalDivider(color = Color(0xFF333333))
-                                            DropdownMenuItem(
-                                                text = { Text(store.t("keyEnter"), color = pillText) },
-                                                onClick = { keyMenuOpen = false; send(mapOf("kind" to "key", "key" to "Return")) },
-                                            )
-                                            DropdownMenuItem(
-                                                text = { Text(store.t("keyBackspace"), color = pillText) },
-                                                onClick = { keyMenuOpen = false; send(mapOf("kind" to "key", "key" to "Backspace")) },
-                                            )
-                                            DropdownMenuItem(
-                                                text = { Text(store.t("hotkeyEsc"), color = pillText) },
-                                                onClick = { keyMenuOpen = false; send(mapOf("kind" to "key", "key" to "Escape")) },
-                                            )
-                                            DropdownMenuItem(
-                                                text = { Text(store.t("hotkeyTab"), color = pillText) },
-                                                onClick = { keyMenuOpen = false; send(mapOf("kind" to "key", "key" to "Tab")) },
-                                            )
-                                            HorizontalDivider(color = Color(0xFF333333))
-                                            DropdownMenuItem(
-                                                text = { Text(store.t("keyScrollUp"), color = pillText) },
-                                                onClick = { keyMenuOpen = false; send(mapOf("kind" to "scroll", "deltaY" to 8)) },
-                                            )
-                                            DropdownMenuItem(
-                                                text = { Text(store.t("keyScrollDown"), color = pillText) },
-                                                onClick = { keyMenuOpen = false; send(mapOf("kind" to "scroll", "deltaY" to -8)) },
-                                            )
                                         }
-                                    }
-                                    Box {
-                                        IconButton(onClick = { settingsMenuOpen = true }, modifier = Modifier.size(36.dp)) {
-                                            Icon(Icons.Rounded.Tune, contentDescription = store.t("settings"), tint = barFg, modifier = Modifier.size(20.dp))
-                                        }
-                                        DropdownMenu(
-                                            expanded = settingsMenuOpen,
-                                            onDismissRequest = { settingsMenuOpen = false },
-                                            containerColor = pillBg,
-                                        ) {
-                                            if (streamConnected) {
+                                        if (targets.size > 1) {
+                                            HorizontalDivider(color = Color(0xFF333333))
+                                            targets.forEach { tr ->
                                                 DropdownMenuItem(
-                                                    text = { Text("H.264 · $streamFps fps", color = pillMute, fontSize = PebbleFont.secondary) },
-                                                    enabled = false,
-                                                    onClick = {},
-                                                )
-                                                HorizontalDivider(color = Color(0xFF333333))
-                                            }
-                                            val presets = listOf(
-                                                "auto" to store.t("deskPresetAuto"),
-                                                "ultra" to store.t("deskPresetUltra"),
-                                                "high" to store.t("deskPresetHigh"),
-                                                "medium" to store.t("deskPresetMedium"),
-                                                "low" to store.t("deskPresetLow"),
-                                            )
-                                            presets.forEach { (id, lbl) ->
-                                                DropdownMenuItem(
-                                                    text = { Text(lbl, color = pillText) },
+                                                    text = { Text(tr.name ?: tr.id, color = pillText) },
                                                     trailingIcon = {
-                                                        if (preset == id) Icon(Icons.Rounded.Check, contentDescription = null, tint = pillText, modifier = Modifier.size(16.dp))
+                                                        if (target == tr.id) Icon(Icons.Rounded.Check, contentDescription = null, tint = pillText, modifier = Modifier.size(16.dp))
                                                     },
                                                     onClick = {
-                                                        preset = id
+                                                        target = tr.id
                                                         settingsMenuOpen = false
                                                     },
                                                 )
                                             }
-                                            if (targets.size > 1) {
-                                                HorizontalDivider(color = Color(0xFF333333))
-                                                targets.forEach { tr ->
-                                                    DropdownMenuItem(
-                                                        text = { Text(tr.name ?: tr.id, color = pillText) },
-                                                        trailingIcon = {
-                                                            if (target == tr.id) Icon(Icons.Rounded.Check, contentDescription = null, tint = pillText, modifier = Modifier.size(16.dp))
-                                                        },
-                                                        onClick = {
-                                                            target = tr.id
-                                                            settingsMenuOpen = false
-                                                        },
-                                                    )
-                                                }
-                                            }
                                         }
                                     }
                                 }
-                            },
-                        )
-                    },
-                ) { innerPadding ->
+                            }
+                        },
+                    )
+                },
+            ) { innerPadding ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(innerPadding)
+                        .imePadding()
+                        .navigationBarsPadding(),
+                ) {
+                    AnimatedVisibility(
+                        visible = isWide && showChatSidebar && resolvedBotId != null,
+                        enter = expandHorizontally(tween(240, easing = FastOutSlowInEasing), expandFrom = Alignment.Start) +
+                            slideInHorizontally(tween(240, easing = FastOutSlowInEasing)) { -it / 3 } +
+                            fadeIn(tween(200)),
+                        exit = shrinkHorizontally(tween(220, easing = FastOutSlowInEasing), shrinkTowards = Alignment.Start) +
+                            slideOutHorizontally(tween(220, easing = FastOutSlowInEasing)) { -it / 3 } +
+                            fadeOut(tween(160)),
+                    ) {
+                        if (resolvedBotId != null) {
+                            Surface(
+                                color = p.card,
+                                shape = RoundedCornerShape(20.dp),
+                                modifier = Modifier
+                                    .padding(
+                                        start = 12.dp,
+                                        top = 12.dp,
+                                        bottom = 12.dp,
+                                        end = if (activeTab == StageKind.DESKTOP) 12.dp else 0.dp,
+                                    )
+                                    .width(340.dp)
+                                    .fillMaxHeight(),
+                            ) {
+                                ChatScreen(
+                                    store = store,
+                                    botId = resolvedBotId,
+                                    compact = false,
+                                    inDesktopSidebar = true,
+                                    onSelectBot = { chatBotId = it },
+                                    onCloseSidebar = null,
+                                )
+                            }
+                        }
+                    }
+
                     Box(
                         modifier = Modifier
-                            .fillMaxSize()
-                            .padding(innerPadding)
-                            .imePadding()
-                            .navigationBarsPadding(),
+                            .weight(1f)
+                            .fillMaxHeight(),
                     ) {
                         if (activeTab == StageKind.FILES) {
                             WorkspaceFilesView(
@@ -444,6 +484,7 @@ fun DesktopScreen(
                                 initialPath = initialPath,
                                 showHidden = showHiddenFiles,
                                 refreshTrigger = filesRefreshSeq,
+                                inWideStage = isWide,
                                 onQuotePath = { relPath ->
                                     store.insertIntoChat("@$relPath ")
                                     showChatSidebar = true

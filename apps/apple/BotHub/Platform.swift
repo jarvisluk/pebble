@@ -203,6 +203,46 @@ extension ToolbarItemPlacement {
     }
 }
 
+struct HubSplitLeadingToolbar<First: View, Second: View>: ToolbarContent {
+    @ViewBuilder var first: () -> First
+    @ViewBuilder var second: () -> Second
+
+    var body: some ToolbarContent {
+        #if os(iOS)
+        ToolbarItem(placement: .topBarLeading) {
+            first()
+        }
+        if #available(iOS 26.0, *) {
+            ToolbarSpacer(.fixed, placement: .topBarLeading)
+        }
+        ToolbarItem(placement: .topBarLeading) {
+            second()
+        }
+        #elseif os(macOS)
+        if #available(macOS 26.0, *) {
+            ToolbarItem(placement: .navigation) {
+                HStack(spacing: 8) {
+                    first()
+                        .buttonStyle(.glass)
+                        .buttonBorderShape(.circle)
+                    second()
+                        .buttonStyle(.glass)
+                        .buttonBorderShape(.circle)
+                }
+            }
+            .sharedBackgroundVisibility(.hidden)
+        } else {
+            ToolbarItem(placement: .navigation) {
+                first()
+            }
+            ToolbarItem(placement: .navigation) {
+                second()
+            }
+        }
+        #endif
+    }
+}
+
 extension View {
     @ViewBuilder
     func inlineNavTitle() -> some View {

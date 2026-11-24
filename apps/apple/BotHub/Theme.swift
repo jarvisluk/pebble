@@ -493,7 +493,7 @@ extension View {
     }
 
     @ViewBuilder
-    func composerGlassButton() -> some View {
+    func composerGlassButton(onCard: Bool = false) -> some View {
         #if os(iOS)
         let base = self.buttonBorderShape(.circle)
         if #available(iOS 26.0, *) {
@@ -502,12 +502,12 @@ extension View {
             base.buttonStyle(.bordered)
         }
         #else
-        self.buttonStyle(MacComposerCircleButtonStyle())
+        self.buttonStyle(MacComposerCircleButtonStyle(onCard: onCard))
         #endif
     }
 
     @ViewBuilder
-    func composerGlassField() -> some View {
+    func composerGlassField(onCard: Bool = false) -> some View {
         #if os(iOS)
         let shape = RoundedRectangle(cornerRadius: 22, style: .continuous)
         if #available(iOS 26.0, *) {
@@ -516,7 +516,7 @@ extension View {
             self.background(.regularMaterial, in: shape)
         }
         #else
-        self.modifier(MacComposerFieldModifier())
+        self.modifier(MacComposerFieldModifier(onCard: onCard))
         #endif
     }
 
@@ -1004,13 +1004,16 @@ private struct MacComposerCircleButtonStyle: ButtonStyle {
     @Environment(\.palette) private var p
     @Environment(\.isEnabled) private var isEnabled
     @State private var hovering = false
+    var onCard: Bool = false
 
     func makeBody(configuration: Configuration) -> some View {
+        let idleFill = onCard ? p.s1 : p.card
+        let hoverFill = onCard ? p.s2 : p.s1
         configuration.label
             .frame(width: 34, height: 34)
             .foregroundStyle(isEnabled ? p.text : p.mute)
             .background(
-                Circle().fill(configuration.isPressed ? p.s2 : (hovering ? p.s1 : p.card))
+                Circle().fill(configuration.isPressed ? p.s2 : (hovering ? hoverFill : idleFill))
             )
             .overlay(Circle().stroke(p.s2, lineWidth: 1))
             .contentShape(Circle())
@@ -1020,11 +1023,12 @@ private struct MacComposerCircleButtonStyle: ButtonStyle {
 
 private struct MacComposerFieldModifier: ViewModifier {
     @Environment(\.palette) private var p
+    var onCard: Bool = false
 
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
         content
-            .background(p.card, in: shape)
+            .background(onCard ? p.s1 : p.card, in: shape)
             .overlay(shape.stroke(p.s2, lineWidth: 1))
     }
 }
