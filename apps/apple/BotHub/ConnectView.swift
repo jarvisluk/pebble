@@ -131,17 +131,18 @@ struct ConnectView: View {
                 VStack(spacing: 0) {
                     Spacer(minLength: 24)
 
-                    VStack(spacing: 14) {
-                        BotAvatar(id: "assistant", size: 84, color: pebbleColor, busy: submitting)
+                    VStack(spacing: 16) {
+                        BotAvatar(id: "assistant", size: 136, color: pebbleColor, busy: submitting)
                         Text("Pebble")
-                            .font(.system(size: 20, weight: .bold))
+                            .font(.system(size: 22, weight: .bold))
                             .foregroundStyle(p.text)
                         Text(hub.t("onboardHeroSub"))
-                            .font(.system(size: 14))
+                            .font(.system(size: 15))
                             .foregroundStyle(p.text2)
                             .multilineTextAlignment(.center)
                     }
-                    .padding(.bottom, 40)
+
+                    Spacer(minLength: 24)
 
                     if scanning {
                         QRScanner { onScanned($0) }

@@ -312,10 +312,11 @@ export function ConnectContent({ standalone = false }: { standalone?: boolean })
       <View style={styles.heroInner}>
         <View style={styles.heroSpacer} />
         <View style={styles.heroTop}>
-          <BotAvatar id="assistant" size={84} color={PEBBLE_COLOR} busy={submitting} />
+          <BotAvatar id="assistant" size={136} color={PEBBLE_COLOR} busy={submitting} />
           <Text style={[styles.heroTitle, { color: theme.text }]}>Pebble</Text>
           <Text style={[styles.heroSub, { color: theme.text2 }]}>{t('onboardHeroSub')}</Text>
         </View>
+        <View style={styles.heroSpacer} />
 
         {scanning && Platform.OS !== 'web' && (
           <View style={[styles.camWrap, styles.heroCam]}>
@@ -802,20 +803,19 @@ const styles = StyleSheet.create({
   },
   heroTop: {
     alignItems: 'center',
-    gap: 10,
+    gap: 12,
     paddingBottom: 0,
-    marginBottom: 40,
   },
   heroCam: {
     marginBottom: 16,
   },
   heroTitle: {
-    fontSize: 20,
+    fontSize: 22,
     fontWeight: '700',
   },
   heroSub: {
-    fontSize: 14,
-    lineHeight: 20,
+    fontSize: 15,
+    lineHeight: 21,
     textAlign: 'center',
   },
   heroActions: {
