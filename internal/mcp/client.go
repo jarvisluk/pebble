@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -17,8 +16,8 @@ import (
 	"bot-hub/internal/node"
 )
 
-// Client talks to a running bot-hub HTTP server on behalf of a bot (used by
-// both the stdio MCP server and `bot-hub` CLI subcommands).
+// Client talks to a running Pebble HTTP server on behalf of a bot (used by
+// both the stdio MCP server and `pebble` CLI subcommands).
 type Client struct {
 	hubURL     string
 	selfBotID  string
@@ -34,22 +33,22 @@ type Client struct {
 func NewClient(hubURL, selfBotID, configPath, explicitToken string) *Client {
 	hubURL = strings.TrimRight(strings.TrimSpace(hubURL), "/")
 	if hubURL == "" {
-		hubURL = strings.TrimRight(strings.TrimSpace(os.Getenv("BOT_HUB_URL")), "/")
+		hubURL = strings.TrimRight(config.LookupEnv("PEBBLE_URL", "BOT_HUB_URL"), "/")
 	}
 	if hubURL == "" {
 		hubURL = "http://127.0.0.1:3789"
 	}
 	selfBotID = strings.TrimSpace(selfBotID)
 	if selfBotID == "" {
-		selfBotID = strings.TrimSpace(os.Getenv("BOT_HUB_BOT_ID"))
+		selfBotID = config.LookupEnv("PEBBLE_BOT_ID", "BOT_HUB_BOT_ID")
 	}
 	configPath = strings.TrimSpace(configPath)
 	if configPath == "" {
-		configPath = strings.TrimSpace(os.Getenv("BOT_HUB_CONFIG"))
+		configPath = config.LookupEnv("PEBBLE_CONFIG", "BOT_HUB_CONFIG")
 	}
 	tok := strings.TrimSpace(explicitToken)
 	if tok == "" {
-		tok = strings.TrimSpace(os.Getenv("BOT_HUB_API_TOKEN"))
+		tok = config.LookupEnv("PEBBLE_API_TOKEN", "BOT_HUB_API_TOKEN")
 	}
 	return &Client{
 		hubURL:      hubURL,
@@ -107,7 +106,7 @@ func (c *Client) DoJSON(ctx context.Context, method, path string, payload any) (
 		}
 		resp, err := c.httpClient.Do(req)
 		if err != nil {
-			return 0, nil, fmt.Errorf("bot-hub API unreachable at %s (is `bot-hub serve` running?): %w", c.hubURL, err)
+			return 0, nil, fmt.Errorf("pebble API unreachable at %s (is `pebble serve` running?): %w", c.hubURL, err)
 		}
 		defer resp.Body.Close()
 		b, err := io.ReadAll(resp.Body)

@@ -127,8 +127,8 @@ done
 	opts := RunOptions{
 		Bot:        bot,
 		Prompt:     "hi",
-		MCPCommand: []string{"/usr/local/bin/bot-hub", "mcp", "--bot-id", "b1"},
-		MCPEnv:     map[string]string{"BOT_HUB_API_TOKEN": "tok-acp"},
+		MCPCommand: []string{"/usr/local/bin/pebble", "mcp", "--bot-id", "b1"},
+		MCPEnv:     map[string]string{"PEBBLE_API_TOKEN": "tok-acp"},
 	}
 	if _, err := h.RunTurn(context.Background(), opts); err != nil {
 		t.Fatal(err)
@@ -155,8 +155,8 @@ done
 	if starts != 2 {
 		t.Fatalf("expected 2 ACP process starts (1 pooled + 1 ephemeral), got %d:\n%s", starts, raw)
 	}
-	if !strings.Contains(string(raw), `"name":"bot-hub"`) || !strings.Contains(string(raw), `"BOT_HUB_API_TOKEN"`) {
-		t.Fatalf("expected session/new to include bot-hub mcpServers, got:\n%s", raw)
+	if !strings.Contains(string(raw), `"name":"pebble"`) || !strings.Contains(string(raw), `"PEBBLE_API_TOKEN"`) {
+		t.Fatalf("expected session/new to include pebble mcpServers, got:\n%s", raw)
 	}
 }
 

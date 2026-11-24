@@ -881,7 +881,7 @@ func TestRunDesktopTaskOverrideGuardAndInterrupt(t *testing.T) {
 		t.Fatalf("expected active desktop task cleared after exit, got %q", activeBot)
 	}
 
-	// Unblocked run verifies harness, model, and BOT_HUB_MCP_ROLE=computer_use.
+	// Unblocked run verifies harness, model, and PEBBLE_MCP_ROLE=computer_use.
 	deskH.mu.Lock()
 	deskH.started = nil
 	deskH.release = nil
@@ -901,8 +901,8 @@ func TestRunDesktopTaskOverrideGuardAndInterrupt(t *testing.T) {
 	if !lastCall.Ephemeral || lastCall.Bot.Harness != "opencode" || lastCall.Bot.Model != "magpie/mac-mini/auto/flash" {
 		t.Fatalf("unexpected desktop worker RunOptions: %+v", lastCall)
 	}
-	if lastCall.ExtraEnv["BOT_HUB_MCP_ROLE"] != "computer_use" || lastCall.MCPEnv["BOT_HUB_MCP_ROLE"] != "computer_use" {
-		t.Fatalf("expected BOT_HUB_MCP_ROLE=computer_use in env, got extra=%v mcp=%v", lastCall.ExtraEnv, lastCall.MCPEnv)
+	if lastCall.ExtraEnv["PEBBLE_MCP_ROLE"] != "computer_use" || lastCall.MCPEnv["PEBBLE_MCP_ROLE"] != "computer_use" {
+		t.Fatalf("expected PEBBLE_MCP_ROLE=computer_use in env, got extra=%v mcp=%v", lastCall.ExtraEnv, lastCall.MCPEnv)
 	}
 }
 

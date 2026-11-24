@@ -112,7 +112,7 @@ func TestManagerLiveActivityThrottleAndTakeover(t *testing.T) {
 		t.Fatalf("expected 4 total requests after takeover, got %d", len(reqs))
 	}
 	alertPayload, _ := reqs[2].Payload.(APNSPayload)
-	if alertPayload.APS.InterruptionLevel != "time-sensitive" || alertPayload.DeepLink != "bothub://desktop?target=local" {
+	if alertPayload.APS.InterruptionLevel != "time-sensitive" || alertPayload.DeepLink != "pebble://desktop?target=local" {
 		t.Fatalf("unexpected takeover alert payload: %+v", alertPayload)
 	}
 }

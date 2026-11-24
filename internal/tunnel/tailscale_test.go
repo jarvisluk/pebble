@@ -1,6 +1,9 @@
 package tunnel
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestParseTailscaleLink(t *testing.T) {
 	cases := []struct {
@@ -31,19 +34,32 @@ func TestParseTailscaleLink(t *testing.T) {
 }
 
 func TestExtractTokenFromTailscaleLink(t *testing.T) {
-	clean, tok := ExtractTokenFromLink("tailscale://bothub-mac.ts.net:3789#token=secret%2B1")
-	if clean != "tailscale://bothub-mac.ts.net:3789" || tok != "secret+1" {
+	clean, tok := ExtractTokenFromLink("tailscale://pebble-mac.ts.net:3789#token=secret%2B1")
+	if clean != "tailscale://pebble-mac.ts.net:3789" || tok != "secret+1" {
 		t.Fatalf("got clean=%q tok=%q", clean, tok)
 	}
 }
 
 func TestDefaultTailscaleHostname(t *testing.T) {
-	got := DefaultTailscaleHostname("bothub")
+	got := DefaultTailscaleHostname("")
 	if len(got) == 0 || len(got) > 63 {
 		t.Fatalf("unexpected hostname length: %q", got)
 	}
-	if got != "bothub" && len(got) < 7 {
-		t.Fatalf("unexpected hostname: %q", got)
+	if got != "pebble" && !strings.HasPrefix(got, "pebble-") {
+		t.Fatalf("expected default hostname to start with pebble, got %q", got)
+	}
+}
+
+func TestIsPebbleHostname(t *testing.T) {
+	for _, match := range []string{"pebble", "pebble-mac-mini", "bothub", "bothub-mac"} {
+		if !isPebbleHostname(match) {
+			t.Fatalf("expected isPebbleHostname(%q) = true", match)
+		}
+	}
+	for _, miss := range []string{"", "iphone", "pebblex", "bothubx"} {
+		if isPebbleHostname(miss) {
+			t.Fatalf("expected isPebbleHostname(%q) = false", miss)
+		}
 	}
 }
 
@@ -51,12 +67,12 @@ func TestSortTailscalePeers(t *testing.T) {
 	peers := []TailscalePeer{
 		{Hostname: "phone", Online: false, IsBotHub: false},
 		{Hostname: "mac-mini", Online: true, IsBotHub: false},
-		{Hostname: "bothub-offline", Online: false, IsBotHub: true},
-		{Hostname: "bothub-home", Online: true, IsBotHub: true},
-		{Hostname: "bothub-alpha", Online: true, IsBotHub: true},
+		{Hostname: "pebble-offline", Online: false, IsBotHub: true},
+		{Hostname: "pebble-home", Online: true, IsBotHub: true},
+		{Hostname: "pebble-alpha", Online: true, IsBotHub: true},
 	}
 	sortTailscalePeers(peers)
-	want := []string{"bothub-alpha", "bothub-home", "mac-mini", "bothub-offline", "phone"}
+	want := []string{"pebble-alpha", "pebble-home", "mac-mini", "pebble-offline", "phone"}
 	for i, w := range want {
 		if peers[i].Hostname != w {
 			t.Fatalf("idx %d: got %q, want %q", i, peers[i].Hostname, w)

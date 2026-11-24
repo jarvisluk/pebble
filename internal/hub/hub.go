@@ -332,7 +332,7 @@ func New(cfg *config.HubConfig, store *state.Store, messages *state.MessageStore
 		IdleStop:              time.Duration(cfg.Desktop.EffectiveIdleStopMinutes()) * time.Minute,
 		StopOnlyWhenNoWindows: cfg.Desktop.ShouldStopOnlyWhenNoWindows(),
 	}
-	mediaDir := filepath.Join(os.TempDir(), "bot-hub-media")
+	mediaDir := filepath.Join(os.TempDir(), "pebble-media")
 	if store != nil && store.DBPath() != "" && store.DBPath() != ":memory:" {
 		mediaDir = filepath.Join(filepath.Dir(store.DBPath()), "media")
 	} else if cfg != nil && cfg.StateFile != "" {
@@ -1646,15 +1646,15 @@ func (h *Hub) executeTurn(ctx context.Context, lane *botLane, bot config.BotConf
 
 	platPath := h.platformInstructionsPath()
 	extraEnv := map[string]string{
-		"BOT_HUB_URL":    hubURL,
-		"BOT_HUB_BOT_ID": bot.ID,
-		"BOT_HUB_HOP":    strconv.Itoa(opts.Hop),
+		"PEBBLE_URL":    hubURL,
+		"PEBBLE_BOT_ID": bot.ID,
+		"PEBBLE_HOP":    strconv.Itoa(opts.Hop),
 	}
 	if cfgPath != "" {
-		extraEnv["BOT_HUB_CONFIG"] = cfgPath
+		extraEnv["PEBBLE_CONFIG"] = cfgPath
 	}
 	if apiToken != "" {
-		extraEnv["BOT_HUB_API_TOKEN"] = apiToken
+		extraEnv["PEBBLE_API_TOKEN"] = apiToken
 	}
 	for k, v := range h.botBrowserEnv(bot) {
 		if k != "" && v != "" {
@@ -1673,7 +1673,7 @@ func (h *Hub) executeTurn(ctx context.Context, lane *botLane, bot config.BotConf
 
 	var mcpEnv map[string]string
 	if apiToken != "" {
-		mcpEnv = map[string]string{"BOT_HUB_API_TOKEN": apiToken}
+		mcpEnv = map[string]string{"PEBBLE_API_TOKEN": apiToken}
 	}
 
 	for attempt := 0; attempt < 2; attempt++ {
@@ -2269,7 +2269,7 @@ func (h *Hub) ValidateModelForHarness(ctx context.Context, kind, model string) e
 		if len(models) > limit {
 			sample += fmt.Sprintf(" ... (total %d)", len(models))
 		}
-		return fmt.Errorf("model %q is not in %s's available model list [%s]; run `bot-hub settings models --harness %s` or pass --force for a custom model ID", model, kind, sample, kind)
+		return fmt.Errorf("model %q is not in %s's available model list [%s]; run `pebble settings models --harness %s` or pass --force for a custom model ID", model, kind, sample, kind)
 	}
 	if (kind == "claude" || kind == "codex") && strings.HasPrefix(model, "magpie/") {
 		return fmt.Errorf("harness %s expects bare model IDs without the 'magpie/' prefix (got %q)", kind, model)
@@ -2957,24 +2957,24 @@ func (h *Hub) RunIsolated(ctx context.Context, botID, prompt string, opts Isolat
 	}
 
 	extraEnv := map[string]string{
-		"BOT_HUB_URL":    h.cfg.HTTP.BaseURL(),
-		"BOT_HUB_BOT_ID": bot.ID,
-		"BOT_HUB_HOP":    "0",
+		"PEBBLE_URL":    h.cfg.HTTP.BaseURL(),
+		"PEBBLE_BOT_ID": bot.ID,
+		"PEBBLE_HOP":    "0",
 	}
 	if h.cfg.ConfigPath != "" {
-		extraEnv["BOT_HUB_CONFIG"] = h.cfg.ConfigPath
+		extraEnv["PEBBLE_CONFIG"] = h.cfg.ConfigPath
 	}
 	var mcpEnv map[string]string
 	if apiToken != "" {
-		extraEnv["BOT_HUB_API_TOKEN"] = apiToken
-		mcpEnv = map[string]string{"BOT_HUB_API_TOKEN": apiToken}
+		extraEnv["PEBBLE_API_TOKEN"] = apiToken
+		mcpEnv = map[string]string{"PEBBLE_API_TOKEN": apiToken}
 	}
 	if role := strings.TrimSpace(opts.MCPRole); role != "" {
-		extraEnv["BOT_HUB_MCP_ROLE"] = role
+		extraEnv["PEBBLE_MCP_ROLE"] = role
 		if mcpEnv == nil {
 			mcpEnv = make(map[string]string, 1)
 		}
-		mcpEnv["BOT_HUB_MCP_ROLE"] = role
+		mcpEnv["PEBBLE_MCP_ROLE"] = role
 	}
 	for k, v := range h.botBrowserEnv(bot) {
 		if k != "" && v != "" {

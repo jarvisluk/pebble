@@ -110,8 +110,10 @@ func (s *HTTPServer) handleNodeCall(w http.ResponseWriter, r *http.Request) {
 				if envMap == nil {
 					envMap = make(map[string]any)
 				}
-				if _, ok := envMap["BOT_HUB_BOT_ID"]; !ok {
-					envMap["BOT_HUB_BOT_ID"] = req.BotID
+				if _, hasPebble := envMap["PEBBLE_BOT_ID"]; !hasPebble {
+					if _, hasLegacy := envMap["BOT_HUB_BOT_ID"]; !hasLegacy {
+						envMap["PEBBLE_BOT_ID"] = req.BotID
+					}
 				}
 				if _, ok := envMap["AGENT_BROWSER_SESSION"]; !ok && session != "" {
 					envMap["AGENT_BROWSER_SESSION"] = session

@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 
+	"bot-hub/internal/config"
 	"bot-hub/internal/desktop"
 	"bot-hub/internal/mcp"
 )
@@ -26,13 +27,13 @@ type connOpts struct {
 }
 
 func registerConnFlags(fs *flag.FlagSet, o *connOpts) {
-	fs.StringVar(&o.hubURL, "hub-url", "", "running bot-hub HTTP base URL")
+	fs.StringVar(&o.hubURL, "hub-url", "", "running Pebble HTTP base URL")
 	fs.StringVar(&o.botID, "bot-id", "", "caller bot ID")
 	fs.StringVar(&o.cfg, "config", "", "path to bots.json config file")
-	fs.StringVar(&o.token, "token", "", "bot-hub API token")
+	fs.StringVar(&o.token, "token", "", "pebble API token")
 }
 
-// runCommand executes `bot-hub <bot|settings|session|routine|node|desktop> ...` and
+// runCommand executes `pebble <bot|settings|session|routine|node|desktop> ...` and
 // returns a process exit code. Separated from os.Exit for unit testing.
 func runCommand(ctx context.Context, args []string, cwd string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
@@ -69,7 +70,7 @@ func runCommand(ctx context.Context, args []string, cwd string, stdout, stderr i
 }
 
 func rejectComputerUseRole(cmdName string) error {
-	if strings.TrimSpace(os.Getenv("BOT_HUB_MCP_ROLE")) == "computer_use" {
+	if config.LookupEnv("PEBBLE_MCP_ROLE", "BOT_HUB_MCP_ROLE") == "computer_use" {
 		return fmt.Errorf("%s cannot be called from inside a computer-use worker", cmdName)
 	}
 	return nil
@@ -78,19 +79,19 @@ func rejectComputerUseRole(cmdName string) error {
 func resolveClient(o connOpts, cwd string) *mcp.Client {
 	hubURL := strings.TrimSpace(o.hubURL)
 	if hubURL == "" {
-		hubURL = strings.TrimSpace(os.Getenv("BOT_HUB_URL"))
+		hubURL = config.LookupEnv("PEBBLE_URL", "BOT_HUB_URL")
 	}
 	botID := strings.TrimSpace(o.botID)
 	if botID == "" {
-		botID = strings.TrimSpace(os.Getenv("BOT_HUB_BOT_ID"))
+		botID = config.LookupEnv("PEBBLE_BOT_ID", "BOT_HUB_BOT_ID")
 	}
 	cfgPath := strings.TrimSpace(o.cfg)
 	if cfgPath == "" {
-		cfgPath = strings.TrimSpace(os.Getenv("BOT_HUB_CONFIG"))
+		cfgPath = config.LookupEnv("PEBBLE_CONFIG", "BOT_HUB_CONFIG")
 	}
 	tok := strings.TrimSpace(o.token)
 	if tok == "" {
-		tok = strings.TrimSpace(os.Getenv("BOT_HUB_API_TOKEN"))
+		tok = config.LookupEnv("PEBBLE_API_TOKEN", "BOT_HUB_API_TOKEN")
 	}
 
 	if hubURL == "" || botID == "" || cfgPath == "" || tok == "" {
@@ -111,13 +112,20 @@ func resolveClient(o connOpts, cwd string) *mcp.Client {
 	return mcp.NewClient(hubURL, botID, cfgPath, tok)
 }
 
+func lookupTokenEnvMap(m map[string]string) string {
+	if tok := strings.TrimSpace(m["PEBBLE_API_TOKEN"]); tok != "" {
+		return tok
+	}
+	return strings.TrimSpace(m["BOT_HUB_API_TOKEN"])
+}
+
 func discoverWorkspaceContext(cwd string) connOpts {
 	var out connOpts
 	if strings.TrimSpace(cwd) == "" {
 		return out
 	}
 
-	// 1. opencode.json -> mcp.servers.bot-hub
+	// 1. opencode.json -> mcp.servers.pebble (or legacy bot-hub)
 	if raw, err := os.ReadFile(filepath.Join(cwd, "opencode.json")); err == nil {
 		var doc struct {
 			MCP struct {
@@ -128,17 +136,19 @@ func discoverWorkspaceContext(cwd string) connOpts {
 			} `json:"mcp"`
 		}
 		if json.Unmarshal(raw, &doc) == nil {
-			if srv, ok := doc.MCP.Servers["bot-hub"]; ok {
-				parseMCPArgs(srv.Command, &out)
-				if out.token == "" {
-					out.token = strings.TrimSpace(srv.Environment["BOT_HUB_API_TOKEN"])
+			for _, key := range []string{config.MCPServerName, config.LegacyMCPServerName} {
+				if srv, ok := doc.MCP.Servers[key]; ok {
+					parseMCPArgs(srv.Command, &out)
+					if out.token == "" {
+						out.token = lookupTokenEnvMap(srv.Environment)
+					}
+					return out
 				}
-				return out
 			}
 		}
 	}
 
-	// 2. .agents/mcp_config.json (agy) or .pi/mcp.json (pi) -> mcpServers.bot-hub
+	// 2. .agents/mcp_config.json (agy) or .pi/mcp.json (pi) -> mcpServers.pebble (or legacy bot-hub)
 	for _, rel := range []string{filepath.Join(".agents", "mcp_config.json"), filepath.Join(".pi", "mcp.json")} {
 		raw, err := os.ReadFile(filepath.Join(cwd, rel))
 		if err != nil {
@@ -152,12 +162,14 @@ func discoverWorkspaceContext(cwd string) connOpts {
 			} `json:"mcpServers"`
 		}
 		if json.Unmarshal(raw, &doc) == nil {
-			if srv, ok := doc.MCPServers["bot-hub"]; ok {
-				parseMCPArgs(append([]string{srv.Command}, srv.Args...), &out)
-				if out.token == "" {
-					out.token = strings.TrimSpace(srv.Env["BOT_HUB_API_TOKEN"])
+			for _, key := range []string{config.MCPServerName, config.LegacyMCPServerName} {
+				if srv, ok := doc.MCPServers[key]; ok {
+					parseMCPArgs(append([]string{srv.Command}, srv.Args...), &out)
+					if out.token == "" {
+						out.token = lookupTokenEnvMap(srv.Env)
+					}
+					return out
 				}
-				return out
 			}
 		}
 	}
@@ -249,7 +261,7 @@ func appendValidateDryRunQuery(path string, validate, dryRun bool) string {
 
 func runBotCmd(ctx context.Context, args []string, cwd string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: bot-hub bot <list|get|create|update|delete|message|send> [flags]")
+		return errors.New("usage: pebble bot <list|get|create|update|delete|message|send> [flags]")
 	}
 	action := args[0]
 	rest := args[1:]
@@ -280,7 +292,7 @@ func runBotCmd(ctx context.Context, args []string, cwd string, stdout, stderr io
 		c := resolveClient(co, cwd)
 		target := c.ResolveBotID(*id)
 		if target == "" {
-			return errors.New("bot ID is required (--id or BOT_HUB_BOT_ID)")
+			return errors.New("bot ID is required (--id or PEBBLE_BOT_ID)")
 		}
 		body, err := c.DoJSON(ctx, http.MethodGet, "/api/bots/"+url.PathEscape(target), nil)
 		if err != nil {
@@ -428,7 +440,7 @@ func runBotCmd(ctx context.Context, args []string, cwd string, stdout, stderr io
 		c := resolveClient(co, cwd)
 		target := c.ResolveBotID(*id)
 		if target == "" {
-			return errors.New("bot ID is required (--id or BOT_HUB_BOT_ID)")
+			return errors.New("bot ID is required (--id or PEBBLE_BOT_ID)")
 		}
 		path := appendValidateDryRunQuery("/api/bots/"+url.PathEscape(target), !*force, *dryRun)
 		body, err := c.DoJSON(ctx, http.MethodPatch, path, payload)
@@ -481,7 +493,7 @@ func runBotCmd(ctx context.Context, args []string, cwd string, stdout, stderr io
 			return errors.New("--id and --message are required")
 		}
 		c := resolveClient(co, cwd)
-		hop, _ := strconv.Atoi(os.Getenv("BOT_HUB_HOP"))
+		hop, _ := strconv.Atoi(config.LookupEnv("PEBBLE_HOP", "BOT_HUB_HOP"))
 		body, err := c.DoJSON(ctx, http.MethodPost, "/api/bots/"+url.PathEscape(strings.TrimSpace(*id))+"/message", map[string]any{
 			"message":   *msg,
 			"fromBotId": c.SelfBotID(),
@@ -509,7 +521,7 @@ func runBotCmd(ctx context.Context, args []string, cwd string, stdout, stderr io
 		c := resolveClient(co, cwd)
 		target := c.ResolveBotID(*id)
 		if target == "" {
-			return errors.New("bot ID is required (--id or BOT_HUB_BOT_ID)")
+			return errors.New("bot ID is required (--id or PEBBLE_BOT_ID)")
 		}
 		if strings.TrimSpace(*text) == "" && len(images) == 0 && len(files) == 0 {
 			return errors.New("--text (or positional text), --image, or --file is required")
@@ -557,7 +569,7 @@ func runBotCmd(ctx context.Context, args []string, cwd string, stdout, stderr io
 
 func runSettingsCmd(ctx context.Context, args []string, cwd string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: bot-hub settings <get|models|set> [flags]")
+		return errors.New("usage: pebble settings <get|models|set> [flags]")
 	}
 	action := args[0]
 	rest := args[1:]
@@ -790,7 +802,7 @@ func runSettingsCmd(ctx context.Context, args []string, cwd string, stdout, stde
 
 func runSessionCmd(ctx context.Context, args []string, cwd string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: bot-hub session <list|recall|rotate> [flags]")
+		return errors.New("usage: pebble session <list|recall|rotate> [flags]")
 	}
 	action := args[0]
 	rest := args[1:]
@@ -898,7 +910,7 @@ func runSessionCmd(ctx context.Context, args []string, cwd string, stdout, stder
 		c := resolveClient(co, cwd)
 		target := c.ResolveBotID(*botID)
 		if target == "" {
-			return errors.New("bot ID is required (--bot or BOT_HUB_BOT_ID)")
+			return errors.New("bot ID is required (--bot or PEBBLE_BOT_ID)")
 		}
 		body, err := c.DoJSON(ctx, http.MethodPost, "/api/bots/"+url.PathEscape(target)+"/rotate", map[string]any{
 			"handoffNote": *handoff,
@@ -918,7 +930,7 @@ func runSessionCmd(ctx context.Context, args []string, cwd string, stdout, stder
 
 func runRoutineCmd(ctx context.Context, args []string, cwd string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: bot-hub routine <list|upsert|delete|run> [flags]")
+		return errors.New("usage: pebble routine <list|upsert|delete|run> [flags]")
 	}
 	action := args[0]
 	rest := args[1:]
@@ -934,7 +946,7 @@ func runRoutineCmd(ctx context.Context, args []string, cwd string, stdout, stder
 		c := resolveClient(co, cwd)
 		target := c.ResolveBotID(*botID)
 		if target == "" {
-			return errors.New("bot ID is required (--bot or BOT_HUB_BOT_ID)")
+			return errors.New("bot ID is required (--bot or PEBBLE_BOT_ID)")
 		}
 		body, err := c.DoJSON(ctx, http.MethodGet, "/api/bots/"+url.PathEscape(target)+"/routines", nil)
 		if err != nil {
@@ -968,7 +980,7 @@ func runRoutineCmd(ctx context.Context, args []string, cwd string, stdout, stder
 		c := resolveClient(co, cwd)
 		target := c.ResolveBotID(*botID)
 		if target == "" {
-			return errors.New("bot ID is required (--bot or BOT_HUB_BOT_ID)")
+			return errors.New("bot ID is required (--bot or PEBBLE_BOT_ID)")
 		}
 		payload := map[string]any{
 			"name":   strings.TrimSpace(*name),
@@ -1026,7 +1038,7 @@ func runRoutineCmd(ctx context.Context, args []string, cwd string, stdout, stder
 		c := resolveClient(co, cwd)
 		target := c.ResolveBotID(*botID)
 		if target == "" {
-			return errors.New("bot ID is required (--bot or BOT_HUB_BOT_ID)")
+			return errors.New("bot ID is required (--bot or PEBBLE_BOT_ID)")
 		}
 		body, err := c.DoJSON(ctx, http.MethodDelete, "/api/bots/"+url.PathEscape(target)+"/routines/"+url.PathEscape(strings.TrimSpace(*id)), nil)
 		if err != nil {
@@ -1050,7 +1062,7 @@ func runRoutineCmd(ctx context.Context, args []string, cwd string, stdout, stder
 		c := resolveClient(co, cwd)
 		target := c.ResolveBotID(*botID)
 		if target == "" {
-			return errors.New("bot ID is required (--bot or BOT_HUB_BOT_ID)")
+			return errors.New("bot ID is required (--bot or PEBBLE_BOT_ID)")
 		}
 		body, err := c.DoJSON(ctx, http.MethodPost, "/api/bots/"+url.PathEscape(target)+"/routines/"+url.PathEscape(strings.TrimSpace(*id))+"/run", nil)
 		if err != nil {
@@ -1067,7 +1079,7 @@ func runRoutineCmd(ctx context.Context, args []string, cwd string, stdout, stder
 
 func runNodeCmd(ctx context.Context, args []string, cwd string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: bot-hub node <list|exec|file> [flags]")
+		return errors.New("usage: pebble node <list|exec|file> [flags]")
 	}
 	action := args[0]
 	rest := args[1:]
@@ -1167,7 +1179,7 @@ func runNodeCmd(ctx context.Context, args []string, cwd string, stdout, stderr i
 
 func runDesktopCmd(ctx context.Context, args []string, cwd string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: bot-hub desktop <task|takeover|setup|power|targets> [flags]")
+		return errors.New("usage: pebble desktop <task|takeover|setup|power|targets> [flags]")
 	}
 	action := args[0]
 	rest := args[1:]
@@ -1187,8 +1199,8 @@ func runDesktopCmd(ctx context.Context, args []string, cwd string, stdout, stder
 		return writeJSONOut(stdout, body)
 
 	case "task":
-		if strings.TrimSpace(os.Getenv("BOT_HUB_MCP_ROLE")) == "computer_use" {
-			return errors.New("desktop task cannot be called from inside a computer-use worker")
+		if err := rejectComputerUseRole("desktop task"); err != nil {
+			return err
 		}
 		fs := newSubFlagSet("desktop task", stderr, &co)
 		goal := fs.String("goal", "", "GUI goal description")
@@ -1206,7 +1218,7 @@ func runDesktopCmd(ctx context.Context, args []string, cwd string, stdout, stder
 		}
 		c := resolveClient(co, cwd)
 		if c.SelfBotID() == "" {
-			return errors.New("caller bot ID is unknown (--bot-id or BOT_HUB_BOT_ID)")
+			return errors.New("caller bot ID is unknown (--bot-id or PEBBLE_BOT_ID)")
 		}
 		body, err := c.DoJSON(ctx, http.MethodPost, "/api/desktop/task", map[string]any{
 			"botId":      c.SelfBotID(),

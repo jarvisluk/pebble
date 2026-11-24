@@ -77,7 +77,7 @@ func ShouldSyncPath(relPath string) bool {
 
 	base := parts[len(parts)-1]
 	switch base {
-	case "opencode.json", "BOT_HUB.md", "CLAUDE.md":
+	case "opencode.json", config.PlatformInstructionsFilename, config.LegacyPlatformInstructionsFilename, "CLAUDE.md":
 		return false
 	}
 	if strings.HasSuffix(clean, "/.agents/skills/"+config.PebbleSetupSkillName+"/SKILL.md") ||

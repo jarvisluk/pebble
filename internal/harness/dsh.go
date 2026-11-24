@@ -355,7 +355,7 @@ func acpMCPServers(opts RunOptions) []any {
 	for k, v := range opts.MCPEnv {
 		env = append(env, map[string]string{"name": k, "value": v})
 	}
-	return []any{map[string]any{"name": "bot-hub", "command": opts.MCPCommand[0], "args": opts.MCPCommand[1:], "env": env}}
+	return []any{map[string]any{"name": config.MCPServerName, "command": opts.MCPCommand[0], "args": opts.MCPCommand[1:], "env": env}}
 }
 
 // acpModels turns dsh's `["provider","model"]` option values into

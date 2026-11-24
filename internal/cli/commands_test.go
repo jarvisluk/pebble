@@ -47,15 +47,15 @@ func TestCLIBotCommandsAndPartialUpdate(t *testing.T) {
 	}))
 	defer api.Close()
 
-	// Simulate an opencode workspace with no per-turn env vars set.
+	// Simulate an opencode workspace with no per-turn env vars set (primary pebble MCP config).
 	ws := t.TempDir()
 	ocDoc := map[string]any{
 		"mcp": map[string]any{
 			"servers": map[string]any{
-				"bot-hub": map[string]any{
+				"pebble": map[string]any{
 					"type":        "local",
-					"command":     []string{"/usr/local/bin/bot-hub", "mcp", "--hub-url", api.URL, "--bot-id", "assistant"},
-					"environment": map[string]string{"BOT_HUB_API_TOKEN": "tok-ws"},
+					"command":     []string{"/usr/local/bin/pebble", "mcp", "--hub-url", api.URL, "--bot-id", "assistant"},
+					"environment": map[string]string{"PEBBLE_API_TOKEN": "tok-ws"},
 				},
 			},
 		},
@@ -101,7 +101,7 @@ func TestCLIBotCommandsAndPartialUpdate(t *testing.T) {
 		t.Fatalf("did not expect description in partial patch: %#v", gotPatch)
 	}
 
-	t.Setenv("BOT_HUB_HOP", "2")
+	t.Setenv("PEBBLE_HOP", "2")
 	if out, errOut, code := run("bot", "message", "writer", "hello", "world"); code != 0 || !strings.Contains(out, "ack") {
 		t.Fatalf("bot message failed: code=%d out=%s err=%s", code, out, errOut)
 	}
@@ -156,10 +156,10 @@ func TestCLISessionRoutineNodeDesktopAndAgyDiscovery(t *testing.T) {
 	}
 	agyDoc := map[string]any{
 		"mcpServers": map[string]any{
-			"bot-hub": map[string]any{
-				"command": "/usr/local/bin/bot-hub",
+			"pebble": map[string]any{
+				"command": "/usr/local/bin/pebble",
 				"args":    []string{"mcp", "--hub-url=" + api.URL, "--bot-id=coder"},
-				"env":     map[string]string{"BOT_HUB_API_TOKEN": "tok-agy"},
+				"env":     map[string]string{"PEBBLE_API_TOKEN": "tok-agy"},
 			},
 		},
 	}
@@ -194,11 +194,23 @@ func TestCLISessionRoutineNodeDesktopAndAgyDiscovery(t *testing.T) {
 		}
 	}
 
-	// computer_use role blocks nested desktop task.
-	t.Setenv("BOT_HUB_MCP_ROLE", "computer_use")
+	// computer_use role blocks nested desktop task (both PEBBLE_MCP_ROLE and legacy BOT_HUB_MCP_ROLE).
+	t.Setenv("PEBBLE_MCP_ROLE", "computer_use")
 	var out, errBuf bytes.Buffer
 	if code := runCommand(context.Background(), []string{"desktop", "task", "--goal", "nested"}, ws, &out, &errBuf); code == 0 {
 		t.Fatalf("expected computer_use role to reject nested desktop task")
+	}
+
+	// Backward compatibility: legacy BOT_HUB_URL / BOT_HUB_BOT_ID / BOT_HUB_API_TOKEN and servers["bot-hub"] fallback still work.
+	legacyWS := t.TempDir()
+	legacyOC := `{"mcp":{"servers":{"bot-hub":{"type":"local","command":["/usr/local/bin/bot-hub","mcp","--hub-url","` + api.URL + `","--bot-id","coder"],"environment":{"BOT_HUB_API_TOKEN":"tok-agy"}}}}}`
+	if err := os.WriteFile(filepath.Join(legacyWS, "opencode.json"), []byte(legacyOC), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PEBBLE_MCP_ROLE", "")
+	var legacyOut, legacyErr bytes.Buffer
+	if code := runCommand(context.Background(), []string{"routine", "list"}, legacyWS, &legacyOut, &legacyErr); code != 0 || !strings.Contains(legacyOut.String(), "Check") {
+		t.Fatalf("expected legacy bot-hub opencode.json fallback to work, got code=%d out=%s err=%s", code, legacyOut.String(), legacyErr.String())
 	}
 }
 
@@ -259,10 +271,10 @@ func TestCLISettingsAndGuardrails(t *testing.T) {
 	}
 	mcpDoc := map[string]any{
 		"mcpServers": map[string]any{
-			"bot-hub": map[string]any{
-				"command": "/usr/local/bin/bot-hub",
+			"pebble": map[string]any{
+				"command": "/usr/local/bin/pebble",
 				"args":    []string{"mcp", "--hub-url=" + api.URL, "--bot-id=coder"},
-				"env":     map[string]string{"BOT_HUB_API_TOKEN": "tok-settings"},
+				"env":     map[string]string{"PEBBLE_API_TOKEN": "tok-settings"},
 			},
 		},
 	}
@@ -391,7 +403,7 @@ func TestCLISettingsAndGuardrails(t *testing.T) {
 	}
 
 	// computer_use role blocks mutating bot/settings commands.
-	t.Setenv("BOT_HUB_MCP_ROLE", "computer_use")
+	t.Setenv("PEBBLE_MCP_ROLE", "computer_use")
 	for _, tc := range [][]string{
 		{"bot", "create", "--id", "x", "--name", "X"},
 		{"bot", "update", "--name", "X"},

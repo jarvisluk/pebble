@@ -38,6 +38,7 @@ func TestShouldSyncPathFilters(t *testing.T) {
 		"workspaces/assistant/.env",
 		"workspaces/assistant/.env.local",
 		"workspaces/assistant/opencode.json",
+		"workspaces/assistant/PEBBLE.md",
 		"workspaces/assistant/BOT_HUB.md",
 		"workspaces/assistant/CLAUDE.md",
 		"workspaces/assistant/.agents/skills/pebble-setup/SKILL.md",
@@ -418,5 +419,31 @@ func TestRebuildWorkspaceGlueProvisionsPebbleSetupSkill(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(cfg.Bots[1].Workspace, ".claude", "skills", config.PebbleSetupSkillName, "SKILL.md")); err != nil {
 		t.Fatalf("expected claude pebble-setup skill: %v", err)
+	}
+}
+
+func TestEnsureGitIgnoreMigratesLegacyBlock(t *testing.T) {
+	root := t.TempDir()
+	giPath := filepath.Join(root, ".gitignore")
+	initial := "# user notes\ncustom-ignore/\n\n# bot-hub-sync:begin\n.env\n**/BOT_HUB.md\n# bot-hub-sync:end\n\n# tail\nlocal.tmp\n"
+	if err := os.WriteFile(giPath, []byte(initial), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureGitIgnore(root); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(giPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(raw)
+	if strings.Contains(s, "bot-hub-sync") {
+		t.Fatalf("expected legacy bot-hub-sync block migrated:\n%s", s)
+	}
+	if strings.Count(s, gitIgnoreBegin) != 1 || !strings.Contains(s, "**/PEBBLE.md") || !strings.Contains(s, "**/BOT_HUB.md") {
+		t.Fatalf("unexpected migrated .gitignore:\n%s", s)
+	}
+	if !strings.Contains(s, "custom-ignore/") || !strings.Contains(s, "local.tmp") {
+		t.Fatalf("expected user .gitignore entries preserved:\n%s", s)
 	}
 }

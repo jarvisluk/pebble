@@ -16,8 +16,10 @@ import (
 )
 
 const (
-	gitIgnoreBegin = "# bot-hub-sync:begin"
-	gitIgnoreEnd   = "# bot-hub-sync:end"
+	gitIgnoreBegin       = "# pebble-sync:begin"
+	gitIgnoreEnd         = "# pebble-sync:end"
+	legacyGitIgnoreBegin = "# bot-hub-sync:begin"
+	legacyGitIgnoreEnd   = "# bot-hub-sync:end"
 )
 
 var managedIgnoreLines = []string{
@@ -31,6 +33,7 @@ var managedIgnoreLines = []string{
 	"media/",
 	"bin/",
 	"**/opencode.json",
+	"**/PEBBLE.md",
 	"**/BOT_HUB.md",
 	"**/CLAUDE.md",
 	"**/.agents/skills/pebble-setup/SKILL.md",
@@ -72,10 +75,16 @@ func EnsureGitIgnore(projectRoot string) error {
 	block := gitIgnoreBegin + "\n" + strings.Join(managedIgnoreLines, "\n") + "\n" + gitIgnoreEnd
 	start := strings.Index(existing, gitIgnoreBegin)
 	end := strings.Index(existing, gitIgnoreEnd)
+	endMarkerLen := len(gitIgnoreEnd)
+	if start < 0 || end <= start {
+		start = strings.Index(existing, legacyGitIgnoreBegin)
+		end = strings.Index(existing, legacyGitIgnoreEnd)
+		endMarkerLen = len(legacyGitIgnoreEnd)
+	}
 
 	var updated string
 	if start >= 0 && end > start {
-		end += len(gitIgnoreEnd)
+		end += endMarkerLen
 		updated = existing[:start] + block + existing[end:]
 	} else {
 		trimmed := strings.TrimRight(existing, "\r\n")
@@ -243,10 +252,10 @@ func ensureGitRepo(ctx context.Context, root, branch, repoURL string) error {
 	}
 	// Ensure local committer identity exists so automated checkpoints never fail on fresh machines.
 	if name, err := runGit(ctx, root, "config", "--get", "user.name"); err != nil || strings.TrimSpace(name) == "" {
-		_, _ = runGit(ctx, root, "config", "user.name", "Bot Hub Sync")
+		_, _ = runGit(ctx, root, "config", "user.name", "Pebble Sync")
 	}
 	if email, err := runGit(ctx, root, "config", "--get", "user.email"); err != nil || strings.TrimSpace(email) == "" {
-		_, _ = runGit(ctx, root, "config", "user.email", "sync@bot-hub.local")
+		_, _ = runGit(ctx, root, "config", "user.email", "sync@pebble.local")
 	}
 	if repoURL != "" {
 		if cur, err := runGit(ctx, root, "remote", "get-url", "origin"); err != nil {

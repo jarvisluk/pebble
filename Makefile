@@ -9,7 +9,9 @@ web:
 	cd web && npm run build
 
 build:
-	go build -ldflags="$(GO_LDFLAGS)" -o bin/bot-hub ./cmd/bot-hub
+	mkdir -p bin
+	go build -ldflags="$(GO_LDFLAGS)" -o bin/pebble ./cmd/pebble
+	ln -sf pebble bin/bot-hub
 
 # Desktop app (Wails, cgo): used for Windows/Linux or legacy macOS packaging.
 desktop:
@@ -19,7 +21,7 @@ APP = bin/Pebble.app
 RES_BIN = $(APP)/Contents/Resources/bin
 CODESIGN_IDENTITY ?=
 
-# Native SwiftUI macOS app (PebbleMac target + Go sidecar bot-hub).
+# Native SwiftUI macOS app (PebbleMac target + Go sidecar pebble).
 app:
 	@set -e; \
 	arch=$$(uname -m); \
@@ -32,7 +34,7 @@ app:
 		dsym_args="DEBUG_INFORMATION_FORMAT=dwarf"; \
 	fi; \
 	mkdir -p bin; \
-	go build -ldflags="$(GO_LDFLAGS)" -o bin/bot-hub ./cmd/bot-hub & \
+	(go build -ldflags="$(GO_LDFLAGS)" -o bin/pebble ./cmd/pebble && ln -sf pebble bin/bot-hub) & \
 	go_pid=$$!; \
 	xcodebuild -project apps/apple/BotHub.xcodeproj -scheme PebbleMac -configuration "$(APP_CONFIG)" -derivedDataPath build/apple-mac \
 		$$dest_args $$arch_args $$dsym_args \
@@ -47,7 +49,8 @@ app:
 	@if [ ! -f "$(APP)/Contents/Resources/AppIcon.icns" ] && [ -f build/darwin/AppIcon.icns ]; then \
 		cp build/darwin/AppIcon.icns "$(APP)/Contents/Resources/AppIcon.icns"; \
 	fi
-	cp bin/bot-hub "$(RES_BIN)/bot-hub" && chmod +x "$(RES_BIN)/bot-hub"
+	cp bin/pebble "$(RES_BIN)/pebble" && chmod +x "$(RES_BIN)/pebble"
+	ln -sf pebble "$(RES_BIN)/bot-hub"
 	@set -e; \
 	for tool in agent-desktop agent-browser; do \
 		src=$$(command -v "$$tool" 2>/dev/null || true); \
@@ -105,7 +108,8 @@ app-wails: desktop
 	cp build/darwin/AppIcon.icns "$(APP)/Contents/Resources/"
 	cp -R build/darwin/*.lproj "$(APP)/Contents/Resources/"
 	cp bin/bot-hub-desktop "$(APP)/Contents/MacOS/"
-	ln -sf ../MacOS/bot-hub-desktop "$(RES_BIN)/bot-hub"
+	ln -sf ../MacOS/bot-hub-desktop "$(RES_BIN)/pebble"
+	ln -sf pebble "$(RES_BIN)/bot-hub"
 	@set -e; \
 	for tool in agent-desktop agent-browser; do \
 		src=$$(command -v "$$tool" 2>/dev/null || true); \
@@ -154,13 +158,13 @@ app-wails: desktop
 	codesign --force --sign "$$IDENTITY" "$(APP)"
 
 serve:
-	go run ./cmd/bot-hub serve
+	go run ./cmd/pebble serve
 
 chat:
-	go run ./cmd/bot-hub chat $(or $(BOT),assistant)
+	go run ./cmd/pebble chat $(or $(BOT),assistant)
 
 status:
-	go run ./cmd/bot-hub status
+	go run ./cmd/pebble status
 
 test:
 	go test ./...

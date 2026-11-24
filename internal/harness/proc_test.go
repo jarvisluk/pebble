@@ -85,8 +85,8 @@ func TestUpsertMCPConfigAtomicAndIdempotent(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "sub", "mcp.json")
 	opts := RunOptions{
-		MCPCommand: []string{"/usr/local/bin/bot-hub", "mcp"},
-		MCPEnv:     map[string]string{"BOT_HUB_API_TOKEN": "tok"},
+		MCPCommand: []string{"/usr/local/bin/pebble", "mcp"},
+		MCPEnv:     map[string]string{"PEBBLE_API_TOKEN": "tok"},
 	}
 
 	if err := upsertMCPConfig(path, opts); err != nil {

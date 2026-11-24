@@ -58,7 +58,7 @@ final class DesktopHostManager {
 
         guard let binPath = resolveBinaryPath() else {
             starting = false
-            daemonError = "未找到 bot-hub 可执行文件"
+            daemonError = "未找到 pebble 可执行文件"
             return
         }
 
@@ -155,14 +155,18 @@ final class DesktopHostManager {
 
     private func resolveBinaryPath() -> String? {
         let env = ProcessInfo.processInfo.environment
-        if let custom = env["BOT_HUB_DAEMON_BIN"], !custom.isEmpty, FileManager.default.isExecutableFile(atPath: custom) {
-            return custom
+        for key in ["PEBBLE_DAEMON_BIN", "BOT_HUB_DAEMON_BIN"] {
+            if let custom = env[key], !custom.isEmpty, FileManager.default.isExecutableFile(atPath: custom) {
+                return custom
+            }
         }
-        if let bundled = Bundle.main.resourceURL?.appendingPathComponent("bin/bot-hub").path,
-           FileManager.default.isExecutableFile(atPath: bundled) {
-            return bundled
+        for rel in ["bin/pebble", "bin/bot-hub"] {
+            if let bundled = Bundle.main.resourceURL?.appendingPathComponent(rel).path,
+               FileManager.default.isExecutableFile(atPath: bundled) {
+                return bundled
+            }
         }
-        for cand in ["/opt/homebrew/bin/bot-hub", "/usr/local/bin/bot-hub"] {
+        for cand in ["/opt/homebrew/bin/pebble", "/usr/local/bin/pebble", "/opt/homebrew/bin/bot-hub", "/usr/local/bin/bot-hub"] {
             if FileManager.default.isExecutableFile(atPath: cand) {
                 return cand
             }
