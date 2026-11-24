@@ -425,6 +425,10 @@ struct RootView: View {
                         } else if let id = router.selected, hub.bots.contains(where: { $0.id == id }) {
                             ChatView(botId: id)
                                 .id(id)
+                                .hubMacTrailingPanel(isPresented: r.detailOpen, width: 360) {
+                                    BotDetailView(botId: id, isPresented: $r.detailOpen)
+                                        .id(id)
+                                }
                                 .transition(.opacity)
                         } else {
                             VStack(spacing: 8) {
@@ -445,8 +449,7 @@ struct RootView: View {
                     }
                     .animation(.easeInOut(duration: 0.2), value: router.selected)
                 }
-                .macSeamlessWindowToolbar()
-                .inspector(isPresented: $r.detailOpen) {
+                .hubSplitInspector(isPresented: $r.detailOpen) {
                     if r.detailOpen, let id = router.selected, hub.bots.contains(where: { $0.id == id }) {
                         BotDetailView(botId: id, isPresented: $r.detailOpen)
                         .id(id)
