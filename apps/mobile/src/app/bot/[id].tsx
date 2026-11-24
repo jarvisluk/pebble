@@ -228,6 +228,7 @@ export default function BotChatScreen() {
 
   const listRef = useRef<FlatList<TimelineEntry>>(null);
   const inputRef = useRef<React.ComponentRef<typeof TextInput>>(null);
+  const [composerHeight, setComposerHeight] = useState(76);
 
   useEffect(() => {
     if (bots.length > 0 && !bot) {
@@ -926,6 +927,7 @@ export default function BotChatScreen() {
           renderItem={renderTimelineEntry}
           contentContainerStyle={[
             styles.listContent,
+            { paddingBottom: composerHeight + 12 },
             timelineEntries.length === 0 && styles.emptyGrow,
           ]}
           ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
@@ -971,13 +973,23 @@ export default function BotChatScreen() {
           }
         />
 
-        {sendErr ? (
-          <View style={[styles.errBanner, { backgroundColor: theme.pink }]}>
-            <Text style={[styles.errTxt, { color: theme.danger }]}>{sendErr}</Text>
-          </View>
-        ) : null}
+        <View
+          pointerEvents="box-none"
+          onLayout={(e) => {
+            const h = Math.ceil(e.nativeEvent.layout.height);
+            if (h > 0 && Math.abs(h - composerHeight) > 1) {
+              setComposerHeight(h);
+            }
+          }}
+          style={[styles.composerOverlay, { paddingBottom: Math.max(insets.bottom, 10) }]}
+        >
+          {sendErr ? (
+            <View style={[styles.errBanner, { backgroundColor: theme.pink }]}>
+              <Text style={[styles.errTxt, { color: theme.danger }]}>{sendErr}</Text>
+            </View>
+          ) : null}
 
-        <View style={[styles.composerWrap, { paddingBottom: Math.max(insets.bottom, 10) }]}>
+          <View pointerEvents="box-none" style={styles.composerWrap}>
           {slashQuery !== null && filteredCommands.length > 0 && (
             <ScrollView
               horizontal
@@ -1063,7 +1075,7 @@ export default function BotChatScreen() {
             </ScrollView>
           )}
 
-          <View style={[styles.composerCapsule, { backgroundColor: theme.card }]}>
+          <View style={[styles.composerCapsule, { backgroundColor: theme.card, borderColor: theme.s2 }]}>
             <Pressable
               accessibilityLabel={t('attachFile')}
               onPress={() => void onPickAttachment()}
@@ -1109,6 +1121,7 @@ export default function BotChatScreen() {
               )}
             </Pressable>
           </View>
+        </View>
         </View>
       </KeyboardAvoidingView>
 
@@ -2072,6 +2085,13 @@ const styles = StyleSheet.create({
   errTxt: {
     fontSize: 15,
   },
+  composerOverlay: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 10,
+  },
   composerWrap: {
     paddingHorizontal: 12,
     paddingTop: 6,
@@ -2098,12 +2118,18 @@ const styles = StyleSheet.create({
   },
   composerCapsule: {
     borderRadius: 24,
+    borderWidth: StyleSheet.hairlineWidth,
     paddingLeft: 6,
     paddingRight: 6,
     paddingVertical: 6,
     flexDirection: 'row',
     alignItems: 'flex-end',
     gap: 8,
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
   },
   attachBtn: {
     width: 36,

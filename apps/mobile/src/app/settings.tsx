@@ -3,7 +3,9 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
+  Animated,
   BackHandler,
+  Easing,
   KeyboardAvoidingView,
   Linking,
   Platform,
@@ -69,6 +71,24 @@ export default function SettingsScreen() {
   const isWide = width >= 768;
   const [tab, setTab] = useState<SettingsTab>('general');
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
+  const pageAnim = useRef(new Animated.Value(1)).current;
+  const pageDirRef = useRef<1 | -1>(1);
+  const firstRenderRef = useRef(true);
+
+  useEffect(() => {
+    if (firstRenderRef.current) {
+      firstRenderRef.current = false;
+      return;
+    }
+    if (isWide) return;
+    pageAnim.setValue(0);
+    Animated.timing(pageAnim, {
+      toValue: 1,
+      duration: 220,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [mobileDetailOpen, isWide, pageAnim]);
   const theme = useTheme();
   const { pref: themePref, setPref: setThemePref } = useThemePref();
   const { pref: langPref, setPref: setLangPref, t } = useI18n();
@@ -375,6 +395,7 @@ export default function SettingsScreen() {
   useEffect(() => {
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
       if (!isWide && mobileDetailOpen) {
+        pageDirRef.current = -1;
         setMobileDetailOpen(false);
         return true;
       }
@@ -478,7 +499,14 @@ export default function SettingsScreen() {
       <ModalHeader
         title={isNarrowDetail ? t(activeTabItem.labelKey) : t('settings')}
         closeLabel={isNarrowDetail ? t('backBtn') : undefined}
-        onClose={isNarrowDetail ? () => setMobileDetailOpen(false) : requestClose}
+        onClose={
+          isNarrowDetail
+            ? () => {
+                pageDirRef.current = -1;
+                setMobileDetailOpen(false);
+              }
+            : requestClose
+        }
         rightLabel={isNarrowList ? undefined : t('save')}
         onRightPress={isNarrowList ? undefined : () => void onSave(false)}
         rightDisabled={!dirty || saving}
@@ -508,6 +536,22 @@ export default function SettingsScreen() {
             })}
           </View>
         )}
+        <Animated.View
+          style={[
+            styles.flex,
+            !isWide && {
+              opacity: pageAnim,
+              transform: [
+                {
+                  translateX: pageAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [pageDirRef.current * 28, 0],
+                  }),
+                },
+              ],
+            },
+          ]}
+        >
         {isNarrowList ? (
           <ScrollView contentContainerStyle={styles.scroll} style={styles.flex}>
             <View style={[styles.catCard, { backgroundColor: theme.card }]}>
@@ -515,6 +559,7 @@ export default function SettingsScreen() {
                 <Pressable
                   key={item.id}
                   onPress={() => {
+                    pageDirRef.current = 1;
                     setTab(item.id);
                     setMobileDetailOpen(true);
                   }}
@@ -1630,6 +1675,7 @@ export default function SettingsScreen() {
           )}
         </ScrollView>
         )}
+        </Animated.View>
       </KeyboardAvoidingView>
     </View>
   );
