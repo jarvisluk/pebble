@@ -10,8 +10,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -38,6 +36,8 @@ import ai.pebble.android.data.PebbleStore
 import ai.pebble.android.ui.theme.BotAvatar
 import ai.pebble.android.ui.theme.PebbleFont
 import ai.pebble.android.ui.theme.LocalPalette
+import androidx.compose.ui.res.painterResource
+import ai.pebble.android.ui.theme.PebbleIcons
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -91,7 +91,7 @@ fun CollabSheetView(
                 ),
                 navigationIcon = {
                     IconButton(onClick = onClose) {
-                        Icon(Icons.Rounded.Close, contentDescription = store.t("close"), tint = p.text)
+                        Icon(painterResource(PebbleIcons.Close), contentDescription = store.t("close"), tint = p.text)
                     }
                 },
                 title = {

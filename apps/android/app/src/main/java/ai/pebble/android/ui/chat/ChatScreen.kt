@@ -37,24 +37,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.automirrored.rounded.FormatListBulleted
-import androidx.compose.material.icons.rounded.Add
-import androidx.compose.material.icons.rounded.ArrowUpward
-import androidx.compose.material.icons.rounded.Check
-import androidx.compose.material.icons.rounded.ChevronRight
-import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.Computer
-import androidx.compose.material.icons.rounded.Description
-import androidx.compose.material.icons.rounded.DesktopWindows
-import androidx.compose.material.icons.rounded.Folder
-import androidx.compose.material.icons.rounded.KeyboardArrowDown
-import androidx.compose.material.icons.rounded.PanTool
-import androidx.compose.material.icons.rounded.PhotoLibrary
-import androidx.compose.material.icons.rounded.Stop
-import androidx.compose.material.icons.rounded.SyncProblem
-import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -119,6 +101,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.Duration
 import java.util.UUID
+import androidx.compose.ui.res.painterResource
+import ai.pebble.android.ui.theme.PebbleIcons
 
 private sealed interface TimelineEntry {
     val id: String
@@ -399,7 +383,7 @@ fun ChatScreen(
                             modifier = Modifier.weight(1f, fill = false),
                         )
                         if (store.bots.size > 1) {
-                            Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = null, tint = p.mute, modifier = Modifier.size(16.dp))
+                            Icon(painterResource(PebbleIcons.KeyboardArrowDown), contentDescription = null, tint = p.mute, modifier = Modifier.size(16.dp))
                         }
                     }
                     DropdownMenu(
@@ -412,7 +396,7 @@ fun ChatScreen(
                                 text = { Text(b.displayName, color = p.text) },
                                 trailingIcon = {
                                     if (b.id == botId) {
-                                        Icon(Icons.Rounded.Check, contentDescription = null, tint = p.accent, modifier = Modifier.size(16.dp))
+                                        Icon(painterResource(PebbleIcons.Check), contentDescription = null, tint = p.accent, modifier = Modifier.size(16.dp))
                                     }
                                 },
                                 onClick = {
@@ -426,7 +410,7 @@ fun ChatScreen(
                 Spacer(Modifier.weight(1f))
                 if (onCloseSidebar != null) {
                     IconButton(onClick = onCloseSidebar, modifier = Modifier.size(28.dp)) {
-                        Icon(Icons.Rounded.Close, contentDescription = store.t("close"), tint = p.text, modifier = Modifier.size(18.dp))
+                        Icon(painterResource(PebbleIcons.Close), contentDescription = store.t("close"), tint = p.text, modifier = Modifier.size(18.dp))
                     }
                 }
             }
@@ -440,7 +424,7 @@ fun ChatScreen(
                 navigationIcon = {
                     if (compact && onBack != null) {
                         IconButton(onClick = onBack) {
-                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = store.t("back"), tint = p.text)
+                            Icon(painterResource(PebbleIcons.ArrowBack), contentDescription = store.t("back"), tint = p.text)
                         }
                     }
                 },
@@ -475,21 +459,21 @@ fun ChatScreen(
                 actions = {
                     IconButton(onClick = { onOpenFiles(botId) }) {
                         Icon(
-                            imageVector = Icons.Rounded.Folder,
+                            painter = painterResource( PebbleIcons.Folder),
                             contentDescription = store.t("workspaceFiles"),
                             tint = p.text,
                         )
                     }
                     IconButton(onClick = { onOpenDesktop(store.takeovers.firstOrNull()?.target ?: "local") }) {
                         Icon(
-                            imageVector = if (store.takeovers.isEmpty()) Icons.Rounded.DesktopWindows else Icons.Rounded.Warning,
+                            painter = painterResource(if (store.takeovers.isEmpty()) PebbleIcons.DesktopWindows else PebbleIcons.Warning),
                             contentDescription = store.t("remoteDesktop"),
                             tint = if (store.takeovers.isEmpty()) p.text else p.busy,
                         )
                     }
                     if (onToggleDetail != null) {
                         IconButton(onClick = onToggleDetail) {
-                            Icon(Icons.AutoMirrored.Rounded.FormatListBulleted, contentDescription = store.t("rightPanelTitle"), tint = p.text)
+                            Icon(painterResource(PebbleIcons.FormatListBulleted), contentDescription = store.t("rightPanelTitle"), tint = p.text)
                         }
                     }
                 },
@@ -506,7 +490,7 @@ fun ChatScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Icon(Icons.Rounded.SyncProblem, contentDescription = null, tint = p.text2, modifier = Modifier.size(16.dp))
+                Icon(painterResource(PebbleIcons.SyncProblem), contentDescription = null, tint = p.text2, modifier = Modifier.size(16.dp))
                 Text(store.t("standbyActiveBanner"), color = p.text, fontSize = PebbleFont.secondary, modifier = Modifier.weight(1f))
                 TextButton(
                     onClick = { scope.launch { store.reconnect() } },
@@ -525,7 +509,7 @@ fun ChatScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                Icon(Icons.Rounded.Computer, contentDescription = null, tint = p.text2, modifier = Modifier.size(16.dp))
+                Icon(painterResource(PebbleIcons.Computer), contentDescription = null, tint = p.text2, modifier = Modifier.size(16.dp))
                 Text(
                     text = store.t(
                         "tempDesktopBanner",
@@ -561,7 +545,7 @@ fun ChatScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Icon(Icons.Rounded.PanTool, contentDescription = null, tint = p.pinkInk, modifier = Modifier.size(16.dp))
+                Icon(painterResource(PebbleIcons.PanTool), contentDescription = null, tint = p.pinkInk, modifier = Modifier.size(16.dp))
                 Text(
                     text = store.t("takeoverInline", mapOf("reason" to to.reason.orEmpty())),
                     color = p.pinkInk,
@@ -687,8 +671,7 @@ fun ChatScreen(
                                             fontSize = PebbleFont.secondary,
                                             fontWeight = FontWeight.SemiBold,
                                         )
-                                        Icon(
-                                            Icons.Rounded.ChevronRight,
+                                        Icon(painterResource( PebbleIcons.ChevronRight),
                                             contentDescription = null,
                                             tint = peerPal.collabInk.copy(alpha = 0.75f),
                                             modifier = Modifier.size(16.dp),
@@ -920,7 +903,7 @@ fun ChatScreen(
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                                     ) {
-                                        Icon(Icons.Rounded.Description, contentDescription = null, tint = p.text2, modifier = Modifier.size(15.dp))
+                                        Icon(painterResource(PebbleIcons.Description), contentDescription = null, tint = p.text2, modifier = Modifier.size(15.dp))
                                         Text(att.name, color = p.text, fontSize = PebbleFont.secondary, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
                                         if (att.uploading) {
                                             CircularProgressIndicator(modifier = Modifier.size(12.dp), strokeWidth = 1.5.dp, color = p.accent)
@@ -936,7 +919,7 @@ fun ChatScreen(
                                         .clickable { pendingAttachments.removeAll { it.id == att.id } },
                                     contentAlignment = Alignment.Center,
                                 ) {
-                                    Icon(Icons.Rounded.Close, contentDescription = null, tint = p.card, modifier = Modifier.size(12.dp))
+                                    Icon(painterResource(PebbleIcons.Close), contentDescription = null, tint = p.card, modifier = Modifier.size(12.dp))
                                 }
                             }
                         }
@@ -961,7 +944,7 @@ fun ChatScreen(
                                 .clickable { attachMenuOpen = true },
                         ) {
                             Box(contentAlignment = Alignment.Center) {
-                                Icon(Icons.Rounded.Add, contentDescription = store.t("attachFile"), tint = p.text, modifier = Modifier.size(22.dp))
+                                Icon(painterResource(PebbleIcons.Add), contentDescription = store.t("attachFile"), tint = p.text, modifier = Modifier.size(22.dp))
                             }
                         }
                         DropdownMenu(
@@ -971,7 +954,7 @@ fun ChatScreen(
                         ) {
                             DropdownMenuItem(
                                 text = { Text(store.t("photoLibrary"), color = p.text) },
-                                leadingIcon = { Icon(Icons.Rounded.PhotoLibrary, contentDescription = null, tint = p.text2) },
+                                leadingIcon = { Icon(painterResource(PebbleIcons.PhotoLibrary), contentDescription = null, tint = p.text2) },
                                 onClick = {
                                     attachMenuOpen = false
                                     photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
@@ -979,7 +962,7 @@ fun ChatScreen(
                             )
                             DropdownMenuItem(
                                 text = { Text(store.t("chooseFile"), color = p.text) },
-                                leadingIcon = { Icon(Icons.Rounded.Description, contentDescription = null, tint = p.text2) },
+                                leadingIcon = { Icon(painterResource(PebbleIcons.Description), contentDescription = null, tint = p.text2) },
                                 onClick = {
                                     attachMenuOpen = false
                                     filePicker.launch(arrayOf("*/*"))
@@ -1046,7 +1029,7 @@ fun ChatScreen(
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Icon(
-                                imageVector = if (showStop) Icons.Rounded.Stop else Icons.Rounded.ArrowUpward,
+                                painter = painterResource(if (showStop) PebbleIcons.Stop else PebbleIcons.ArrowUpward),
                                 contentDescription = store.t(if (showStop) "stopOutput" else "sendMsg"),
                                 tint = btnFg,
                                 modifier = Modifier.size(if (showStop) 18.dp else 22.dp),

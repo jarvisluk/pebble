@@ -22,10 +22,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Check
-import androidx.compose.material.icons.rounded.CheckCircle
-import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -44,6 +40,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ai.pebble.android.i18n.L
+import androidx.compose.ui.res.painterResource
 
 data class ConfirmItem(
     val title: String,
@@ -137,7 +134,7 @@ fun StatusTextBanner(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Icon(
-            imageVector = if (error) Icons.Rounded.Warning else Icons.Rounded.CheckCircle,
+            painter = painterResource(if (error) PebbleIcons.Warning else PebbleIcons.CheckCircle),
             contentDescription = null,
             tint = fg,
             modifier = Modifier.size(18.dp),
@@ -341,7 +338,7 @@ fun BotAppearancePicker(
                 ) {
                     if (active) {
                         Icon(
-                            imageVector = Icons.Rounded.Check,
+                            painter = painterResource( PebbleIcons.Check),
                             contentDescription = null,
                             tint = Color.White,
                             modifier = Modifier.size(16.dp),

@@ -21,11 +21,6 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.CheckBox
-import androidx.compose.material.icons.rounded.CheckBoxOutlineBlank
-import androidx.compose.material.icons.rounded.ChevronRight
-import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -70,6 +65,8 @@ import ai.pebble.android.ui.theme.PebblePalette
 import ai.pebble.android.ui.theme.copyToClipboard
 import coil3.compose.SubcomposeAsyncImage
 import kotlinx.coroutines.delay
+import androidx.compose.ui.res.painterResource
+import ai.pebble.android.ui.theme.PebbleIcons
 
 enum class TableAlign {
     LEFT, CENTER, RIGHT;
@@ -1303,7 +1300,7 @@ private fun RenderMarkdownBlock(
                     ) {
                         if (item.task) {
                             Icon(
-                                imageVector = if (item.checked) Icons.Rounded.CheckBox else Icons.Rounded.CheckBoxOutlineBlank,
+                                painter = painterResource(if (item.checked) PebbleIcons.CheckBox else PebbleIcons.CheckBoxOutlineBlank),
                                 contentDescription = null,
                                 tint = if (item.checked) p.accent else p.mute,
                                 modifier = Modifier
@@ -1487,7 +1484,7 @@ private fun DetailsBlockView(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Icon(
-                imageVector = if (expanded) Icons.Rounded.KeyboardArrowDown else Icons.Rounded.ChevronRight,
+                painter = painterResource(if (expanded) PebbleIcons.KeyboardArrowDown else PebbleIcons.ChevronRight),
                 contentDescription = null,
                 tint = p.mute,
                 modifier = Modifier.size(16.dp),
