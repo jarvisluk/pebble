@@ -21,8 +21,8 @@ type AgyHarness struct {
 	mu     sync.Mutex
 	procs  map[string]*agyProc
 
-	modelsOnce sync.Once
-	models     []string
+	modelsMu sync.Mutex
+	models   []string
 }
 
 type agyProc struct {
@@ -99,28 +99,37 @@ func (h *AgyHarness) ListCommands(_ context.Context, bot config.BotConfig) ([]Sl
 	return mergeSlashCommands(builtins, local), nil
 }
 
-// Models lists model slugs from `agy models` (cached).
+// Models lists model slugs from `agy models` (cached on success).
 func (h *AgyHarness) Models(ctx context.Context) ([]string, error) {
-	h.modelsOnce.Do(func() {
-		out, err := exec.CommandContext(ctx, h.binary, "models").Output()
-		if err != nil {
-			return
+	h.modelsMu.Lock()
+	defer h.modelsMu.Unlock()
+	if len(h.models) > 0 {
+		return append([]string(nil), h.models...), nil
+	}
+	fctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(fctx, h.binary, "models").Output()
+	if err != nil {
+		return nil, nil
+	}
+	var list []string
+	for _, line := range strings.Split(string(out), "\n") {
+		if i := strings.LastIndexByte(line, '\r'); i >= 0 {
+			line = line[i+1:]
 		}
-		for _, line := range strings.Split(string(out), "\n") {
-			if i := strings.LastIndexByte(line, '\r'); i >= 0 {
-				line = line[i+1:]
-			}
-			trimmed := strings.TrimSpace(line)
-			if trimmed == "" || strings.HasPrefix(trimmed, "Fetching ") {
-				continue
-			}
-			f := strings.Fields(trimmed)
-			if len(f) == 0 || strings.Contains(f[0], ":") {
-				continue
-			}
-			h.models = append(h.models, f[0])
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "Fetching ") {
+			continue
 		}
-	})
+		f := strings.Fields(trimmed)
+		if len(f) == 0 || strings.Contains(f[0], ":") {
+			continue
+		}
+		list = append(list, f[0])
+	}
+	if len(list) > 0 {
+		h.models = list
+	}
 	return append([]string(nil), h.models...), nil
 }
 
@@ -142,8 +151,9 @@ func (h *AgyHarness) Reload() {
 		p.kill()
 		delete(h.procs, id)
 	}
-	h.modelsOnce = sync.Once{}
+	h.modelsMu.Lock()
 	h.models = nil
+	h.modelsMu.Unlock()
 }
 
 func (h *AgyHarness) drop(botID string, p *agyProc) {

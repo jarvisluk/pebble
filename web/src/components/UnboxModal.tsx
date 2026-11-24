@@ -5,6 +5,7 @@ import { DOWNLOAD_LINKS } from '../lib/downloads';
 import { translate } from '../lib/i18n';
 import { HarnessIcon } from './HarnessIcon';
 import { MagpieInstallBanner } from './MagpieInstallBanner';
+import { ModelCombo } from './ModelCombo';
 
 interface UnboxModalProps {
   open: boolean;
@@ -69,6 +70,9 @@ export const UnboxModal: React.FC<UnboxModalProps> = ({
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const [copiedId, setCopiedId] = useState('');
+  const [loadingModels, setLoadingModels] = useState<Record<string, boolean>>({});
+  const inflightModelsRef = useRef<Record<string, number>>({});
+  const prefetchedRef = useRef<Set<string>>(new Set());
 
   const tailcatTimerRef = useRef<number | null>(null);
   const setupTimersRef = useRef<Record<string, number>>({});
@@ -152,14 +156,30 @@ export const UnboxModal: React.FC<UnboxModalProps> = ({
     }
   };
 
+  const fetchModels = async (harnessId: string, force = false) => {
+    if (!harnessId) return;
+    if (!force && (inflightModelsRef.current[harnessId] || 0) > 0) return;
+    inflightModelsRef.current[harnessId] = (inflightModelsRef.current[harnessId] || 0) + 1;
+    setLoadingModels((prev) => ({ ...prev, [harnessId]: true }));
+    try {
+      await onLoadModels(harnessId, force);
+    } finally {
+      const next = Math.max(0, (inflightModelsRef.current[harnessId] || 1) - 1);
+      inflightModelsRef.current[harnessId] = next;
+      if (next === 0) {
+        setLoadingModels((prev) => ({ ...prev, [harnessId]: false }));
+      }
+    }
+  };
+
   useEffect(() => {
     if (!open) return;
     if (step === 1) {
       if (selectedHarness) {
-        void onLoadModels(selectedHarness);
+        void fetchModels(selectedHarness);
       }
     } else if (step === 2) {
-      void onLoadModels(selectedHarness);
+      void fetchModels(selectedHarness);
       const presets = settings?.magpie?.presets || [];
       if (presets[0] && (!apPreset || !presets.some((p) => p.id === apPreset))) {
         setApPreset(presets[0].id);
@@ -172,6 +192,18 @@ export const UnboxModal: React.FC<UnboxModalProps> = ({
     };
   }, [open, step, selectedHarness]);
 
+  // Pre-fetch model lists for all installed harnesses in the background so switching
+  // harnesses and clicking the Default model picker is instant.
+  useEffect(() => {
+    if (!open || step !== 1) return;
+    const installed = (settings?.harnesses || []).filter((h) => h.installed);
+    for (const h of installed) {
+      if (prefetchedRef.current.has(h.id) || (models[h.id] && models[h.id].length > 0)) continue;
+      prefetchedRef.current.add(h.id);
+      void fetchModels(h.id);
+    }
+  }, [open, step, settings?.harnesses]);
+
   const copyText = (text: string, tag: string) => {
     navigator.clipboard?.writeText(text).then(() => {
       setCopiedId(tag);
@@ -183,6 +215,7 @@ export const UnboxModal: React.FC<UnboxModalProps> = ({
     setBusy(true);
     setErr('');
     try {
+      prefetchedRef.current.clear();
       onResetModels();
       await onLoadSettings(true);
       onToast(t('ubRecheckDone'));
@@ -599,20 +632,17 @@ export const UnboxModal: React.FC<UnboxModalProps> = ({
                       <label>
                         {t('ubDefaultModelLbl')} <em>{t('ubDefaultModelHint')}</em>
                       </label>
-                      <input
+                      <ModelCombo
                         id="ubStep1DefaultModel"
-                        className="mono"
-                        spellCheck={false}
-                        list="ubStep1ModelList"
-                        placeholder={t('ubDefaultModelPh')}
                         value={defaultModel}
-                        onChange={(e) => setDefaultModel(e.target.value)}
+                        onChange={setDefaultModel}
+                        options={models[selectedHarness] || []}
+                        loading={Boolean(loadingModels[selectedHarness])}
+                        placeholder={t('ubDefaultModelPh')}
+                        loadingText={t('ubLoadingModels')}
+                        emptyText={t('ubNoModelsFound')}
+                        dropUp
                       />
-                      <datalist id="ubStep1ModelList">
-                        {(models[selectedHarness] || []).map((m) => (
-                          <option key={m} value={m} />
-                        ))}
-                      </datalist>
                     </div>
                   </div>
                 </>
@@ -866,20 +896,17 @@ export const UnboxModal: React.FC<UnboxModalProps> = ({
                   <label>
                     {t('ubDefaultModelLbl')} <em>{t('ubDefaultModelHint')}</em>
                   </label>
-                  <input
+                  <ModelCombo
                     id="ubDefaultModel"
-                    className="mono"
-                    spellCheck={false}
-                    list="ubDefaultModelList"
-                    placeholder={t('ubDefaultModelPh')}
                     value={defaultModel}
-                    onChange={(e) => setDefaultModel(e.target.value)}
+                    onChange={setDefaultModel}
+                    options={models[selectedHarness] || []}
+                    loading={Boolean(loadingModels[selectedHarness])}
+                    placeholder={t('ubDefaultModelPh')}
+                    loadingText={t('ubLoadingModels')}
+                    emptyText={t('ubNoModelsFound')}
+                    dropUp={fullscreen}
                   />
-                  <datalist id="ubDefaultModelList">
-                    {(models[selectedHarness] || []).map((m) => (
-                      <option key={m} value={m} />
-                    ))}
-                  </datalist>
                 </div>
               )}
             </div>

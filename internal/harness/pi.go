@@ -26,8 +26,8 @@ type PiHarness struct {
 	procs    map[string]*piProc
 	commands map[string][]SlashCommand
 
-	modelsOnce sync.Once
-	models     []string
+	modelsMu sync.Mutex
+	models   []string
 }
 
 type piProc struct {
@@ -114,22 +114,31 @@ func (h *PiHarness) ListCommands(_ context.Context, bot config.BotConfig) ([]Sla
 	return mergeSlashCommands(cached, builtins, local), nil
 }
 
-// Models lists `pi --list-models` as provider/model IDs (cached).
+// Models lists `pi --list-models` as provider/model IDs (cached on success).
 func (h *PiHarness) Models(ctx context.Context) ([]string, error) {
-	h.modelsOnce.Do(func() {
-		out, err := exec.CommandContext(ctx, h.binary, "--list-models", "--offline").Output()
-		if err != nil {
-			return
+	h.modelsMu.Lock()
+	defer h.modelsMu.Unlock()
+	if len(h.models) > 0 {
+		return append([]string(nil), h.models...), nil
+	}
+	fctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(fctx, h.binary, "--list-models", "--offline").Output()
+	if err != nil {
+		return nil, nil
+	}
+	var list []string
+	for i, line := range strings.Split(string(out), "\n") {
+		f := strings.Fields(line)
+		if i == 0 || len(f) < 2 {
+			continue
 		}
-		for i, line := range strings.Split(string(out), "\n") {
-			f := strings.Fields(line)
-			if i == 0 || len(f) < 2 {
-				continue
-			}
-			h.models = append(h.models, f[0]+"/"+f[1])
-		}
-	})
-	return h.models, nil
+		list = append(list, f[0]+"/"+f[1])
+	}
+	if len(list) > 0 {
+		h.models = list
+	}
+	return append([]string(nil), h.models...), nil
 }
 
 func (h *PiHarness) Close() {
@@ -150,8 +159,9 @@ func (h *PiHarness) Reload() {
 		p.kill()
 		delete(h.procs, id)
 	}
-	h.modelsOnce = sync.Once{}
+	h.modelsMu.Lock()
 	h.models = nil
+	h.modelsMu.Unlock()
 }
 
 func (h *PiHarness) drop(botID string, p *piProc) {
