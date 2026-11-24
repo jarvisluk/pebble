@@ -67,28 +67,33 @@ func main() {
 }
 
 type prefs struct {
-	Mode        string   `json:"mode,omitempty"` // "" (ask) | local | remote
-	Link        string   `json:"link,omitempty"`
-	RemoteToken string   `json:"remoteToken,omitempty"`
-	NodeID      string   `json:"nodeId,omitempty"`
-	NodeName    string   `json:"nodeName,omitempty"`
-	AllowNode   bool     `json:"allowNode,omitempty"`
-	NodePerms   []string `json:"nodePerms"`
+	Mode                string   `json:"mode,omitempty"` // "" (ask) | local | remote
+	Link                string   `json:"link,omitempty"`
+	RemoteToken         string   `json:"remoteToken,omitempty"`
+	NodeID              string   `json:"nodeId,omitempty"`
+	NodeName            string   `json:"nodeName,omitempty"`
+	AllowNode           bool     `json:"allowNode,omitempty"`
+	NodePerms           []string `json:"nodePerms"`
+	TailscaleBound      bool     `json:"tailscaleBound,omitempty"`
+	TailscaleControlURL string   `json:"tailscaleControlUrl,omitempty"`
 }
 
 type desktop struct {
-	dir       string
-	app       *application.App
-	win       *application.WebviewWindow
+	dir          string
+	app          *application.App
+	win          *application.WebviewWindow
 	menu         *application.Menu
 	nodeItem     *application.MenuItem
 	takeoverItem *application.MenuItem
 	pushbackItem *application.MenuItem
 	mu           sync.Mutex
-	prefs     prefs
-	status    string // what setup.html shows while starting / after an error
-	stop      func() // stops the running mode
-	nodeAgent *node.Agent
+	prefs        prefs
+	status       string // human-readable status (legacy/failover)
+	statusState  string // "" | "starting" | "error"
+	statusError  string // raw error detail when statusState == "error"
+	stop         func() // stops the running mode
+	nodeAgent    *node.Agent
+	tsNode       *tunnel.TailscaleNode
 }
 
 func (d *desktop) run() {
@@ -97,7 +102,10 @@ func (d *desktop) run() {
 		Description: "Personal bot hub",
 		Assets:      application.AssetOptions{Handler: http.HandlerFunc(d.serveSetup), DisableLogging: true},
 		Mac:         application.MacOptions{ApplicationShouldTerminateAfterLastWindowClosed: false},
-		OnShutdown:  d.halt,
+		OnShutdown: func() {
+			d.halt()
+			d.closeTailscale()
+		},
 	})
 	d.win = d.app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title:            "Pebble",
@@ -151,6 +159,12 @@ func (d *desktop) run() {
 	d.menu = menu
 	tray.SetMenu(menu)
 
+	if d.prefs.TailscaleBound {
+		go func() {
+			_, _ = d.tailscaleStart(context.Background(), "", d.prefs.TailscaleControlURL, false)
+		}()
+	}
+
 	if d.prefs.Mode != "" {
 		go d.start(d.prefs)
 	} else {
@@ -191,7 +205,7 @@ func (d *desktop) run() {
 // start runs mode p and points the window at its chat page.
 func (d *desktop) start(p prefs) {
 	d.halt()
-	d.setStatus("正在启动…")
+	d.setStatusState("starting", "")
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	url, err := "", error(nil)
@@ -205,7 +219,7 @@ func (d *desktop) start(p prefs) {
 	}
 	if err != nil {
 		cancel()
-		d.setStatus("启动失败：" + err.Error())
+		d.setStatusState("error", err.Error())
 		return
 	}
 	d.mu.Lock()
@@ -224,7 +238,7 @@ func (d *desktop) start(p prefs) {
 	d.mu.Unlock()
 	d.save()
 	d.syncTray()
-	d.setStatus("")
+	d.setStatusState("", "")
 	d.win.SetURL(url)
 }
 
@@ -260,17 +274,18 @@ func (d *desktop) startLocal(ctx context.Context, done chan struct{}) (string, e
 }
 
 type remoteTarget struct {
-	kind    string // "tailcat" | "http"
+	kind    string // "tailcat" | "tailscale" | "http"
 	link    string // cleaned link without #token=
 	token   string
-	baseURL string // for kind == "http" (including tailscale:// converted to http://)
+	addr    string // host:port for tailscale dialing
+	baseURL string // for kind == "http" or "tailscale"
 }
 
 func parseRemoteTarget(rawLink string) (remoteTarget, error) {
 	link, tok := tunnel.ExtractTokenFromLink(rawLink)
 	trimmed := strings.TrimSpace(link)
 	if trimmed == "" {
-		return remoteTarget{}, errors.New("请输入远程连接地址")
+		return remoteTarget{}, errors.New("remote address is required")
 	}
 	if strings.HasPrefix(trimmed, "tailcat://") {
 		if _, _, err := tunnel.ParseLink(trimmed); err != nil {
@@ -279,29 +294,22 @@ func parseRemoteTarget(rawLink string) (remoteTarget, error) {
 		return remoteTarget{kind: "tailcat", link: trimmed, token: tok}, nil
 	}
 	if strings.HasPrefix(trimmed, "tailscale://") {
-		rest := strings.TrimPrefix(trimmed, "tailscale://")
-		rest = strings.TrimRight(rest, "/")
-		if rest == "" {
-			return remoteTarget{}, errors.New("tailscale:// 地址不能为空")
-		}
-		if !strings.Contains(rest, ":") {
-			rest += ":3789"
-		}
-		u, err := url.Parse("http://" + rest)
-		if err != nil || u.Host == "" {
-			return remoteTarget{}, fmt.Errorf("无效的 Tailscale 地址: %s", trimmed)
+		addr, err := tunnel.ParseTailscaleLink(trimmed)
+		if err != nil {
+			return remoteTarget{}, err
 		}
 		return remoteTarget{
-			kind:    "http",
+			kind:    "tailscale",
 			link:    trimmed,
 			token:   tok,
-			baseURL: "http://" + u.Host,
+			addr:    addr,
+			baseURL: "http://" + addr,
 		}, nil
 	}
 	if strings.HasPrefix(trimmed, "http://") || strings.HasPrefix(trimmed, "https://") {
 		u, err := url.Parse(trimmed)
 		if err != nil || u.Host == "" {
-			return remoteTarget{}, fmt.Errorf("无效的远程地址: %s", trimmed)
+			return remoteTarget{}, fmt.Errorf("invalid remote address: %s", trimmed)
 		}
 		return remoteTarget{
 			kind:    "http",
@@ -310,7 +318,7 @@ func parseRemoteTarget(rawLink string) (remoteTarget, error) {
 			baseURL: u.Scheme + "://" + u.Host,
 		}, nil
 	}
-	return remoteTarget{}, errors.New("请填写 tailcat://、tailscale:// 或 http(s):// 地址")
+	return remoteTarget{}, errors.New("expected tailcat://, tailscale://, or http(s):// address")
 }
 
 func (d *desktop) startRemote(ctx context.Context, rawLink string, done chan struct{}) (string, error) {
@@ -335,6 +343,52 @@ func (d *desktop) startRemote(ctx context.Context, rawLink string, done chan str
 		tr = &http.Transport{
 			DialContext: func(dctx context.Context, _, _ string) (net.Conn, error) { return dial(dctx) },
 		}
+	} else if target.kind == "tailscale" {
+		u, err := url.Parse(target.baseURL)
+		if err != nil {
+			close(done)
+			return "", err
+		}
+		upstream = u
+		closeClient = func() error { return nil }
+		d.mu.Lock()
+		tsNode := d.tsNode
+		tsBound := d.prefs.TailscaleBound
+		tsCtrl := d.prefs.TailscaleControlURL
+		d.mu.Unlock()
+		if tsNode == nil && tsBound {
+			if _, serr := d.tailscaleStart(ctx, "", tsCtrl, false); serr == nil {
+				d.mu.Lock()
+				tsNode = d.tsNode
+				d.mu.Unlock()
+			}
+		}
+		if tsNode != nil {
+			wctx, wcancel := context.WithTimeout(ctx, 10*time.Second)
+			werr := tsNode.WaitRunning(wctx)
+			wcancel()
+			if werr == nil {
+				dialAddr := target.addr
+				tr = &http.Transport{
+					DialContext: func(dctx context.Context, _, _ string) (net.Conn, error) {
+						return tsNode.Dial(dctx, dialAddr)
+					},
+				}
+			}
+		}
+		if tr == nil {
+			tr = &http.Transport{}
+		}
+		probeCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+		req, _ := http.NewRequestWithContext(probeCtx, http.MethodGet, target.baseURL+"/healthz", nil)
+		resp, err := (&http.Client{Transport: tr}).Do(req)
+		cancel()
+		if err != nil {
+			tr.CloseIdleConnections()
+			close(done)
+			return "", fmt.Errorf("cannot reach %s: %w", target.baseURL, err)
+		}
+		resp.Body.Close()
 	} else {
 		u, err := url.Parse(target.baseURL)
 		if err != nil {
@@ -351,7 +405,7 @@ func (d *desktop) startRemote(ctx context.Context, rawLink string, done chan str
 		if err != nil {
 			tr.CloseIdleConnections()
 			close(done)
-			return "", fmt.Errorf("无法连接到 %s：%w", target.baseURL, err)
+			return "", fmt.Errorf("cannot reach %s: %w", target.baseURL, err)
 		}
 		resp.Body.Close()
 	}
@@ -756,30 +810,122 @@ func (d *desktop) reset() {
 	d.win.SetURL("/desktop-setup")
 }
 
-func (d *desktop) setStatus(s string) { d.mu.Lock(); d.status = s; d.mu.Unlock() }
+func (d *desktop) setStatus(s string) {
+	d.mu.Lock()
+	d.status = s
+	d.statusState = ""
+	d.statusError = ""
+	d.mu.Unlock()
+}
+
+func (d *desktop) setStatusState(state, errMsg string) {
+	d.mu.Lock()
+	d.status = ""
+	d.statusState = state
+	d.statusError = errMsg
+	d.mu.Unlock()
+}
+
+func (d *desktop) closeTailscale() {
+	d.mu.Lock()
+	n := d.tsNode
+	d.tsNode = nil
+	d.mu.Unlock()
+	if n != nil {
+		_ = n.Close()
+	}
+}
+
+func (d *desktop) tailscaleStart(ctx context.Context, authKey, controlURL string, openBrowser bool) (tunnel.TailscaleState, error) {
+	ctrl := strings.TrimSpace(controlURL)
+	key := strings.TrimSpace(authKey)
+
+	d.mu.Lock()
+	if ctrl == "" {
+		ctrl = d.prefs.TailscaleControlURL
+	}
+	existing := d.tsNode
+	needRecreate := existing != nil && (ctrl != existing.Options().ControlURL || key != "")
+	if needRecreate {
+		d.tsNode = nil
+	}
+	d.mu.Unlock()
+
+	if needRecreate && existing != nil {
+		_ = existing.Close()
+		existing = nil
+	}
+
+	if existing == nil {
+		n := tunnel.NewTailscaleNode(tunnel.TailscaleOptions{
+			StateDir:   filepath.Join(d.dir, "tailscale-client"),
+			Hostname:   tunnel.DefaultTailscaleHostname("bothub-desktop"),
+			ControlURL: ctrl,
+			AuthKey:    key,
+		})
+		if err := n.Start(); err != nil {
+			return tunnel.TailscaleState{State: "error", Error: err.Error()}, err
+		}
+		d.mu.Lock()
+		d.tsNode = n
+		d.prefs.TailscaleBound = true
+		d.prefs.TailscaleControlURL = ctrl
+		d.mu.Unlock()
+		d.save()
+		existing = n
+	}
+
+	wctx, cancel := context.WithTimeout(ctx, 4*time.Second)
+	defer cancel()
+	st := existing.WaitStateChange(wctx)
+	if st.State == "running" {
+		st = existing.Status(ctx, true)
+	}
+	if openBrowser && st.State == "needs_login" && st.AuthURL != "" && d.app != nil {
+		_ = d.app.Browser.OpenURL(st.AuthURL)
+	}
+	return st, nil
+}
+
+func (d *desktop) tailscaleStatus(ctx context.Context, includePeers bool) tunnel.TailscaleState {
+	d.mu.Lock()
+	n := d.tsNode
+	d.mu.Unlock()
+	if n == nil {
+		return tunnel.TailscaleState{State: "disabled"}
+	}
+	return n.Status(ctx, includePeers)
+}
+
+func (d *desktop) tailscaleLogout(ctx context.Context) tunnel.TailscaleState {
+	d.mu.Lock()
+	n := d.tsNode
+	d.tsNode = nil
+	d.prefs.TailscaleBound = false
+	d.mu.Unlock()
+	d.save()
+	if n != nil {
+		_ = n.Logout(ctx)
+	} else {
+		_ = os.RemoveAll(filepath.Join(d.dir, "tailscale-client"))
+	}
+	return tunnel.TailscaleState{State: "disabled"}
+}
 
 // serveSetup is the in-app page shown before a mode runs (wails:// origin).
 func (d *desktop) serveSetup(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case r.URL.Path == "/api/desktop" && r.Method == http.MethodGet:
 		d.mu.Lock()
-		out := map[string]any{"mode": d.prefs.Mode, "link": d.prefs.Link, "status": d.status, "dataDir": d.dir}
-		d.mu.Unlock()
-		harnesses := make([]map[string]any, 0, len(desktopHarnesses))
-		installedCount := 0
-		for _, item := range desktopHarnesses {
-			ok, _ := harness.DetectHarness(item.id)
-			if ok {
-				installedCount++
-			}
-			harnesses = append(harnesses, map[string]any{
-				"id":        item.id,
-				"label":     item.label,
-				"installed": ok,
-			})
+		out := map[string]any{
+			"mode":        d.prefs.Mode,
+			"link":        d.prefs.Link,
+			"status":      d.status,
+			"statusState": d.statusState,
+			"statusError": d.statusError,
+			"dataDir":     d.dir,
 		}
-		out["harnesses"] = harnesses
-		out["installedCount"] = installedCount
+		d.mu.Unlock()
 		writeJSON(w, out)
 	case r.URL.Path == "/api/desktop/start" && r.Method == http.MethodPost:
 		var p prefs
@@ -790,6 +936,19 @@ func (d *desktop) serveSetup(w http.ResponseWriter, r *http.Request) {
 		p.Link = strings.TrimSpace(p.Link)
 		go d.start(p)
 		writeJSON(w, map[string]any{"ok": true})
+	case r.URL.Path == "/api/desktop/tailscale" && r.Method == http.MethodGet:
+		includePeers := r.URL.Query().Get("peers") == "1"
+		writeJSON(w, d.tailscaleStatus(r.Context(), includePeers))
+	case r.URL.Path == "/api/desktop/tailscale/start" && r.Method == http.MethodPost:
+		var req struct {
+			AuthKey    string `json:"authKey"`
+			ControlURL string `json:"controlUrl"`
+		}
+		_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&req)
+		st, _ := d.tailscaleStart(r.Context(), req.AuthKey, req.ControlURL, true)
+		writeJSON(w, st)
+	case r.URL.Path == "/api/desktop/tailscale/logout" && r.Method == http.MethodPost:
+		writeJSON(w, d.tailscaleLogout(r.Context()))
 	default:
 		distFS := webassets.DistFS()
 		clean := strings.TrimPrefix(path.Clean("/"+r.URL.Path), "/")

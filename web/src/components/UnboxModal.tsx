@@ -1028,22 +1028,67 @@ export const UnboxModal: React.FC<UnboxModalProps> = ({
             }
           }}
         />
-        <main className="unbox-full-main">
-          <header className="unbox-full-head">
-            <div className="unbox-top">
-              <div>
-                <h1 id="ubTitle">{headerMeta.title}</h1>
-                <p id="ubSub">{headerMeta.sub}</p>
+        <div className="unbox-full-scroll">
+          <main className="unbox-full-main">
+            <header className="unbox-full-head">
+              <div className="unbox-top">
+                <div>
+                  <h1 id="ubTitle">{headerMeta.title}</h1>
+                  <p id="ubSub">{headerMeta.sub}</p>
+                </div>
+                <button type="button" id="ubSkipTop" className="link-btn" onClick={() => void handleSkip()}>
+                  {t('ubSkip')}
+                </button>
               </div>
-              <button type="button" id="ubSkipTop" className="link-btn" onClick={() => void handleSkip()}>
-                {t('ubSkip')}
+            </header>
+            <section className="unbox-full-body">{stepBody}</section>
+          </main>
+        </div>
+        <footer className="unbox-full-foot-wrap">
+          <div className="unbox-full-foot">
+            <div className="unbox-full-foot-l">
+              {step > 1 && (
+                <button
+                  type="button"
+                  id="ubPrev"
+                  className="btn"
+                  onClick={() => {
+                    setErr('');
+                    setStep((s) => (s > 1 ? ((s - 1) as 1 | 2 | 3) : s));
+                  }}
+                >
+                  {t('ubPrev')}
+                </button>
+              )}
+            </div>
+            <div className="unbox-progress" aria-label={t('ubStepsAria')}>
+              <div className="unbox-progress-bars">
+                {([1, 2, 3] as const).map((n) => (
+                  <span
+                    key={n}
+                    className={`unbox-progress-seg${n === step ? ' on' : ''}${n < step ? ' done' : ''}`}
+                    data-ub-step={n}
+                  />
+                ))}
+              </div>
+              <div className="unbox-progress-labels">
+                {([1, 2, 3] as const).map((n) => (
+                  <span
+                    key={n}
+                    className={`unbox-progress-lbl${n === step ? ' on' : ''}${n < step ? ' done' : ''}`}
+                  >
+                    {t(`ubStep${n}Label`)}
+                  </span>
+                ))}
+              </div>
+            </div>
+            <div className="unbox-full-foot-r">
+              <button type="button" id="ubNext" className="btn go" disabled={busy} onClick={() => void handleNext()}>
+                {step === 3 ? t('ubFinish') : step === 1 && !anyInstalled ? t('ubContinue') : t('ubNext')}
               </button>
             </div>
-            {stepBar}
-          </header>
-          <section className="unbox-full-card">{stepBody}</section>
-          <footer className="unbox-full-foot">{footActions}</footer>
-        </main>
+          </div>
+        </footer>
       </div>
     );
   }

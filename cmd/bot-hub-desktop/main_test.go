@@ -97,7 +97,7 @@ func TestParseRemoteTarget(t *testing.T) {
 	if err != nil {
 		t.Fatalf("tailscale parse error: %v", err)
 	}
-	if ts.kind != "http" || ts.baseURL != "http://mac-mini.ts.net:3789" || ts.token != "sec123" {
+	if ts.kind != "tailscale" || ts.addr != "mac-mini.ts.net:3789" || ts.baseURL != "http://mac-mini.ts.net:3789" || ts.token != "sec123" {
 		t.Fatalf("unexpected tailscale target: %+v", ts)
 	}
 
@@ -111,5 +111,16 @@ func TestParseRemoteTarget(t *testing.T) {
 
 	if _, err := parseRemoteTarget("invalid-link"); err == nil {
 		t.Fatal("expected error for invalid remote link")
+	}
+
+	d := &desktop{dir: t.TempDir()}
+	reqTS := httptest.NewRequest(http.MethodGet, "/api/desktop/tailscale", nil)
+	recTS := httptest.NewRecorder()
+	d.serveSetup(recTS, reqTS)
+	if recTS.Code != http.StatusOK {
+		t.Fatalf("GET /api/desktop/tailscale status = %d, want 200", recTS.Code)
+	}
+	if !strings.Contains(recTS.Body.String(), `"state":"disabled"`) {
+		t.Fatalf("unexpected tailscale status body: %s", recTS.Body.String())
 	}
 }
