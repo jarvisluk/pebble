@@ -153,6 +153,35 @@ func (d *desktop) run() {
 
 	if d.prefs.Mode != "" {
 		go d.start(d.prefs)
+	} else {
+		// Pre-warm harness auth & Magpie caches while user is on the setup screen
+		// so clicking "Run Locally" transitions into onboarding immediately.
+		go func() {
+			wctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			var wg sync.WaitGroup
+			magpieOK := harness.MagpieInstalled()
+			if magpieOK {
+				wg.Add(3)
+				go func() { defer wg.Done(); _ = harness.MagpieGatewayHealthy(wctx) }()
+				go func() { defer wg.Done(); _ = harness.MagpieListProviders(wctx) }()
+				go func() { defer wg.Done(); _ = harness.MagpiePresets(wctx) }()
+			}
+			for _, id := range []string{"opencode", "codebuddy", "qoder", "codex", "claude", "grok", "trae", "pi", "dsh", "agy"} {
+				if ok, _ := harness.DetectHarness(id); ok {
+					k := id
+					wg.Add(1)
+					go func() {
+						defer wg.Done()
+						_, _ = harness.DetectHarnessAuthCached(wctx, k)
+						if magpieOK {
+							_ = harness.GetMagpieStatus(wctx, k)
+						}
+					}()
+				}
+			}
+			wg.Wait()
+		}()
 	}
 	if err := d.app.Run(); err != nil {
 		log.Fatal(err)
@@ -212,14 +241,18 @@ func (d *desktop) startLocal(ctx context.Context, done chan struct{}) (string, e
 	base := cfg.HTTP.BaseURL()
 	errc := make(chan error, 1)
 	go func() { errc <- cli.Serve(ctx, d.dir); close(done) }()
-	for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline); time.Sleep(200 * time.Millisecond) {
+	warmClient := &http.Client{Timeout: 3 * time.Second}
+	for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
 		select {
 		case err := <-errc:
 			return "", fmt.Errorf("本机服务退出：%v", err)
 		default:
 		}
-		if r, err := http.Get(base + "/healthz"); err == nil {
+		if r, err := warmClient.Get(base + "/healthz"); err == nil {
 			r.Body.Close()
+			if sr, serr := warmClient.Get(base + "/api/settings"); serr == nil {
+				sr.Body.Close()
+			}
 			return base + "/", nil
 		}
 	}
@@ -808,6 +841,9 @@ func (d *desktop) save() {
 
 // dataDir is where the app keeps config/, state/ and workspaces/.
 func dataDir() (string, error) {
+	if custom := strings.TrimSpace(os.Getenv("BOT_HUB_DATA_DIR")); custom != "" {
+		return custom, os.MkdirAll(custom, 0o700)
+	}
 	base, err := os.UserConfigDir()
 	if err != nil {
 		return "", err

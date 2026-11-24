@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -28,7 +29,7 @@ var (
 )
 
 func defaultRunAuthCheck(ctx context.Context, bin string, args ...string) (int, string, error) {
-	cctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	cctx, cancel := context.WithTimeout(ctx, 1500*time.Millisecond)
 	defer cancel()
 	cmd := exec.CommandContext(cctx, bin, args...)
 	cmd.Env = augmentedEnv(nil)
@@ -207,6 +208,44 @@ func PreferredInstalledHarness() string {
 	return ""
 }
 
+type authCacheEntry struct {
+	status  string
+	detail  string
+	fetched time.Time
+}
+
+var (
+	authCacheMu sync.Mutex
+	authCache   = make(map[string]authCacheEntry)
+)
+
+const authCacheTTL = 30 * time.Second
+
+// InvalidateAuthCache clears cached DetectHarnessAuth results.
+func InvalidateAuthCache() {
+	authCacheMu.Lock()
+	clear(authCache)
+	authCacheMu.Unlock()
+}
+
+// DetectHarnessAuthCached returns a briefly cached auth status for kind so
+// repeated /api/settings loads stay fast without spawning CLI subprocesses.
+func DetectHarnessAuthCached(ctx context.Context, kind string) (string, string) {
+	authCacheMu.Lock()
+	if ent, ok := authCache[kind]; ok && time.Since(ent.fetched) < authCacheTTL {
+		authCacheMu.Unlock()
+		return ent.status, ent.detail
+	}
+	authCacheMu.Unlock()
+
+	status, detail := DetectHarnessAuth(ctx, kind)
+
+	authCacheMu.Lock()
+	authCache[kind] = authCacheEntry{status: status, detail: detail, fetched: time.Now()}
+	authCacheMu.Unlock()
+	return status, detail
+}
+
 // DetectHarnessAuth verifies whether an installed harness is authenticated and ready to run.
 // Returns "ready", "needs_login", or "unknown".
 func DetectHarnessAuth(ctx context.Context, kind string) (status string, detail string) {
@@ -225,6 +264,9 @@ func DetectHarnessAuth(ctx context.Context, kind string) (status string, detail 
 		if strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY")) != "" {
 			return "ready", "API Key"
 		}
+		if home != "" && nonEmptyFile(filepath.Join(home, ".claude", ".credentials.json")) {
+			return "ready", "已登录"
+		}
 		if GetMagpieStatus(ctx, "claude").Connected {
 			return "ready", "Magpie"
 		}
@@ -234,14 +276,14 @@ func DetectHarnessAuth(ctx context.Context, kind string) (status string, detail 
 				return "ready", "已登录"
 			}
 		}
-		if home != "" && nonEmptyFile(filepath.Join(home, ".claude", ".credentials.json")) {
-			return "ready", "已登录"
-		}
 		return "needs_login", "需登录 Claude 账号"
 
 	case "codex":
 		if strings.TrimSpace(os.Getenv("OPENAI_API_KEY")) != "" {
 			return "ready", "API Key"
+		}
+		if home != "" && nonEmptyFile(filepath.Join(home, ".codex", "auth.json")) {
+			return "ready", "已登录"
 		}
 		if GetMagpieStatus(ctx, "codex").Connected {
 			return "ready", "Magpie"
@@ -251,9 +293,6 @@ func DetectHarnessAuth(ctx context.Context, kind string) (status string, detail 
 			if !strings.Contains(low, "not logged in") {
 				return "ready", "已登录"
 			}
-		}
-		if home != "" && nonEmptyFile(filepath.Join(home, ".codex", "auth.json")) {
-			return "ready", "已登录"
 		}
 		return "needs_login", "需登录 ChatGPT 账号"
 
@@ -270,14 +309,14 @@ func DetectHarnessAuth(ctx context.Context, kind string) (status string, detail 
 		if strings.TrimSpace(os.Getenv("QODER_API_KEY")) != "" {
 			return "ready", "API Key"
 		}
+		if home != "" && dirHasAuthFile(filepath.Join(home, ".qoder")) {
+			return "ready", "已登录"
+		}
 		if code, out, err := runAuthCheckFunc(ctx, binPath, "auth", "status"); err == nil && code == 0 {
 			low := strings.ToLower(out)
 			if !strings.Contains(low, "not logged in") && !strings.Contains(low, "unauthenticated") {
 				return "ready", "已登录"
 			}
-		}
-		if home != "" && dirHasAuthFile(filepath.Join(home, ".qoder")) {
-			return "ready", "已登录"
 		}
 		return "needs_login", "需登录 Qoder 账号"
 

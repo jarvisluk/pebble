@@ -213,6 +213,7 @@ func StartInstall(target string) (SetupTask, error) {
 		if target == "magpie" {
 			InvalidateMagpieCache()
 		}
+		InvalidateAuthCache()
 
 		setupMu.Lock()
 		defer setupMu.Unlock()
@@ -405,7 +406,7 @@ func GetLoginStatus(ctx context.Context, kind string) SetupTask {
 	if authStatus == "ready" && ent.task.State == "running" {
 		ent.task.State = "done"
 		ent.task.UpdatedAt = time.Now().UnixMilli()
-		ent.task.Logs = append(ent.task.Logs, "登录已验证完成")
+		InvalidateAuthCache()
 		if ent.cmd != nil && ent.cmd.Process != nil {
 			_ = syscall.Kill(-ent.cmd.Process.Pid, syscall.SIGKILL)
 		}

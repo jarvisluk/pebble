@@ -732,7 +732,11 @@ export default function App() {
   }
 
   if (!bootReady && !loginOpen) {
-    return <div className="dsetup-page" />;
+    return (
+      <div className="dsetup-page">
+        <div className="dsetup-sub">{t('desktopSetupStarting')}</div>
+      </div>
+    );
   }
 
   return (

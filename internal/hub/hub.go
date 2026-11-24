@@ -1989,15 +1989,20 @@ func (h *Hub) Harnesses(ctx context.Context) []HarnessInfo {
 		})
 	}
 	h.lanesMu.RUnlock()
+	magpieOK := harness.MagpieInstalled()
 	var wg sync.WaitGroup
 	for i := range out {
+		if !out[i].Installed {
+			out[i].Magpie = harness.MagpieStatus{Installed: magpieOK}
+			continue
+		}
 		wg.Add(1)
 		go func(hi *HarnessInfo) {
 			defer wg.Done()
-			hi.Magpie = harness.GetMagpieStatus(ctx, hi.ID)
-			if hi.Installed {
-				hi.AuthStatus, hi.AuthDetail = harness.DetectHarnessAuth(ctx, hi.ID)
+			if magpieOK {
+				hi.Magpie = harness.GetMagpieStatus(ctx, hi.ID)
 			}
+			hi.AuthStatus, hi.AuthDetail = harness.DetectHarnessAuthCached(ctx, hi.ID)
 		}(&out[i])
 	}
 	wg.Wait()

@@ -782,6 +782,7 @@ func (s *HTTPServer) handleSettings(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	if r.URL.Query().Get("fresh") == "1" {
 		harness.InvalidateMagpieCache()
+		harness.InvalidateAuthCache()
 	}
 	defaultModel, defaultModels := s.hub.DefaultModelsSnapshot()
 	deskHarness, deskModel := s.hub.DesktopWorkerSnapshot()
