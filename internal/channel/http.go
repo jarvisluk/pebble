@@ -64,6 +64,9 @@ type HTTPServer struct {
 
 	fileTicketsMu sync.Mutex
 	fileTickets   map[string]fileTicket
+
+	sseResetMu sync.Mutex
+	sseReset   chan struct{}
 }
 
 type mediaTicket struct {
@@ -95,8 +98,29 @@ func (s *HTTPServer) apiToken() string {
 	return s.cfg.APIToken
 }
 
+func (s *HTTPServer) sseResetChan() <-chan struct{} {
+	s.sseResetMu.Lock()
+	defer s.sseResetMu.Unlock()
+	if s.sseReset == nil {
+		s.sseReset = make(chan struct{})
+	}
+	return s.sseReset
+}
+
+func (s *HTTPServer) notifyTokenChanged(token string) {
+	s.sseResetMu.Lock()
+	if s.sseReset != nil {
+		close(s.sseReset)
+	}
+	s.sseReset = make(chan struct{})
+	s.sseResetMu.Unlock()
+	if fn := OnAPITokenChanged; fn != nil {
+		fn(token)
+	}
+}
+
 func NewHTTPServer(h *hub.Hub, cfg config.HTTPConfig) *HTTPServer {
-	s := &HTTPServer{hub: h, cfg: cfg}
+	s := &HTTPServer{hub: h, cfg: cfg, sseReset: make(chan struct{})}
 	mux := http.NewServeMux()
 
 	// Web UI
@@ -393,6 +417,7 @@ func (s *HTTPServer) handleEvents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
 
+	resetCh := s.sseResetChan()
 	subID, ch := s.hub.Subscribe()
 	defer s.hub.Unsubscribe(subID)
 
@@ -406,6 +431,8 @@ func (s *HTTPServer) handleEvents(w http.ResponseWriter, r *http.Request) {
 	for {
 		select {
 		case <-r.Context().Done():
+			return
+		case <-resetCh:
 			return
 		case <-keepalive.C:
 			fmt.Fprintf(w, ": ping\n\n")
@@ -432,7 +459,10 @@ func (s *HTTPServer) serverInfo() protocol.ServerInfo {
 	return protocol.BuildServerInfo(virtualSupported)
 }
 
-func (s *HTTPServer) handleMeta(w http.ResponseWriter, _ *http.Request) {
+func (s *HTTPServer) handleMeta(w http.ResponseWriter, r *http.Request) {
+	if !viaTailcat(r) && !viaTailscale(r) {
+		w.Header().Set("X-Pebble-PID", strconv.Itoa(os.Getpid()))
+	}
 	writeJSON(w, http.StatusOK, s.serverInfo())
 }
 
@@ -1048,6 +1078,10 @@ type settingsBody struct {
 // DesktopResetFunc is registered by the native desktop host (bot-hub-desktop)
 // so the onboarding wizard can navigate back to the mode selector page.
 var DesktopResetFunc func()
+
+// OnAPITokenChanged is registered by the native desktop host so local-mode
+// clients immediately receive newly generated or rotated API tokens.
+var OnAPITokenChanged func(token string)
 
 func (s *HTTPServer) handleDesktopReset(w http.ResponseWriter, r *http.Request) {
 	if DesktopResetFunc == nil {

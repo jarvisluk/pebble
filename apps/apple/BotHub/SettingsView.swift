@@ -131,6 +131,7 @@ struct SettingsView: View {
     @State private var deskTouched = false
     @State private var deskPerms: [DesktopPermissionItem] = []
     @State private var deskPermsLoading = false
+    @State private var deskPermsError = ""
 
     @State private var tcQRData: Data?
     @State private var tcQRVersion: Int = 0
@@ -256,16 +257,26 @@ struct SettingsView: View {
                 showUnsavedAlert = true
             }
         }
-        .task(id: tab) {
-            _ = try? await hub.loadSettings()
-            try? await hub.refreshBots()
+        .task(id: "\(tab.rawValue)|\(hub.authToken)") {
+            guard !hub.baseURL.isEmpty else { return }
+            error = ""
+            do {
+                _ = try await hub.loadSettings()
+                try await hub.refreshBots()
+            } catch {
+                self.error = errText(error, hub.t("opFailed"))
+            }
             if tab == .memory { await loadMem("") }
             if tab == .desktop { await loadPerms() }
             if tab == .remote {
-                async let n: Void? = try? hub.refreshNodes()
-                async let tc: Void? = try? hub.refreshTailcat()
-                async let ht: Void? = try? hub.refreshHostTailscale()
-                _ = await (n, tc, ht)
+                do {
+                    async let n: Void = hub.refreshNodes()
+                    async let tc: Void = hub.refreshTailcat()
+                    async let ht: Void = hub.refreshHostTailscale()
+                    _ = try await (n, tc, ht)
+                } catch {
+                    self.error = errText(error, hub.t("opFailed"))
+                }
                 if tsHostnameIn.isEmpty, let hn = hub.hostTailscale?.hostname, !hn.isEmpty { tsHostnameIn = hn }
                 if tsControlUrlIn.isEmpty, let cu = hub.hostTailscale?.controlUrl, !cu.isEmpty { tsControlUrlIn = cu }
             }
@@ -1540,9 +1551,13 @@ struct SettingsView: View {
 
     private func loadPerms() async {
         deskPermsLoading = true
+        deskPermsError = ""
         defer { deskPermsLoading = false }
-        if let resp = try? await hub.fetchDesktopPermissions("local") {
+        do {
+            let resp = try await hub.fetchDesktopPermissions("local")
             deskPerms = resp.items ?? []
+        } catch {
+            deskPermsError = errText(error, hub.t("opFailed"))
         }
     }
 
@@ -1556,10 +1571,20 @@ struct SettingsView: View {
 
     private var desktopPermissionsSection: some View {
         Section {
+            if !deskPermsError.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    StatusText(text: deskPermsError)
+                    Button(hub.t("retry")) {
+                        Task { await loadPerms() }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+            }
             if deskPerms.isEmpty {
                 if deskPermsLoading {
                     ProgressView()
-                } else {
+                } else if deskPermsError.isEmpty {
                     Text(hub.t("deskPermsDesc")).foregroundStyle(.secondary)
                 }
             } else {

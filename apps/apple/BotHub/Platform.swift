@@ -128,25 +128,36 @@ var platformSwitchControlSize: ControlSize {
 }
 
 #if os(macOS)
+private final class MacSeamlessTitlebarView: NSView {
+    weak var appliedWindow: NSWindow?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        applyIfNeeded()
+    }
+
+    func applyIfNeeded() {
+        guard let window, appliedWindow !== window else { return }
+        appliedWindow = window
+        DispatchQueue.main.async { [weak window] in
+            guard let window else { return }
+            if !window.titlebarAppearsTransparent {
+                window.titlebarAppearsTransparent = true
+            }
+            if window.titlebarSeparatorStyle != .none {
+                window.titlebarSeparatorStyle = .none
+            }
+        }
+    }
+}
+
 private struct MacSeamlessTitlebarBridge: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView()
-        DispatchQueue.main.async { apply(to: view.window) }
-        return view
+    func makeNSView(context: Context) -> MacSeamlessTitlebarView {
+        MacSeamlessTitlebarView()
     }
 
-    func updateNSView(_ nsView: NSView, context: Context) {
-        DispatchQueue.main.async { apply(to: nsView.window) }
-    }
-
-    private func apply(to window: NSWindow?) {
-        guard let window else { return }
-        if !window.titlebarAppearsTransparent {
-            window.titlebarAppearsTransparent = true
-        }
-        if window.titlebarSeparatorStyle != .none {
-            window.titlebarSeparatorStyle = .none
-        }
+    func updateNSView(_ nsView: MacSeamlessTitlebarView, context: Context) {
+        nsView.applyIfNeeded()
     }
 }
 
@@ -205,7 +216,9 @@ private final class MacWindowObserverView: NSView {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         bindWindow(window)
-        evaluateVisibility()
+        DispatchQueue.main.async { [weak self] in
+            self?.evaluateVisibility()
+        }
     }
 
     private func removeObservers() {
@@ -258,16 +271,19 @@ private struct MacWindowVisibilityBridge: NSViewRepresentable {
     func makeNSView(context: Context) -> MacWindowObserverView {
         let view = MacWindowObserverView()
         view.onVisibilityChange = { next in
-            if visible != next { visible = next }
+            DispatchQueue.main.async {
+                if visible != next { visible = next }
+            }
         }
         return view
     }
 
     func updateNSView(_ nsView: MacWindowObserverView, context: Context) {
         nsView.onVisibilityChange = { next in
-            if visible != next { visible = next }
+            DispatchQueue.main.async {
+                if visible != next { visible = next }
+            }
         }
-        nsView.evaluateVisibility()
     }
 }
 
@@ -478,6 +494,41 @@ extension View {
         modifier(MacWindowVisibilityModifier())
         #else
         modifier(IOSWindowVisibilityModifier())
+        #endif
+    }
+
+    /// iOS/iPadOS 使用原生 `.inspector`；macOS 上避开 SystemSplitView+NavigationSplitView 的两阶段约束崩溃循环。
+    @ViewBuilder
+    func hubSplitInspector<Panel: View>(isPresented: Binding<Bool>, @ViewBuilder panel: @escaping () -> Panel) -> some View {
+        #if os(macOS)
+        self
+        #else
+        self.inspector(isPresented: isPresented, content: panel)
+        #endif
+    }
+
+    /// macOS 在主对话区域右侧嵌入纯 SwiftUI 侧边工作面板，替代系统 `.inspector`。
+    @ViewBuilder
+    func hubMacTrailingPanel<Panel: View>(isPresented: Bool, width: CGFloat = 360, @ViewBuilder panel: @escaping () -> Panel) -> some View {
+        #if os(macOS)
+        HStack(spacing: 0) {
+            self.frame(maxWidth: .infinity, maxHeight: .infinity)
+            if isPresented {
+                panel()
+                    .frame(width: width)
+                    .frame(maxHeight: .infinity)
+                    .overlay(alignment: .leading) {
+                        Rectangle()
+                            .fill(platformSeparatorColor)
+                            .frame(width: 0.5)
+                            .ignoresSafeArea()
+                    }
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: isPresented)
+        #else
+        self
         #endif
     }
 }

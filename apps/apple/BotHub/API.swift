@@ -77,6 +77,15 @@ func normalizeAddress(_ raw: String) -> NormalizedAddress {
     return NormalizedAddress(cleanAddress: withProto, token: token, isTailcat: false, isTailscale: false)
 }
 
+/// 独立于系统共享 Cookie 存储的 HTTP 会话，避免本机多端口或模式切换时残留的 `bot_hub_token` Cookie 污染请求。
+let hubAPISession: URLSession = {
+    let cfg = URLSessionConfiguration.default
+    cfg.httpShouldSetCookies = false
+    cfg.httpCookieAcceptPolicy = .never
+    cfg.httpCookieStorage = nil
+    return URLSession(configuration: cfg)
+}()
+
 struct APIClient {
     var base: String
     var token: String
@@ -102,7 +111,7 @@ struct APIClient {
             req.httpBody = try JSONSerialization.data(withJSONObject: body)
         }
         if !token.isEmpty { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
-        let (data, resp) = try await URLSession.shared.data(for: req)
+        let (data, resp) = try await hubAPISession.data(for: req)
         let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
         if code == 401 { throw HubError(message: L.t("invalidTokenErr"), unauthorized: true, status: 401) }
         if !(200..<300).contains(code) {
@@ -140,7 +149,7 @@ struct APIClient {
         body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
         req.httpBody = body
 
-        let (respData, resp) = try await URLSession.shared.data(for: req)
+        let (respData, resp) = try await hubAPISession.data(for: req)
         let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
         if code == 401 { throw HubError(message: L.t("invalidTokenErr"), unauthorized: true, status: 401) }
         if !(200..<300).contains(code) {
@@ -181,7 +190,7 @@ struct APIClient {
         guard let url = workspaceFileRawURL(botId: botId, path: path, ticket: tk.ticket, download: true) else {
             throw HubError(message: L.t("downloadFailed"))
         }
-        let (tmpURL, resp) = try await URLSession.shared.download(from: url)
+        let (tmpURL, resp) = try await hubAPISession.download(from: url)
         let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
         if !(200..<300).contains(code) {
             throw HubError(message: "HTTP \(code)", status: code)
@@ -217,7 +226,7 @@ final class EventStream {
                     APIClient.attachClientHeaders(&req)
                     req.setValue("text/event-stream", forHTTPHeaderField: "Accept")
                     if !token.isEmpty { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
-                    let (bytes, resp) = try await URLSession.shared.bytes(for: req)
+                    let (bytes, resp) = try await hubAPISession.bytes(for: req)
                     let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
                     if code == 401 {
                         await onStatus(false)

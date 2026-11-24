@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -312,12 +313,25 @@ func (h *Host) startLocal(ctx context.Context, done chan struct{}) (string, stri
 			return "", "", fmt.Errorf("本机服务退出：%v", err)
 		default:
 		}
-		if r, err := warmClient.Get(base + "/healthz"); err == nil {
-			r.Body.Close()
-			if sr, serr := warmClient.Get(base + "/api/settings"); serr == nil {
-				sr.Body.Close()
+		if req, rerr := http.NewRequestWithContext(ctx, http.MethodGet, base+"/api/meta", nil); rerr == nil {
+			if cfg.HTTP.APIToken != "" {
+				req.Header.Set("Authorization", "Bearer "+cfg.HTTP.APIToken)
 			}
-			return base + "/", cfg.HTTP.APIToken, nil
+			if r, err := warmClient.Do(req); err == nil {
+				pidHdr := strings.TrimSpace(r.Header.Get("X-Pebble-PID"))
+				r.Body.Close()
+				if r.StatusCode == http.StatusOK && (pidHdr == "" || pidHdr == strconv.Itoa(os.Getpid())) {
+					if sreq, serr := http.NewRequestWithContext(ctx, http.MethodGet, base+"/api/settings", nil); serr == nil {
+						if cfg.HTTP.APIToken != "" {
+							sreq.Header.Set("Authorization", "Bearer "+cfg.HTTP.APIToken)
+						}
+						if sr, serr := warmClient.Do(sreq); serr == nil {
+							sr.Body.Close()
+						}
+					}
+					return base + "/", cfg.HTTP.APIToken, nil
+				}
+			}
 		}
 	}
 	return "", "", errors.New("本机服务没有响应")
@@ -720,6 +734,20 @@ func (h *Host) setRemoteToken(tok string) {
 	}
 	if agent != nil {
 		agent.SetToken(tok)
+	}
+}
+
+// SetLocalToken updates the active token when running in local mode and notifies UI shells.
+func (h *Host) SetLocalToken(tok string) {
+	tok = strings.TrimSpace(tok)
+	h.mu.Lock()
+	changed := h.prefs.Mode == "local" && h.activeToken != tok
+	if changed {
+		h.activeToken = tok
+	}
+	h.mu.Unlock()
+	if changed {
+		h.notify()
 	}
 }
 

@@ -199,7 +199,7 @@ final class DesktopHostManager {
             req.setValue("application/json", forHTTPHeaderField: "Content-Type")
             req.httpBody = try JSONSerialization.data(withJSONObject: body)
         }
-        let (data, resp) = try await URLSession.shared.data(for: req)
+        let (data, resp) = try await hubAPISession.data(for: req)
         let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
         guard (200..<300).contains(code) else {
             let msg = String(data: data, encoding: .utf8) ?? "HTTP \(code)"
@@ -318,7 +318,7 @@ final class DesktopHostManager {
                     req.timeoutInterval = 70
                     req.setValue("text/event-stream", forHTTPHeaderField: "Accept")
                     req.setValue("Bearer \(tok)", forHTTPHeaderField: "Authorization")
-                    let (bytes, resp) = try await URLSession.shared.bytes(for: req)
+                    let (bytes, resp) = try await hubAPISession.bytes(for: req)
                     let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
                     if code != 200 { throw HubError(message: "HTTP \(code)") }
                     var buf: [UInt8] = []

@@ -5,6 +5,8 @@ struct DevicesView: View {
     @Environment(Router.self) private var router
     @Environment(\.palette) private var p
 
+    @State private var error = ""
+
     private var tailcatText: String {
         guard let t = hub.tailcat else { return hub.t("tailcatUnknown") }
         switch t.state {
@@ -43,6 +45,9 @@ struct DevicesView: View {
             onClose: { router.sheet = nil }
         ) {
             Form {
+                if !error.isEmpty {
+                    Section { StatusText(text: error) }
+                }
                 Section(hub.t("currentMobileConn")) {
                     if let s = hub.activeServer {
                         LabeledContent(s.label) {
@@ -91,16 +96,21 @@ struct DevicesView: View {
             .hubForm()
             .refreshable { await load() }
         }
-        .task { await load() }
+        .task(id: hub.authToken) { await load() }
     }
 
     private func load() async {
+        error = ""
         await hub.refreshMobileTailscale(includePeers: false)
         guard hub.isConnected else { return }
-        async let a: Void? = try? hub.refreshNodes()
-        async let b: Void? = try? hub.refreshTailcat()
-        async let c: Void? = try? hub.refreshHostTailscale()
-        _ = await (a, b, c)
+        do {
+            async let a: Void = hub.refreshNodes()
+            async let b: Void = hub.refreshTailcat()
+            async let c: Void = hub.refreshHostTailscale()
+            _ = try await (a, b, c)
+        } catch {
+            self.error = errText(error, hub.t("opFailed"))
+        }
     }
 
     private func nodeRow(_ node: NodeInfo) -> some View {

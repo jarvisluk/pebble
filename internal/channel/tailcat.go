@@ -233,8 +233,11 @@ func (s *HTTPServer) handleSetTailcat(w http.ResponseWriter, r *http.Request) {
 	s.cfg.APIToken = token
 	s.cfgMu.Unlock()
 
-	if token != prevToken && s.hub != nil {
-		s.hub.SetAPIToken(token)
+	if token != prevToken {
+		if s.hub != nil {
+			s.hub.SetAPIToken(token)
+		}
+		s.notifyTokenChanged(token)
 	}
 
 	if token != "" && (token != prevToken || enable) {

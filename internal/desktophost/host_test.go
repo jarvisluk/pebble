@@ -1,13 +1,18 @@
 package desktophost
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"bot-hub/internal/protocol"
 )
@@ -195,6 +200,97 @@ func TestSyncRemoteTokenFromResponse(t *testing.T) {
 	})
 	if got := host.Prefs().RemoteToken; got != "login-token" {
 		t.Fatalf("RemoteToken from /api/login = %q, want %q", got, "login-token")
+	}
+}
+
+func TestSetLocalTokenUpdatesSnapshotAndNotifies(t *testing.T) {
+	dir := t.TempDir()
+	var snapshots []Snapshot
+	host := New(dir, Hooks{
+		OnChange: func(snap Snapshot) {
+			snapshots = append(snapshots, snap)
+		},
+	})
+	host.Load()
+
+	// Configure local mode and verify SetLocalToken updates ActiveToken and triggers OnChange.
+	host.mu.Lock()
+	host.prefs.Mode = "local"
+	host.activeURL = "http://127.0.0.1:3789/"
+	host.activeToken = ""
+	host.mu.Unlock()
+
+	host.SetLocalToken("  new-local-tok  ")
+	if got := host.Snapshot().ActiveToken; got != "new-local-tok" {
+		t.Fatalf("Snapshot.ActiveToken = %q, want %q", got, "new-local-tok")
+	}
+	if len(snapshots) != 1 || snapshots[0].ActiveToken != "new-local-tok" {
+		t.Fatalf("expected OnChange with new-local-tok, got %+v", snapshots)
+	}
+
+	// Idempotent call with the same token must not spam OnChange.
+	host.SetLocalToken("new-local-tok")
+	if len(snapshots) != 1 {
+		t.Fatalf("expected no duplicate OnChange for same token, got %d", len(snapshots))
+	}
+
+	// In remote mode, SetLocalToken must NOT overwrite ActiveToken.
+	host.mu.Lock()
+	host.prefs.Mode = "remote"
+	host.activeToken = "remote-tok"
+	host.mu.Unlock()
+
+	host.SetLocalToken("local-should-be-ignored")
+	if got := host.Snapshot().ActiveToken; got != "remote-tok" {
+		t.Fatalf("remote ActiveToken overwritten by SetLocalToken: got %q, want %q", got, "remote-tok")
+	}
+}
+
+func TestStartLocalIgnoresForeignPID(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+
+	foreign := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/healthz":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		case "/api/meta":
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("X-Pebble-PID", "99999999")
+			_, _ = w.Write([]byte(`{"protocolVersion":2}`))
+		default:
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+		}
+	}))
+	foreign.Listener = ln
+	foreign.Start()
+	defer foreign.Close()
+
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config", "bots.json")
+	if err := os.MkdirAll(filepath.Dir(cfgPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfgBody := fmt.Sprintf(`{"http":{"host":"127.0.0.1","port":%d},"bots":[{"id":"a","name":"A"}]}`, port)
+	if err := os.WriteFile(cfgPath, []byte(cfgBody), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	host := New(dir, Hooks{
+		ServeLocal: func(_ context.Context, _ string) error {
+			time.Sleep(120 * time.Millisecond)
+			return errors.New("bind: address already in use")
+		},
+	})
+	done := make(chan struct{})
+	_, _, err = host.startLocal(context.Background(), done)
+	<-done
+	if err == nil || !strings.Contains(err.Error(), "address already in use") {
+		t.Fatalf("expected ServeLocal bind error instead of foreign /api/meta PID success, got: %v", err)
 	}
 }
 
