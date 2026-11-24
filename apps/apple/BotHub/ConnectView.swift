@@ -16,6 +16,8 @@ struct ConnectView: View {
     @State private var label = ""
     @State private var address = ""
     @State private var token = ""
+    @State private var standbyAddress = ""
+    @State private var standbyToken = ""
     @State private var err = ""
     @State private var infoHint = ""
     @State private var submitting = false
@@ -186,6 +188,8 @@ struct ConnectView: View {
                     TextField(hub.t("labelOptional"), text: $label, prompt: Text(hub.t("labelExamplePh")))
                     TextField(hub.t("connAddr"), text: $address, prompt: Text("tailcat://… / tailscale://… / 192.168.1.10:3789")).monoInput()
                     SecureField(hub.t("tokenOptionalLbl"), text: $token, prompt: Text(hub.t("tokenFillHint")))
+                    TextField(hub.t("standbyAddress"), text: $standbyAddress, prompt: Text("tailcat://… / 192.168.x.x:3789")).monoInput()
+                    SecureField(hub.t("standbyToken"), text: $standbyToken, prompt: Text(hub.t("tokenFillHint")))
                 } header: {
                     Text(hub.t("manualAddrTitle"))
                 } footer: {
@@ -287,7 +291,13 @@ struct ConnectView: View {
         submitting = true
         Task {
             do {
-                try await hub.addAndConnectServer(label: label, address: address, token: token)
+                try await hub.addAndConnectServer(
+                    label: label,
+                    address: address,
+                    token: token,
+                    standbyAddress: standbyAddress,
+                    standbyToken: standbyToken
+                )
             } catch {
                 submitting = false
                 err = errText(error, hub.t("connFailed"))

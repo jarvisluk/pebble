@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/robfig/cron/v3"
 )
@@ -19,6 +20,10 @@ const (
 	RoutineDeliveryReceipt = "receipt"
 	RoutineDeliveryNotify  = "notify"
 	RoutineDeliveryNone    = "none"
+
+	RoutineFailoverAuto        = "auto"
+	RoutineFailoverPrimaryOnly = "primary_only"
+	RoutineFailoverManual      = "manual"
 )
 
 var cronParser = cron.NewParser(
@@ -47,7 +52,8 @@ type ScheduleConfig struct {
 	WebhookURL     string `json:"webhookUrl,omitempty"`
 	Prompt         string `json:"prompt"`
 	Model          string `json:"model,omitempty"`
-	MainDelivery   string `json:"mainDelivery,omitempty"` // "receipt" (default) | "notify" | "none"
+	MainDelivery   string `json:"mainDelivery,omitempty"`   // "receipt" (default) | "notify" | "none"
+	FailoverPolicy string `json:"failoverPolicy,omitempty"` // "auto" (default) | "primary_only" | "manual"
 	Enabled        *bool  `json:"enabled,omitempty"`
 }
 
@@ -74,6 +80,20 @@ func (s ScheduleConfig) EffectiveMainDelivery() string {
 		return RoutineDeliveryNone
 	default:
 		return strings.ToLower(strings.TrimSpace(s.MainDelivery))
+	}
+}
+
+// EffectiveFailoverPolicy returns the normalized failover policy ("auto", "primary_only", or "manual").
+func (s ScheduleConfig) EffectiveFailoverPolicy() string {
+	switch strings.ToLower(strings.TrimSpace(s.FailoverPolicy)) {
+	case "", RoutineFailoverAuto:
+		return RoutineFailoverAuto
+	case RoutineFailoverPrimaryOnly:
+		return RoutineFailoverPrimaryOnly
+	case RoutineFailoverManual:
+		return RoutineFailoverManual
+	default:
+		return strings.ToLower(strings.TrimSpace(s.FailoverPolicy))
 	}
 }
 
@@ -116,6 +136,11 @@ func (s ScheduleConfig) Validate() error {
 	case "", RoutineDeliveryReceipt, RoutineDeliveryNotify, RoutineDeliveryNone:
 	default:
 		return fmt.Errorf("invalid mainDelivery %q (expected receipt, notify, or none)", s.MainDelivery)
+	}
+	switch strings.ToLower(strings.TrimSpace(s.FailoverPolicy)) {
+	case "", RoutineFailoverAuto, RoutineFailoverPrimaryOnly, RoutineFailoverManual:
+	default:
+		return fmt.Errorf("invalid failoverPolicy %q (expected auto, primary_only, or manual)", s.FailoverPolicy)
 	}
 	return nil
 }
@@ -277,6 +302,172 @@ func (d DesktopConfig) ShouldStopOnlyWhenNoWindows() bool {
 	return d.StopOnlyWhenNoWindows == nil || *d.StopOnlyWhenNoWindows
 }
 
+type SyncGitConfig struct {
+	Enabled         bool   `json:"enabled"`
+	RepoURL         string `json:"repoUrl,omitempty"`
+	Branch          string `json:"branch,omitempty"`          // default: "main"
+	IntervalMinutes int    `json:"intervalMinutes,omitempty"` // default: 10
+}
+
+func (g SyncGitConfig) EffectiveBranch() string {
+	if b := strings.TrimSpace(g.Branch); b != "" {
+		return b
+	}
+	return "main"
+}
+
+func (g SyncGitConfig) EffectiveIntervalMinutes() int {
+	if g.IntervalMinutes <= 0 {
+		return 10
+	}
+	return g.IntervalMinutes
+}
+
+type SyncWebDAVConfig struct {
+	Enabled  bool   `json:"enabled"`
+	Prefix   string `json:"prefix,omitempty"`   // default: "/webdav"
+	ReadOnly *bool  `json:"readOnly,omitempty"` // default: true
+}
+
+func (w SyncWebDAVConfig) EffectivePrefix() string {
+	p := strings.TrimSpace(w.Prefix)
+	if p == "" {
+		return "/webdav"
+	}
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
+	p = strings.TrimRight(p, "/")
+	if p == "" {
+		return "/webdav"
+	}
+	return p
+}
+
+func (w SyncWebDAVConfig) IsReadOnly() bool {
+	return w.ReadOnly == nil || *w.ReadOnly
+}
+
+type SyncPeerConfig struct {
+	ID       string `json:"id,omitempty"`
+	Label    string `json:"label,omitempty"`
+	URL      string `json:"url"`
+	Token    string `json:"token,omitempty"`
+	Priority int    `json:"priority,omitempty"` // smaller number = higher priority (e.g. 10 primary, 20 standby)
+}
+
+type SyncConfig struct {
+	Role               string            `json:"role,omitempty"`     // "primary" (default) | "standby"
+	Priority           int               `json:"priority,omitempty"` // default: primary=10, standby=20
+	PeerURL            string            `json:"peerUrl,omitempty"`
+	PeerToken          string            `json:"peerToken,omitempty"`
+	Peers              []SyncPeerConfig  `json:"peers,omitempty"`
+	FailoverTimeoutSec int               `json:"failoverTimeoutSec,omitempty"` // default: 90
+	Git                *SyncGitConfig    `json:"git,omitempty"`
+	WebDAV             *SyncWebDAVConfig `json:"webdav,omitempty"`
+}
+
+func (s *SyncConfig) EffectivePriority() int {
+	if s != nil && s.Priority > 0 {
+		return s.Priority
+	}
+	if s.EffectiveRole() == "standby" {
+		return 20
+	}
+	return 10
+}
+
+// HigherPriorityPeers returns all configured peers whose priority is strictly
+// higher (smaller number) than the local host's effective priority.
+func (s *SyncConfig) HigherPriorityPeers() []SyncPeerConfig {
+	if s == nil {
+		return nil
+	}
+	selfPrio := s.EffectivePriority()
+	var out []SyncPeerConfig
+	seen := make(map[string]bool)
+	for _, p := range s.Peers {
+		u := strings.TrimRight(strings.TrimSpace(p.URL), "/")
+		if u == "" || seen[u] {
+			continue
+		}
+		prio := p.Priority
+		if prio <= 0 {
+			prio = 10
+		}
+		if prio < selfPrio {
+			p.URL = u
+			p.Priority = prio
+			seen[u] = true
+			out = append(out, p)
+		}
+	}
+	if len(out) == 0 && s.EffectiveRole() == "standby" {
+		if u := strings.TrimRight(strings.TrimSpace(s.PeerURL), "/"); u != "" {
+			out = append(out, SyncPeerConfig{
+				ID:       "primary",
+				URL:      u,
+				Token:    s.PeerToken,
+				Priority: 10,
+			})
+		}
+	}
+	return out
+}
+
+func (s *SyncConfig) EffectiveFailoverTimeout() time.Duration {
+	if s == nil || s.FailoverTimeoutSec <= 0 {
+		return 90 * time.Second
+	}
+	return time.Duration(s.FailoverTimeoutSec) * time.Second
+}
+
+func (s *SyncConfig) EffectiveRole() string {
+	if s == nil {
+		return "primary"
+	}
+	switch strings.ToLower(strings.TrimSpace(s.Role)) {
+	case "standby":
+		return "standby"
+	default:
+		return "primary"
+	}
+}
+
+func (s *SyncConfig) GitEnabled() bool {
+	return s != nil && s.Git != nil && s.Git.Enabled
+}
+
+func (s *SyncConfig) WebDAVEnabled() bool {
+	return s != nil && s.WebDAV != nil && s.WebDAV.Enabled
+}
+
+func (s *SyncConfig) WebDAVReadOnly() bool {
+	if s == nil || s.WebDAV == nil {
+		return true
+	}
+	return s.WebDAV.IsReadOnly()
+}
+
+type APNsConfig struct {
+	KeyPath    string `json:"keyPath,omitempty"`
+	KeyPEM     string `json:"keyPem,omitempty"`
+	KeyID      string `json:"keyId,omitempty"`
+	TeamID     string `json:"teamId,omitempty"`
+	BundleID   string `json:"bundleId,omitempty"`
+	DefaultEnv string `json:"defaultEnv,omitempty"` // "production" | "sandbox"
+}
+
+type PushConfig struct {
+	Enabled  *bool      `json:"enabled,omitempty"` // default: true
+	RelayURL string     `json:"relayUrl,omitempty"`
+	APNs     APNsConfig `json:"apns,omitempty"`
+}
+
+func (p PushConfig) IsEnabled() bool {
+	return p.Enabled == nil || *p.Enabled
+}
+
 type HubConfig struct {
 	ProjectRoot string `json:"-"`
 	ConfigPath  string `json:"-"`
@@ -293,12 +484,14 @@ type HubConfig struct {
 	// MagpieWebURL is where `magpie web` is reachable from other devices;
 	// clients away from the host open it instead of the local app.
 	MagpieWebURL      string      `json:"magpieWebUrl,omitempty"`
-	OpenCodeServerURL   string            `json:"opencodeServerUrl,omitempty"`
-	SharedDir         string            `json:"sharedDir,omitempty"`
-	StateFile         string            `json:"stateFile,omitempty"`
-	MessagesDir       string            `json:"messagesDir,omitempty"`
-	HTTP              HTTPConfig        `json:"http,omitempty"`
-	Bots              []BotConfig       `json:"bots"`
+	OpenCodeServerURL string      `json:"opencodeServerUrl,omitempty"`
+	SharedDir         string      `json:"sharedDir,omitempty"`
+	StateFile         string      `json:"stateFile,omitempty"`
+	MessagesDir       string      `json:"messagesDir,omitempty"`
+	HTTP              HTTPConfig  `json:"http,omitempty"`
+	Sync              *SyncConfig `json:"sync,omitempty"`
+	Push              PushConfig  `json:"push,omitempty"`
+	Bots              []BotConfig `json:"bots"`
 }
 
 var (
@@ -493,6 +686,28 @@ func Load(projectRoot, explicitPath string) (*HubConfig, string, error) {
 		cfg.HTTP.Tailscale.ControlURL = strings.TrimSpace(expandEnv(cfg.HTTP.Tailscale.ControlURL))
 		cfg.HTTP.Tailscale.AuthKey = strings.TrimSpace(expandEnv(cfg.HTTP.Tailscale.AuthKey))
 	}
+	if cfg.Sync != nil {
+		cfg.Sync.PeerURL = strings.TrimRight(strings.TrimSpace(expandEnv(cfg.Sync.PeerURL)), "/")
+		cfg.Sync.PeerToken = strings.TrimSpace(expandEnv(cfg.Sync.PeerToken))
+		for i := range cfg.Sync.Peers {
+			cfg.Sync.Peers[i].URL = strings.TrimRight(strings.TrimSpace(expandEnv(cfg.Sync.Peers[i].URL)), "/")
+			cfg.Sync.Peers[i].Token = strings.TrimSpace(expandEnv(cfg.Sync.Peers[i].Token))
+		}
+		if cfg.Sync.Git != nil {
+			cfg.Sync.Git.RepoURL = strings.TrimSpace(expandEnv(cfg.Sync.Git.RepoURL))
+			cfg.Sync.Git.Branch = strings.TrimSpace(cfg.Sync.Git.Branch)
+		}
+	}
+	cfg.Push.RelayURL = strings.TrimSpace(expandEnv(cfg.Push.RelayURL))
+	cfg.Push.APNs.KeyPath = strings.TrimSpace(expandEnv(cfg.Push.APNs.KeyPath))
+	if cfg.Push.APNs.KeyPath != "" && !filepath.IsAbs(cfg.Push.APNs.KeyPath) {
+		cfg.Push.APNs.KeyPath = absFrom(projectRoot, cfg.Push.APNs.KeyPath)
+	}
+	cfg.Push.APNs.KeyPEM = strings.TrimSpace(expandEnv(cfg.Push.APNs.KeyPEM))
+	cfg.Push.APNs.KeyID = strings.TrimSpace(expandEnv(cfg.Push.APNs.KeyID))
+	cfg.Push.APNs.TeamID = strings.TrimSpace(expandEnv(cfg.Push.APNs.TeamID))
+	cfg.Push.APNs.BundleID = strings.TrimSpace(expandEnv(cfg.Push.APNs.BundleID))
+	cfg.Push.APNs.DefaultEnv = strings.ToLower(strings.TrimSpace(expandEnv(cfg.Push.APNs.DefaultEnv)))
 
 	if cfg.SharedDir == "" {
 		cfg.SharedDir = "./workspaces/_shared"

@@ -25,6 +25,7 @@ import (
 	"bot-hub/internal/desktop"
 	"bot-hub/internal/harness"
 	"bot-hub/internal/node"
+	"bot-hub/internal/push"
 	"bot-hub/internal/state"
 )
 
@@ -283,6 +284,8 @@ type Hub struct {
 	subs   map[uint64]chan Event
 	subSeq atomic.Uint64
 
+	push *push.Manager
+
 	closeMu sync.Mutex
 	closed  bool
 
@@ -338,6 +341,7 @@ func New(cfg *config.HubConfig, store *state.Store, messages *state.MessageStore
 		hops:               make(map[string]int),
 		questions:          make(map[string]*pendingQuestionEntry),
 		inboundAtts:        make(map[string]inboundAttEntry),
+		push:               push.NewManager(cfg, store),
 	}
 	h.nodes = node.NewRegistry(func() {
 		h.reconcileActiveDesktopTarget()
@@ -407,6 +411,9 @@ func (h *Hub) Close() {
 	h.desktopTargetMu.Unlock()
 	h.localDesk.Close()
 	h.registry.Close()
+	if h.push != nil {
+		h.push.Close()
+	}
 	if h.store != nil {
 		_ = h.store.Close()
 	}
@@ -418,6 +425,10 @@ func (h *Hub) Config() *config.HubConfig {
 
 func (h *Hub) Nodes() *node.Registry {
 	return h.nodes
+}
+
+func (h *Hub) Store() *state.Store {
+	return h.store
 }
 
 func (h *Hub) LocalDesktop() *desktop.Engine {
@@ -474,6 +485,9 @@ func (h *Hub) Unsubscribe(id uint64) {
 }
 
 func (h *Hub) broadcast(evt Event) {
+	if h.push != nil {
+		h.push.EnqueueEvent(evt.Type, evt.BotID, evt.Payload)
+	}
 	h.subsMu.Lock()
 	defer h.subsMu.Unlock()
 	for _, ch := range h.subs {
@@ -483,6 +497,34 @@ func (h *Hub) broadcast(evt Event) {
 			// Drop if a slow web client lags behind.
 		}
 	}
+}
+
+func (h *Hub) PushStatus() push.Status {
+	if h.push == nil {
+		return push.Status{Mode: "disabled"}
+	}
+	return h.push.Status()
+}
+
+func (h *Hub) UpsertPushDevice(d state.PushDevice) error {
+	if h.store == nil {
+		return errors.New("state store unavailable")
+	}
+	return h.store.UpsertPushDevice(d)
+}
+
+func (h *Hub) SetPushActivityToken(deviceID, activityKey, token string) error {
+	if h.store == nil {
+		return errors.New("state store unavailable")
+	}
+	return h.store.SetPushActivityToken(deviceID, activityKey, token)
+}
+
+func (h *Hub) DeletePushDevice(deviceID string) error {
+	if h.store == nil {
+		return errors.New("state store unavailable")
+	}
+	return h.store.DeletePushDevice(deviceID)
 }
 
 func (h *Hub) appendMessage(msg state.ChatMessage) state.ChatMessage {
@@ -1411,6 +1453,8 @@ func (h *Hub) buildTurnPrompt(bot config.BotConfig, prompt string, isFirstTurn b
 					"[System Note: New session started. Previous session %s (%s) is archived. Use recall_session if you need prior context.]",
 					prev.ID, strings.Join(details, ", "),
 				))
+			} else if recent, err := h.store.RecentMessagesForHandoff(bot.ID, 8); err == nil && len(recent) > 0 {
+				prefixParts = append(prefixParts, formatCrossHostHandoffPrefix(recent))
 			}
 		}
 		if bot.Harness == "dsh" && platPath != "" {
@@ -1426,6 +1470,15 @@ func (h *Hub) buildTurnPrompt(bot config.BotConfig, prompt string, isFirstTurn b
 		return prompt
 	}
 	return strings.Join(prefixParts, "\n\n") + "\n\n" + prompt
+}
+
+func formatCrossHostHandoffPrefix(recent []state.SyncMessageRow) string {
+	var lines []string
+	lines = append(lines, "[System Note: Cross-host session handoff — recent conversation synced from another host:]")
+	for _, m := range recent {
+		lines = append(lines, fmt.Sprintf("- %s: %s", m.Role, firstLineSummary(m.Text, 240)))
+	}
+	return strings.Join(lines, "\n")
 }
 
 func formatRoutineReceiptsPrefix(receipts []state.RoutineRun) string {

@@ -141,6 +141,7 @@ final class HubStore {
     var questions: [PendingQuestion] = []
     var desktopTargets: [DesktopTarget] = []
     var activeDesktopTarget = ActiveDesktopTarget(target: "local", name: nil, temporary: false, expiresAt: nil)
+    var usingStandby = false
     var routines: [String: [RoutineItem]] = [:]
 
     @ObservationIgnored private var activeChat: String?
@@ -254,9 +255,14 @@ final class HubStore {
             if let st = decodeAny(p, as: BotStatus.self) {
                 upsertBot(st)
                 if !st.isBusy { tools[st.id] = nil }
+                LiveActivityManager.shared.handleBotStatus(st)
             }
         case "tool_use":
-            if let bid = p["botId"] as? String { tools[bid] = (p["tool"] as? String) ?? "" }
+            if let bid = p["botId"] as? String {
+                let tool = (p["tool"] as? String) ?? ""
+                tools[bid] = tool
+                LiveActivityManager.shared.handleToolUse(botId: bid, tool: tool)
+            }
         case "bot_created":
             if let st = decodeAny(p, as: BotStatus.self), !bots.contains(where: { $0.id == st.id }) { bots.append(st) }
         case "bot_deleted":
@@ -266,7 +272,10 @@ final class HubStore {
         case "desktop_target":
             if let at = decodeAny(p, as: ActiveDesktopTarget.self) { activeDesktopTarget = at }
         case "takeover":
-            if let arr = p["items"], let list = decodeAny(arr, as: [TakeoverRequest].self) { takeovers = list }
+            if let arr = p["items"], let list = decodeAny(arr, as: [TakeoverRequest].self) {
+                takeovers = list
+                LiveActivityManager.shared.handleTakeovers(list)
+            }
         case "questions":
             if let arr = p["items"], let list = decodeAny(arr, as: [PendingQuestion].self) { questions = list }
         case "routine_updated", "routine_run":
@@ -286,11 +295,60 @@ final class HubStore {
         let seq = connSeq
         stream.stop()
         online = false
+        usingStandby = false
         connState = .connecting
         connError = ""
 
-        let norm = normalizeAddress(profile.address)
-        var tok = profile.token.isEmpty ? norm.token : profile.token
+        do {
+            try await connectEndpoint(profile: profile, rawAddress: profile.address, rawToken: profile.token, isStandby: false, seq: seq)
+        } catch {
+            guard seq == connSeq else { return }
+            if (error as? HubError)?.unauthorized == true {
+                handleConnectError(error)
+                return
+            }
+            var candidates: [(String, String)] = []
+            let sbAddr = (profile.standbyAddress ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !sbAddr.isEmpty {
+                candidates.append((sbAddr, profile.standbyToken ?? ""))
+            }
+            for fb in (profile.fallbackHosts ?? []) {
+                let addr = fb.address.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !addr.isEmpty && addr != sbAddr {
+                    candidates.append((addr, fb.token ?? ""))
+                }
+            }
+            var lastErr: Error = error
+            for (addr, tok) in candidates {
+                do {
+                    try await connectEndpoint(profile: profile, rawAddress: addr, rawToken: tok, isStandby: true, seq: seq)
+                    return
+                } catch {
+                    guard seq == connSeq else { return }
+                    lastErr = error
+                    if (error as? HubError)?.unauthorized == true {
+                        break
+                    }
+                }
+            }
+            handleConnectError(lastErr)
+        }
+    }
+
+    private func handleConnectError(_ error: Error) {
+        usingStandby = false
+        if let e = error as? HubError, e.unauthorized {
+            connState = .unauthorized
+            connError = e.message
+        } else {
+            connState = .error
+            connError = errText(error, L.t("connFailed"))
+        }
+    }
+
+    private func connectEndpoint(profile: ServerProfile, rawAddress: String, rawToken: String, isStandby: Bool, seq: Int) async throws {
+        let norm = normalizeAddress(rawAddress)
+        var tok = rawToken.isEmpty ? norm.token : rawToken
         var url = norm.cleanAddress
         do {
             if norm.isTailscale {
@@ -314,7 +372,7 @@ final class HubStore {
                 await Tunnel.stop()
             }
             guard seq == connSeq else { return }
-            if tok != profile.token || norm.cleanAddress != profile.address,
+            if !isStandby, tok != profile.token || norm.cleanAddress != profile.address,
                let i = servers.firstIndex(where: { $0.id == profile.id }) {
                 servers[i].address = norm.cleanAddress
                 servers[i].token = tok
@@ -331,6 +389,7 @@ final class HubStore {
             let list = data.bots ?? []
             bots = list
             msgs = [:]; last = [:]; unread = [:]; tools = [:]; models = [:]; routines = [:]
+            usingStandby = isStandby
             connState = .connected
             connError = ""
 
@@ -352,20 +411,17 @@ final class HubStore {
                 }
             }
             Task { if let q: QuestionsResp = try? await client.call("/api/questions"), seq == connSeq { questions = q.items ?? [] } }
+            PushManager.shared.activeChatBotId = { [weak self] in self?.activeChat }
+            PushManager.shared.configureConnection(base: url, token: tok)
+            LiveActivityManager.shared.startObservingTokens()
             startStream(url, tok)
         } catch {
-            guard seq == connSeq else { return }
+            guard seq == connSeq else { throw error }
             baseURL = url
             authToken = tok
             isTailcat = norm.isTailcat
             isTailscale = norm.isTailscale
-            if let e = error as? HubError, e.unauthorized {
-                connState = .unauthorized
-                connError = e.message
-            } else {
-                connState = .error
-                connError = errText(error, L.t("connFailed"))
-            }
+            throw error
         }
     }
 
@@ -386,22 +442,44 @@ final class HubStore {
         }
     }
 
-    func addAndConnectServer(label: String, address: String, token: String) async throws {
+    func addAndConnectServer(label: String, address: String, token: String, standbyAddress: String? = nil, standbyToken: String? = nil) async throws {
         let norm = normalizeAddress(address)
         if norm.cleanAddress.isEmpty { throw HubError(message: L.t("enterValidAddr")) }
         let tok = (token.isEmpty ? norm.token : token).trimmingCharacters(in: .whitespaces)
         let lbl = label.trimmingCharacters(in: .whitespaces)
+        let sbTokTrim = (standbyToken ?? "").trimmingCharacters(in: .whitespaces)
+        let sbParts = (standbyAddress ?? "")
+            .split { $0 == "," || $0 == "\n" }
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        var fallbacks: [FallbackHost] = []
+        for part in sbParts {
+            let fn = normalizeAddress(part)
+            if !fn.cleanAddress.isEmpty {
+                let ft = !sbTokTrim.isEmpty ? sbTokTrim : (fn.token.isEmpty ? nil : fn.token)
+                fallbacks.append(FallbackHost(label: nil, address: fn.cleanAddress, token: ft))
+            }
+        }
+        let sbAddr = fallbacks.first?.address
+        let sbTok = fallbacks.first?.token
+
         var target: ServerProfile
         if let i = servers.firstIndex(where: { $0.address == norm.cleanAddress }) {
             target = servers[i]
             if !lbl.isEmpty { target.label = lbl }
             if !tok.isEmpty { target.token = tok }
+            if let sbAddr, !sbAddr.isEmpty { target.standbyAddress = sbAddr }
+            if let sbTok, !sbTok.isEmpty { target.standbyToken = sbTok }
+            if !fallbacks.isEmpty { target.fallbackHosts = fallbacks }
             servers[i] = target
         } else {
             let def = norm.isTailcat ? L.t("remoteHostDefault")
                 : norm.cleanAddress.replacingOccurrences(of: "^https?://", with: "", options: .regularExpression)
             target = ServerProfile(id: "\(Int(Date().timeIntervalSince1970 * 1000))", label: lbl.isEmpty ? def : lbl,
-                                   address: norm.cleanAddress, token: tok)
+                                   address: norm.cleanAddress, token: tok,
+                                   standbyAddress: (sbAddr?.isEmpty == false ? sbAddr : nil),
+                                   standbyToken: sbTok,
+                                   fallbackHosts: fallbacks.isEmpty ? nil : fallbacks)
             servers.insert(target, at: 0)
         }
         activeServerId = target.id

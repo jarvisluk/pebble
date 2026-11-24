@@ -12,6 +12,10 @@ const TS_BIND_KEY = 'bothub.tsBind.v1';
 
 export type ThemePreference = 'system' | 'light' | 'dark';
 export type LanguagePreference = 'system' | 'zh-CN' | 'en';
+export type BotSortMode = 'recent' | 'manual';
+
+const BOT_SORT_KEY = 'bothub.botSortMode.v1';
+const BOT_PINNED_KEY = 'bothub.pinnedBots.v1';
 
 async function readKey(key: string): Promise<string | null> {
   if (Platform.OS === 'web') {
@@ -108,4 +112,29 @@ export async function loadTailscaleBindPref(): Promise<TailscaleBindPref> {
 
 export async function saveTailscaleBindPref(pref: TailscaleBindPref | null): Promise<void> {
   await writeKey(TS_BIND_KEY, pref && pref.bound ? JSON.stringify(pref) : null);
+}
+
+export async function loadBotListPrefs(): Promise<{ sortMode: BotSortMode; pinnedIds: string[] }> {
+  const [sortRaw, pinnedRaw] = await Promise.all([readKey(BOT_SORT_KEY), readKey(BOT_PINNED_KEY)]);
+  const sortMode: BotSortMode = sortRaw === 'manual' ? 'manual' : 'recent';
+  let pinnedIds: string[] = [];
+  if (pinnedRaw) {
+    try {
+      const parsed = JSON.parse(pinnedRaw);
+      if (Array.isArray(parsed)) {
+        pinnedIds = parsed.filter((x): x is string => typeof x === 'string');
+      }
+    } catch {
+      // ignore malformed storage
+    }
+  }
+  return { sortMode, pinnedIds };
+}
+
+export async function saveBotSortMode(mode: BotSortMode): Promise<void> {
+  await writeKey(BOT_SORT_KEY, mode === 'recent' ? null : mode);
+}
+
+export async function savePinnedBots(ids: string[]): Promise<void> {
+  await writeKey(BOT_PINNED_KEY, ids.length > 0 ? JSON.stringify(ids) : null);
 }

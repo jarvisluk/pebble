@@ -1065,3 +1065,77 @@ func TestDesktopPermissionsRoutes(t *testing.T) {
 		t.Fatalf("expected 400 when permission missing, got %d", badRec.Code)
 	}
 }
+
+func TestHTTPPushEndpoints(t *testing.T) {
+	tmp := t.TempDir()
+	store, err := state.NewStore(filepath.Join(tmp, "sessions.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	msgStore, err := state.NewMessageStore(filepath.Join(tmp, "messages"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := harness.NewRegistry()
+	reg.Register(noopHarness{kind: "opencode"})
+	cfg := &config.HubConfig{
+		ProjectRoot: tmp,
+		SharedDir:   filepath.Join(tmp, "workspaces", "_shared"),
+		StateFile:   filepath.Join(tmp, "sessions.json"),
+		MessagesDir: filepath.Join(tmp, "messages"),
+		Bots: []config.BotConfig{
+			{ID: "assistant", Name: "Pebble", Workspace: filepath.Join(tmp, "assistant"), Harness: "opencode"},
+		},
+	}
+	h := hub.New(cfg, store, msgStore, reg)
+	defer h.Close()
+	srv := NewHTTPServer(h, config.HTTPConfig{Host: "127.0.0.1", Port: 3789, APIToken: "secret-token"})
+	defer srv.Shutdown(t.Context())
+
+	doReq := func(method, path, body string) *httptest.ResponseRecorder {
+		var rdr *strings.Reader
+		if body != "" {
+			rdr = strings.NewReader(body)
+		} else {
+			rdr = strings.NewReader("")
+		}
+		req := httptest.NewRequest(method, path, rdr)
+		req.Host = "127.0.0.1:3789"
+		req.Header.Set("Origin", "http://127.0.0.1:3789")
+		req.Header.Set("Authorization", "Bearer secret-token")
+		if body != "" {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		rec := httptest.NewRecorder()
+		srv.srv.Handler.ServeHTTP(rec, req)
+		return rec
+	}
+
+	if rec := doReq(http.MethodPost, "/api/push/register", `{"deviceId":"ios-1","platform":"ios","env":"sandbox","bundleId":"local.bothub.mobile","pushToken":"pt-1","liveActivityStartToken":"st-1"}`); rec.Code != http.StatusOK {
+		t.Fatalf("POST /api/push/register status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+
+	if rec := doReq(http.MethodPost, "/api/push/activity-token", `{"deviceId":"ios-1","activityKey":"bot:assistant","token":"at-1"}`); rec.Code != http.StatusOK {
+		t.Fatalf("POST /api/push/activity-token status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+
+	statusRec := doReq(http.MethodGet, "/api/push/status", "")
+	if statusRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/push/status status = %d, body = %s", statusRec.Code, statusRec.Body.String())
+	}
+	var st struct {
+		Configured  bool   `json:"configured"`
+		Mode        string `json:"mode"`
+		DeviceCount int    `json:"deviceCount"`
+	}
+	if err := json.Unmarshal(statusRec.Body.Bytes(), &st); err != nil {
+		t.Fatal(err)
+	}
+	if st.Mode != "disabled" || st.DeviceCount != 1 {
+		t.Fatalf("unexpected push status: %+v", st)
+	}
+
+	if rec := doReq(http.MethodDelete, "/api/push/devices/ios-1", ""); rec.Code != http.StatusOK {
+		t.Fatalf("DELETE /api/push/devices/ios-1 status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+}

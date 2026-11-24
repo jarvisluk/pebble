@@ -55,6 +55,8 @@ export function ConnectContent({ standalone = false }: { standalone?: boolean })
   const [label, setLabel] = useState('');
   const [address, setAddress] = useState('');
   const [token, setToken] = useState('');
+  const [standbyAddress, setStandbyAddress] = useState('');
+  const [standbyToken, setStandbyToken] = useState('');
   const [localError, setLocalError] = useState('');
   const [infoHint, setInfoHint] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -232,6 +234,8 @@ export function ConnectContent({ standalone = false }: { standalone?: boolean })
         label: label.trim() || undefined,
         address: address.trim(),
         token: token.trim() || undefined,
+        standbyAddress: standbyAddress.trim() || undefined,
+        standbyToken: standbyToken.trim() || undefined,
       });
     } catch (err: any) {
       setSubmitting(false);
@@ -465,6 +469,33 @@ export function ConnectContent({ standalone = false }: { standalone?: boolean })
               <TextInput
                 value={token}
                 onChangeText={setToken}
+                placeholder={t('tokenFillHint')}
+                placeholderTextColor={theme.mute}
+                secureTextEntry
+                autoCapitalize="none"
+                autoCorrect={false}
+                style={[styles.input, { backgroundColor: theme.s1, color: theme.text, fontFamily: MONO_FONT }]}
+              />
+            </View>
+
+            <View style={styles.field}>
+              <Text style={[styles.fieldLbl, { color: theme.text2 }]}>{t('standbyAddress')}</Text>
+              <TextInput
+                value={standbyAddress}
+                onChangeText={setStandbyAddress}
+                placeholder="tailcat://… / 192.168.x.x:3789"
+                placeholderTextColor={theme.mute}
+                autoCapitalize="none"
+                autoCorrect={false}
+                style={[styles.input, { backgroundColor: theme.s1, color: theme.text, fontFamily: MONO_FONT }]}
+              />
+            </View>
+
+            <View style={styles.field}>
+              <Text style={[styles.fieldLbl, { color: theme.text2 }]}>{t('standbyToken')}</Text>
+              <TextInput
+                value={standbyToken}
+                onChangeText={setStandbyToken}
                 placeholder={t('tokenFillHint')}
                 placeholderTextColor={theme.mute}
                 secureTextEntry

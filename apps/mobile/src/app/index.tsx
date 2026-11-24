@@ -3,6 +3,7 @@ import { router } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   Platform,
   Pressable,
@@ -15,8 +16,10 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BotAvatar } from '../components/BotAvatar';
-import { PlusIcon, SearchIcon, SettingsIcon, XIcon } from '../components/Icons';
+import { ArrowUpDownIcon, PinIcon, SearchIcon, SettingsIcon } from '../components/Icons';
+import { confirmAction } from '../confirm';
 import { useI18n } from '../i18n';
+import { type BotSortMode, loadBotListPrefs, saveBotSortMode, savePinnedBots } from '../storage';
 import { formatShortTime, plainPreview, useHub } from '../store';
 import { useTheme } from '../theme';
 import type { BotStatus } from '../types';
@@ -32,20 +35,32 @@ export default function BotsScreen() {
     bots,
     last,
     unread,
-    tools,
     takeovers,
     activeDesktopTarget,
+    usingStandby,
     questions,
     refreshBots,
     reconnect,
     resolveTakeover,
+    deleteBot,
+    toggleUnread,
     setActiveDesktopTarget,
   } = useHub();
 
   const [query, setQuery] = useState('');
-  const [searching, setSearching] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [manualOverride, setManualOverride] = useState(false);
+  const [sortMode, setSortMode] = useState<BotSortMode>('recent');
+  const [pinnedIds, setPinnedIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    loadBotListPrefs()
+      .then((prefs) => {
+        setSortMode(prefs.sortMode);
+        setPinnedIds(prefs.pinnedIds);
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (connState === 'connected') {
@@ -60,16 +75,35 @@ export default function BotsScreen() {
     (connState === 'error' && bots.length === 0) ||
     (connState === 'connecting' && bots.length === 0);
 
-  const filteredBots = useMemo(() => {
+  const orderedBots = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return bots;
-    return bots.filter(
-      (b) =>
-        b.name.toLowerCase().includes(q) ||
-        b.id.toLowerCase().includes(q) ||
-        (b.description || '').toLowerCase().includes(q)
-    );
-  }, [bots, query]);
+    const indexed = bots
+      .map((bot, idx) => ({ bot, idx }))
+      .filter(
+        ({ bot }) =>
+          !q ||
+          bot.name.toLowerCase().includes(q) ||
+          bot.id.toLowerCase().includes(q) ||
+          (bot.description || '').toLowerCase().includes(q)
+      );
+
+    indexed.sort((a, b) => {
+      const aPin = pinnedIds.indexOf(a.bot.id);
+      const bPin = pinnedIds.indexOf(b.bot.id);
+      if (aPin !== -1 && bPin !== -1) return aPin - bPin;
+      if (aPin !== -1) return -1;
+      if (bPin !== -1) return 1;
+
+      if (sortMode === 'recent') {
+        const ta = last[a.bot.id]?.createdAt || '';
+        const tb = last[b.bot.id]?.createdAt || '';
+        if (ta !== tb) return tb.localeCompare(ta);
+      }
+      return a.idx - b.idx;
+    });
+
+    return indexed;
+  }, [bots, last, pinnedIds, query, sortMode]);
 
   const onRefresh = useCallback(async () => {
     if (connState !== 'connected') {
@@ -91,6 +125,68 @@ export default function BotsScreen() {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
     }
     router.push(`/bot/${encodeURIComponent(botId)}`);
+  };
+
+  const togglePin = (botId: string) => {
+    setPinnedIds((prev) => {
+      const next = prev.includes(botId) ? prev.filter((id) => id !== botId) : [botId, ...prev];
+      void savePinnedBots(next);
+      return next;
+    });
+  };
+
+  const openSortMenu = () => {
+    const pick = (mode: BotSortMode) => {
+      setSortMode(mode);
+      void saveBotSortMode(mode);
+    };
+    Alert.alert(t('sortBots'), undefined, [
+      {
+        text: `${sortMode === 'recent' ? '✓ ' : ''}${t('sortByRecent')}`,
+        onPress: () => pick('recent'),
+      },
+      {
+        text: `${sortMode === 'manual' ? '✓ ' : ''}${t('sortManual')}`,
+        onPress: () => pick('manual'),
+      },
+      { text: t('cancel'), style: 'cancel' },
+    ]);
+  };
+
+  const openBotActions = (bot: BotStatus) => {
+    if (Platform.OS !== 'web') {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    }
+    const pinned = pinnedIds.includes(bot.id);
+    const isUnread = (unread[bot.id] || 0) > 0;
+    const actions: Array<{ text: string; style?: 'default' | 'cancel' | 'destructive'; onPress?: () => void }> = [
+      {
+        text: t(pinned ? 'unpinBot' : 'pinBot'),
+        onPress: () => togglePin(bot.id),
+      },
+      {
+        text: t(isUnread ? 'markRead' : 'markUnread'),
+        onPress: () => toggleUnread(bot.id),
+      },
+    ];
+    if (bots.length > 1) {
+      actions.push({
+        text: t('delete'),
+        style: 'destructive',
+        onPress: () => {
+          confirmAction(
+            t('deleteBotTitle', { name: bot.name }),
+            t('deleteBotDesc'),
+            () => {
+              void deleteBot(bot.id).catch(() => {});
+            },
+            true
+          );
+        },
+      });
+    }
+    actions.push({ text: t('cancel'), style: 'cancel' });
+    Alert.alert(bot.name, undefined, actions);
   };
 
   if (showGate) {
@@ -117,18 +213,19 @@ export default function BotsScreen() {
     return <ConnectContent standalone />;
   }
 
-  const renderBotItem = ({ item, index }: { item: BotStatus; index: number }) => {
-    const lastMsg = last[item.id];
-    const unreadCount = unread[item.id] || 0;
-    const toolName = tools[item.id];
-    const hasQuestion = questions.some((q) => q.botId === item.id);
+  const renderBotItem = ({ item }: { item: { bot: BotStatus; idx: number } }) => {
+    const { bot, idx } = item;
+    const lastMsg = last[bot.id];
+    const unreadCount = unread[bot.id] || 0;
+    const pinned = pinnedIds.includes(bot.id);
+    const hasQuestion = questions.some((q) => q.botId === bot.id);
 
-    let subtitleText = item.description || item.harness;
+    let subtitleText = bot.description || bot.harness;
     let subtitleColor = theme.mute;
     if (hasQuestion) {
       subtitleText = t('questionWaitingBadge');
       subtitleColor = theme.busy;
-    } else if (item.busy) {
+    } else if (bot.busy) {
       subtitleText = t('processing');
       subtitleColor = theme.busy;
     } else if (lastMsg) {
@@ -146,18 +243,22 @@ export default function BotsScreen() {
 
     return (
       <Pressable
-        onPress={() => openBot(item.id)}
+        onPress={() => openBot(bot.id)}
+        onLongPress={() => openBotActions(bot)}
         style={({ pressed }) => [
           styles.botCard,
           { backgroundColor: pressed ? theme.sel : theme.card },
         ]}
       >
-        <BotAvatar id={item.id} size={50} index={index} avatar={item.avatar} color={item.color} busy={!!item.busy} ringColor={theme.card} />
+        <BotAvatar id={bot.id} size={46} index={idx} avatar={bot.avatar} color={bot.color} busy={!!bot.busy} ringColor={theme.card} />
         <View style={styles.botBody}>
           <View style={styles.botTopRow}>
-            <Text numberOfLines={1} style={[styles.botName, { color: theme.text }]}>
-              {item.name}
-            </Text>
+            <View style={styles.botNameRow}>
+              <Text numberOfLines={1} style={[styles.botName, { color: theme.text }]}>
+                {bot.name}
+              </Text>
+              {pinned && <PinIcon size={12} color={theme.mute} />}
+            </View>
             <Text style={[styles.botTime, { color: theme.mute }]}>
               {formatShortTime(lastMsg?.createdAt, lang)}
             </Text>
@@ -182,54 +283,54 @@ export default function BotsScreen() {
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: theme.page }]} edges={['top', 'left', 'right']}>
       <View style={styles.header}>
-        <Text style={[styles.title, { color: theme.text }]}>Bots</Text>
+        <Pressable
+          accessibilityLabel={t('sortBots')}
+          onPress={openSortMenu}
+          style={({ pressed }) => [styles.iconBtn, pressed && { backgroundColor: theme.s1 }]}
+        >
+          <ArrowUpDownIcon size={18} color={theme.text2} />
+        </Pressable>
 
-        <View style={styles.headerActions}>
-          <Pressable
-            accessibilityLabel={t('searchBot')}
-            onPress={() => {
-              if (searching) setQuery('');
-              setSearching((v) => !v);
-            }}
-            style={[styles.iconBtn, { backgroundColor: theme.s1 }]}
-          >
-            {searching ? <XIcon size={19} color={theme.text} /> : <SearchIcon size={19} color={theme.text} />}
-          </Pressable>
-          <Pressable
-            accessibilityLabel={t('newBot')}
-            onPress={() => router.push(connState === 'connected' ? '/create-bot' : '/connect')}
-            style={[styles.iconBtn, { backgroundColor: theme.s1 }]}
-          >
-            <PlusIcon size={19} color={theme.text} />
-          </Pressable>
-          <Pressable
-            accessibilityLabel={t('settings')}
-            onPress={() => router.push(connState === 'connected' ? '/settings' : '/connect')}
-            style={[styles.iconBtn, { backgroundColor: theme.s1 }]}
-          >
-            <SettingsIcon size={19} color={theme.text} />
-          </Pressable>
-        </View>
+        <Pressable
+          accessibilityLabel={t('settings')}
+          onPress={() => router.push(connState === 'connected' ? '/settings' : '/connect')}
+          style={({ pressed }) => [styles.iconBtn, pressed && { backgroundColor: theme.s1 }]}
+        >
+          <SettingsIcon size={19} color={theme.text2} />
+        </Pressable>
       </View>
 
-      {searching && (
-        <View style={[styles.searchBox, { backgroundColor: theme.s1 }]}>
-          <SearchIcon size={16} color={theme.mute} />
-          <TextInput
-            value={query}
-            onChangeText={setQuery}
-            placeholder={t('searchBot')}
-            placeholderTextColor={theme.mute}
-            style={[styles.searchInput, { color: theme.text }]}
-            autoFocus
-            clearButtonMode="while-editing"
-            returnKeyType="search"
-          />
-          {Platform.OS !== 'ios' && query.length > 0 && (
-            <Pressable onPress={() => setQuery('')} hitSlop={8}>
-              <Text style={[styles.clearTxt, { color: theme.mute }]}>{t('clear')}</Text>
+      <View style={[styles.searchBox, { backgroundColor: theme.s1 }]}>
+        <SearchIcon size={15} color={theme.mute} />
+        <TextInput
+          value={query}
+          onChangeText={setQuery}
+          placeholder={t('searchBot')}
+          placeholderTextColor={theme.mute}
+          style={[styles.searchInput, { color: theme.text }]}
+          clearButtonMode="while-editing"
+          returnKeyType="search"
+        />
+        {Platform.OS !== 'ios' && query.length > 0 && (
+          <Pressable onPress={() => setQuery('')} hitSlop={8}>
+            <Text style={[styles.clearTxt, { color: theme.mute }]}>{t('clear')}</Text>
+          </Pressable>
+        )}
+      </View>
+
+      {usingStandby && (
+        <View style={[styles.toBanner, { backgroundColor: theme.card, borderWidth: 1, borderColor: theme.s2 }]}>
+          <Text numberOfLines={1} style={[styles.toBannerTxt, { color: theme.text }]}>
+            {t('standbyActiveBanner')}
+          </Text>
+          <View style={styles.toBannerActs}>
+            <Pressable
+              onPress={() => void reconnect()}
+              style={[styles.toBannerBtn, { backgroundColor: theme.s1 }]}
+            >
+              <Text style={[styles.toBannerBtnTxt, { color: theme.text }]}>{t('retryPrimary')}</Text>
             </Pressable>
-          )}
+          </View>
         </View>
       )}
 
@@ -278,8 +379,8 @@ export default function BotsScreen() {
       )}
 
       <FlatList
-        data={filteredBots}
-        keyExtractor={(item) => item.id}
+        data={orderedBots}
+        keyExtractor={(item) => item.bot.id}
         renderItem={renderBotItem}
         contentContainerStyle={styles.listContent}
         ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
@@ -308,48 +409,36 @@ const styles = StyleSheet.create({
   },
   header: {
     paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 10,
+    paddingTop: 6,
+    paddingBottom: 6,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 10,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: '700',
-    letterSpacing: -0.7,
-  },
-  headerActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
   },
   iconBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    position: 'relative',
   },
   searchBox: {
     marginHorizontal: 16,
-    marginBottom: 12,
-    height: 40,
+    marginBottom: 10,
+    height: 36,
     borderRadius: 999,
-    paddingHorizontal: 14,
+    paddingHorizontal: 12,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
   },
   searchInput: {
     flex: 1,
-    fontSize: 17,
+    fontSize: 14,
     paddingVertical: 0,
   },
   clearTxt: {
-    fontSize: 15,
+    fontSize: 13,
     fontWeight: '600',
   },
   toBanner: {
@@ -365,7 +454,7 @@ const styles = StyleSheet.create({
   },
   toBannerTxt: {
     flex: 1,
-    fontSize: 15,
+    fontSize: 13,
     fontWeight: '600',
   },
   toBannerActs: {
@@ -374,11 +463,11 @@ const styles = StyleSheet.create({
   },
   toBannerBtn: {
     borderRadius: 999,
-    paddingHorizontal: 11,
-    paddingVertical: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
   },
   toBannerBtnTxt: {
-    fontSize: 13.5,
+    fontSize: 12,
     fontWeight: '700',
   },
   listContent: {
@@ -389,14 +478,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 11,
     borderRadius: 20,
   },
   botBody: {
     flex: 1,
     minWidth: 0,
-    gap: 4,
+    gap: 3,
   },
   botTopRow: {
     flexDirection: 'row',
@@ -404,14 +493,21 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: 8,
   },
-  botName: {
-    fontSize: 17,
-    fontWeight: '600',
+  botNameRow: {
     flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  botName: {
+    fontSize: 15,
+    fontWeight: '600',
+    flexShrink: 1,
   },
   botTime: {
-    fontSize: 13,
-    fontWeight: '500',
+    fontSize: 12,
+    fontWeight: '400',
   },
   botBottomRow: {
     flexDirection: 'row',
@@ -420,7 +516,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   botPreview: {
-    fontSize: 15,
+    fontSize: 13,
     flex: 1,
   },
   unreadPill: {
@@ -443,18 +539,18 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   centerTxt: {
-    fontSize: 16,
+    fontSize: 14,
     textAlign: 'center',
   },
   secondaryBtn: {
     borderRadius: 999,
     paddingHorizontal: 18,
-    paddingVertical: 11,
+    paddingVertical: 10,
     alignItems: 'center',
     justifyContent: 'center',
   },
   secondaryBtnTxt: {
-    fontSize: 17,
+    fontSize: 14,
     fontWeight: '600',
   },
 });

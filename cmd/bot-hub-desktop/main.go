@@ -7,10 +7,10 @@ package main
 import (
 	"context"
 	"crypto/subtle"
-	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"net"
 	"net/http"
@@ -18,6 +18,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -32,11 +33,11 @@ import (
 	"bot-hub/internal/config"
 	"bot-hub/internal/harness"
 	"bot-hub/internal/node"
+	"bot-hub/internal/state"
+	"bot-hub/internal/syncer"
 	"bot-hub/internal/tunnel"
+	webassets "bot-hub/internal/web"
 )
-
-//go:embed setup.html
-var setupHTML []byte
 
 var desktopHarnesses = []struct {
 	id    string
@@ -79,9 +80,11 @@ type desktop struct {
 	dir       string
 	app       *application.App
 	win       *application.WebviewWindow
-	menu      *application.Menu
-	nodeItem  *application.MenuItem
-	mu        sync.Mutex
+	menu         *application.Menu
+	nodeItem     *application.MenuItem
+	takeoverItem *application.MenuItem
+	pushbackItem *application.MenuItem
+	mu           sync.Mutex
 	prefs     prefs
 	status    string // what setup.html shows while starting / after an error
 	stop      func() // stops the running mode
@@ -103,7 +106,7 @@ func (d *desktop) run() {
 		MinWidth:         680,
 		MinHeight:        520,
 		BackgroundColour: application.NewRGB(239, 236, 232),
-		URL:              "/",
+		URL:              "/desktop-setup",
 		JS:               "if(/Mac/.test(navigator.platform)){window.__bothubMacShell=true;document.documentElement.classList.add('mac-app');}",
 		Mac: application.MacWindow{
 			TitleBar: application.MacTitleBarHiddenInset,
@@ -137,6 +140,12 @@ func (d *desktop) run() {
 		next := d.nodeItem.Checked()
 		d.setLocalNode(&next, nil, nil)
 	})
+	d.takeoverItem = menu.Add("接管为本机运行（容灾模式）")
+	d.takeoverItem.SetHidden(d.prefs.Mode != "remote" || d.prefs.Link == "")
+	d.takeoverItem.OnClick(func(*application.Context) { go d.failoverToLocal() })
+	d.pushbackItem = menu.Add("回传增量并切回远程主主机")
+	d.pushbackItem.SetHidden(d.prefs.Mode != "local" || d.prefs.Link == "")
+	d.pushbackItem.OnClick(func(*application.Context) { go d.failbackToRemote() })
 	menu.AddSeparator()
 	menu.Add("退出").OnClick(func(*application.Context) { d.app.Quit() })
 	d.menu = menu
@@ -331,16 +340,136 @@ func (d *desktop) startRemote(ctx context.Context, rawLink string, done chan str
 
 func (d *desktop) syncTray() {
 	d.mu.Lock()
-	mode, allow := d.prefs.Mode, d.prefs.AllowNode
-	item, menu := d.nodeItem, d.menu
+	mode, allow, link := d.prefs.Mode, d.prefs.AllowNode, d.prefs.Link
+	item, takeoverItem, pushbackItem, menu := d.nodeItem, d.takeoverItem, d.pushbackItem, d.menu
 	d.mu.Unlock()
 	if item != nil {
 		item.SetHidden(mode != "remote")
 		item.SetChecked(allow)
 	}
+	if takeoverItem != nil {
+		takeoverItem.SetHidden(mode != "remote" || link == "")
+	}
+	if pushbackItem != nil {
+		pushbackItem.SetHidden(mode != "local" || link == "")
+	}
 	if menu != nil {
 		menu.Update()
 	}
+}
+
+func (d *desktop) peerHTTPClient(ctx context.Context, rawLink, fallbackToken string) (*http.Client, string, string, func(), error) {
+	link, linkTok := tunnel.ExtractTokenFromLink(rawLink)
+	tok := strings.TrimSpace(linkTok)
+	if tok == "" {
+		tok = strings.TrimSpace(fallbackToken)
+	}
+	if strings.HasPrefix(link, "tailcat://") {
+		dial, closeClient, err := tunnel.Connect(ctx, link)
+		if err != nil {
+			return nil, "", "", nil, err
+		}
+		cli := &http.Client{
+			Timeout: 15 * time.Second,
+			Transport: &http.Transport{
+				DialContext: func(dctx context.Context, _, _ string) (net.Conn, error) { return dial(dctx) },
+			},
+		}
+		return cli, "http://tailcat.local", tok, func() { _ = closeClient() }, nil
+	}
+	return &http.Client{Timeout: 15 * time.Second}, strings.TrimRight(link, "/"), tok, func() {}, nil
+}
+
+func (d *desktop) failoverToLocal() {
+	d.mu.Lock()
+	p := d.prefs
+	d.mu.Unlock()
+	if p.Mode != "remote" || strings.TrimSpace(p.Link) == "" {
+		return
+	}
+	d.setStatus("正在从主电脑同步数据并切换至本机接管…")
+	if err := ensureConfig(d.dir); err != nil {
+		d.setStatus("初始化本机配置失败：" + err.Error())
+		return
+	}
+	cfg, _, err := config.Load(d.dir, "")
+	if err != nil {
+		d.setStatus("读取本机配置失败：" + err.Error())
+		return
+	}
+	store, err := state.NewStore(cfg.StateFile)
+	if err != nil {
+		d.setStatus("打开本机状态库失败：" + err.Error())
+		return
+	}
+	svc := syncer.NewWithStore(cfg, store)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	cli, peerBase, peerTok, cleanup, dialErr := d.peerHTTPClient(ctx, p.Link, p.RemoteToken)
+	pulled := false
+	if dialErr == nil {
+		defer cleanup()
+		if _, err := svc.PullFromPeer(ctx, cli, peerBase, peerTok); err == nil {
+			pulled = true
+		}
+	}
+	cancel()
+	if !pulled && cfg.Sync.GitEnabled() {
+		gctx, gcancel := context.WithTimeout(context.Background(), 20*time.Second)
+		_, _ = syncer.CheckpointPull(gctx, cfg)
+		gcancel()
+	}
+	_ = store.Close()
+
+	p.Mode = "local"
+	d.start(p)
+}
+
+func (d *desktop) failbackToRemote() {
+	d.mu.Lock()
+	p := d.prefs
+	d.mu.Unlock()
+	if p.Mode != "local" || strings.TrimSpace(p.Link) == "" {
+		return
+	}
+	d.setStatus("正在回传接管增量至主电脑…")
+	cfg, _, err := config.Load(d.dir, "")
+	if err != nil {
+		d.setStatus("读取本机配置失败：" + err.Error())
+		return
+	}
+	store, err := state.NewStore(cfg.StateFile)
+	if err != nil {
+		d.setStatus("打开本机状态库失败：" + err.Error())
+		return
+	}
+	svc := syncer.NewWithStore(cfg, store)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	cli, peerBase, peerTok, cleanup, err := d.peerHTTPClient(ctx, p.Link, p.RemoteToken)
+	if err != nil {
+		cancel()
+		_ = store.Close()
+		d.setStatus("连接主电脑失败，已保留在本机运行：" + err.Error())
+		return
+	}
+	_, pushErr := svc.PushToPeer(ctx, cli, peerBase, peerTok)
+	cleanup()
+	cancel()
+	if pushErr != nil {
+		_ = store.Close()
+		d.setStatus("回传增量失败，已保留在本机运行：" + pushErr.Error())
+		return
+	}
+	if cfg.Sync.GitEnabled() {
+		gctx, gcancel := context.WithTimeout(context.Background(), 20*time.Second)
+		_, _ = syncer.CheckpointPush(gctx, cfg, svc.HostID())
+		gcancel()
+	}
+	_ = store.Close()
+
+	p.Mode = "remote"
+	d.start(p)
 }
 
 func (d *desktop) remoteToken() string {
@@ -498,7 +627,7 @@ func (d *desktop) reset() {
 	d.save()
 	d.syncTray()
 	d.setStatus("")
-	d.win.SetURL("/")
+	d.win.SetURL("/desktop-setup")
 }
 
 func (d *desktop) setStatus(s string) { d.mu.Lock(); d.status = s; d.mu.Unlock() }
@@ -536,8 +665,21 @@ func (d *desktop) serveSetup(w http.ResponseWriter, r *http.Request) {
 		go d.start(p)
 		writeJSON(w, map[string]any{"ok": true})
 	default:
+		distFS := webassets.DistFS()
+		clean := strings.TrimPrefix(path.Clean("/"+r.URL.Path), "/")
+		if clean != "" && clean != "." {
+			if info, err := fs.Stat(distFS, clean); err == nil && !info.IsDir() {
+				http.FileServer(http.FS(distFS)).ServeHTTP(w, r)
+				return
+			}
+		}
+		raw, err := fs.ReadFile(distFS, "index.html")
+		if err != nil {
+			http.Error(w, "desktop setup assets missing", http.StatusInternalServerError)
+			return
+		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write(setupHTML)
+		_, _ = w.Write(raw)
 	}
 }
 

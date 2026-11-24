@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"reflect"
@@ -19,6 +20,7 @@ import (
 	"bot-hub/internal/config"
 	"bot-hub/internal/hub"
 	"bot-hub/internal/state"
+	"bot-hub/internal/tunnel"
 	"github.com/robfig/cron/v3"
 )
 
@@ -64,6 +66,12 @@ type Scheduler struct {
 	jobs   map[string]*scheduledJob
 	active map[string]bool
 	wg     sync.WaitGroup
+
+	probeMu          sync.Mutex
+	primaryProbe     func(context.Context) bool
+	peerProbe        func(context.Context, string) bool
+	lastHigherAlive  time.Time
+	nowFn            func() time.Time
 }
 
 func New(h *hub.Hub) *Scheduler {
@@ -71,7 +79,32 @@ func New(h *hub.Hub) *Scheduler {
 		hub:    h,
 		jobs:   make(map[string]*scheduledJob),
 		active: make(map[string]bool),
+		nowFn:  time.Now,
 	}
+}
+
+// SetPrimaryProbe overrides the liveness probe used by standby hosts before failing over a routine.
+func (s *Scheduler) SetPrimaryProbe(fn func(context.Context) bool) {
+	s.probeMu.Lock()
+	s.primaryProbe = fn
+	s.probeMu.Unlock()
+}
+
+// SetPeerProbe overrides the per-peer liveness probe used when checking higher-priority hosts.
+func (s *Scheduler) SetPeerProbe(fn func(context.Context, string) bool) {
+	s.probeMu.Lock()
+	s.peerProbe = fn
+	s.probeMu.Unlock()
+}
+
+func (s *Scheduler) currentTime() time.Time {
+	s.probeMu.Lock()
+	fn := s.nowFn
+	s.probeMu.Unlock()
+	if fn != nil {
+		return fn()
+	}
+	return time.Now()
 }
 
 func jobKey(botID, routineID string) string {
@@ -288,13 +321,14 @@ func (s *Scheduler) runJob(ctx context.Context, job *scheduledJob, intervalNext,
 				cronNext = cronSched.Next(firedAt.In(time.Local))
 			}
 			// Run asynchronously so a slow LLM turn never delays the timer loop.
+			scheduledAt := next
 			s.wg.Add(1)
-			go func(spec config.ScheduleConfig) {
+			go func(spec config.ScheduleConfig, schedAt time.Time) {
 				defer s.wg.Done()
-				if _, err := s.execute(ctx, job.botID, spec, "schedule", ""); err != nil && !errors.Is(err, ErrRoutineAlreadyRunning) && ctx.Err() == nil {
+				if _, err := s.executeWithSlot(ctx, job.botID, spec, "schedule", "", schedAt); err != nil && !errors.Is(err, ErrRoutineAlreadyRunning) && ctx.Err() == nil {
 					log.Printf("[scheduler] failed %s/%s: %v", job.botID, spec.EffectiveID(), err)
 				}
-			}(job.spec)
+			}(job.spec, scheduledAt)
 
 			now := time.Now()
 			dailyNext = time.Time{}
@@ -328,6 +362,10 @@ func (s *Scheduler) finishRun(key string) {
 }
 
 func (s *Scheduler) execute(ctx context.Context, botID string, sched config.ScheduleConfig, trigger, webhookPayload string) (*state.RoutineRun, error) {
+	return s.executeWithSlot(ctx, botID, sched, trigger, webhookPayload, time.Time{})
+}
+
+func (s *Scheduler) executeWithSlot(ctx context.Context, botID string, sched config.ScheduleConfig, trigger, webhookPayload string, scheduledAt time.Time) (*state.RoutineRun, error) {
 	rid := sched.EffectiveID()
 	key := jobKey(botID, rid)
 	if !s.tryStartRun(key) {
@@ -338,6 +376,18 @@ func (s *Scheduler) execute(ctx context.Context, botID string, sched config.Sche
 	bot, ok := s.hub.GetBot(botID)
 	if !ok {
 		return nil, fmt.Errorf("bot %q not found: %w", botID, hub.ErrBotNotFound)
+	}
+
+	slotAt := scheduledAt
+	if slotAt.IsZero() {
+		slotAt = s.currentTime()
+	}
+	slotKey := ""
+	if trigger == "schedule" {
+		slotKey = fmt.Sprintf("%s:%s:%s", botID, rid, slotAt.UTC().Format("2006-01-02T15:04"))
+		if !s.shouldRunScheduled(ctx, sched, slotKey) {
+			return nil, nil
+		}
 	}
 
 	log.Printf("[scheduler] firing %s/%s (%s)", botID, rid, trigger)
@@ -375,6 +425,7 @@ func (s *Scheduler) execute(ctx context.Context, botID string, sched config.Sche
 		DurationMs:  finished.Sub(started).Milliseconds(),
 		StartedAt:   started.UTC().Format(time.RFC3339Nano),
 		FinishedAt:  finished.UTC().Format(time.RFC3339Nano),
+		SlotKey:     slotKey,
 	}
 
 	if err != nil {
@@ -442,6 +493,109 @@ func (s *Scheduler) execute(ctx context.Context, botID string, sched config.Sche
 		}
 	}
 	return &run, nil
+}
+
+func (s *Scheduler) shouldRunScheduled(ctx context.Context, sched config.ScheduleConfig, slotKey string) bool {
+	cfg := s.hub.Config()
+	if cfg == nil {
+		return true
+	}
+	higherPeers := cfg.Sync.HigherPriorityPeers()
+	if cfg.Sync.EffectiveRole() != "standby" && len(higherPeers) == 0 {
+		return true
+	}
+	if sched.EffectiveFailoverPolicy() != config.RoutineFailoverAuto {
+		log.Printf("[scheduler] standby skipped %s (failoverPolicy=%s)", sched.EffectiveID(), sched.EffectiveFailoverPolicy())
+		return false
+	}
+	if store := s.hub.Store(); store != nil && store.HasRoutineSlotKey(slotKey) {
+		log.Printf("[scheduler] standby skipped %s (slotKey=%s already recorded)", sched.EffectiveID(), slotKey)
+		return false
+	}
+
+	s.probeMu.Lock()
+	peerProbe := s.peerProbe
+	primaryProbe := s.primaryProbe
+	s.probeMu.Unlock()
+
+	pctx, cancel := context.WithTimeout(ctx, 4*time.Second)
+	anyHigherAlive := false
+	if peerProbe != nil && len(higherPeers) > 0 {
+		for _, peer := range higherPeers {
+			if peerProbe(pctx, peer.URL) {
+				anyHigherAlive = true
+				break
+			}
+		}
+	} else if primaryProbe != nil {
+		anyHigherAlive = primaryProbe(pctx)
+	} else if len(higherPeers) > 0 {
+		for _, peer := range higherPeers {
+			if probeHealthz(pctx, peer.URL) {
+				anyHigherAlive = true
+				break
+			}
+		}
+	} else if cfg.Sync != nil && cfg.Sync.PeerURL != "" {
+		anyHigherAlive = probeHealthz(pctx, cfg.Sync.PeerURL)
+	}
+	cancel()
+
+	now := s.currentTime()
+	s.probeMu.Lock()
+	if anyHigherAlive {
+		s.lastHigherAlive = now
+		s.probeMu.Unlock()
+		return false
+	}
+	if s.lastHigherAlive.IsZero() {
+		s.lastHigherAlive = now
+		s.probeMu.Unlock()
+		log.Printf("[scheduler] standby waiting for failover timeout before taking over %s", sched.EffectiveID())
+		return false
+	}
+	elapsed := now.Sub(s.lastHigherAlive)
+	s.probeMu.Unlock()
+
+	if elapsed < cfg.Sync.EffectiveFailoverTimeout() {
+		return false
+	}
+	log.Printf("[scheduler] host taking over routine %s (higher-priority peers unreachable for %s)", sched.EffectiveID(), elapsed.Round(time.Second))
+	return true
+}
+
+func probeHealthz(ctx context.Context, peerURL string) bool {
+	peerURL = strings.TrimSpace(peerURL)
+	if peerURL == "" {
+		return false
+	}
+	cli := &http.Client{Timeout: 3 * time.Second}
+	healthURL := strings.TrimRight(peerURL, "/") + "/healthz"
+	if strings.HasPrefix(peerURL, "tailcat://") {
+		link, _ := tunnel.ExtractTokenFromLink(peerURL)
+		dial, closeClient, err := tunnel.Connect(ctx, link)
+		if err != nil {
+			return false
+		}
+		defer func() { _ = closeClient() }()
+		cli = &http.Client{
+			Timeout: 3 * time.Second,
+			Transport: &http.Transport{
+				DialContext: func(dctx context.Context, _, _ string) (net.Conn, error) { return dial(dctx) },
+			},
+		}
+		healthURL = "http://tailcat.local/healthz"
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, healthURL, nil)
+	if err != nil {
+		return false
+	}
+	resp, err := cli.Do(req)
+	if err != nil {
+		return false
+	}
+	_ = resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
 }
 
 func isSilentOutput(text string) bool {

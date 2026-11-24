@@ -154,6 +154,8 @@ struct SettingsView: View {
             switch tab {
             case .general:
                 appearanceSection
+                pushNotificationsSection
+                openSourceSection
             case .models:
                 magpieSection
                 nativeCLISection
@@ -521,6 +523,62 @@ struct SettingsView: View {
         }
     }
 
+<<<<<<< HEAD
+    private var pushNotificationsSection: some View {
+        let pm = PushManager.shared
+        let la = LiveActivityManager.shared
+        return Section(hub.t("pushSection")) {
+            HStack {
+                Text(hub.t("pushSystemPerm"))
+                Spacer()
+                switch pm.authStatus {
+                case .authorized, .provisional, .ephemeral:
+                    Text(hub.t("pushGranted")).foregroundStyle(.green)
+                case .denied:
+                    Button(hub.t("pushOpenSettings")) {
+                        if let u = URL(string: UIApplication.openSettingsURLString) { openURL(u) }
+                    }
+                    .font(.footnote)
+                default:
+                    Button(hub.t("pushEnable")) {
+                        Task { await pm.requestPermissionAndRegister() }
+                    }
+                    .font(.footnote)
+                }
+            }
+            HStack {
+                Text(hub.t("pushLiveActivity"))
+                Spacer()
+                Text(la.activitiesEnabled ? hub.t("pushEnabled") : hub.t("pushDisabled"))
+                    .foregroundStyle(la.activitiesEnabled ? Color.green : .secondary)
+            }
+            HStack {
+                Text(hub.t("pushServerChannel"))
+                Spacer()
+                Text(pushModeLabel(pm.serverStatus.mode))
+                    .foregroundStyle(pm.serverStatus.configured ? Color.green : .secondary)
+            }
+        }
+    }
+
+    private func pushModeLabel(_ mode: String) -> String {
+        switch mode {
+        case "direct": return hub.t("pushModeDirect")
+        case "relay": return hub.t("pushModeRelay")
+        default: return hub.t("pushModeDisabled")
+        }
+    }
+
+    private var openSourceSection: some View {
+        Section(hub.t("openSourceTitle")) {
+            Text(hub.t("openSourceDesc"))
+                .font(.system(size: 14))
+                .foregroundStyle(p.text2)
+            Link(destination: URL(string: "https://github.com/jarvisluk/bot-hub")!) {
+                Label(hub.t("openSourceLinkBtn"), systemImage: "star")
+            }
+        }
+    }
     // MARK: 模型
 
     @ViewBuilder
