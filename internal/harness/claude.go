@@ -168,6 +168,7 @@ func (h *ClaudeHarness) startProc(opts RunOptions, ephemeral bool) (*claudeProc,
 	if cur, err := os.ReadFile(claudeMD); os.IsNotExist(err) || (err == nil && string(cur) == "@AGENTS.md\n") {
 		_ = os.WriteFile(claudeMD, []byte(wantClaudeMD), 0o644)
 	}
+	_ = config.EnsureClaudeWorkspaceSkill(bot.Workspace)
 
 	args := []string{"-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose"}
 	if bot.Model != "" {

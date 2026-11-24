@@ -40,6 +40,8 @@ func TestShouldSyncPathFilters(t *testing.T) {
 		"workspaces/assistant/opencode.json",
 		"workspaces/assistant/BOT_HUB.md",
 		"workspaces/assistant/CLAUDE.md",
+		"workspaces/assistant/.agents/skills/pebble-setup/SKILL.md",
+		"workspaces/assistant/.claude/skills/pebble-setup/SKILL.md",
 		"workspaces/assistant/_shared/USER.md",
 		"workspaces/assistant/.git/config",
 		"workspaces/assistant/node_modules/pkg/index.js",
@@ -393,5 +395,28 @@ func TestBidirectionalDeltaSyncWithStores(t *testing.T) {
 	}
 	if pushSum2.MessagesSynced != 0 || pushSum2.RoutineRunsSynced != 0 {
 		t.Fatalf("expected 0 synced on second push, got %+v", pushSum2)
+	}
+}
+
+func TestRebuildWorkspaceGlueProvisionsPebbleSetupSkill(t *testing.T) {
+	root := t.TempDir()
+	cfg := &config.HubConfig{
+		ProjectRoot: root,
+		SharedDir:   filepath.Join(root, "workspaces", "_shared"),
+		Bots: []config.BotConfig{
+			{ID: "oc", Harness: "opencode", Workspace: filepath.Join(root, "workspaces", "oc")},
+			{ID: "cl", Harness: "claude", Workspace: filepath.Join(root, "workspaces", "cl")},
+		},
+	}
+	if err := RebuildWorkspaceGlue(cfg); err != nil {
+		t.Fatal(err)
+	}
+	for _, b := range cfg.Bots {
+		if _, err := os.Stat(filepath.Join(b.Workspace, ".agents", "skills", config.PebbleSetupSkillName, "SKILL.md")); err != nil {
+			t.Fatalf("expected shared pebble-setup skill in %s: %v", b.ID, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(cfg.Bots[1].Workspace, ".claude", "skills", config.PebbleSetupSkillName, "SKILL.md")); err != nil {
+		t.Fatalf("expected claude pebble-setup skill: %v", err)
 	}
 }

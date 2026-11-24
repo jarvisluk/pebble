@@ -80,6 +80,10 @@ func ShouldSyncPath(relPath string) bool {
 	case "opencode.json", "BOT_HUB.md", "CLAUDE.md":
 		return false
 	}
+	if strings.HasSuffix(clean, "/.agents/skills/"+config.PebbleSetupSkillName+"/SKILL.md") ||
+		strings.HasSuffix(clean, "/.claude/skills/"+config.PebbleSetupSkillName+"/SKILL.md") {
+		return false
+	}
 	if strings.Contains(base, ".conflict-") {
 		return false
 	}
@@ -556,6 +560,9 @@ func RebuildWorkspaceGlue(cfg *config.HubConfig) error {
 				_ = os.Symlink(relTarget, linkPath)
 			}
 		}
+		bCopy := b
+		bCopy.Workspace = ws
+		_ = config.EnsureWorkspaceSkill(&bCopy)
 	}
 	return nil
 }

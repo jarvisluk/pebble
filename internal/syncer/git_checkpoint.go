@@ -33,6 +33,8 @@ var managedIgnoreLines = []string{
 	"**/opencode.json",
 	"**/BOT_HUB.md",
 	"**/CLAUDE.md",
+	"**/.agents/skills/pebble-setup/SKILL.md",
+	"**/.claude/skills/pebble-setup/SKILL.md",
 	"workspaces/*/_shared",
 	"!workspaces/_shared/",
 	"*.conflict-*",

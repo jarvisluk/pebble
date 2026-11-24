@@ -50,7 +50,7 @@ func Main(args []string) {
 		return
 	}
 	switch sub {
-	case "bot", "session", "routine", "node", "desktop":
+	case "bot", "settings", "session", "routine", "node", "desktop":
 		cwd, _ := os.Getwd()
 		os.Exit(runCommand(context.Background(), args, cwd, os.Stdout, os.Stderr))
 	}
@@ -106,11 +106,12 @@ func printUsage() {
   bot-hub status [-config path]                                   Show configured bots and persisted sessions
   bot-hub mcp     [--hub-url url] [--bot-id id] [--config path]   Run stdio MCP server exposing core runtime primitives
   bot-hub connect [-listen addr] [-node] <tailcat-link>           Reach a remote bot-hub over Tailcat (optionally register as a node)
-  bot-hub bot     <list|get|create|update|delete|message> [flags] Manage bots or send messages via running Hub API
-  bot-hub session <list|recall|rotate> [flags]                    Inspect, recall, or rotate bot sessions
-  bot-hub routine <list|upsert|delete|run> [flags]                Manage and trigger scheduled routines
-  bot-hub node    <list|exec|file> [flags]                        List or invoke remote computer nodes
-  bot-hub desktop <task|takeover|setup|power> [flags]             Delegate desktop GUI tasks, setup virtual desktop, or control power`)
+  bot-hub bot      <list|get|create|update|delete|message|send> [flags] Manage bots or send messages via running Hub API
+  bot-hub settings <get|models|set> [flags]                       Read or update global Pebble settings and list available models
+  bot-hub session  <list|recall|rotate> [flags]                   Inspect, recall, or rotate bot sessions
+  bot-hub routine  <list|upsert|delete|run> [flags]               Manage and trigger scheduled routines
+  bot-hub node     <list|exec|file> [flags]                       List or invoke remote computer nodes
+  bot-hub desktop  <task|takeover|setup|power|targets> [flags]    Delegate desktop GUI tasks, list targets, setup virtual desktop, or control power`)
 }
 
 func runHostDaemon(args []string) {

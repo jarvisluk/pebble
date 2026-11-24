@@ -133,3 +133,65 @@ func assertHasAgent(t *testing.T, agents []AgentInfo, name string) {
 	}
 	t.Fatalf("expected agent %q in %+v", name, agents)
 }
+
+func TestEnsureWorkspacePebbleSetupSkillDiscoveredByHarnesses(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	root := t.TempDir()
+	cfg := &config.HubConfig{
+		ProjectRoot: root,
+		SharedDir:   filepath.Join(root, "workspaces", "_shared"),
+	}
+
+	ocBot := config.BotConfig{ID: "oc", Name: "OC", Workspace: filepath.Join(root, "workspaces", "oc"), Harness: "opencode"}
+	clBot := config.BotConfig{ID: "cl", Name: "CL", Workspace: filepath.Join(root, "workspaces", "cl"), Harness: "claude"}
+	if err := config.EnsureWorkspace(&ocBot, cfg, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.EnsureWorkspace(&clBot, cfg, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := context.Background()
+	listers := []struct {
+		name string
+		h    CommandLister
+		bot  config.BotConfig
+	}{
+		{"claude", NewClaudeHarness(), clBot},
+		{"agy", NewAgyHarness(), ocBot},
+		{"dsh", NewDshHarness(), ocBot},
+		{"opencode", NewOpenCodeHarness(""), ocBot},
+		{"pi", NewPiHarness(), ocBot},
+		{"codex", NewCodexHarness(), ocBot},
+		{"codebuddy", NewCodeBuddyHarness(), ocBot},
+	}
+
+	for _, tc := range listers {
+		cmds, err := tc.h.ListCommands(ctx, tc.bot)
+		if err != nil {
+			t.Fatalf("%s ListCommands failed: %v", tc.name, err)
+		}
+		var found *SlashCommand
+		for i := range cmds {
+			if cmds[i].Name == config.PebbleSetupSkillName {
+				found = &cmds[i]
+				break
+			}
+		}
+		if found == nil {
+			t.Fatalf("%s did not discover %q skill in %+v", tc.name, config.PebbleSetupSkillName, cmds)
+		}
+		if found.Source != "skill" || found.Description == "" {
+			t.Fatalf("%s unexpected skill entry: %+v", tc.name, *found)
+		}
+	}
+
+	wsCustom := filepath.Join(root, "workspaces", "custom-claude")
+	if err := config.EnsureClaudeWorkspaceSkill(wsCustom); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(wsCustom, ".claude", "skills", config.PebbleSetupSkillName, "SKILL.md")); err != nil {
+		t.Fatalf("expected EnsureClaudeWorkspaceSkill to create SKILL.md: %v", err)
+	}
+}

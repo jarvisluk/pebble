@@ -559,6 +559,23 @@ func ValidateBotID(id string) error {
 	return nil
 }
 
+// ValidateModelID rejects excessively long or control/whitespace-containing model IDs.
+// Empty string is valid and represents inheriting the hub/harness default.
+func ValidateModelID(model string) error {
+	if model == "" {
+		return nil
+	}
+	if len(model) > 256 {
+		return fmt.Errorf("model ID too long (max 256 characters)")
+	}
+	for _, r := range model {
+		if r <= 0x20 || r == 0x7f {
+			return fmt.Errorf("invalid model ID %q (cannot contain whitespace or control characters)", model)
+		}
+	}
+	return nil
+}
+
 // NormalizeDesktopTarget validates and canonicalizes a bot's desktopTarget binding.
 // Accepted values:
 //   - "" (follow global active target)
@@ -984,17 +1001,20 @@ func PlatformInstructionsText() string {
 		"- **Shared Context & Memory**:",
 		"  - Read `_shared/USER.md` for hub-wide user preferences.",
 		"  - When Magpie Memory tools (`memory_search` / `memory_save`) are available, store cross-project preferences with `scope=\"global\"` and this bot's durable notes with `scope=\"project\"` and tag `bot:<your-bot-id>` (and pass that tag when searching so sibling workspaces inside a git repo never mix). Otherwise store durable notes in `memory/`.",
-		"- **MCP Core Tools (`bot-hub` MCP, 7 runtime primitives)**:",
+		"- **MCP Core Tools (`bot-hub` MCP, 8 runtime primitives)**:",
 		"  - `send_message(text?, images?, files?)`: send visible text, local images, and/or files to the user.",
 		"  - `message_bot(botId, message)`: collaborate with another bot.",
 		"  - `recall_session(...)`: read sliced messages from `previous` / `active` / `<sessionId>` (keep slices small; fetch single oversized messages by `messageId`). If `bot-hub session list` returns a `magpieSession`, pass it to `magpie-sessions__read_session` for raw tool transcripts.",
 		"  - `desktop_task(goal, ...)` & `request_takeover(reason, ...)`: delegate multi-step GUI tasks to the visible desktop worker, or pause for human QR/2FA/CAPTCHA/payment takeover (omit `nodeId` to use this bot's bound screen `desktopTarget` or the active desktop target).",
 		"  - `node_exec(command, ...)` & `node_file(op, path, ...)`: run shell commands or read/write/list files on connected remote nodes.",
+		"  - `open_stage(kind, path?, title?, url?)`: open a Stage UI panel (`files`, `desktop`, `browser`, `artifact`, `mcp-app`).",
 		"- **Full `bot-hub` CLI (auto-reads current bot context from env or workspace config)**:",
-		"  - **Bots & Self-Edit**: `bot-hub bot list | get [--id <id>] | create --id <id> --name <name> [--harness opencode|pi|dsh|claude|agy] | update [--id <id>] [--name ...] [--description ...] [--instructions-file AGENTS.md] | delete --id <id> | message <id> <msg> | send [--text \"...\"] [--image <path>] [--file <path>]`.",
+		"  - **Bots & Self-Edit**: `bot-hub bot list | get [--id <id>] | create --id <id> --name <name> [--harness opencode|codebuddy|qoder|codex|claude|grok|trae|pi|dsh|agy] [--model <m>] [--force] | update [--id <id>] [--model <m> | --inherit-model] [--harness <h>] [--name ...] [--description ...] [--instructions-file AGENTS.md] [--desktop-target <t>] [--browser-mode auto|isolated|attach] [--dry-run] [--force] | delete --id <id> [--confirm-self] | message <id> <msg> | send [--text \"...\"] [--image <path>] [--file <path>]`.",
+		"  - **Settings & Models**: `bot-hub settings get [--fresh] | models [--harness <h>] [--source magpie] | set [--default-harness <h>] [--default-model <m> | --clear-default-model] [--harness-model <h>=<m>] [--clear-harness-model <h>] [--desktop-harness <h> | --clear-desktop-harness] [--desktop-model <m> | --clear-desktop-model] [--magpie-web-url <url> | --clear-magpie-web-url] [--shared-user-md \"...\" | --shared-user-md-file <path>] [--dry-run] [--force]`.",
 		"  - **Sessions**: `bot-hub session list [--bot <id|*>] [--query ...] | recall [--id previous|active|<sid>] | rotate [--handoff \"...\"]` (rotate regularly on harnesses without native `billion-context` compression like `agy`, `dsh`).",
 		"  - **Routines**: `bot-hub routine list | upsert --name <n> --prompt <p> [--every-minutes N | --daily-at HH:MM] [--main-delivery receipt|notify|none] | delete --id <r> | run --id <r>` (isolated ephemeral turns with `AGENTS.md` + `memory/`).",
-		"  - **Nodes & Desktop**: `bot-hub node list | exec --command <cmd> | file --op read|write|list --path <p>` and `bot-hub desktop task --goal <g> | takeover --reason <r>`.",
+		"  - **Nodes & Desktop**: `bot-hub node list | exec --command <cmd> | file --op read|write|list --path <p>` and `bot-hub desktop targets | task --goal <g> | takeover --reason <r>`.",
+		"- **Pebble Setup Skill**: Read the workspace `pebble-setup` skill (`.agents/skills/pebble-setup/SKILL.md`) before switching models, changing global settings, or operating Pebble interfaces so pre-flight checks, `--dry-run`, and safety guardrails are followed.",
 		"- **Local Desktop & Browser CLI (run locally or via `node_exec`)**:",
 		"  - Desktop GUI (`agent-desktop` CLI): operate apps via accessibility-tree `snapshot` + `@ref` instead of blind coordinates.",
 		"  - Browser (`agent-browser` CLI):",
@@ -1069,6 +1089,9 @@ func EnsureWorkspace(bot *BotConfig, cfg *HubConfig, customInstructions string) 
 	// Write workspace-local opencode.json so the bot automatically gets bot-hub MCP tools
 	// and _shared/BOT_HUB.md instructions without clobbering global Magpie config.
 	if err := ensureOpenCodeMCPConfig(bot, cfg); err != nil {
+		return err
+	}
+	if err := EnsureWorkspaceSkill(bot); err != nil {
 		return err
 	}
 	return nil

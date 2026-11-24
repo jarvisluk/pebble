@@ -142,8 +142,16 @@ func TestPlatformInstructionsAndOpenCodeSync(t *testing.T) {
 	if !strings.Contains(string(botHubMD), "recall_session") || !strings.Contains(string(botHubMD), "bot:<your-bot-id>") ||
 		!strings.Contains(string(botHubMD), "agent-desktop") || !strings.Contains(string(botHubMD), "agent-browser") ||
 		!strings.Contains(string(botHubMD), "request_takeover") || !strings.Contains(string(botHubMD), "bot-hub bot") ||
+		!strings.Contains(string(botHubMD), "bot-hub settings") || !strings.Contains(string(botHubMD), "pebble-setup") ||
 		!strings.Contains(string(botHubMD), "update") || strings.Contains(string(botHubMD), "node_desktop") {
 		t.Fatalf("unexpected BOT_HUB.md content:\n%s", botHubMD)
+	}
+	skillRaw, err := os.ReadFile(filepath.Join(cfg.Bots[0].Workspace, ".agents", "skills", PebbleSetupSkillName, "SKILL.md"))
+	if err != nil {
+		t.Fatalf("expected workspace pebble-setup SKILL.md: %v", err)
+	}
+	if !strings.Contains(string(skillRaw), "name: pebble-setup") {
+		t.Fatalf("unexpected skill content:\n%s", skillRaw)
 	}
 	agentsMD, err := os.ReadFile(filepath.Join(cfg.Bots[0].Workspace, "AGENTS.md"))
 	if err != nil {
@@ -437,6 +445,58 @@ func TestBotDesktopTargetAndBrowserModeValidation(t *testing.T) {
 	}
 	if cfg.Bots[0].DesktopTarget != "virtual:a" || cfg.Bots[0].BrowserMode != "isolated" || cfg.Bots[0].EffectiveBrowserMode() != "isolated" {
 		t.Fatalf("unexpected loaded bot config: %+v", cfg.Bots[0])
+	}
+}
+
+func TestWorkspaceSkillProvisioningAndValidateModelID(t *testing.T) {
+	root := t.TempDir()
+	cfgDir := filepath.Join(root, "config")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfgPath := filepath.Join(cfgDir, "bots.json")
+	raw := `{"bots":[{"id":"oc","harness":"opencode"},{"id":"cl","harness":"claude"}]}`
+	if err := os.WriteFile(cfgPath, []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _, err := Load(root, cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Both bots get .agents/skills/pebble-setup/SKILL.md.
+	for _, b := range cfg.Bots {
+		sharedSkill := filepath.Join(b.Workspace, ".agents", "skills", PebbleSetupSkillName, "SKILL.md")
+		data, err := os.ReadFile(sharedSkill)
+		if err != nil {
+			t.Fatalf("missing shared skill for bot %s: %v", b.ID, err)
+		}
+		if string(data) != PebbleSetupSkillText() {
+			t.Fatalf("skill mismatch for bot %s", b.ID)
+		}
+	}
+	// Only claude bot gets .claude/skills/pebble-setup/SKILL.md on initial provisioning.
+	if _, err := os.Stat(filepath.Join(cfg.Bots[1].Workspace, ".claude", "skills", PebbleSetupSkillName, "SKILL.md")); err != nil {
+		t.Fatalf("expected .claude skill for claude bot: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(cfg.Bots[0].Workspace, ".claude", "skills", PebbleSetupSkillName, "SKILL.md")); !os.IsNotExist(err) {
+		t.Fatalf("did not expect .claude skill for opencode bot, got err=%v", err)
+	}
+
+	skillText := PebbleSetupSkillText()
+	if !strings.HasPrefix(skillText, "---\nname: pebble-setup\ndescription: ") || strings.Contains(skillText, "node_desktop") {
+		t.Fatalf("invalid pebble-setup SKILL.md frontmatter or stale reference")
+	}
+
+	for _, valid := range []string{"", "sonnet", "magpie/mac-mini/auto/sonnet", "anthropic/claude-sonnet-4-5"} {
+		if err := ValidateModelID(valid); err != nil {
+			t.Fatalf("ValidateModelID(%q) unexpected error: %v", valid, err)
+		}
+	}
+	for _, invalid := range []string{"bad model", "bad\nmodel", "bad\tmodel", "bad\x00model", strings.Repeat("a", 257)} {
+		if err := ValidateModelID(invalid); err == nil {
+			t.Fatalf("expected ValidateModelID(%q) to fail", invalid)
+		}
 	}
 }
 

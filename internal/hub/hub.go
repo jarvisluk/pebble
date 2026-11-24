@@ -53,6 +53,11 @@ var ErrForbidden = errors.New("forbidden")
 // ErrQuestionNotFound indicates that the requested pending question does not exist or has already been settled.
 var ErrQuestionNotFound = errors.New("question not found")
 
+var (
+	detectHarnessFunc     = harness.DetectHarness
+	detectHarnessAuthFunc = harness.DetectHarnessAuthCached
+)
+
 // PendingQuestion describes an interactive question card awaiting user input.
 type PendingQuestion struct {
 	ID        string                  `json:"id"`
@@ -1000,6 +1005,9 @@ func (h *Hub) CreateBot(req CreateBotRequest) (*BotStatus, error) {
 	}
 	req.Color = color
 	req.Model = strings.TrimSpace(req.Model)
+	if err := config.ValidateModelID(req.Model); err != nil {
+		return nil, err
+	}
 	req.Harness = strings.TrimSpace(req.Harness)
 	if req.Harness == "" {
 		req.Harness = h.DefaultHarness()
@@ -2137,46 +2145,277 @@ func (h *Hub) MagpieProviderAction(ctx context.Context, req harness.MagpieProvid
 	return out, nil
 }
 
-// UpdateBot changes a bot's name, description, harness, model or instructions
-// (AGENTS.md), persists it, and applies it from the bot's next turn. Switching
-// harness starts a new session, since sessions do not carry across harnesses.
-func (h *Hub) UpdateBot(botID string, upd BotUpdate) (*BotStatus, error) {
+// BotUpdatePreview describes the outcome of validating or dry-running a bot update.
+type BotUpdatePreview struct {
+	DryRun             bool   `json:"dryRun"`
+	Valid              bool   `json:"valid"`
+	BotID              string `json:"botId"`
+	Harness            string `json:"harness"`
+	Model              string `json:"model"`
+	ModelInherited     bool   `json:"modelInherited"`
+	HarnessChanged     bool   `json:"harnessChanged"`
+	SessionWillArchive bool   `json:"sessionWillArchive"`
+}
+
+func (h *Hub) normalizeBotUpdate(upd *BotUpdate) error {
 	if upd.Harness != nil {
 		*upd.Harness = strings.TrimSpace(*upd.Harness)
 		if _, err := h.registry.Get(*upd.Harness); err != nil {
-			return nil, err
+			return err
 		}
 	}
 	if upd.Name != nil && strings.TrimSpace(*upd.Name) == "" {
-		return nil, errors.New("名称不能为空")
+		return errors.New("名称不能为空")
 	}
 	if upd.Avatar != nil {
 		avatar, err := config.NormalizeBotAvatar(*upd.Avatar)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		*upd.Avatar = avatar
 	}
 	if upd.Color != nil {
 		color, err := config.NormalizeBotColor(*upd.Color)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		*upd.Color = color
 	}
 	if upd.DesktopTarget != nil {
 		dt, err := config.NormalizeDesktopTarget(*upd.DesktopTarget)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		*upd.DesktopTarget = dt
 	}
 	if upd.BrowserMode != nil {
 		bm, err := config.NormalizeBrowserMode(*upd.BrowserMode)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		*upd.BrowserMode = bm
+	}
+	if upd.Model != nil {
+		*upd.Model = strings.TrimSpace(*upd.Model)
+		if err := config.ValidateModelID(*upd.Model); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ValidateHarnessKey reports whether kind is a registered harness ID.
+func (h *Hub) ValidateHarnessKey(kind string) error {
+	kind = strings.TrimSpace(kind)
+	if kind == "" {
+		return errors.New("harness ID is required")
+	}
+	_, err := h.registry.Get(kind)
+	return err
+}
+
+// ValidateHarnessReady checks that kind is registered, installed, and authenticated.
+func (h *Hub) ValidateHarnessReady(ctx context.Context, kind string) error {
+	kind = strings.TrimSpace(kind)
+	if _, err := h.registry.Get(kind); err != nil {
+		return err
+	}
+	installed, _ := detectHarnessFunc(kind)
+	if !installed {
+		return fmt.Errorf("harness %q is not installed", kind)
+	}
+	status, detail := detectHarnessAuthFunc(ctx, kind)
+	if status == "needs_login" {
+		if detail != "" {
+			return fmt.Errorf("harness %q requires login (%s)", kind, detail)
+		}
+		return fmt.Errorf("harness %q requires login", kind)
+	}
+	return nil
+}
+
+// ValidateModelForHarness checks model syntax and, when the harness exposes a
+// non-empty model catalog, verifies exact membership.
+func (h *Hub) ValidateModelForHarness(ctx context.Context, kind, model string) error {
+	model = strings.TrimSpace(model)
+	if err := config.ValidateModelID(model); err != nil {
+		return err
+	}
+	if model == "" {
+		return nil
+	}
+	kind = strings.TrimSpace(kind)
+	if kind == "" {
+		kind = h.DefaultHarness()
+	}
+	if _, err := h.registry.Get(kind); err != nil {
+		return err
+	}
+	models, err := h.ModelsWithSource(ctx, kind, "")
+	if err != nil {
+		return err
+	}
+	if len(models) > 0 {
+		for _, m := range models {
+			if m == model {
+				return nil
+			}
+		}
+		limit := 15
+		if len(models) < limit {
+			limit = len(models)
+		}
+		sample := strings.Join(models[:limit], ", ")
+		if len(models) > limit {
+			sample += fmt.Sprintf(" ... (total %d)", len(models))
+		}
+		return fmt.Errorf("model %q is not in %s's available model list [%s]; run `bot-hub settings models --harness %s` or pass --force for a custom model ID", model, kind, sample, kind)
+	}
+	if (kind == "claude" || kind == "codex") && strings.HasPrefix(model, "magpie/") {
+		return fmt.Errorf("harness %s expects bare model IDs without the 'magpie/' prefix (got %q)", kind, model)
+	}
+	return nil
+}
+
+// ValidateGlobalDefaultModel checks that defaultModel applies to defaultHarness
+// and passes ValidateModelForHarness for the resolved model ID.
+func (h *Hub) ValidateGlobalDefaultModel(ctx context.Context, defaultHarness, defaultModel string) error {
+	defaultModel = strings.TrimSpace(defaultModel)
+	if err := config.ValidateModelID(defaultModel); err != nil {
+		return err
+	}
+	if defaultModel == "" {
+		return nil
+	}
+	defaultHarness = strings.TrimSpace(defaultHarness)
+	if defaultHarness == "" {
+		defaultHarness = h.DefaultHarness()
+	}
+	effective := (&config.HubConfig{DefaultModel: defaultModel}).DefaultModelFor(defaultHarness)
+	if effective == "" {
+		return fmt.Errorf("defaultModel %q does not apply to defaultHarness %q; set a compatible model or use --harness-model", defaultModel, defaultHarness)
+	}
+	return h.ValidateModelForHarness(ctx, defaultHarness, effective)
+}
+
+// PreviewDefaultModelsImpact returns the IDs of bots inheriting the hub default
+// whose effective resolved model would change under nextDefaultModel/nextPerHarness.
+func (h *Hub) PreviewDefaultModelsImpact(nextDefaultModel string, nextPerHarness map[string]string) []string {
+	tmpCfg := &config.HubConfig{
+		DefaultModel:  strings.TrimSpace(nextDefaultModel),
+		DefaultModels: nextPerHarness,
+	}
+	h.lanesMu.RLock()
+	defer h.lanesMu.RUnlock()
+	affected := make([]string, 0)
+	for _, id := range h.order {
+		lane := h.lanes[id]
+		if lane == nil || !lane.bot.ModelInherited {
+			continue
+		}
+		next := tmpCfg.DefaultModelFor(lane.bot.Harness)
+		if next != lane.bot.Model {
+			affected = append(affected, lane.bot.ID)
+		}
+	}
+	return affected
+}
+
+// ValidateCreateBot checks bot creation fields and, when strict is true, verifies
+// the target harness is ready and any explicit model is valid for it.
+func (h *Hub) ValidateCreateBot(ctx context.Context, req CreateBotRequest, strict bool) error {
+	if err := config.ValidateBotID(strings.TrimSpace(req.ID)); err != nil {
+		return err
+	}
+	model := strings.TrimSpace(req.Model)
+	if err := config.ValidateModelID(model); err != nil {
+		return err
+	}
+	targetHarness := strings.TrimSpace(req.Harness)
+	if targetHarness == "" {
+		targetHarness = h.DefaultHarness()
+	}
+	if _, err := h.registry.Get(targetHarness); err != nil {
+		return err
+	}
+	if strict {
+		if err := h.ValidateHarnessReady(ctx, targetHarness); err != nil {
+			return err
+		}
+		if model != "" {
+			if err := h.ValidateModelForHarness(ctx, targetHarness, model); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// ValidateBotUpdate validates a partial bot update and computes the resulting
+// effective harness/model/session archive impact without mutating state.
+func (h *Hub) ValidateBotUpdate(ctx context.Context, botID string, upd BotUpdate, strict bool) (*BotUpdatePreview, error) {
+	if err := h.normalizeBotUpdate(&upd); err != nil {
+		return nil, err
+	}
+	h.lanesMu.RLock()
+	lane, ok := h.lanes[botID]
+	var bot config.BotConfig
+	if ok {
+		bot = lane.bot
+	}
+	defaultModel, defaultModels := h.cfg.DefaultModel, h.cfg.DefaultModels
+	h.lanesMu.RUnlock()
+	if !ok {
+		return nil, fmt.Errorf("bot %q not found: %w", botID, ErrBotNotFound)
+	}
+
+	nextHarness := bot.Harness
+	harnessChanged := upd.Harness != nil && *upd.Harness != bot.Harness
+	if upd.Harness != nil {
+		nextHarness = *upd.Harness
+	}
+	nextModel := bot.Model
+	nextInherited := bot.ModelInherited
+	if upd.Model != nil {
+		nextModel = *upd.Model
+		nextInherited = nextModel == ""
+	}
+	if nextInherited {
+		tmpCfg := &config.HubConfig{DefaultModel: defaultModel, DefaultModels: defaultModels}
+		nextModel = tmpCfg.DefaultModelFor(nextHarness)
+	}
+
+	if strict {
+		if upd.Harness != nil {
+			if err := h.ValidateHarnessReady(ctx, nextHarness); err != nil {
+				return nil, err
+			}
+		}
+		if (upd.Model != nil || harnessChanged) && !nextInherited && nextModel != "" {
+			if err := h.ValidateModelForHarness(ctx, nextHarness, nextModel); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	return &BotUpdatePreview{
+		DryRun:             true,
+		Valid:              true,
+		BotID:              botID,
+		Harness:            nextHarness,
+		Model:              nextModel,
+		ModelInherited:     nextInherited,
+		HarnessChanged:     harnessChanged,
+		SessionWillArchive: harnessChanged,
+	}, nil
+}
+
+// UpdateBot changes a bot's name, description, harness, model or instructions
+// (AGENTS.md), persists it, and applies it from the bot's next turn. Switching
+// harness starts a new session, since sessions do not carry across harnesses.
+func (h *Hub) UpdateBot(botID string, upd BotUpdate) (*BotStatus, error) {
+	if err := h.normalizeBotUpdate(&upd); err != nil {
+		return nil, err
 	}
 	h.lanesMu.Lock()
 	lane, ok := h.lanes[botID]
@@ -2202,7 +2441,7 @@ func (h *Hub) UpdateBot(botID string, upd BotUpdate) (*BotStatus, error) {
 		bot.Harness = *upd.Harness
 	}
 	if upd.Model != nil {
-		bot.Model = strings.TrimSpace(*upd.Model)
+		bot.Model = *upd.Model
 		bot.ModelInherited = bot.Model == ""
 	}
 	if upd.PrivateSessions != nil {
@@ -2269,6 +2508,9 @@ func (h *Hub) UpdateBot(botID string, upd BotUpdate) (*BotStatus, error) {
 	h.lanesMu.Unlock()
 
 	if harnessChanged {
+		if bot.Harness == "claude" {
+			_ = config.EnsureWorkspaceSkill(&bot)
+		}
 		lane.sessionGen.Add(1)
 		if prev, existed, _ := h.store.ArchiveActive(botID, "harness_changed", "", ""); existed {
 			h.appendMessage(state.ChatMessage{
@@ -2404,18 +2646,23 @@ func (h *Hub) DefaultModelsSnapshot() (string, map[string]string) {
 // SetDefaultModels sets the hub-wide default model and per-harness overrides
 // (an empty override is removed), then re-resolves every inheriting bot.
 func (h *Hub) SetDefaultModels(defaultModel string, perHarness map[string]string) error {
+	defaultModel = strings.TrimSpace(defaultModel)
+	if err := config.ValidateModelID(defaultModel); err != nil {
+		return err
+	}
 	clean := map[string]string{}
 	for k, v := range perHarness {
 		if v = strings.TrimSpace(v); v != "" {
 			if _, err := h.registry.Get(k); err != nil {
 				return err
 			}
+			if err := config.ValidateModelID(v); err != nil {
+				return err
+			}
 			clean[k] = v
 		}
 	}
-	defaultModel = strings.TrimSpace(defaultModel)
 	h.lanesMu.Lock()
-	defer h.lanesMu.Unlock()
 	if h.cfg.ConfigPath != "" {
 		err := config.UpdateRaw(h.cfg, func(raw *config.HubConfig) error {
 			raw.DefaultModel = defaultModel
@@ -2426,19 +2673,29 @@ func (h *Hub) SetDefaultModels(defaultModel string, perHarness map[string]string
 			return nil
 		})
 		if err != nil {
+			h.lanesMu.Unlock()
 			return fmt.Errorf("save config: %w", err)
 		}
 	}
 	h.cfg.DefaultModel = defaultModel
 	h.cfg.DefaultModels = clean
+	var changedStatuses []BotStatus
 	for i := range h.cfg.Bots {
 		b := &h.cfg.Bots[i]
 		if b.ModelInherited {
+			prevModel := b.Model
 			b.Model = h.cfg.DefaultModelFor(b.Harness)
 			if lane := h.lanes[b.ID]; lane != nil {
 				lane.bot.Model = b.Model
+				if b.Model != prevModel {
+					changedStatuses = append(changedStatuses, h.statusOfLocked(lane))
+				}
 			}
 		}
+	}
+	h.lanesMu.Unlock()
+	for _, st := range changedStatuses {
+		h.broadcast(Event{Type: "bot_status", BotID: st.ID, Payload: st})
 	}
 	return nil
 }
@@ -3208,6 +3465,9 @@ func (h *Hub) DesktopWorkerSnapshot() (string, string) {
 func (h *Hub) SetDesktopWorker(harnessKind, model string) error {
 	harnessKind = strings.TrimSpace(harnessKind)
 	model = strings.TrimSpace(model)
+	if err := config.ValidateModelID(model); err != nil {
+		return err
+	}
 	if harnessKind != "" {
 		if _, err := h.registry.Get(harnessKind); err != nil {
 			return err
@@ -3246,14 +3506,23 @@ func (h *Hub) MagpieWebURL() string {
 	return u
 }
 
-// SetMagpieWebURL persists the Magpie web address; empty clears it.
-func (h *Hub) SetMagpieWebURL(raw string) error {
+// ValidateMagpieWebURL normalizes and validates a Magpie web URL (empty clears it).
+func ValidateMagpieWebURL(raw string) (string, error) {
 	u := strings.TrimSpace(raw)
 	if u != "" {
 		parsed, err := url.Parse(u)
 		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
-			return fmt.Errorf("Magpie 网页地址需以 http:// 或 https:// 开头")
+			return "", fmt.Errorf("Magpie 网页地址需以 http:// 或 https:// 开头")
 		}
+	}
+	return u, nil
+}
+
+// SetMagpieWebURL persists the Magpie web address; empty clears it.
+func (h *Hub) SetMagpieWebURL(raw string) error {
+	u, err := ValidateMagpieWebURL(raw)
+	if err != nil {
+		return err
 	}
 	h.lanesMu.Lock()
 	defer h.lanesMu.Unlock()

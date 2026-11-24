@@ -32,7 +32,7 @@ func registerConnFlags(fs *flag.FlagSet, o *connOpts) {
 	fs.StringVar(&o.token, "token", "", "bot-hub API token")
 }
 
-// runCommand executes `bot-hub <bot|session|routine|node|desktop> ...` and
+// runCommand executes `bot-hub <bot|settings|session|routine|node|desktop> ...` and
 // returns a process exit code. Separated from os.Exit for unit testing.
 func runCommand(ctx context.Context, args []string, cwd string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
@@ -46,6 +46,8 @@ func runCommand(ctx context.Context, args []string, cwd string, stdout, stderr i
 	switch sub {
 	case "bot":
 		err = runBotCmd(ctx, rest, cwd, stdout, stderr)
+	case "settings":
+		err = runSettingsCmd(ctx, rest, cwd, stdout, stderr)
 	case "session":
 		err = runSessionCmd(ctx, rest, cwd, stdout, stderr)
 	case "routine":
@@ -64,6 +66,13 @@ func runCommand(ctx context.Context, args []string, cwd string, stdout, stderr i
 		return 1
 	}
 	return 0
+}
+
+func rejectComputerUseRole(cmdName string) error {
+	if strings.TrimSpace(os.Getenv("BOT_HUB_MCP_ROLE")) == "computer_use" {
+		return fmt.Errorf("%s cannot be called from inside a computer-use worker", cmdName)
+	}
+	return nil
 }
 
 func resolveClient(o connOpts, cwd string) *mcp.Client {
@@ -190,21 +199,21 @@ func writeJSONOut(w io.Writer, raw []byte) error {
 	return err
 }
 
-func readInstructionsInput(inline, filePath, cwd string, inlineSet, fileSet bool) (string, bool, error) {
+func readTextInput(inline, filePath, cwd string, inlineSet, fileSet bool, flagBase string) (string, bool, error) {
 	if inlineSet && fileSet {
-		return "", false, errors.New("cannot specify both --instructions and --instructions-file")
+		return "", false, fmt.Errorf("cannot specify both --%s and --%s-file", flagBase, flagBase)
 	}
 	if fileSet {
 		p := strings.TrimSpace(filePath)
 		if p == "" {
-			return "", false, errors.New("--instructions-file cannot be empty")
+			return "", false, fmt.Errorf("--%s-file cannot be empty", flagBase)
 		}
 		if !filepath.IsAbs(p) && cwd != "" {
 			p = filepath.Join(cwd, p)
 		}
 		b, err := os.ReadFile(p)
 		if err != nil {
-			return "", false, fmt.Errorf("read instructions file: %w", err)
+			return "", false, fmt.Errorf("read %s file: %w", flagBase, err)
 		}
 		return string(b), true, nil
 	}
@@ -220,6 +229,20 @@ func (m *multiStringFlag) String() string { return strings.Join(*m, ",") }
 func (m *multiStringFlag) Set(v string) error {
 	*m = append(*m, v)
 	return nil
+}
+
+func appendValidateDryRunQuery(path string, validate, dryRun bool) string {
+	q := url.Values{}
+	if validate {
+		q.Set("validate", "1")
+	}
+	if dryRun {
+		q.Set("dryRun", "1")
+	}
+	if enc := q.Encode(); enc != "" {
+		return path + "?" + enc
+	}
+	return path
 }
 
 // --- bot ---
@@ -266,6 +289,9 @@ func runBotCmd(ctx context.Context, args []string, cwd string, stdout, stderr io
 		return writeJSONOut(stdout, body)
 
 	case "create":
+		if err := rejectComputerUseRole("bot create"); err != nil {
+			return err
+		}
 		fs := newSubFlagSet("bot create", stderr, &co)
 		id := fs.String("id", "", "unique bot ID")
 		name := fs.String("name", "", "display name")
@@ -275,10 +301,11 @@ func runBotCmd(ctx context.Context, args []string, cwd string, stdout, stderr io
 		instr := fs.String("instructions", "", "AGENTS.md markdown content")
 		instrFile := fs.String("instructions-file", "", "path to markdown file for AGENTS.md")
 		model := fs.String("model", "", "model override")
-		harnessName := fs.String("harness", "", "agent runtime (opencode|pi|dsh|claude|agy)")
+		harnessName := fs.String("harness", "", "agent runtime (opencode|codebuddy|qoder|codex|claude|grok|trae|pi|dsh|agy)")
 		priv := fs.Bool("private-sessions", false, "enable private sessions")
 		deskTarget := fs.String("desktop-target", "", "bound desktop screen target (e.g. local, virtual:<slot>, <nodeId>, <nodeId>:virtual:<slot>)")
 		browserMode := fs.String("browser-mode", "", "browser isolation mode (auto|isolated|attach)")
+		force := fs.Bool("force", false, "skip strict harness/model validation")
 		if err := fs.Parse(rest); err != nil {
 			return err
 		}
@@ -287,7 +314,7 @@ func runBotCmd(ctx context.Context, args []string, cwd string, stdout, stderr io
 		if strings.TrimSpace(*id) == "" || strings.TrimSpace(*name) == "" {
 			return errors.New("--id and --name are required")
 		}
-		instructions, hasInstr, err := readInstructionsInput(*instr, *instrFile, cwd, visited["instructions"], visited["instructions-file"])
+		instructions, hasInstr, err := readTextInput(*instr, *instrFile, cwd, visited["instructions"], visited["instructions-file"], "instructions")
 		if err != nil {
 			return err
 		}
@@ -323,13 +350,17 @@ func runBotCmd(ctx context.Context, args []string, cwd string, stdout, stderr io
 			payload["browserMode"] = *browserMode
 		}
 		c := resolveClient(co, cwd)
-		body, err := c.DoJSON(ctx, http.MethodPost, "/api/bots", payload)
+		path := appendValidateDryRunQuery("/api/bots", !*force, false)
+		body, err := c.DoJSON(ctx, http.MethodPost, path, payload)
 		if err != nil {
 			return err
 		}
 		return writeJSONOut(stdout, body)
 
 	case "update":
+		if err := rejectComputerUseRole("bot update"); err != nil {
+			return err
+		}
 		fs := newSubFlagSet("bot update", stderr, &co)
 		id := fs.String("id", "", "bot ID (defaults to current bot)")
 		name := fs.String("name", "", "new display name")
@@ -339,16 +370,22 @@ func runBotCmd(ctx context.Context, args []string, cwd string, stdout, stderr io
 		instr := fs.String("instructions", "", "new AGENTS.md markdown content")
 		instrFile := fs.String("instructions-file", "", "path to markdown file for AGENTS.md")
 		model := fs.String("model", "", "model override (empty string inherits hub default)")
-		harnessName := fs.String("harness", "", "agent runtime (opencode|pi|dsh|claude|agy)")
+		inheritModel := fs.Bool("inherit-model", false, "inherit hub default model (clears explicit model override)")
+		harnessName := fs.String("harness", "", "agent runtime (opencode|codebuddy|qoder|codex|claude|grok|trae|pi|dsh|agy)")
 		priv := fs.Bool("private-sessions", false, "enable private sessions")
 		deskTarget := fs.String("desktop-target", "", "bound desktop screen target (empty string follows default)")
 		browserMode := fs.String("browser-mode", "", "browser isolation mode (auto|isolated|attach)")
+		dryRun := fs.Bool("dry-run", false, "validate and preview update without applying changes")
+		force := fs.Bool("force", false, "skip strict harness/model validation")
 		if err := fs.Parse(rest); err != nil {
 			return err
 		}
 		visited := map[string]bool{}
 		fs.Visit(func(f *flag.Flag) { visited[f.Name] = true })
-		instructions, hasInstr, err := readInstructionsInput(*instr, *instrFile, cwd, visited["instructions"], visited["instructions-file"])
+		if *inheritModel && visited["model"] && strings.TrimSpace(*model) != "" {
+			return errors.New("cannot combine --inherit-model with a non-empty --model")
+		}
+		instructions, hasInstr, err := readTextInput(*instr, *instrFile, cwd, visited["instructions"], visited["instructions-file"], "instructions")
 		if err != nil {
 			return err
 		}
@@ -368,7 +405,9 @@ func runBotCmd(ctx context.Context, args []string, cwd string, stdout, stderr io
 		if hasInstr {
 			payload["instructions"] = instructions
 		}
-		if visited["model"] {
+		if *inheritModel {
+			payload["model"] = ""
+		} else if visited["model"] {
 			payload["model"] = *model
 		}
 		if visited["harness"] {
@@ -384,22 +423,27 @@ func runBotCmd(ctx context.Context, args []string, cwd string, stdout, stderr io
 			payload["browserMode"] = *browserMode
 		}
 		if len(payload) == 0 {
-			return errors.New("specify at least one field to update (--name, --description, --avatar, --color, --instructions, --instructions-file, --model, --harness, --private-sessions, --desktop-target, --browser-mode)")
+			return errors.New("specify at least one field to update (--name, --description, --avatar, --color, --instructions, --instructions-file, --model, --inherit-model, --harness, --private-sessions, --desktop-target, --browser-mode)")
 		}
 		c := resolveClient(co, cwd)
 		target := c.ResolveBotID(*id)
 		if target == "" {
 			return errors.New("bot ID is required (--id or BOT_HUB_BOT_ID)")
 		}
-		body, err := c.DoJSON(ctx, http.MethodPatch, "/api/bots/"+url.PathEscape(target), payload)
+		path := appendValidateDryRunQuery("/api/bots/"+url.PathEscape(target), !*force, *dryRun)
+		body, err := c.DoJSON(ctx, http.MethodPatch, path, payload)
 		if err != nil {
 			return err
 		}
 		return writeJSONOut(stdout, body)
 
 	case "delete":
+		if err := rejectComputerUseRole("bot delete"); err != nil {
+			return err
+		}
 		fs := newSubFlagSet("bot delete", stderr, &co)
 		id := fs.String("id", "", "bot ID to delete")
+		confirmSelf := fs.Bool("confirm-self", false, "confirm deleting the currently active bot")
 		if err := fs.Parse(rest); err != nil {
 			return err
 		}
@@ -411,6 +455,9 @@ func runBotCmd(ctx context.Context, args []string, cwd string, stdout, stderr io
 			return errors.New("--id is required")
 		}
 		c := resolveClient(co, cwd)
+		if c.SelfBotID() != "" && target == c.SelfBotID() && !*confirmSelf {
+			return fmt.Errorf("refusing to delete current bot %q without --confirm-self", target)
+		}
 		body, err := c.DoJSON(ctx, http.MethodDelete, "/api/bots/"+url.PathEscape(target), nil)
 		if err != nil {
 			return err
@@ -503,6 +550,239 @@ func runBotCmd(ctx context.Context, args []string, cwd string, stdout, stderr io
 
 	default:
 		return fmt.Errorf("unknown bot action %q (expected list|get|create|update|delete|message|send)", action)
+	}
+}
+
+// --- settings ---
+
+func runSettingsCmd(ctx context.Context, args []string, cwd string, stdout, stderr io.Writer) error {
+	if len(args) == 0 {
+		return errors.New("usage: bot-hub settings <get|models|set> [flags]")
+	}
+	action := args[0]
+	rest := args[1:]
+	var co connOpts
+
+	switch action {
+	case "get":
+		fs := newSubFlagSet("settings get", stderr, &co)
+		fresh := fs.Bool("fresh", false, "bypass cache and probe harnesses/Magpie live")
+		if err := fs.Parse(rest); err != nil {
+			return err
+		}
+		c := resolveClient(co, cwd)
+		path := "/api/settings"
+		if *fresh {
+			path += "?fresh=1"
+		}
+		body, err := c.DoJSON(ctx, http.MethodGet, path, nil)
+		if err != nil {
+			return err
+		}
+		return writeJSONOut(stdout, body)
+
+	case "models":
+		fs := newSubFlagSet("settings models", stderr, &co)
+		harnessName := fs.String("harness", "", "target harness ID (defaults to current bot's harness)")
+		source := fs.String("source", "", "model catalog source (optional: magpie)")
+		if err := fs.Parse(rest); err != nil {
+			return err
+		}
+		c := resolveClient(co, cwd)
+		targetHarness := strings.TrimSpace(*harnessName)
+		if targetHarness == "" && c.SelfBotID() != "" {
+			if botBody, err := c.DoJSON(ctx, http.MethodGet, "/api/bots/"+url.PathEscape(c.SelfBotID()), nil); err == nil {
+				var botDoc struct {
+					Harness string `json:"harness"`
+				}
+				if json.Unmarshal(botBody, &botDoc) == nil && strings.TrimSpace(botDoc.Harness) != "" {
+					targetHarness = strings.TrimSpace(botDoc.Harness)
+				}
+			}
+		}
+		if targetHarness == "" {
+			if sBody, err := c.DoJSON(ctx, http.MethodGet, "/api/settings", nil); err == nil {
+				var sDoc struct {
+					DefaultHarness string `json:"defaultHarness"`
+				}
+				if json.Unmarshal(sBody, &sDoc) == nil && strings.TrimSpace(sDoc.DefaultHarness) != "" {
+					targetHarness = strings.TrimSpace(sDoc.DefaultHarness)
+				}
+			}
+		}
+		if targetHarness == "" {
+			targetHarness = "opencode"
+		}
+
+		q := url.Values{}
+		q.Set("harness", targetHarness)
+		src := strings.TrimSpace(*source)
+		if src != "" {
+			q.Set("source", src)
+		}
+		body, err := c.DoJSON(ctx, http.MethodGet, "/api/models?"+q.Encode(), nil)
+		if err != nil {
+			return err
+		}
+		var mDoc struct {
+			Models []string `json:"models"`
+		}
+		if err := json.Unmarshal(body, &mDoc); err != nil {
+			return writeJSONOut(stdout, body)
+		}
+		if mDoc.Models == nil {
+			mDoc.Models = []string{}
+		}
+		outBytes, err := json.Marshal(struct {
+			Harness string   `json:"harness"`
+			Source  string   `json:"source,omitempty"`
+			Models  []string `json:"models"`
+		}{
+			Harness: targetHarness,
+			Source:  src,
+			Models:  mDoc.Models,
+		})
+		if err != nil {
+			return err
+		}
+		return writeJSONOut(stdout, outBytes)
+
+	case "set":
+		if err := rejectComputerUseRole("settings set"); err != nil {
+			return err
+		}
+		fs := newSubFlagSet("settings set", stderr, &co)
+		defHarness := fs.String("default-harness", "", "hub-wide default harness")
+		defModel := fs.String("default-model", "", "hub-wide default model")
+		clearDefModel := fs.Bool("clear-default-model", false, "clear hub-wide default model")
+		var harnessModels multiStringFlag
+		var clearHarnessModels multiStringFlag
+		fs.Var(&harnessModels, "harness-model", "per-harness default model override in <harness>=<model> form (repeatable)")
+		fs.Var(&clearHarnessModels, "clear-harness-model", "clear per-harness default model override for <harness> (repeatable)")
+		deskHarness := fs.String("desktop-harness", "", "desktop worker harness")
+		clearDeskHarness := fs.Bool("clear-desktop-harness", false, "clear desktop worker harness")
+		deskModel := fs.String("desktop-model", "", "desktop worker model")
+		clearDeskModel := fs.Bool("clear-desktop-model", false, "clear desktop worker model")
+		magpieWebURL := fs.String("magpie-web-url", "", "Magpie web URL")
+		clearMagpieWebURL := fs.Bool("clear-magpie-web-url", false, "clear Magpie web URL")
+		sharedUserMD := fs.String("shared-user-md", "", "shared _shared/USER.md markdown content")
+		sharedUserMDFile := fs.String("shared-user-md-file", "", "path to markdown file for _shared/USER.md")
+		dryRun := fs.Bool("dry-run", false, "validate and preview impact without applying changes")
+		force := fs.Bool("force", false, "skip strict harness/model validation")
+		if err := fs.Parse(rest); err != nil {
+			return err
+		}
+
+		visited := map[string]bool{}
+		fs.Visit(func(f *flag.Flag) { visited[f.Name] = true })
+
+		payload := map[string]any{}
+		if visited["default-harness"] {
+			v := strings.TrimSpace(*defHarness)
+			if v == "" {
+				return errors.New("--default-harness cannot be empty")
+			}
+			payload["defaultHarness"] = v
+		}
+
+		if visited["default-model"] && *clearDefModel {
+			return errors.New("cannot specify both --default-model and --clear-default-model")
+		}
+		if visited["default-model"] {
+			v := strings.TrimSpace(*defModel)
+			if v == "" {
+				return errors.New("--default-model cannot be empty (use --clear-default-model to clear)")
+			}
+			payload["defaultModel"] = v
+		} else if *clearDefModel {
+			payload["defaultModel"] = ""
+		}
+
+		patch := map[string]string{}
+		for _, entry := range harnessModels {
+			h, m, ok := strings.Cut(entry, "=")
+			h = strings.TrimSpace(h)
+			m = strings.TrimSpace(m)
+			if !ok || h == "" || m == "" {
+				return fmt.Errorf("invalid --harness-model %q (expected <harness>=<model>; use --clear-harness-model <harness> to clear)", entry)
+			}
+			patch[h] = m
+		}
+		for _, rawH := range clearHarnessModels {
+			h := strings.TrimSpace(rawH)
+			if h == "" {
+				return errors.New("--clear-harness-model cannot be empty")
+			}
+			if _, exists := patch[h]; exists {
+				return fmt.Errorf("cannot both set and clear harness model for %q", h)
+			}
+			patch[h] = ""
+		}
+		if len(patch) > 0 {
+			payload["defaultModelsPatch"] = patch
+		}
+
+		if visited["desktop-harness"] && *clearDeskHarness {
+			return errors.New("cannot specify both --desktop-harness and --clear-desktop-harness")
+		}
+		if visited["desktop-harness"] {
+			v := strings.TrimSpace(*deskHarness)
+			if v == "" {
+				return errors.New("--desktop-harness cannot be empty (use --clear-desktop-harness to clear)")
+			}
+			payload["desktopHarness"] = v
+		} else if *clearDeskHarness {
+			payload["desktopHarness"] = ""
+		}
+
+		if visited["desktop-model"] && *clearDeskModel {
+			return errors.New("cannot specify both --desktop-model and --clear-desktop-model")
+		}
+		if visited["desktop-model"] {
+			v := strings.TrimSpace(*deskModel)
+			if v == "" {
+				return errors.New("--desktop-model cannot be empty (use --clear-desktop-model to clear)")
+			}
+			payload["desktopModel"] = v
+		} else if *clearDeskModel {
+			payload["desktopModel"] = ""
+		}
+
+		if visited["magpie-web-url"] && *clearMagpieWebURL {
+			return errors.New("cannot specify both --magpie-web-url and --clear-magpie-web-url")
+		}
+		if visited["magpie-web-url"] {
+			v := strings.TrimSpace(*magpieWebURL)
+			if v == "" {
+				return errors.New("--magpie-web-url cannot be empty (use --clear-magpie-web-url to clear)")
+			}
+			payload["magpieWebUrl"] = v
+		} else if *clearMagpieWebURL {
+			payload["magpieWebUrl"] = ""
+		}
+
+		userMD, hasUserMD, err := readTextInput(*sharedUserMD, *sharedUserMDFile, cwd, visited["shared-user-md"], visited["shared-user-md-file"], "shared-user-md")
+		if err != nil {
+			return err
+		}
+		if hasUserMD {
+			payload["sharedUserMd"] = userMD
+		}
+
+		if len(payload) == 0 {
+			return errors.New("specify at least one setting to update")
+		}
+
+		c := resolveClient(co, cwd)
+		path := appendValidateDryRunQuery("/api/settings", !*force, *dryRun)
+		body, err := c.DoJSON(ctx, http.MethodPatch, path, payload)
+		if err != nil {
+			return err
+		}
+		return writeJSONOut(stdout, body)
+
+	default:
+		return fmt.Errorf("unknown settings action %q (expected get|models|set)", action)
 	}
 }
 
@@ -887,13 +1167,25 @@ func runNodeCmd(ctx context.Context, args []string, cwd string, stdout, stderr i
 
 func runDesktopCmd(ctx context.Context, args []string, cwd string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: bot-hub desktop <task|takeover|setup|power> [flags]")
+		return errors.New("usage: bot-hub desktop <task|takeover|setup|power|targets> [flags]")
 	}
 	action := args[0]
 	rest := args[1:]
 	var co connOpts
 
 	switch action {
+	case "targets":
+		fs := newSubFlagSet("desktop targets", stderr, &co)
+		if err := fs.Parse(rest); err != nil {
+			return err
+		}
+		c := resolveClient(co, cwd)
+		body, err := c.DoJSON(ctx, http.MethodGet, "/api/desktop/targets", nil)
+		if err != nil {
+			return err
+		}
+		return writeJSONOut(stdout, body)
+
 	case "task":
 		if strings.TrimSpace(os.Getenv("BOT_HUB_MCP_ROLE")) == "computer_use" {
 			return errors.New("desktop task cannot be called from inside a computer-use worker")
@@ -1013,6 +1305,6 @@ func runDesktopCmd(ctx context.Context, args []string, cwd string, stdout, stder
 		return writeJSONOut(stdout, body)
 
 	default:
-		return fmt.Errorf("unknown desktop action %q (expected task|takeover|setup|power)", action)
+		return fmt.Errorf("unknown desktop action %q (expected task|takeover|setup|power|targets)", action)
 	}
 }
