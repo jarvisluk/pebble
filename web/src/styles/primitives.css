@@ -108,18 +108,18 @@ button.mp:hover { background: var(--s2); color: var(--text); }
 
 .dlg-wrap { position: fixed; inset: 0; z-index: var(--z-modal); display: grid; place-items: center; padding: calc(16px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right)) calc(16px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left)); background: var(--shade); opacity: 0; pointer-events: none; transition: opacity var(--dur-fast); }
 .dlg-wrap.open { opacity: 1; pointer-events: auto; }
-.dlg { width: min(520px, 100%); max-height: calc(100dvh - 32px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); display: flex; flex-direction: column; background: var(--card); border-radius: var(--r-card); box-shadow: 0 24px 60px rgba(0, 0, 0, .2); transform: scale(.98); transition: transform var(--dur-fast); }
+.dlg { width: min(520px, 100%); max-height: calc(100dvh - 32px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); display: flex; flex-direction: column; overflow: hidden; background: var(--card); border-radius: var(--r-card); box-shadow: 0 24px 60px rgba(0, 0, 0, .2); transform: scale(.98); transition: transform var(--dur-fast); }
 .dlg-wrap.open .dlg { transform: none; }
 .dlg.sm { width: min(400px, 100%); }
 .dlg.wide { width: min(680px, 100%); }
-.dlg-h { padding: 24px 24px 0; display: flex; align-items: center; gap: 12px; }
+.dlg-h { padding: 24px 24px 12px; display: flex; align-items: center; gap: 12px; flex: none; position: relative; z-index: 2; }
 .dlg-h-col { flex-direction: column; align-items: stretch; gap: 0; }
 .dlg-h .av { width: 44px; height: 44px; }
 .dlg-h h3 { font-size: var(--fs-lg); font-weight: 700; line-height: 1.4; }
 .dlg-h p { font-size: var(--fs-sm); color: var(--mute); }
-.dlg-b { padding: 20px 24px 12px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
+.dlg-b { padding: 8px 24px 12px; flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
 .dlg-b > p { color: var(--text-2); }
-.dlg-f { padding: 12px 24px 24px; display: flex; justify-content: flex-end; gap: 8px; }
+.dlg-f { padding: 12px 24px 24px; display: flex; justify-content: flex-end; gap: 8px; flex: none; position: relative; z-index: 2; }
 
 .toast { position: fixed; left: 50%; bottom: calc(76px + env(safe-area-inset-bottom)); transform: translateX(-50%); background: var(--text); color: var(--card); font-size: var(--fs-base); padding: 8px 16px; border-radius: 999px; z-index: var(--z-toast); animation: rise .18s ease-out; }
 

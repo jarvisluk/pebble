@@ -94,7 +94,9 @@ export default function App() {
 
   const [createOpen, setCreateOpen] = useState(false);
   const [unboxOpen, setUnboxOpen] = useState(false);
+  const [unboxFullscreen, setUnboxFullscreen] = useState(false);
   const [unboxStep, setUnboxStep] = useState<1 | 2 | 3>(1);
+  const [bootReady, setBootReady] = useState(false);
   const [loginOpen, setLoginOpen] = useState(false);
   const [confirmOpts, setConfirmOpts] = useState<ConfirmOptions | null>(null);
   const [toastMsg, setToastMsg] = useState('');
@@ -476,6 +478,7 @@ export default function App() {
     if (unboxAutoPromptedRef.current || loginOpenRef.current) return;
     if (s?.onboarding?.needsSetup) {
       unboxAutoPromptedRef.current = true;
+      setUnboxFullscreen(true);
       setUnboxStep(1);
       setUnboxOpen(true);
     }
@@ -489,8 +492,11 @@ export default function App() {
         void refreshActiveDesktopTarget();
         void refreshQuestions();
         maybeAutoOpenUnbox(s);
+        setBootReady(true);
       })
-      .catch(() => {});
+      .catch(() => {
+        setBootReady(true);
+      });
     return () => {
       esRef.current?.close();
     };
@@ -695,6 +701,40 @@ export default function App() {
     } catch {}
   }, []);
 
+  if (unboxOpen && unboxFullscreen) {
+    return (
+      <>
+        <UnboxModal
+          open
+          fullscreen
+          initialStep={unboxStep}
+          bots={bots}
+          settings={settings}
+          models={modelsMap}
+          lang={lang}
+          onClose={() => {
+            setUnboxOpen(false);
+            setUnboxFullscreen(false);
+          }}
+          onToast={showToast}
+          onSettingsUpdated={setSettings}
+          onLoadSettings={loadSettings}
+          onLoadModels={loadModels}
+          onReloadBots={loadBots}
+          onBotUpdated={(st) => {
+            setBots((prev) => prev.map((b) => (b.id === st.id ? { ...b, ...st } : b)));
+          }}
+          onResetModels={() => setModelsMap({})}
+        />
+        {toastMsg && <div className="toast">{toastMsg}</div>}
+      </>
+    );
+  }
+
+  if (!bootReady && !loginOpen) {
+    return <div className="dsetup-page" />;
+  }
+
   return (
     <>
       <div
@@ -834,6 +874,7 @@ export default function App() {
             }}
             onReopenUnbox={() => {
               setView('chat');
+              setUnboxFullscreen(false);
               setUnboxStep(1);
               setUnboxOpen(true);
             }}

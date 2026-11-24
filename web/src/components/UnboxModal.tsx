@@ -8,6 +8,7 @@ import { MagpieInstallBanner } from './MagpieInstallBanner';
 
 interface UnboxModalProps {
   open: boolean;
+  fullscreen?: boolean;
   initialStep: 1 | 2 | 3;
   bots: BotStatus[];
   settings: SettingsData | null;
@@ -25,6 +26,7 @@ interface UnboxModalProps {
 
 export const UnboxModal: React.FC<UnboxModalProps> = ({
   open,
+  fullscreen = false,
   initialStep,
   bots,
   settings,
@@ -70,6 +72,31 @@ export const UnboxModal: React.FC<UnboxModalProps> = ({
 
   const tailcatTimerRef = useRef<number | null>(null);
   const setupTimersRef = useRef<Record<string, number>>({});
+  const dragArmedRef = useRef(false);
+
+  useEffect(() => {
+    if (!fullscreen || !open) return;
+    const onMove = (e: MouseEvent) => {
+      if (!dragArmedRef.current || !(e.buttons & 1)) {
+        dragArmedRef.current = false;
+        return;
+      }
+      dragArmedRef.current = false;
+      (window as unknown as { webkit?: { messageHandlers?: { external?: { postMessage: (m: string) => void } } } })
+        .webkit?.messageHandlers?.external?.postMessage('wails:drag');
+    };
+    const clearArm = () => {
+      dragArmedRef.current = false;
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', clearArm);
+    window.addEventListener('blur', clearArm);
+    return () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', clearArm);
+      window.removeEventListener('blur', clearArm);
+    };
+  }, [fullscreen, open]);
 
   const clearSetupTimers = () => {
     for (const tid of Object.values(setupTimersRef.current)) {
@@ -381,9 +408,9 @@ export const UnboxModal: React.FC<UnboxModalProps> = ({
         ? loginTask?.logs?.[loginTask.logs.length - 1]
         : '';
 
-    const sub = h.installed
-      ? [h.summary, h.binaryPath || t('ubReady')].filter(Boolean).join(' · ')
-      : h.summary || t('ubNotDetectedHint');
+    const descKey = `ubDesc_${h.id}`;
+    const translatedDesc = t(descKey);
+    const sub = translatedDesc !== descKey ? translatedDesc : h.installed ? t('ubReady') : t('ubNotInstalled');
 
     const toggleInstall = () => {
       setExpandedInstall((prev) => {
@@ -491,8 +518,29 @@ export const UnboxModal: React.FC<UnboxModalProps> = ({
   };
 
   return (
-    <div id="unboxDlg" className={`dlg-wrap${open ? ' open' : ''}`} aria-label={t('ubAria')}>
-      <div className="dlg unbox">
+    <div
+      id="unboxDlg"
+      className={fullscreen ? `dsetup-page unbox-full-page${open ? ' open' : ''}` : `dlg-wrap${open ? ' open' : ''}`}
+      aria-label={t('ubAria')}
+    >
+      {fullscreen && (
+        <div
+          className="dsetup-drag"
+          onMouseDown={(e) => {
+            dragArmedRef.current = e.button === 0 && e.detail === 1;
+          }}
+          onDoubleClick={(e) => {
+            const bridge = (window as unknown as {
+              webkit?: { messageHandlers?: { external?: { postMessage: (m: string) => void } } };
+            }).webkit;
+            if (bridge?.messageHandlers?.external) {
+              e.preventDefault();
+              bridge.messageHandlers.external.postMessage('wails:drag:doubleclick');
+            }
+          }}
+        />
+      )}
+      <div className={fullscreen ? 'dlg unbox unbox-full-card' : 'dlg unbox'}>
         <div className="dlg-h dlg-h-col">
           <div className="unbox-top">
             <div>
