@@ -651,7 +651,7 @@
 .unbox-defaults { gap: 8px; margin-top: 4px; }
 .dsetup-tabs { display: flex; align-items: center; gap: 6px; }
 .unbox-full-page { align-items: center; justify-content: flex-start; overflow-y: auto; padding: 52px 18px 28px; }
-.unbox-full-card { margin: auto 0; width: min(600px, 100%); max-height: calc(100dvh - 80px); box-shadow: none; border: 1px solid var(--s2); transform: none; }
+.unbox-full-card { margin: auto; width: min(600px, 100%); max-height: calc(100dvh - 80px); box-shadow: none; border: 1px solid var(--s2); transform: none; }
 
   /* question cards */
   .q-card {
