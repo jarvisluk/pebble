@@ -125,7 +125,7 @@ struct ConnectView: View {
                 }
             }
         } else {
-            SheetToolbar(actionTitle: hub.t("connect"), loading: submitting) { submit() }
+            SheetToolbar(actionTitle: hub.t("connect"), loading: submitting, action: { submit() })
         }
     }
 

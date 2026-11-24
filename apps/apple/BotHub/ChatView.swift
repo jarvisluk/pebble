@@ -26,7 +26,7 @@ struct ChatView: View {
     @Environment(HubStore.self) private var hub
     @Environment(Router.self) private var router
     @Environment(\.palette) private var p
-    @Environment(\.horizontalSizeClass) private var hsc
+    @Environment(\.hubCompact) private var compact
     var botId: String
     var inDesktopSidebar = false
     var onSelectBot: ((String) -> Void)? = nil
@@ -98,8 +98,7 @@ struct ChatView: View {
 
     var body: some View {
         let pal = p.bot(botId, index, custom: bot?.color)
-        VStack(spacing: 0) {
-            #if os(macOS)
+        let base = VStack(spacing: 0) {
             if inDesktopSidebar {
                 HStack(spacing: 8) {
                     if hub.bots.count > 1 {
@@ -137,10 +136,9 @@ struct ChatView: View {
                 .padding(.vertical, 10)
                 .background(p.card)
                 .overlay(alignment: .bottom) {
-                    Rectangle().fill(p.s2).frame(height: 1)
+                    Rectangle().fill(p.s2).frame(height: 0.5)
                 }
             }
-            #endif
             topBanners(pal)
             thread(pal)
             composer(pal)
@@ -173,19 +171,7 @@ struct ChatView: View {
                 guard case .success(let urls) = result else { return }
                 importFileURLs(urls)
             }
-            #if os(macOS)
-            .onDrop(of: [.fileURL], isTargeted: nil) { providers in
-                for provider in providers {
-                    _ = provider.loadObject(ofClass: URL.self) { url, _ in
-                        guard let url else { return }
-                        Task { @MainActor in
-                            importFileURLs([url])
-                        }
-                    }
-                }
-                return !providers.isEmpty
-            }
-            #endif
+            .hubDropFileURLs { importFileURLs($0) }
             .background(p.page.ignoresSafeArea())
             .sheet(item: $collabPeer) { target in
                 NavigationStack {
@@ -195,59 +181,6 @@ struct ChatView: View {
             .sheet(item: $previewMedia) { media in
                 MediaPreviewSheet(media: media)
             }
-            #if os(iOS)
-            .navigationTitle(name)
-            .inlineNavTitle()
-            .toolbar {
-                ToolbarItem(placement: .principal) {
-                    if inDesktopSidebar && hub.bots.count > 1 {
-                        Menu {
-                            ForEach(hub.bots) { b in
-                                Button {
-                                    onSelectBot?(b.id)
-                                } label: {
-                                    Label(b.displayName, systemImage: b.id == botId ? "checkmark" : "bubble.left")
-                                }
-                            }
-                        } label: {
-                            HStack(spacing: 6) {
-                                titleView
-                                Image(systemName: "chevron.down")
-                                    .font(.system(size: AppFont.caption, weight: .semibold))
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    } else {
-                        titleView
-                    }
-                }
-                ToolbarItemGroup(placement: .primaryAction) {
-                    if inDesktopSidebar {
-                        if let onCloseSidebar {
-                            Button { onCloseSidebar() } label: { Label(hub.t("close"), systemImage: "xmark") }
-                        }
-                    } else {
-                        if !router.detailOpen {
-                            Button { router.openFiles(botId: botId) } label: {
-                                Label(hub.t("workspaceFiles"), systemImage: "folder")
-                            }
-                            Button { router.openDesktop(hub.takeovers.first?.target ?? "local") } label: {
-                                Label(hub.t("remoteDesktop"), systemImage: hub.takeovers.isEmpty ? "display" : "exclamationmark.triangle")
-                            }
-                        }
-                        Button { router.detailOpen.toggle() } label: { Label(hub.t("botDetails"), systemImage: "info.circle") }
-                    }
-                }
-            }
-            #else
-            .modifier(MacChatToolbarModifier(inDesktopSidebar: inDesktopSidebar, titleView: titleView, onOpenFiles: {
-                router.openFiles(botId: botId)
-            }, onOpenDesktop: {
-                router.openDesktop(hub.takeovers.first?.target ?? "local")
-            }, onToggleDetail: {
-                router.detailOpen.toggle()
-            }, hasTakeover: !hub.takeovers.isEmpty))
-            #endif
             .task(id: botId) {
                 hub.setActiveChat(botId)
                 try? await hub.loadMessages(botId)
@@ -264,6 +197,31 @@ struct ChatView: View {
                     router.closeBot()
                 }
             }
+
+        if inDesktopSidebar {
+            base
+        } else {
+            base
+                .navigationTitle("")
+                .inlineNavTitle()
+                .macSeamlessWindowToolbar()
+                .toolbar {
+                    ToolbarItem(placement: .principal) {
+                        titleView
+                    }
+                    ToolbarItemGroup(placement: .hubTrailing) {
+                        if !router.detailOpen {
+                            Button { router.openFiles(botId: botId) } label: {
+                                Label(hub.t("workspaceFiles"), systemImage: "folder")
+                            }
+                            Button { router.openDesktop(hub.takeovers.first?.target ?? "local") } label: {
+                                Label(hub.t("remoteDesktop"), systemImage: hub.takeovers.isEmpty ? "display" : "exclamationmark.triangle")
+                            }
+                        }
+                        Button { router.detailOpen.toggle() } label: { Label(hub.t("botDetails"), systemImage: "info.circle") }
+                    }
+                }
+        }
     }
 
     @ViewBuilder
@@ -332,11 +290,8 @@ struct ChatView: View {
             BotAvatar(id: botId, size: 28, index: index, avatar: bot?.avatar, color: bot?.color, busy: bot?.isBusy ?? false)
             Text(name).font(.system(size: AppFont.cardTitle, weight: .bold)).lineLimit(1)
         }
-        #if os(macOS)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 4)
+        .padding(.horizontal, 6)
         .fixedSize(horizontal: true, vertical: false)
-        #endif
     }
 
     @ViewBuilder
@@ -396,7 +351,7 @@ struct ChatView: View {
                         Color.clear.frame(height: 1).id("bottom")
                     }
                     .frame(maxWidth: 840)
-                    .padding(.horizontal, hsc == .compact ? 10 : 14)
+                    .padding(.horizontal, compact ? 10 : 14)
                     .padding(.vertical, 12)
                     .frame(maxWidth: .infinity)
                 }
@@ -582,7 +537,7 @@ struct ChatView: View {
             composerInputBar(pal)
         }
         .frame(maxWidth: 840)
-        .padding(.horizontal, hsc == .compact ? 10 : 14)
+        .padding(.horizontal, compact ? 10 : 14)
         .padding(.top, 6)
         .padding(.bottom, 8)
         .frame(maxWidth: .infinity)
@@ -623,19 +578,13 @@ struct ChatView: View {
                 .padding(.horizontal, 14)
                 .padding(.vertical, 9)
                 .composerGlassField()
-                #if os(macOS)
-                .onKeyPress(.return, phases: .down) { press in
-                    if press.modifiers.contains(.shift) {
-                        return .ignored
-                    }
+                .hubSubmitOnReturn {
                     if showStop {
                         interrupt()
                     } else {
                         submit()
                     }
-                    return .handled
                 }
-                #endif
                 .onChange(of: input) { _, v in
                     acDismissed = false
                     if v.count > 8000 { input = String(v.prefix(8000)) }
@@ -1372,41 +1321,3 @@ struct QuestionCardView: View {
         }
     }
 }
-
-#if os(macOS)
-private struct MacChatToolbarModifier<TitleView: View>: ViewModifier {
-    @Environment(HubStore.self) private var hub
-    var inDesktopSidebar: Bool
-    var titleView: TitleView
-    var onOpenFiles: () -> Void
-    var onOpenDesktop: () -> Void
-    var onToggleDetail: () -> Void
-    var hasTakeover: Bool
-
-    func body(content: Content) -> some View {
-        if inDesktopSidebar {
-            content
-        } else {
-            content
-                .navigationTitle("")
-                .macSeamlessWindowToolbar()
-                .toolbar {
-                    ToolbarItem(placement: .principal) {
-                        titleView
-                    }
-                    ToolbarItemGroup(placement: .primaryAction) {
-                        Button(action: onOpenFiles) {
-                            Label(hub.t("workspaceFiles"), systemImage: "folder")
-                        }
-                        Button(action: onOpenDesktop) {
-                            Label(hub.t("remoteDesktop"), systemImage: hasTakeover ? "exclamationmark.triangle" : "display")
-                        }
-                        Button(action: onToggleDetail) {
-                            Label(hub.t("botDetails"), systemImage: "info.circle")
-                        }
-                    }
-                }
-        }
-    }
-}
-#endif
