@@ -400,7 +400,7 @@ func (s *HTTPServer) handleIndex(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *HTTPServer) handleHealth(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "pid": os.Getpid()})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (s *HTTPServer) handleEvents(w http.ResponseWriter, r *http.Request) {
@@ -457,7 +457,10 @@ func (s *HTTPServer) serverInfo() protocol.ServerInfo {
 	return protocol.BuildServerInfo(virtualSupported)
 }
 
-func (s *HTTPServer) handleMeta(w http.ResponseWriter, _ *http.Request) {
+func (s *HTTPServer) handleMeta(w http.ResponseWriter, r *http.Request) {
+	if !viaTailcat(r) && !viaTailscale(r) {
+		w.Header().Set("X-Pebble-PID", strconv.Itoa(os.Getpid()))
+	}
 	writeJSON(w, http.StatusOK, s.serverInfo())
 }
 

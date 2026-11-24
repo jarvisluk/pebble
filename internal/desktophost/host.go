@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -312,23 +313,24 @@ func (h *Host) startLocal(ctx context.Context, done chan struct{}) (string, stri
 			return "", "", fmt.Errorf("本机服务退出：%v", err)
 		default:
 		}
-		if r, err := warmClient.Get(base + "/healthz"); err == nil {
-			var hz struct {
-				OK  bool `json:"ok"`
-				PID int  `json:"pid"`
+		if req, rerr := http.NewRequestWithContext(ctx, http.MethodGet, base+"/api/meta", nil); rerr == nil {
+			if cfg.HTTP.APIToken != "" {
+				req.Header.Set("Authorization", "Bearer "+cfg.HTTP.APIToken)
 			}
-			_ = json.NewDecoder(r.Body).Decode(&hz)
-			r.Body.Close()
-			if r.StatusCode == http.StatusOK && (hz.PID == 0 || hz.PID == os.Getpid()) {
-				if req, rerr := http.NewRequestWithContext(ctx, http.MethodGet, base+"/api/settings", nil); rerr == nil {
-					if cfg.HTTP.APIToken != "" {
-						req.Header.Set("Authorization", "Bearer "+cfg.HTTP.APIToken)
+			if r, err := warmClient.Do(req); err == nil {
+				pidHdr := strings.TrimSpace(r.Header.Get("X-Pebble-PID"))
+				r.Body.Close()
+				if r.StatusCode == http.StatusOK && (pidHdr == "" || pidHdr == strconv.Itoa(os.Getpid())) {
+					if sreq, serr := http.NewRequestWithContext(ctx, http.MethodGet, base+"/api/settings", nil); serr == nil {
+						if cfg.HTTP.APIToken != "" {
+							sreq.Header.Set("Authorization", "Bearer "+cfg.HTTP.APIToken)
+						}
+						if sr, serr := warmClient.Do(sreq); serr == nil {
+							sr.Body.Close()
+						}
 					}
-					if sr, serr := warmClient.Do(req); serr == nil {
-						sr.Body.Close()
-					}
+					return base + "/", cfg.HTTP.APIToken, nil
 				}
-				return base + "/", cfg.HTTP.APIToken, nil
 			}
 		}
 	}

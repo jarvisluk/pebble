@@ -246,7 +246,7 @@ func TestSetLocalTokenUpdatesSnapshotAndNotifies(t *testing.T) {
 	}
 }
 
-func TestStartLocalIgnoresForeignPIDHealthz(t *testing.T) {
+func TestStartLocalIgnoresForeignPID(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen: %v", err)
@@ -254,12 +254,17 @@ func TestStartLocalIgnoresForeignPIDHealthz(t *testing.T) {
 	port := ln.Addr().(*net.TCPAddr).Port
 
 	foreign := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/healthz" {
+		switch r.URL.Path {
+		case "/healthz":
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"ok":true,"pid":99999999}`))
-			return
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		case "/api/meta":
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("X-Pebble-PID", "99999999")
+			_, _ = w.Write([]byte(`{"protocolVersion":2}`))
+		default:
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
 		}
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
 	}))
 	foreign.Listener = ln
 	foreign.Start()
@@ -285,6 +290,6 @@ func TestStartLocalIgnoresForeignPIDHealthz(t *testing.T) {
 	_, _, err = host.startLocal(context.Background(), done)
 	<-done
 	if err == nil || !strings.Contains(err.Error(), "address already in use") {
-		t.Fatalf("expected ServeLocal bind error instead of foreign healthz success, got: %v", err)
+		t.Fatalf("expected ServeLocal bind error instead of foreign /api/meta PID success, got: %v", err)
 	}
 }
