@@ -53,11 +53,7 @@ struct SettingsSidebarView: View {
             .safeAreaInset(edge: .top, spacing: 0) {
                 HStack {
                     Button {
-                        if router.settingsDirty {
-                            router.requestLeaveSettings = true
-                        } else {
-                            router.leaveSettings()
-                        }
+                        router.requestSettingsBack()
                     } label: {
                         Image(systemName: "chevron.left")
                             .font(.system(size: AppFont.cardTitle, weight: .medium))
@@ -93,6 +89,8 @@ struct SettingsView: View {
     @Environment(Router.self) private var router
     @Environment(\.palette) private var p
     @Environment(\.openURL) private var openURL
+    @Environment(\.hubCompact) private var compact
+    @Environment(\.dismiss) private var dismiss
 
     var tab: SettingsTab = .general
 
@@ -233,7 +231,20 @@ struct SettingsView: View {
         .hubForm()
         .navigationTitle(hub.t(tab.titleKey))
         .inlineNavTitle()
+        .navigationBarBackButtonHidden(compact && dirty)
         .toolbar {
+            if compact && dirty {
+                ToolbarItem(placement: .hubLeading) {
+                    Button {
+                        router.settingsDirty = dirty
+                        router.requestSettingsBack { dismiss() }
+                    } label: {
+                        Label(hub.t("back"), systemImage: "chevron.backward")
+                            .labelStyle(.iconOnly)
+                    }
+                    .accessibilityLabel(hub.t("back"))
+                }
+            }
             ToolbarItem(placement: .confirmationAction) {
                 if saving {
                     ProgressView().controlSize(.small)
@@ -244,7 +255,7 @@ struct SettingsView: View {
         }
         .alert(hub.t("unsavedTitle"), isPresented: $showUnsavedAlert) {
             Button(hub.t("saveAndLeave")) { save(closeAfter: true) }
-            Button(hub.t("discardChanges"), role: .destructive) { router.leaveSettings() }
+            Button(hub.t("discardChanges"), role: .destructive) { finishLeavingSettings() }
             Button(hub.t("cancel"), role: .cancel) {}
         } message: {
             Text(hub.t("unsavedDesc"))
@@ -314,6 +325,9 @@ struct SettingsView: View {
             sync()
             router.settingsDirty = dirty
         }
+        .onDisappear {
+            router.clearSettingsDirty()
+        }
         .modifier(SettingsSyncModifier(
             defaultHarness: hub.settings?.defaultHarness,
             harnessIds: (hub.settings?.harnesses ?? []).map(\.id),
@@ -350,6 +364,15 @@ struct SettingsView: View {
         }
     }
 
+    private func finishLeavingSettings() {
+        if compact {
+            router.clearSettingsDirty()
+            dismiss()
+        } else {
+            router.leaveSettings()
+        }
+    }
+
     private func save(closeAfter: Bool = false) {
         error = ""; saved = ""; saving = true
         Task {
@@ -361,7 +384,7 @@ struct SettingsView: View {
                 drafts = [:]
                 sync()
                 saved = hub.t("settingsSaved")
-                if closeAfter { router.leaveSettings() }
+                if closeAfter { finishLeavingSettings() }
             } catch { self.error = errText(error, hub.t("saveFailed")) }
             saving = false
         }

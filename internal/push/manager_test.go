@@ -44,7 +44,7 @@ func TestManagerLiveActivityThrottleAndTakeover(t *testing.T) {
 		DeviceID:               "iphone-1",
 		Platform:               "ios",
 		Env:                    "sandbox",
-		BundleID:               "local.bothub.mobile",
+		BundleID:               "local.pebble.mobile",
 		PushToken:              "push-tok",
 		LiveActivityStartToken: "start-tok",
 		Enabled:                true,

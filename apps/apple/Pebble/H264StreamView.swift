@@ -368,7 +368,7 @@ final class H264StreamController {
 }
 
 private final class H264DecoderWorker: @unchecked Sendable {
-    private let queue = DispatchQueue(label: "bothub.h264.decode", qos: .userInteractive)
+    private let queue = DispatchQueue(label: "pebble.h264.decode", qos: .userInteractive)
     private let counterLock = NSLock()
     private var frameCounter = 0
 

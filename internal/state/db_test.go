@@ -99,7 +99,7 @@ func TestPushDeviceStore(t *testing.T) {
 		DeviceID:               "dev-1",
 		Platform:               "ios",
 		Env:                    "sandbox",
-		BundleID:               "local.bothub.mobile",
+		BundleID:               "local.pebble.mobile",
 		PushToken:              "tok-push-1",
 		LiveActivityStartToken: "tok-start-1",
 		Enabled:                true,

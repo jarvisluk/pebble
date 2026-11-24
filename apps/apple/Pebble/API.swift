@@ -1,7 +1,7 @@
 import Foundation
 import Security
 #if os(iOS)
-import BotHubTunnelC
+import PebbleTunnelC
 #endif
 
 struct HubError: LocalizedError {

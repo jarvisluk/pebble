@@ -4,7 +4,7 @@
 <dict>
   <key>CFBundleName</key><string>Pebble</string>
   <key>CFBundleDisplayName</key><string>Pebble</string>
-  <key>CFBundleIdentifier</key><string>local.bothub.desktop</string>
+  <key>CFBundleIdentifier</key><string>local.pebble.desktop</string>
   <key>CFBundleExecutable</key><string>bot-hub-desktop</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>

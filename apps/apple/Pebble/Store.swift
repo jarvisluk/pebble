@@ -1055,7 +1055,7 @@ final class HubStore {
             st = try await callAPI("/api/magpie/install")
         }
         if st.state == "error" {
-            throw NSError(domain: "BotHub", code: 400, userInfo: [NSLocalizedDescriptionKey: st.error ?? "Magpie install failed"])
+            throw NSError(domain: "Pebble", code: 400, userInfo: [NSLocalizedDescriptionKey: st.error ?? "Magpie install failed"])
         }
         _ = try await loadSettings()
         resetModelsCache()

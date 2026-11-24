@@ -75,6 +75,7 @@ class PebbleRouter {
     fun openBot(id: String) {
         if (sheet is SheetRoute.BotInfo) sheet = null
         inSettings = false
+        clearSettingsDirty()
         selectedBotId = id
     }
 
@@ -89,10 +90,29 @@ class PebbleRouter {
         settingsTab = if (compact) null else SettingsTab.GENERAL
     }
 
-    fun leaveSettings() {
-        inSettings = false
+    fun clearSettingsDirty() {
         settingsDirty = false
         requestLeaveSettings = false
+    }
+
+    fun leaveSettingsTab() {
+        settingsTab = null
+        clearSettingsDirty()
+    }
+
+    fun requestSettingsBack(compact: Boolean) {
+        if (compact && settingsTab != null) {
+            if (settingsDirty) requestLeaveSettings = true
+            else leaveSettingsTab()
+        } else {
+            if (settingsDirty) requestLeaveSettings = true
+            else leaveSettings()
+        }
+    }
+
+    fun leaveSettings() {
+        inSettings = false
+        clearSettingsDirty()
     }
 
     fun openDesktop(target: String = "local") {
@@ -173,15 +193,7 @@ fun RootScaffold(
                 router.desktop != null -> router.desktop = null
                 router.sheet != null -> router.sheet = null
                 router.detailOpen -> router.detailOpen = false
-                router.inSettings -> {
-                    if (compact && router.settingsTab != null) {
-                        if (router.settingsDirty) router.requestLeaveSettings = true
-                        else router.settingsTab = null
-                    } else {
-                        if (router.settingsDirty) router.requestLeaveSettings = true
-                        else router.leaveSettings()
-                    }
-                }
+                router.inSettings -> router.requestSettingsBack(compact)
                 compact && router.selectedBotId != null -> router.closeBot()
             }
         }
@@ -203,7 +215,7 @@ fun RootScaffold(
                             compact = true,
                             selectedTab = null,
                             onSelectTab = { router.settingsTab = it },
-                            onBack = { router.leaveSettings() },
+                            onBack = { router.requestSettingsBack(compact = true) },
                         )
                     } else {
                         SettingsDetailScreen(
@@ -213,14 +225,8 @@ fun RootScaffold(
                             requestLeave = router.requestLeaveSettings,
                             onClearRequestLeave = { router.requestLeaveSettings = false },
                             onDirtyChanged = { router.settingsDirty = it },
-                            onBack = {
-                                if (router.settingsDirty) router.requestLeaveSettings = true
-                                else router.settingsTab = null
-                            },
-                            onLeaveSettings = {
-                                router.leaveSettings()
-                                router.settingsTab = null
-                            },
+                            onBack = { router.requestSettingsBack(compact = true) },
+                            onLeaveSettings = { router.leaveSettingsTab() },
                             onOpenConnect = { router.sheet = SheetRoute.Connect(false) },
                             onOpenDevices = { router.sheet = SheetRoute.Devices },
                             onOpenCreateBot = { router.sheet = SheetRoute.CreateBot },
@@ -272,10 +278,7 @@ fun RootScaffold(
                             compact = false,
                             selectedTab = router.settingsTab ?: SettingsTab.GENERAL,
                             onSelectTab = { router.settingsTab = it },
-                            onBack = {
-                                if (router.settingsDirty) router.requestLeaveSettings = true
-                                else router.leaveSettings()
-                            },
+                            onBack = { router.requestSettingsBack(compact = false) },
                         )
                     }
                     Box(modifier = Modifier.width(0.5.dp).fillMaxHeight().background(p.s2))
@@ -287,10 +290,7 @@ fun RootScaffold(
                             requestLeave = router.requestLeaveSettings,
                             onClearRequestLeave = { router.requestLeaveSettings = false },
                             onDirtyChanged = { router.settingsDirty = it },
-                            onBack = {
-                                if (router.settingsDirty) router.requestLeaveSettings = true
-                                else router.leaveSettings()
-                            },
+                            onBack = { router.requestSettingsBack(compact = false) },
                             onLeaveSettings = { router.leaveSettings() },
                             onOpenConnect = { router.sheet = SheetRoute.Connect(false) },
                             onOpenDevices = { router.sheet = SheetRoute.Devices },

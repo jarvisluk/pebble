@@ -520,7 +520,7 @@ func (m *Manager) pushLiveActivity(activityKey string, attrs LiveActivityAttribu
 			Timestamp:    nowUnix,
 		}
 		if sendEvent == "start" {
-			aps.AttributesType = "BotHubActivityAttributes"
+			aps.AttributesType = "PebbleActivityAttributes"
 			aps.Attributes = &attrs
 		}
 		if sendEvent == "end" {

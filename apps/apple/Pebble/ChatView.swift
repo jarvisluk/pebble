@@ -993,7 +993,7 @@ struct FileAttachmentRow: View {
                     try data.write(to: dst, options: .atomic)
                 }
                 #else
-                let dir = FileManager.default.temporaryDirectory.appendingPathComponent("bothub-files-\(file.id)", isDirectory: true)
+                let dir = FileManager.default.temporaryDirectory.appendingPathComponent("pebble-files-\(file.id)", isDirectory: true)
                 try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
                 let dst = dir.appendingPathComponent(fname)
                 try data.write(to: dst, options: .atomic)
