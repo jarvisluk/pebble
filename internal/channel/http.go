@@ -130,6 +130,7 @@ func NewHTTPServer(h *hub.Hub, cfg config.HTTPConfig) *HTTPServer {
 	mux.HandleFunc("GET /api/bots/{id}/routine-runs", s.handleListRoutineRuns)
 	mux.HandleFunc("GET /api/settings", s.handleSettings)
 	mux.HandleFunc("PUT /api/settings", s.handlePutSettings)
+	mux.HandleFunc("POST /api/desktop/reset", s.handleDesktopReset)
 	mux.HandleFunc("POST /api/push/register", s.handlePushRegister)
 	mux.HandleFunc("POST /api/push/activity-token", s.handlePushActivityToken)
 	mux.HandleFunc("DELETE /api/push/devices/{deviceId}", s.handlePushDeleteDevice)
@@ -777,6 +778,27 @@ type settingsBody struct {
 	OnboardingCompleted *bool             `json:"onboardingCompleted,omitempty"`
 }
 
+// DesktopResetFunc is registered by the native desktop host (bot-hub-desktop)
+// so the onboarding wizard can navigate back to the mode selector page.
+var DesktopResetFunc func()
+
+func (s *HTTPServer) handleDesktopReset(w http.ResponseWriter, r *http.Request) {
+	if DesktopResetFunc == nil {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "desktop host unavailable"})
+		return
+	}
+	host := r.Host
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	if host != "127.0.0.1" && host != "localhost" && host != "::1" {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "loopback only"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	DesktopResetFunc()
+}
+
 func (s *HTTPServer) handleSettings(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
@@ -831,8 +853,9 @@ func (s *HTTPServer) handleSettings(w http.ResponseWriter, r *http.Request) {
 		"defaultHarness": s.hub.DefaultHarness(),
 		"defaultModel":   defaultModel,
 		"defaultModels":  defaultModels,
-		"sharedUserMd":   s.hub.SharedUserMD(),
-		"harnesses":      harnesses,
+		"sharedUserMd":        s.hub.SharedUserMD(),
+		"harnesses":           harnesses,
+		"canResetDesktopMode": DesktopResetFunc != nil,
 		"onboarding": map[string]any{
 			"completed":          completed,
 			"needsSetup":         !completed && !hasConversation,

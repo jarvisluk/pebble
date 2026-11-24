@@ -29,6 +29,7 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/events"
 	"github.com/wailsapp/wails/v3/pkg/icons"
 
+	"bot-hub/internal/channel"
 	"bot-hub/internal/cli"
 	"bot-hub/internal/config"
 	"bot-hub/internal/harness"
@@ -63,6 +64,7 @@ func main() {
 	}
 	d := &desktop{dir: dir}
 	d.load()
+	channel.DesktopResetFunc = func() { go d.reset() }
 	d.run()
 }
 

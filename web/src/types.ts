@@ -126,6 +126,7 @@ export interface SettingsData {
   sharedUserMd?: string;
   desktopHarness?: string;
   desktopModel?: string;
+  canResetDesktopMode?: boolean;
   harnesses: HarnessInfo[];
 }
 

@@ -46,6 +46,7 @@ export const UnboxModal: React.FC<UnboxModalProps> = ({
   const t = (k: string, vars?: Record<string, string | number>) => translate(lang, k, vars);
 
   const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [stepDir, setStepDir] = useState<'enter' | 'next' | 'prev'>('enter');
   const [selectedHarness, setSelectedHarness] = useState('opencode');
   const [expandedInstall, setExpandedInstall] = useState<Set<string>>(() => new Set());
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -131,6 +132,7 @@ export const UnboxModal: React.FC<UnboxModalProps> = ({
       return;
     }
     setStep(initialStep);
+    setStepDir('enter');
     setErr('');
     setProvDismissed(false);
     setAddProvOpen(false);
@@ -389,11 +391,13 @@ export const UnboxModal: React.FC<UnboxModalProps> = ({
       if (step === 1) {
         await persistHarness();
         await persistModelAndComplete(false);
+        setStepDir('next');
         setStep(2);
         return;
       }
       if (step === 2) {
         await persistModelAndComplete(false);
+        setStepDir('next');
         setStep(3);
         return;
       }
@@ -1059,34 +1063,46 @@ export const UnboxModal: React.FC<UnboxModalProps> = ({
         />
         <div className="unbox-full-scroll">
           <main className="unbox-full-main">
-            <header className="unbox-full-head">
-              <div className="unbox-top">
-                <div className="unbox-guide-lead">
-                  <BotAvatar id={bots[0]?.id || 'assistant'} bots={bots} className="pebble-guide-av" busy={busy} />
-                  <div>
-                    <h1 id="ubTitle">{headerMeta.title}</h1>
-                    <p id="ubSub">{headerMeta.sub}</p>
+            <div key={step} className={`unbox-step-pane is-${stepDir}`}>
+              <header className="unbox-full-head">
+                <div className="unbox-top">
+                  <div className="unbox-guide-lead">
+                    <BotAvatar id="assistant" bots={[]} color="#7aaa98" className="pebble-guide-av" busy={busy} />
+                    <div>
+                      <h1 id="ubTitle">{headerMeta.title}</h1>
+                      <p id="ubSub">{headerMeta.sub}</p>
+                    </div>
                   </div>
+                  <button type="button" id="ubSkipTop" className="link-btn" onClick={() => void handleSkip()}>
+                    {t('ubSkip')}
+                  </button>
                 </div>
-                <button type="button" id="ubSkipTop" className="link-btn" onClick={() => void handleSkip()}>
-                  {t('ubSkip')}
-                </button>
-              </div>
-            </header>
-            <section className="unbox-full-body">{stepBody}</section>
+              </header>
+              <section className="unbox-full-body">{stepBody}</section>
+            </div>
           </main>
         </div>
         <footer className="unbox-full-foot-wrap">
           <div className="unbox-full-foot">
             <div className="unbox-full-foot-l">
-              {step > 1 && (
+              {(step > 1 || Boolean(settings?.canResetDesktopMode)) && (
                 <button
                   type="button"
                   id="ubPrev"
                   className="btn"
+                  disabled={busy}
                   onClick={() => {
                     setErr('');
-                    setStep((s) => (s > 1 ? ((s - 1) as 1 | 2 | 3) : s));
+                    if (step > 1) {
+                      setStepDir('prev');
+                      setStep((s) => (s > 1 ? ((s - 1) as 1 | 2 | 3) : s));
+                    } else if (settings?.canResetDesktopMode) {
+                      setBusy(true);
+                      void api('/api/desktop/reset', { method: 'POST' }).catch((e) => {
+                        setBusy(false);
+                        if (e instanceof Error && e.message !== 'unauthorized') setErr(e.message);
+                      });
+                    }
                   }}
                 >
                   {t('ubPrev')}

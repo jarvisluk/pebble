@@ -41,7 +41,7 @@ struct ConnectView: View {
     }
 
     var body: some View {
-        Group {
+        ZStack {
             if isConnectingGate {
                 VStack(spacing: 14) {
                     ProgressView(hub.t("connectingHost"))
@@ -50,17 +50,28 @@ struct ConnectView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(p.page)
+                .transition(.opacity)
             } else if showFreshHero {
                 freshHeroContent
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(p.page)
+                    .transition(.asymmetric(
+                        insertion: .move(edge: .leading).combined(with: .opacity),
+                        removal: .move(edge: .leading).combined(with: .opacity)
+                    ))
             } else {
                 formContent
                     .frame(maxWidth: isGate ? 560 : .infinity)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(p.page)
+                    .transition(.asymmetric(
+                        insertion: .move(edge: .trailing).combined(with: .opacity),
+                        removal: .move(edge: .trailing).combined(with: .opacity)
+                    ))
             }
         }
+        .animation(.spring(response: 0.34, dampingFraction: 0.88), value: showFreshHero)
+        .animation(.easeOut(duration: 0.22), value: isConnectingGate)
         .navigationTitle(showFreshHero ? "" : (isGate ? "Pebble" : hub.t("connectHost")))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { connectToolbar }
@@ -116,99 +127,106 @@ struct ConnectView: View {
     }
 
     private var freshHeroContent: some View {
-        ScrollView {
-            VStack(spacing: 0) {
-                Spacer(minLength: 48)
+        GeometryReader { geo in
+            ScrollView {
+                VStack(spacing: 0) {
+                    Spacer(minLength: 24)
 
-                VStack(spacing: 14) {
-                    BotAvatar(id: "assistant", size: 84, busy: submitting)
-                    Text("Pebble")
-                        .font(.system(size: 20, weight: .bold))
-                        .foregroundStyle(p.text)
-                    Text(hub.t("onboardHeroSub"))
-                        .font(.system(size: 14))
-                        .foregroundStyle(p.text2)
-                        .multilineTextAlignment(.center)
-                }
-                .padding(.bottom, 28)
-
-                if scanning {
-                    QRScanner { onScanned($0) }
-                        .frame(height: 240)
-                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                        .padding(.bottom, 16)
-                }
-
-                VStack(spacing: 10) {
-                    Button {
-                        toggleScanner()
-                    } label: {
-                        HStack(spacing: 8) {
-                            Image(systemName: "qrcode.viewfinder")
-                                .font(.system(size: 16, weight: .semibold))
-                            Text(scanning ? hub.t("collapse") : hub.t("scanConnect"))
-                                .font(.system(size: 15, weight: .semibold))
-                        }
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 48)
-                        .background(p.accent, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                        .foregroundStyle(p.card)
+                    VStack(spacing: 14) {
+                        BotAvatar(id: "assistant", size: 84, color: "#7aaa98", busy: submitting)
+                        Text("Pebble")
+                            .font(.system(size: 20, weight: .bold))
+                            .foregroundStyle(p.text)
+                        Text(hub.t("onboardHeroSub"))
+                            .font(.system(size: 14))
+                            .foregroundStyle(p.text2)
+                            .multilineTextAlignment(.center)
                     }
-                    .buttonStyle(.plain)
+                    .padding(.bottom, 28)
 
-                    Button {
-                        scanning = false
-                        withAnimation { manualOpen = true }
-                    } label: {
-                        Text(hub.t("manualPairingBtn"))
-                            .font(.system(size: 15, weight: .medium))
+                    if scanning {
+                        QRScanner { onScanned($0) }
+                            .frame(height: 240)
+                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                            .padding(.bottom, 16)
+                            .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                    }
+
+                    VStack(spacing: 10) {
+                        Button {
+                            withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
+                                toggleScanner()
+                            }
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "qrcode.viewfinder")
+                                    .font(.system(size: 16, weight: .semibold))
+                                Text(scanning ? hub.t("collapse") : hub.t("scanConnect"))
+                                    .font(.system(size: 15, weight: .semibold))
+                            }
                             .frame(maxWidth: .infinity)
                             .frame(height: 48)
-                            .background(p.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                            .foregroundStyle(p.text)
-                    }
-                    .buttonStyle(.plain)
-                }
-
-                if !err.isEmpty {
-                    Text(err)
-                        .font(.system(size: 13))
-                        .foregroundStyle(p.danger)
-                        .multilineTextAlignment(.center)
-                        .padding(.top, 12)
-                } else if !infoHint.isEmpty {
-                    Text(infoHint)
-                        .font(.system(size: 13))
-                        .foregroundStyle(p.sageInk)
-                        .multilineTextAlignment(.center)
-                        .padding(.top, 12)
-                }
-
-                Spacer(minLength: 40)
-
-                VStack(spacing: 6) {
-                    Text(hub.t("noDesktopYet"))
-                        .font(.system(size: 12))
-                        .foregroundStyle(p.mute)
-                    HStack(spacing: 10) {
-                        Button("macOS") { openURL(desktopDownloadMacURL) }
-                        Text("·").foregroundStyle(p.mute)
-                        Button("Windows") { openURL(desktopDownloadWinURL) }
-                        Text("·").foregroundStyle(p.mute)
-                        ShareLink(item: desktopDownloadMacURL) {
-                            Text(hub.t("sendToComputer"))
+                            .background(p.accent, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .foregroundStyle(p.card)
                         }
+                        .buttonStyle(.plain)
+
+                        Button {
+                            scanning = false
+                            withAnimation(.spring(response: 0.34, dampingFraction: 0.88)) {
+                                manualOpen = true
+                            }
+                        } label: {
+                            Text(hub.t("manualPairingBtn"))
+                                .font(.system(size: 15, weight: .medium))
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 48)
+                                .background(p.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                .foregroundStyle(p.text)
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(p.text2)
-                    .buttonStyle(.plain)
+
+                    if !err.isEmpty {
+                        Text(err)
+                            .font(.system(size: 13))
+                            .foregroundStyle(p.danger)
+                            .multilineTextAlignment(.center)
+                            .padding(.top, 12)
+                    } else if !infoHint.isEmpty {
+                        Text(infoHint)
+                            .font(.system(size: 13))
+                            .foregroundStyle(p.sageInk)
+                            .multilineTextAlignment(.center)
+                            .padding(.top, 12)
+                    }
+
+                    Spacer(minLength: 24)
+
+                    VStack(spacing: 6) {
+                        Text(hub.t("noDesktopYet"))
+                            .font(.system(size: 12))
+                            .foregroundStyle(p.mute)
+                        HStack(spacing: 10) {
+                            Button("macOS") { openURL(desktopDownloadMacURL) }
+                            Text("·").foregroundStyle(p.mute)
+                            Button("Windows") { openURL(desktopDownloadWinURL) }
+                            Text("·").foregroundStyle(p.mute)
+                            ShareLink(item: desktopDownloadMacURL) {
+                                Text(hub.t("sendToComputer"))
+                            }
+                        }
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(p.text2)
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.top, 12)
+                    .padding(.bottom, 20)
                 }
-                .padding(.top, 16)
-                .padding(.bottom, 24)
+                .frame(maxWidth: 360)
+                .padding(.horizontal, 24)
+                .frame(maxWidth: .infinity, minHeight: geo.size.height)
             }
-            .frame(maxWidth: 360)
-            .padding(.horizontal, 24)
-            .frame(maxWidth: .infinity, minHeight: 540)
         }
     }
 

@@ -297,7 +297,7 @@ export default function DesktopSetup() {
       />
       <main className="dsetup-main">
         <header className="dsetup-head dsetup-hero">
-          <BotAvatar id="assistant" bots={[]} className="pebble-guide-av-lg" busy={busy} />
+          <BotAvatar id="assistant" bots={[]} color="#7aaa98" className="pebble-guide-av-lg" busy={busy} />
           <h1>Pebble</h1>
           <p className="dsetup-sub">{t('desktopSetupSub')}</p>
         </header>

@@ -976,14 +976,52 @@
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 52px 24px 28px;
+  display: flex;
+  flex-direction: column;
+  padding: 52px 24px 32px;
 }
 .unbox-full-main {
   width: min(840px, 100%);
-  margin: 0 auto;
+  margin: auto;
+  display: flex;
+  flex-direction: column;
+}
+.unbox-step-pane {
   display: flex;
   flex-direction: column;
   gap: 20px;
+}
+.unbox-step-pane.is-enter {
+  animation: unboxEnter var(--dur-panel) var(--ease-out) both;
+}
+.unbox-step-pane.is-next {
+  animation: unboxSlideNext var(--dur-panel) var(--ease-out) both;
+}
+.unbox-step-pane.is-prev {
+  animation: unboxSlidePrev var(--dur-panel) var(--ease-out) both;
+}
+.dsetup-main {
+  animation: unboxEnter var(--dur-panel) var(--ease-out) both;
+}
+@keyframes unboxEnter {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes unboxSlideNext {
+  from { opacity: 0; transform: translateX(28px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+@keyframes unboxSlidePrev {
+  from { opacity: 0; transform: translateX(-28px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .unbox-step-pane.is-enter,
+  .unbox-step-pane.is-next,
+  .unbox-step-pane.is-prev,
+  .dsetup-main {
+    animation: none;
+  }
 }
 .unbox-full-head {
   padding: 0 2px;

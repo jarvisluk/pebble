@@ -638,6 +638,7 @@ func EnsureStarterConfig(projectRoot, preferredHarness string) (string, bool, er
 				ID:          "assistant",
 				Name:        "Pebble",
 				Description: "日常问答、信息整理与任务协助",
+				Color:       "#7aaa98",
 				Workspace:   "./workspaces/assistant",
 				Harness:     hKind,
 			},

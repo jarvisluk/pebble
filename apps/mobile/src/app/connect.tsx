@@ -5,6 +5,8 @@ import { router, useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Animated,
+  Easing,
   KeyboardAvoidingView,
   Linking,
   Platform,
@@ -67,6 +69,24 @@ export function ConnectContent({ standalone = false }: { standalone?: boolean })
   const [manualOpen, setManualOpen] = useState(false);
   const isFreshOnboarding = standalone && servers.length === 0 && !activeServer;
   const showFreshHero = isFreshOnboarding && !manualOpen;
+
+  const pageAnim = useRef(new Animated.Value(1)).current;
+  const pageDirRef = useRef<1 | -1>(1);
+  const firstRenderRef = useRef(true);
+
+  useEffect(() => {
+    if (firstRenderRef.current) {
+      firstRenderRef.current = false;
+      return;
+    }
+    pageAnim.setValue(0);
+    Animated.timing(pageAnim, {
+      toValue: 1,
+      duration: 240,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [showFreshHero, pageAnim]);
 
   const {
     address: paramAddr,
@@ -292,7 +312,7 @@ export function ConnectContent({ standalone = false }: { standalone?: boolean })
     >
       <View style={styles.heroInner}>
         <View style={styles.heroTop}>
-          <BotAvatar id="assistant" size={84} busy={submitting} />
+          <BotAvatar id="assistant" size={84} color="#7aaa98" busy={submitting} />
           <Text style={[styles.heroTitle, { color: theme.text }]}>Pebble</Text>
           <Text style={[styles.heroSub, { color: theme.text2 }]}>{t('onboardHeroSub')}</Text>
         </View>
@@ -323,6 +343,7 @@ export function ConnectContent({ standalone = false }: { standalone?: boolean })
           <Pressable
             onPress={() => {
               setScanning(false);
+              pageDirRef.current = 1;
               setManualOpen(true);
             }}
             style={[styles.heroSecondaryBtn, { backgroundColor: theme.card }]}
@@ -385,7 +406,10 @@ export function ConnectContent({ standalone = false }: { standalone?: boolean })
                 </View>
                 {isFreshOnboarding && manualOpen && (
                   <Pressable
-                    onPress={() => setManualOpen(false)}
+                    onPress={() => {
+                      pageDirRef.current = -1;
+                      setManualOpen(false);
+                    }}
                     style={[styles.qrBtn, { backgroundColor: theme.card }]}
                   >
                     <Text style={[styles.qrBtnTxt, { color: theme.text }]}>{t('backBtn')}</Text>
@@ -751,10 +775,31 @@ export function ConnectContent({ standalone = false }: { standalone?: boolean })
     </KeyboardAvoidingView>
   );
 
+  const animatedContent = (
+    <Animated.View
+      style={[
+        styles.flex,
+        {
+          opacity: pageAnim,
+          transform: [
+            {
+              translateX: pageAnim.interpolate({
+                inputRange: [0, 1],
+                outputRange: [pageDirRef.current * 26, 0],
+              }),
+            },
+          ],
+        },
+      ]}
+    >
+      {content}
+    </Animated.View>
+  );
+
   if (standalone) {
     return (
       <SafeAreaView style={[styles.root, { backgroundColor: theme.page }]} edges={['top', 'left', 'right', 'bottom']}>
-        {content}
+        {animatedContent}
       </SafeAreaView>
     );
   }
@@ -762,7 +807,7 @@ export function ConnectContent({ standalone = false }: { standalone?: boolean })
   return (
     <View style={[styles.root, { backgroundColor: theme.page }]}>
       <ModalHeader title={t('connectHost')} onClose={closeSheet} />
-      {content}
+      {animatedContent}
     </View>
   );
 }
