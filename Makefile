@@ -1,10 +1,15 @@
-.PHONY: web build desktop app app-wails serve chat status test ios-tunnel android-tunnel android-native android-native-debug
+.PHONY: web build desktop app app-fast app-wails serve chat status test ios-tunnel android-tunnel android-native android-native-debug
+
+GO_LDFLAGS ?= -s -w
+APP_CONFIG ?= Release
+UNIVERSAL ?= 0
+DSYM ?= 0
 
 web:
 	cd web && npm run build
 
 build:
-	go build -o bin/bot-hub ./cmd/bot-hub
+	go build -ldflags="$(GO_LDFLAGS)" -o bin/bot-hub ./cmd/bot-hub
 
 # Desktop app (Wails, cgo): used for Windows/Linux or legacy macOS packaging.
 desktop:
@@ -15,10 +20,29 @@ RES_BIN = $(APP)/Contents/Resources/bin
 CODESIGN_IDENTITY ?=
 
 # Native SwiftUI macOS app (PebbleMac target + Go sidecar bot-hub).
-app: build
-	xcodebuild -project apps/apple/BotHub.xcodeproj -scheme PebbleMac -configuration Release -derivedDataPath build/apple-mac CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO build
+app:
+	@set -e; \
+	arch=$$(uname -m); \
+	dest_args=""; arch_args=""; dsym_args=""; \
+	if [ "$(UNIVERSAL)" != "1" ]; then \
+		dest_args="-destination platform=macOS,arch=$$arch"; \
+		arch_args="ONLY_ACTIVE_ARCH=YES"; \
+	fi; \
+	if [ "$(DSYM)" != "1" ]; then \
+		dsym_args="DEBUG_INFORMATION_FORMAT=dwarf"; \
+	fi; \
+	mkdir -p bin; \
+	go build -ldflags="$(GO_LDFLAGS)" -o bin/bot-hub ./cmd/bot-hub & \
+	go_pid=$$!; \
+	xcodebuild -project apps/apple/BotHub.xcodeproj -scheme PebbleMac -configuration "$(APP_CONFIG)" -derivedDataPath build/apple-mac \
+		$$dest_args $$arch_args $$dsym_args \
+		COMPILATION_CACHE_ENABLE_CACHING=YES \
+		CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO build & \
+	xcode_pid=$$!; \
+	wait "$$go_pid"; \
+	wait "$$xcode_pid"
 	rm -rf "$(APP)" && mkdir -p bin
-	cp -R "build/apple-mac/Build/Products/Release/Pebble.app" "$(APP)"
+	cp -R "build/apple-mac/Build/Products/$(APP_CONFIG)/Pebble.app" "$(APP)"
 	mkdir -p "$(RES_BIN)"
 	@if [ ! -f "$(APP)/Contents/Resources/AppIcon.icns" ] && [ -f build/darwin/AppIcon.icns ]; then \
 		cp build/darwin/AppIcon.icns "$(APP)/Contents/Resources/AppIcon.icns"; \
@@ -71,6 +95,9 @@ app: build
 	done; \
 	codesign --force --sign "$$IDENTITY" --entitlements apps/apple/BotHub/BotHubMac.entitlements "$(APP)"
 	codesign --verify --deep --strict "$(APP)"
+
+app-fast:
+	$(MAKE) app APP_CONFIG=Debug
 
 app-wails: desktop
 	rm -rf "$(APP)" && mkdir -p "$(APP)/Contents/MacOS" "$(RES_BIN)"
