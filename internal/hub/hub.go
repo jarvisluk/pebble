@@ -53,6 +53,9 @@ var ErrForbidden = errors.New("forbidden")
 // ErrQuestionNotFound indicates that the requested pending question does not exist or has already been settled.
 var ErrQuestionNotFound = errors.New("question not found")
 
+// ErrApprovalNotFound indicates that the requested pending approval does not exist or has already been settled.
+var ErrApprovalNotFound = errors.New("approval not found")
+
 // PendingQuestion describes an interactive question card awaiting user input.
 type PendingQuestion struct {
 	ID        string                  `json:"id"`
@@ -66,6 +69,26 @@ type PendingQuestion struct {
 type pendingQuestionEntry struct {
 	item PendingQuestion
 	ch   chan harness.QuestionResponse
+}
+
+// PendingApproval describes a pending tool execution approval awaiting user decision.
+type PendingApproval struct {
+	ID        string                     `json:"id"`
+	BotID     string                     `json:"botId"`
+	BotName   string                     `json:"botName,omitempty"`
+	ToolName  string                     `json:"toolName"`
+	Kind      string                     `json:"kind"`
+	Title     string                     `json:"title,omitempty"`
+	Summary   string                     `json:"summary,omitempty"`
+	RawInput  map[string]any             `json:"rawInput,omitempty"`
+	Options   []harness.PermissionOption `json:"options,omitempty"`
+	Mode      string                     `json:"mode,omitempty"`
+	CreatedAt string                     `json:"createdAt"`
+}
+
+type pendingApprovalEntry struct {
+	item PendingApproval
+	ch   chan harness.PermissionResponse
 }
 
 type SendOptions struct {
@@ -95,13 +118,14 @@ type MentionCandidate struct {
 }
 
 type IsolatedOptions struct {
-	Source     string
-	Harness    string
-	Model      string
-	MCPRole    string
-	TimeoutSec int
-	ExtraEnv   map[string]string
-	OnToolUse  func(toolName string)
+	Source         string
+	Harness        string
+	Model          string
+	PermissionMode string
+	MCPRole        string
+	TimeoutSec     int
+	ExtraEnv       map[string]string
+	OnToolUse      func(toolName string)
 }
 
 type DesktopTaskRequest struct {
@@ -124,6 +148,7 @@ type RoutinePatch struct {
 	Prompt             *string `json:"prompt,omitempty"`
 	Model              *string `json:"model,omitempty"`
 	MainDelivery       *string `json:"mainDelivery,omitempty"`
+	PermissionMode     *string `json:"permissionMode,omitempty"`
 	Enabled            *bool   `json:"enabled,omitempty"`
 }
 
@@ -141,6 +166,7 @@ type BotStatus struct {
 	PrivateSessions  bool                 `json:"privateSessions,omitempty"`
 	DesktopTarget    string               `json:"desktopTarget,omitempty"`
 	BrowserMode      string               `json:"browserMode,omitempty"`
+	PermissionMode   string               `json:"permissionMode,omitempty"`
 	ArchivedSessions int                  `json:"archivedSessions,omitempty"`
 	Busy             bool                 `json:"busy"`
 	Queued           int64                `json:"queued"`
@@ -164,6 +190,7 @@ type CreateBotRequest struct {
 	PrivateSessions bool   `json:"privateSessions,omitempty"`
 	DesktopTarget   string `json:"desktopTarget,omitempty"`
 	BrowserMode     string `json:"browserMode,omitempty"`
+	PermissionMode  string `json:"permissionMode,omitempty"`
 }
 
 // BotUpdate changes a bot's settings; nil fields stay as they are. An empty
@@ -179,6 +206,7 @@ type BotUpdate struct {
 	PrivateSessions *bool   `json:"privateSessions,omitempty"`
 	DesktopTarget   *string `json:"desktopTarget,omitempty"`
 	BrowserMode     *string `json:"browserMode,omitempty"`
+	PermissionMode  *string `json:"permissionMode,omitempty"`
 }
 
 type RotateResult struct {
@@ -189,19 +217,20 @@ type RotateResult struct {
 
 // HarnessInfo describes one available harness.
 type HarnessInfo struct {
-	ID             string                     `json:"id"`
-	Label          string                     `json:"label"`
-	DefaultModel   string                     `json:"defaultModel"`
-	Installed      bool                       `json:"installed"`
-	BinaryPath     string                     `json:"binaryPath,omitempty"`
-	AuthStatus     string                     `json:"authStatus,omitempty"` // "ready" | "needs_login" | "unknown"
-	AuthDetail     string                     `json:"authDetail,omitempty"`
-	RequiresLogin  bool                       `json:"requiresLogin,omitempty"`
-	CanAutoInstall bool                       `json:"canAutoInstall,omitempty"`
-	Category       string                     `json:"category,omitempty"` // "recommended" | "advanced"
-	Summary        string                     `json:"summary,omitempty"`
-	Install        harness.HarnessInstallInfo `json:"install"`
-	Magpie         harness.MagpieStatus       `json:"magpie"`
+	ID             string                         `json:"id"`
+	Label          string                         `json:"label"`
+	DefaultModel   string                         `json:"defaultModel"`
+	Installed      bool                           `json:"installed"`
+	BinaryPath     string                         `json:"binaryPath,omitempty"`
+	AuthStatus     string                         `json:"authStatus,omitempty"` // "ready" | "needs_login" | "unknown"
+	AuthDetail     string                         `json:"authDetail,omitempty"`
+	RequiresLogin  bool                           `json:"requiresLogin,omitempty"`
+	CanAutoInstall bool                           `json:"canAutoInstall,omitempty"`
+	Category       string                         `json:"category,omitempty"` // "recommended" | "advanced"
+	Summary        string                         `json:"summary,omitempty"`
+	Permissions    harness.PermissionCapabilities `json:"permissions"`
+	Install        harness.HarnessInstallInfo     `json:"install"`
+	Magpie         harness.MagpieStatus           `json:"magpie"`
 }
 
 type Event struct {
@@ -308,6 +337,12 @@ type Hub struct {
 	questionsMu sync.Mutex
 	questions   map[string]*pendingQuestionEntry
 
+	approvalsMu sync.Mutex
+	approvals   map[string]*pendingApprovalEntry
+
+	allowlistMu  sync.Mutex
+	sessionAllow map[string]map[string]bool
+
 	inboundAttsMu sync.Mutex
 	inboundAtts   map[string]inboundAttEntry
 }
@@ -351,6 +386,8 @@ func New(cfg *config.HubConfig, store *state.Store, messages *state.MessageStore
 		subs:               make(map[uint64]chan Event),
 		hops:               make(map[string]int),
 		questions:          make(map[string]*pendingQuestionEntry),
+		approvals:          make(map[string]*pendingApprovalEntry),
+		sessionAllow:       make(map[string]map[string]bool),
 		inboundAtts:        make(map[string]inboundAttEntry),
 		push:               push.NewManager(cfg, store),
 	}
@@ -963,6 +1000,7 @@ func (h *Hub) statusOfLocked(lane *botLane) BotStatus {
 		PrivateSessions:  lane.bot.PrivateSessions,
 		DesktopTarget:    lane.bot.DesktopTarget,
 		BrowserMode:      lane.bot.BrowserMode,
+		PermissionMode:   lane.bot.EffectivePermissionMode(),
 		ArchivedSessions: archivedCount,
 		Busy:             lane.busy.Load(),
 		Queued:           lane.queued.Load(),
@@ -1004,7 +1042,8 @@ func (h *Hub) CreateBot(req CreateBotRequest) (*BotStatus, error) {
 	if req.Harness == "" {
 		req.Harness = h.DefaultHarness()
 	}
-	if _, err := h.registry.Get(req.Harness); err != nil {
+	runner, err := h.registry.Get(req.Harness)
+	if err != nil {
 		return nil, err
 	}
 	dt, err := config.NormalizeDesktopTarget(req.DesktopTarget)
@@ -1017,6 +1056,14 @@ func (h *Hub) CreateBot(req CreateBotRequest) (*BotStatus, error) {
 		return nil, err
 	}
 	req.BrowserMode = bm
+	pm, err := config.NormalizePermissionMode(req.PermissionMode)
+	if err != nil {
+		return nil, err
+	}
+	if pm != "" && !harness.CapabilitiesOf(runner).SupportsMode(pm) {
+		return nil, fmt.Errorf("harness %q does not support permission mode %q", req.Harness, pm)
+	}
+	req.PermissionMode = pm
 	req.Instructions = strings.TrimSpace(req.Instructions)
 
 	if err := config.ValidateBotID(req.ID); err != nil {
@@ -1041,8 +1088,12 @@ func (h *Hub) CreateBot(req CreateBotRequest) (*BotStatus, error) {
 		PrivateSessions: req.PrivateSessions,
 		DesktopTarget:   req.DesktopTarget,
 		BrowserMode:     req.BrowserMode,
+		PermissionMode:  req.PermissionMode,
 	}
 	config.NormalizeBot(&bot, h.cfg)
+	if !harness.CapabilitiesOf(runner).SupportsMode(bot.EffectivePermissionMode()) {
+		bot.PermissionMode = config.PermissionModeAuto
+	}
 	if err := config.EnsureWorkspace(&bot, h.cfg, req.Instructions); err != nil {
 		h.lanesMu.Unlock()
 		return nil, fmt.Errorf("init workspace for %q: %w", req.ID, err)
@@ -1110,6 +1161,8 @@ func (h *Hub) ResetSession(botID string) (state.SessionRecord, bool, error) {
 	if h.cancelIsolatedByBot(botID) > 0 {
 		h.desktop.CancelTakeoversByBot(botID)
 	}
+	h.CancelApprovalsByBot(botID)
+	h.clearSessionAllow(botID)
 
 	prev, existed, err := h.store.ArchiveActive(botID, "reset", "", "")
 	if err == nil {
@@ -1151,6 +1204,8 @@ func (h *Hub) RotateSession(botID, handoffNote string, deferUntilTurnEnd bool) (
 	lane.pendingRotate = false
 	lane.pendingHandoff = ""
 	lane.rotateMu.Unlock()
+	h.CancelApprovalsByBot(botID)
+	h.clearSessionAllow(botID)
 
 	prev, existed, err := h.store.ArchiveActive(botID, "reset", "", note)
 	if err != nil {
@@ -1238,6 +1293,37 @@ func (h *Hub) HandleInput(ctx context.Context, botID, rawInput string, opts Send
 			BotID:     botID,
 			SessionID: rec.SessionID,
 			Text:      strings.Join(lines, "\n"),
+		}, nil
+	}
+
+	if input == "/mode" || strings.HasPrefix(input, "/mode ") || strings.HasPrefix(input, "/mode\t") {
+		arg := strings.TrimSpace(strings.TrimPrefix(input, "/mode"))
+		bot, ok := h.GetBot(botID)
+		if !ok {
+			return nil, fmt.Errorf("bot %q not found", botID)
+		}
+		runner, err := h.registry.Get(bot.Harness)
+		if err != nil {
+			return nil, err
+		}
+		caps := harness.CapabilitiesOf(runner)
+		rec, _ := h.store.Get(botID)
+		if arg == "" {
+			text := fmt.Sprintf("当前权限模式：%s\n可用模式：%s", bot.EffectivePermissionMode(), strings.Join(caps.Modes, ", "))
+			return &harness.TurnResult{BotID: botID, SessionID: rec.SessionID, Text: text}, nil
+		}
+		norm, err := config.NormalizePermissionMode(arg)
+		if err != nil || norm == "" {
+			return nil, fmt.Errorf("无效权限模式 %q（可选：%s）", arg, strings.Join(caps.Modes, ", "))
+		}
+		st, err := h.UpdateBot(botID, BotUpdate{PermissionMode: &norm})
+		if err != nil {
+			return nil, err
+		}
+		return &harness.TurnResult{
+			BotID:     botID,
+			SessionID: rec.SessionID,
+			Text:      fmt.Sprintf("已将 %s 权限模式切换为 %s。", st.Name, st.PermissionMode),
 		}, nil
 	}
 
@@ -1694,9 +1780,13 @@ func (h *Hub) executeTurn(ctx context.Context, lane *botLane, bot config.BotConf
 		toolCounts := make(map[string]int)
 
 		var onQuestion func(context.Context, harness.QuestionRequest) (harness.QuestionResponse, error)
+		var onPermission func(context.Context, harness.PermissionRequest) (harness.PermissionResponse, error)
 		if isInteractiveQuestionSource(opts) {
 			onQuestion = func(qCtx context.Context, req harness.QuestionRequest) (harness.QuestionResponse, error) {
 				return h.AskQuestion(qCtx, bot, req)
+			}
+			onPermission = func(pCtx context.Context, req harness.PermissionRequest) (harness.PermissionResponse, error) {
+				return h.RequestApproval(pCtx, bot, bot.EffectivePermissionMode(), req)
 			}
 		}
 
@@ -1712,12 +1802,14 @@ func (h *Hub) executeTurn(ctx context.Context, lane *botLane, bot config.BotConf
 			Prompt:                   effectivePrompt,
 			Attachments:              attachments,
 			SessionID:                sess.RuntimeSessionID,
+			PermissionMode:           bot.EffectivePermissionMode(),
 			PlatformInstructionsPath: platPath,
 			MCPCommand:               mcpCmd,
 			MCPEnv:                   mcpEnv,
 			ExtraEnv:                 extraEnv,
 			OnText:                   opts.OnText,
 			OnQuestion:               onQuestion,
+			OnPermission:             onPermission,
 			OnToolUse: func(toolName string) {
 				if toolName != "" {
 					toolMu.Lock()
@@ -1921,6 +2013,7 @@ func (h *Hub) executeTurn(ctx context.Context, lane *botLane, bot config.BotConf
 
 		if doRotate && h.store != nil && gen == lane.sessionGen.Load() {
 			if _, archived, _ := h.store.ArchiveSessionByID(sess.ID, "reset", "", handoff); archived {
+				h.clearSessionAllow(bot.ID)
 				_ = h.store.DismissPendingReceipts(bot.ID)
 				h.appendMessage(state.ChatMessage{
 					BotID: bot.ID, SessionID: sess.ID, Turn: turnNum,
@@ -1955,6 +2048,7 @@ func (h *Hub) Interrupt(botID string) (bool, error) {
 	}
 	if interrupted {
 		h.desktop.CancelTakeoversByBot(botID)
+		h.CancelApprovalsByBot(botID)
 	}
 	return interrupted, nil
 }
@@ -2038,6 +2132,7 @@ func (h *Hub) Harnesses(ctx context.Context) []HarnessInfo {
 			CanAutoInstall: meta.CanAutoInstall,
 			Category:       meta.Category,
 			Summary:        meta.Summary,
+			Permissions:    harness.CapabilitiesOf(r),
 			Install:        meta,
 		})
 	}
@@ -2178,6 +2273,13 @@ func (h *Hub) UpdateBot(botID string, upd BotUpdate) (*BotStatus, error) {
 		}
 		*upd.BrowserMode = bm
 	}
+	if upd.PermissionMode != nil {
+		pm, err := config.NormalizePermissionMode(*upd.PermissionMode)
+		if err != nil {
+			return nil, err
+		}
+		*upd.PermissionMode = pm
+	}
 	h.lanesMu.Lock()
 	lane, ok := h.lanes[botID]
 	if !ok {
@@ -2186,6 +2288,7 @@ func (h *Hub) UpdateBot(botID string, upd BotUpdate) (*BotStatus, error) {
 	}
 	bot := lane.bot
 	harnessChanged := upd.Harness != nil && *upd.Harness != bot.Harness
+	prevPermMode := bot.EffectivePermissionMode()
 	if upd.Name != nil {
 		bot.Name = strings.TrimSpace(*upd.Name)
 	}
@@ -2214,9 +2317,30 @@ func (h *Hub) UpdateBot(botID string, upd BotUpdate) (*BotStatus, error) {
 	if upd.BrowserMode != nil {
 		bot.BrowserMode = *upd.BrowserMode
 	}
+	if upd.PermissionMode != nil {
+		pm := *upd.PermissionMode
+		if pm == "" {
+			pm = h.cfg.EffectiveDefaultPermissionMode()
+		}
+		bot.PermissionMode = pm
+		bot.AutoApprove = nil
+	}
+	if runner, err := h.registry.Get(bot.Harness); err == nil {
+		caps := harness.CapabilitiesOf(runner)
+		effPM := bot.EffectivePermissionMode()
+		if !caps.SupportsMode(effPM) {
+			if upd.PermissionMode != nil && *upd.PermissionMode != "" {
+				h.lanesMu.Unlock()
+				return nil, fmt.Errorf("harness %q does not support permission mode %q", bot.Harness, effPM)
+			}
+			bot.PermissionMode = config.PermissionModeAuto
+			bot.AutoApprove = nil
+		}
+	}
 	if bot.ModelInherited {
 		bot.Model = h.cfg.DefaultModelFor(bot.Harness)
 	}
+	permChanged := bot.EffectivePermissionMode() != prevPermMode
 
 	if h.cfg.ConfigPath != "" {
 		err := config.UpdateRaw(h.cfg, func(raw *config.HubConfig) error {
@@ -2230,6 +2354,12 @@ func (h *Hub) UpdateBot(botID string, upd BotUpdate) (*BotStatus, error) {
 				rb.PrivateSessions = bot.PrivateSessions
 				rb.DesktopTarget = bot.DesktopTarget
 				rb.BrowserMode = bot.BrowserMode
+				if upd.PermissionMode != nil || harnessChanged {
+					rb.PermissionMode = bot.PermissionMode
+					if upd.PermissionMode != nil || rb.PermissionMode != "" {
+						rb.AutoApprove = nil
+					}
+				}
 				if upd.Model != nil || harnessChanged {
 					rb.Model = ""
 					if !bot.ModelInherited {
@@ -2277,6 +2407,10 @@ func (h *Hub) UpdateBot(botID string, upd BotUpdate) (*BotStatus, error) {
 			})
 		}
 		st, _ = h.statusOne(botID)
+	}
+	if harnessChanged || permChanged {
+		h.CancelApprovalsByBot(botID)
+		h.clearSessionAllow(botID)
 	}
 	h.broadcast(Event{Type: "bot_status", BotID: botID, Payload: st})
 	return &st, nil
@@ -2342,6 +2476,8 @@ func (h *Hub) DeleteBot(botID string) error {
 	if h.desktop != nil {
 		h.desktop.CancelTakeoversByBot(botID)
 	}
+	h.CancelApprovalsByBot(botID)
+	h.clearSessionAllow(botID)
 	if h.localDeskPool != nil {
 		h.localDeskPool.RemoveSlot(botID)
 	}
@@ -2386,6 +2522,33 @@ func (h *Hub) SetDefaultHarness(harness string) error {
 		}
 	}
 	h.cfg.DefaultHarness = harness
+	return nil
+}
+
+// DefaultPermissionMode returns the hub-wide default permission mode for new bots.
+func (h *Hub) DefaultPermissionMode() string {
+	h.lanesMu.RLock()
+	defer h.lanesMu.RUnlock()
+	return h.cfg.EffectiveDefaultPermissionMode()
+}
+
+// SetDefaultPermissionMode updates and persists the hub-wide default permission mode.
+func (h *Hub) SetDefaultPermissionMode(mode string) error {
+	norm, err := config.NormalizePermissionMode(mode)
+	if err != nil {
+		return err
+	}
+	h.lanesMu.Lock()
+	defer h.lanesMu.Unlock()
+	if h.cfg.ConfigPath != "" {
+		if err := config.UpdateRaw(h.cfg, func(raw *config.HubConfig) error {
+			raw.DefaultPermissionMode = norm
+			return nil
+		}); err != nil {
+			return fmt.Errorf("save config: %w", err)
+		}
+	}
+	h.cfg.DefaultPermissionMode = norm
 	return nil
 }
 
@@ -2673,6 +2836,12 @@ func (h *Hub) RunIsolated(ctx context.Context, botID, prompt string, opts Isolat
 	if opts.TimeoutSec > 0 {
 		bot.TimeoutSec = opts.TimeoutSec
 	}
+	permMode := bot.EffectivePermissionMode()
+	if norm, err := config.NormalizePermissionMode(opts.PermissionMode); err == nil && norm != "" {
+		permMode = norm
+		bot.PermissionMode = norm
+		bot.AutoApprove = nil
+	}
 
 	runner, err := h.registry.Get(bot.Harness)
 	if err != nil {
@@ -2746,6 +2915,7 @@ func (h *Hub) RunIsolated(ctx context.Context, botID, prompt string, opts Isolat
 		Prompt:                   effectivePrompt,
 		SessionID:                "",
 		Ephemeral:                true,
+		PermissionMode:           permMode,
 		PlatformInstructionsPath: platPath,
 		MCPCommand:               mcpCmd,
 		MCPEnv:                   mcpEnv,
@@ -2878,6 +3048,9 @@ func (h *Hub) UpdateRoutine(botID, routineID string, patch RoutinePatch) (config
 	}
 	if patch.MainDelivery != nil {
 		base.MainDelivery = strings.TrimSpace(*patch.MainDelivery)
+	}
+	if patch.PermissionMode != nil {
+		base.PermissionMode = strings.TrimSpace(*patch.PermissionMode)
 	}
 	if patch.Enabled != nil {
 		v := *patch.Enabled
@@ -3093,6 +3266,9 @@ func cleanScheduleInput(raw config.ScheduleConfig) config.ScheduleConfig {
 	raw.Prompt = strings.TrimSpace(raw.Prompt)
 	raw.Model = strings.TrimSpace(raw.Model)
 	raw.MainDelivery = raw.EffectiveMainDelivery()
+	if rpm, err := config.NormalizeRoutinePermissionMode(raw.PermissionMode); err == nil {
+		raw.PermissionMode = rpm
+	}
 	if raw.Enabled == nil {
 		v := true
 		raw.Enabled = &v
@@ -3705,10 +3881,11 @@ func (h *Hub) RunDesktopTask(ctx context.Context, req DesktopTaskRequest) (*harn
 	)
 
 	return h.RunIsolated(ctx, botID, strings.Join(lines, "\n"), IsolatedOptions{
-		Source:     "desktop_task",
-		Harness:    deskHarness,
-		Model:      deskModel,
-		MCPRole:    "computer_use",
+		Source:         "desktop_task",
+		Harness:        deskHarness,
+		Model:          deskModel,
+		PermissionMode: config.PermissionModeAuto,
+		MCPRole:        "computer_use",
 		TimeoutSec: req.TimeoutSec,
 		ExtraEnv:   taskEnv,
 		OnToolUse: func(toolName string) {
@@ -3856,6 +4033,298 @@ func (h *Hub) AnswerQuestion(id string, answers map[string]any, cancelled bool, 
 	return items, nil
 }
 
+const approvalWaitTimeout = 15 * time.Minute
+
+func newApprovalID() string {
+	b := make([]byte, 8)
+	_, _ = rand.Read(b)
+	return "apr_" + hex.EncodeToString(b)
+}
+
+func (h *Hub) listApprovalsLocked(botID string) []PendingApproval {
+	items := make([]PendingApproval, 0, len(h.approvals))
+	for _, entry := range h.approvals {
+		if botID != "" && entry.item.BotID != botID {
+			continue
+		}
+		items = append(items, entry.item)
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].CreatedAt != items[j].CreatedAt {
+			return items[i].CreatedAt < items[j].CreatedAt
+		}
+		return items[i].ID < items[j].ID
+	})
+	return items
+}
+
+// ListApprovals returns all pending tool approval cards, optionally filtered by botID.
+func (h *Hub) ListApprovals(botID string) []PendingApproval {
+	h.approvalsMu.Lock()
+	defer h.approvalsMu.Unlock()
+	return h.listApprovalsLocked(botID)
+}
+
+func (h *Hub) broadcastApprovals(items []PendingApproval) {
+	h.broadcast(Event{
+		Type:    "approvals",
+		Payload: map[string]any{"items": items},
+	})
+}
+
+func approvalAllowKey(req harness.PermissionRequest) string {
+	name := strings.ToLower(strings.TrimSpace(req.ToolName))
+	if name == "" {
+		name = strings.ToLower(strings.TrimSpace(req.Kind))
+	}
+	if name == "" {
+		return "tool"
+	}
+	return name
+}
+
+func (h *Hub) isSessionAllowed(botID, key string) bool {
+	if botID == "" || key == "" {
+		return false
+	}
+	h.allowlistMu.Lock()
+	defer h.allowlistMu.Unlock()
+	return h.sessionAllow[botID][key]
+}
+
+func (h *Hub) addSessionAllow(botID, key string) {
+	if botID == "" || key == "" {
+		return
+	}
+	h.allowlistMu.Lock()
+	if h.sessionAllow == nil {
+		h.sessionAllow = make(map[string]map[string]bool)
+	}
+	m := h.sessionAllow[botID]
+	if m == nil {
+		m = make(map[string]bool)
+		h.sessionAllow[botID] = m
+	}
+	m[key] = true
+	h.allowlistMu.Unlock()
+}
+
+func (h *Hub) clearSessionAllow(botID string) {
+	if botID == "" {
+		return
+	}
+	h.allowlistMu.Lock()
+	delete(h.sessionAllow, botID)
+	h.allowlistMu.Unlock()
+}
+
+// CancelApprovalsByBot cancels and removes all pending approvals for botID.
+func (h *Hub) CancelApprovalsByBot(botID string) int {
+	h.approvalsMu.Lock()
+	var cancelled []*pendingApprovalEntry
+	for id, entry := range h.approvals {
+		if botID == "" || entry.item.BotID == botID {
+			delete(h.approvals, id)
+			cancelled = append(cancelled, entry)
+		}
+	}
+	items := h.listApprovalsLocked("")
+	h.approvalsMu.Unlock()
+
+	for _, entry := range cancelled {
+		select {
+		case entry.ch <- harness.PermissionResponse{Decision: "cancelled", Reason: "cancelled"}:
+		default:
+		}
+	}
+	if len(cancelled) > 0 {
+		h.broadcastApprovals(items)
+	}
+	return len(cancelled)
+}
+
+func (h *Hub) auditApproval(botID string, req harness.PermissionRequest, resp harness.PermissionResponse) {
+	if h.store == nil && h.messages == nil {
+		return
+	}
+	tool := strings.TrimSpace(req.ToolName)
+	if tool == "" {
+		tool = req.Kind
+	}
+	if tool == "" {
+		tool = "tool"
+	}
+	summary := firstLineSummary(req.Summary, 80)
+	var text string
+	switch resp.Decision {
+	case "allow_once":
+		if summary != "" {
+			text = fmt.Sprintf("已批准 %s：%s", tool, summary)
+		} else {
+			text = fmt.Sprintf("已批准 %s", tool)
+		}
+	case "allow_always":
+		text = fmt.Sprintf("本次会话始终允许：%s", tool)
+	case "reject":
+		if summary != "" {
+			text = fmt.Sprintf("已拒绝 %s：%s", tool, summary)
+		} else {
+			text = fmt.Sprintf("已拒绝 %s", tool)
+		}
+		if r := firstLineSummary(resp.Reason, 80); r != "" {
+			text += fmt.Sprintf("（%s）", r)
+		}
+	default:
+		return
+	}
+
+	var sessID string
+	var turn int
+	h.lanesMu.RLock()
+	lane := h.lanes[botID]
+	h.lanesMu.RUnlock()
+	if lane != nil {
+		lane.turnMu.Lock()
+		sessID = lane.activeSessionID
+		turn = lane.activeTurn
+		lane.turnMu.Unlock()
+	}
+	if sessID == "" && h.store != nil {
+		if rec, ok := h.store.Get(botID); ok {
+			sessID = rec.ID
+			turn = rec.TurnCount
+		}
+	}
+	h.appendMessage(state.ChatMessage{
+		BotID:     botID,
+		SessionID: sessID,
+		Turn:      turn,
+		Role:      "system",
+		From:      "system",
+		Text:      text,
+	})
+}
+
+// RequestApproval publishes a pending tool approval card to connected clients and blocks until resolved or cancelled.
+func (h *Hub) RequestApproval(ctx context.Context, bot config.BotConfig, mode string, req harness.PermissionRequest) (harness.PermissionResponse, error) {
+	allowKey := approvalAllowKey(req)
+	if h.isSessionAllowed(bot.ID, allowKey) {
+		var allowAlwaysID, fallbackID string
+		for _, opt := range req.Options {
+			if opt.Kind == "allow_once" && opt.ID != "session_allow" {
+				return harness.PermissionResponse{Decision: "allow_once", OptionID: opt.ID}, nil
+			}
+			if opt.Kind == "allow_always" && opt.ID != "session_allow" && allowAlwaysID == "" {
+				allowAlwaysID = opt.ID
+			}
+			if (opt.Kind == "allow_once" || opt.Kind == "allow_always") && fallbackID == "" {
+				fallbackID = opt.ID
+			}
+		}
+		if allowAlwaysID != "" {
+			return harness.PermissionResponse{Decision: "allow_once", OptionID: allowAlwaysID}, nil
+		}
+		return harness.PermissionResponse{Decision: "allow_once", OptionID: fallbackID}, nil
+	}
+
+	id := newApprovalID()
+	opts := make([]harness.PermissionOption, len(req.Options))
+	copy(opts, req.Options)
+	if len(opts) == 0 {
+		opts = harness.StandardPermissionOptions(true)
+	}
+	kind := req.Kind
+	if kind == "" {
+		kind = harness.ClassifyToolKind(req.ToolName)
+	}
+	entry := &pendingApprovalEntry{
+		item: PendingApproval{
+			ID:        id,
+			BotID:     bot.ID,
+			BotName:   bot.Name,
+			ToolName:  req.ToolName,
+			Kind:      kind,
+			Title:     req.Title,
+			Summary:   req.Summary,
+			RawInput:  harness.SanitizePermissionInput(req.RawInput),
+			Options:   opts,
+			Mode:      mode,
+			CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		},
+		ch: make(chan harness.PermissionResponse, 1),
+	}
+
+	h.approvalsMu.Lock()
+	h.approvals[id] = entry
+	items := h.listApprovalsLocked("")
+	h.approvalsMu.Unlock()
+	h.broadcastApprovals(items)
+
+	defer func() {
+		h.approvalsMu.Lock()
+		_, existed := h.approvals[id]
+		if existed {
+			delete(h.approvals, id)
+			items := h.listApprovalsLocked("")
+			h.approvalsMu.Unlock()
+			h.broadcastApprovals(items)
+		} else {
+			h.approvalsMu.Unlock()
+		}
+	}()
+
+	timer := time.NewTimer(approvalWaitTimeout)
+	defer timer.Stop()
+
+	select {
+	case resp := <-entry.ch:
+		if resp.Decision == "allow_always" {
+			h.addSessionAllow(bot.ID, allowKey)
+		}
+		if resp.Decision != "cancelled" {
+			h.auditApproval(bot.ID, req, resp)
+		}
+		return resp, nil
+	case <-timer.C:
+		resp := harness.PermissionResponse{Decision: "reject", Reason: "审批超时"}
+		h.auditApproval(bot.ID, req, resp)
+		return resp, nil
+	case <-ctx.Done():
+		return harness.PermissionResponse{Decision: "cancelled"}, ctx.Err()
+	}
+}
+
+// ReplyApproval delivers a user's decision to a pending tool approval card.
+func (h *Hub) ReplyApproval(id, decision, optionID, reason string) ([]PendingApproval, error) {
+	decision = strings.ToLower(strings.TrimSpace(decision))
+	switch decision {
+	case "allow_once", "allow_always", "reject":
+	default:
+		return nil, fmt.Errorf("invalid decision %q (expected allow_once, allow_always, or reject)", decision)
+	}
+
+	h.approvalsMu.Lock()
+	entry, ok := h.approvals[id]
+	if !ok {
+		h.approvalsMu.Unlock()
+		return nil, ErrApprovalNotFound
+	}
+	delete(h.approvals, id)
+	items := h.listApprovalsLocked("")
+	h.approvalsMu.Unlock()
+
+	select {
+	case entry.ch <- harness.PermissionResponse{
+		Decision: decision,
+		OptionID: strings.TrimSpace(optionID),
+		Reason:   strings.TrimSpace(reason),
+	}:
+	default:
+	}
+	h.broadcastApprovals(items)
+	return items, nil
+}
+
 func sanitizeUploadFilename(name string) string {
 	base := filepath.Base(strings.TrimSpace(name))
 	if base == "" || base == "." || base == ".." || base == string(filepath.Separator) {
@@ -3950,6 +4419,7 @@ func (h *Hub) ListBotCommands(ctx context.Context, botID string) ([]harness.Slas
 	hubBuiltins := []harness.SlashCommand{
 		{Name: "status", Description: "查看当前会话状态与费用", Source: "hub"},
 		{Name: "bots", Description: "列出所有 Bot", Source: "hub"},
+		{Name: "mode", Description: "查看或切换权限模式", ArgumentHint: "[auto|edit|ask|plan]", Source: "hub"},
 		{Name: "ask", Description: "委派任务给其他 Bot", ArgumentHint: "<bot> <message>", Source: "hub"},
 		{Name: "reset", Description: "归档当前会话并开启新会话", Source: "hub"},
 	}

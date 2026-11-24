@@ -87,15 +87,63 @@ type RunOptions struct {
 	Attachments              []Attachment
 	SessionID                string
 	Ephemeral                bool
+	PermissionMode           string
 	PlatformInstructionsPath string
 	// MCPCommand/MCPEnv describe the bot-hub MCP server for harnesses that
 	// take MCP config per process rather than from the workspace.
-	MCPCommand []string
-	MCPEnv     map[string]string
-	ExtraEnv   map[string]string
-	OnText     func(chunk string)
-	OnToolUse  func(toolName string)
-	OnQuestion func(ctx context.Context, req QuestionRequest) (QuestionResponse, error)
+	MCPCommand   []string
+	MCPEnv       map[string]string
+	ExtraEnv     map[string]string
+	OnText       func(chunk string)
+	OnToolUse    func(toolName string)
+	OnQuestion   func(ctx context.Context, req QuestionRequest) (QuestionResponse, error)
+	OnPermission func(ctx context.Context, req PermissionRequest) (PermissionResponse, error)
+}
+
+type PermissionCapabilities struct {
+	Modes               []string `json:"modes"`
+	InteractiveApproval bool     `json:"interactiveApproval"`
+	SupportsAllowAlways bool     `json:"supportsAllowAlways"`
+}
+
+// PermissionCapable is optionally implemented by harnesses that support
+// non-auto permission modes or interactive tool approvals.
+type PermissionCapable interface {
+	PermissionCapabilities() PermissionCapabilities
+}
+
+// CapabilitiesOf returns the permission capabilities of h, defaulting to auto-only.
+func CapabilitiesOf(h Harness) PermissionCapabilities {
+	if pc, ok := h.(PermissionCapable); ok {
+		caps := pc.PermissionCapabilities()
+		if len(caps.Modes) == 0 {
+			caps.Modes = []string{config.PermissionModeAuto}
+		}
+		return caps
+	}
+	return PermissionCapabilities{Modes: []string{config.PermissionModeAuto}}
+}
+
+type PermissionOption struct {
+	ID    string `json:"id"`
+	Kind  string `json:"kind"` // "allow_once" | "allow_always" | "reject"
+	Label string `json:"label"`
+}
+
+type PermissionRequest struct {
+	ID       string             `json:"id"`
+	ToolName string             `json:"toolName"`
+	Kind     string             `json:"kind"` // "shell" | "write" | "read" | "mcp" | "network" | "other"
+	Title    string             `json:"title,omitempty"`
+	Summary  string             `json:"summary,omitempty"`
+	RawInput map[string]any     `json:"rawInput,omitempty"`
+	Options  []PermissionOption `json:"options,omitempty"`
+}
+
+type PermissionResponse struct {
+	Decision string `json:"decision"` // "allow_once" | "allow_always" | "reject" | "cancelled"
+	OptionID string `json:"optionId,omitempty"`
+	Reason   string `json:"reason,omitempty"`
 }
 
 // Harness runs agent turns. Implementations keep a long-lived connection to

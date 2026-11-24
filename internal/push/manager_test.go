@@ -169,3 +169,97 @@ $$
 		t.Fatalf("expected truncated preview '一二三四五…', got %q", trunc)
 	}
 }
+
+
+func TestManagerApprovalsAndQuestionTitle(t *testing.T) {
+	store, err := state.NewStore(filepath.Join(t.TempDir(), "sessions.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	if err := store.UpsertPushDevice(state.PushDevice{
+		DeviceID:               "iphone-1",
+		Platform:               "ios",
+		Env:                    "sandbox",
+		BundleID:               "local.bothub.mobile",
+		PushToken:              "push-tok",
+		LiveActivityStartToken: "start-tok",
+		Enabled:                true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_ = store.SetPushActivityToken("iphone-1", "bot:alpha", "act-tok")
+
+	sender := &mockSender{}
+	mgr := NewManagerWithSender(store, sender)
+	defer mgr.Close()
+
+	mgr.processEvent(rawEvent{
+		Type:    "bot_status",
+		BotID:   "alpha",
+		Payload: map[string]any{"id": "alpha", "name": "Alpha", "status": "busy"},
+	})
+
+	// Pending approval -> time-sensitive alert + Live Activity phase="approval".
+	mgr.processEvent(rawEvent{
+		Type: "approvals",
+		Payload: map[string]any{
+			"items": []map[string]any{
+				{"id": "apr-1", "botId": "alpha", "botName": "Alpha", "toolName": "bash", "summary": "rm -rf /tmp/x"},
+			},
+		},
+	})
+
+	reqs := sender.list()
+	var sawAlert, sawApprovalLA bool
+	for _, r := range reqs {
+		pl, ok := r.Payload.(APNSPayload)
+		if !ok {
+			continue
+		}
+		if r.PushType == PushTypeAlert && pl.Kind == "approval" && pl.APS.InterruptionLevel == "time-sensitive" {
+			sawAlert = true
+		}
+		if r.PushType == PushTypeLiveActivity && pl.APS.ContentState.Phase == "approval" && pl.APS.ContentState.StatusText == "等待批准" {
+			sawApprovalLA = true
+		}
+	}
+	if !sawAlert || !sawApprovalLA {
+		t.Fatalf("missing approval alert/LA: reqs=%+v", reqs)
+	}
+
+	// Clearing approvals while bot still busy restores phase="running".
+	before := len(sender.list())
+	mgr.processEvent(rawEvent{
+		Type:    "approvals",
+		Payload: map[string]any{"items": []map[string]any{}},
+	})
+	reqsAfter := sender.list()[before:]
+	if len(reqsAfter) == 0 {
+		t.Fatal("expected Live Activity restore when approval cleared")
+	}
+	restorePl, _ := reqsAfter[0].Payload.(APNSPayload)
+	if restorePl.APS.ContentState.Phase != "running" {
+		t.Fatalf("expected restored phase=running, got %+v", restorePl.APS.ContentState)
+	}
+
+	// Questions event reads Title (and falls back to Prompt).
+	beforeQ := len(sender.list())
+	mgr.processEvent(rawEvent{
+		Type: "questions",
+		Payload: map[string]any{
+			"items": []map[string]any{
+				{"id": "q-1", "botId": "alpha", "botName": "Alpha", "title": "Confirm branch name"},
+			},
+		},
+	})
+	reqsQ := sender.list()[beforeQ:]
+	if len(reqsQ) != 1 {
+		t.Fatalf("expected 1 question alert, got %d", len(reqsQ))
+	}
+	qPl, _ := reqsQ[0].Payload.(APNSPayload)
+	if qPl.APS.Alert == nil || qPl.APS.Alert.Body != "Confirm branch name" {
+		t.Fatalf("expected alert body from Title, got %+v", qPl.APS.Alert)
+	}
+}

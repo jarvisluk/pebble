@@ -440,3 +440,73 @@ func TestBotDesktopTargetAndBrowserModeValidation(t *testing.T) {
 	}
 }
 
+func TestPermissionModeValidationAndCompatibility(t *testing.T) {
+	for _, tc := range []struct {
+		in   string
+		want string
+	}{
+		{"", ""},
+		{" AUTO ", "auto"},
+		{"Edit", "edit"},
+		{"ASK", "ask"},
+		{"plan", "plan"},
+	} {
+		got, err := NormalizePermissionMode(tc.in)
+		if err != nil || got != tc.want {
+			t.Fatalf("NormalizePermissionMode(%q) = (%q, %v), want (%q, nil)", tc.in, got, err, tc.want)
+		}
+	}
+	if _, err := NormalizePermissionMode("yolo"); err == nil {
+		t.Fatal("expected invalid permissionMode to fail")
+	}
+
+	falseVal := false
+	trueVal := true
+	if got := (BotConfig{}).EffectivePermissionMode(); got != PermissionModeAuto {
+		t.Fatalf("default EffectivePermissionMode = %q, want auto", got)
+	}
+	if got := (BotConfig{AutoApprove: &falseVal}).EffectivePermissionMode(); got != PermissionModeAsk {
+		t.Fatalf("legacy autoApprove=false EffectivePermissionMode = %q, want ask", got)
+	}
+	if !(BotConfig{AutoApprove: &trueVal}).ShouldAutoApprove() {
+		t.Fatal("expected autoApprove=true ShouldAutoApprove() == true")
+	}
+	if (BotConfig{AutoApprove: &falseVal, PermissionMode: PermissionModePlan}).EffectivePermissionMode() != PermissionModePlan {
+		t.Fatal("explicit permissionMode must override legacy autoApprove")
+	}
+	if (BotConfig{PermissionMode: PermissionModeEdit}).ShouldAutoApprove() {
+		t.Fatal("edit mode must not return ShouldAutoApprove() == true")
+	}
+
+	if _, err := NormalizeRoutinePermissionMode("ask"); err == nil {
+		t.Fatal("routine permissionMode should reject ask")
+	}
+	if got, err := NormalizeRoutinePermissionMode("PLAN"); err != nil || got != PermissionModePlan {
+		t.Fatalf("NormalizeRoutinePermissionMode(PLAN) = (%q, %v)", got, err)
+	}
+
+	root := t.TempDir()
+	cfgDir := filepath.Join(root, "config")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfgPath := filepath.Join(cfgDir, "bots.json")
+	raw := `{"defaultPermissionMode":"edit","bots":[{"id":"a"},{"id":"b","autoApprove":false},{"id":"c","permissionMode":"plan","schedules":[{"name":"s1","everyMinutes":10,"prompt":"check","permissionMode":"auto"}]}]}`
+	if err := os.WriteFile(cfgPath, []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _, err := Load(root, cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Bots[0].EffectivePermissionMode() != PermissionModeEdit {
+		t.Fatalf("bot a should inherit defaultPermissionMode=edit, got %q", cfg.Bots[0].EffectivePermissionMode())
+	}
+	if cfg.Bots[1].EffectivePermissionMode() != PermissionModeAsk {
+		t.Fatalf("bot b with legacy autoApprove=false should resolve to ask, got %q", cfg.Bots[1].EffectivePermissionMode())
+	}
+	if cfg.Bots[2].EffectivePermissionMode() != PermissionModePlan || cfg.Bots[2].Schedules[0].PermissionMode != PermissionModeAuto {
+		t.Fatalf("bot c config mismatch: %+v", cfg.Bots[2])
+	}
+}
+

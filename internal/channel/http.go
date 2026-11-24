@@ -137,6 +137,8 @@ func NewHTTPServer(h *hub.Hub, cfg config.HTTPConfig) *HTTPServer {
 	mux.HandleFunc("POST /api/bots/{id}/interrupt", s.handleInterrupt)
 	mux.HandleFunc("GET /api/questions", s.handleQuestions)
 	mux.HandleFunc("POST /api/questions/{id}/reply", s.handleQuestionReply)
+	mux.HandleFunc("GET /api/approvals", s.handleApprovals)
+	mux.HandleFunc("POST /api/approvals/{id}/reply", s.handleApprovalReply)
 	mux.HandleFunc("GET /api/bots/{id}/routines", s.handleListRoutines)
 	mux.HandleFunc("POST /api/bots/{id}/routines", s.handleCreateRoutine)
 	mux.HandleFunc("PATCH /api/bots/{id}/routines/{routineId}", s.handleUpdateRoutine)
@@ -975,8 +977,9 @@ func (s *HTTPServer) handleInterrupt(w http.ResponseWriter, r *http.Request) {
 }
 
 type settingsBody struct {
-	DefaultHarness      *string           `json:"defaultHarness,omitempty"`
-	DefaultModel        *string           `json:"defaultModel,omitempty"`
+	DefaultHarness        *string           `json:"defaultHarness,omitempty"`
+	DefaultPermissionMode *string           `json:"defaultPermissionMode,omitempty"`
+	DefaultModel          *string           `json:"defaultModel,omitempty"`
 	DefaultModels       map[string]string `json:"defaultModels,omitempty"`
 	DesktopHarness      *string           `json:"desktopHarness,omitempty"`
 	DesktopModel        *string           `json:"desktopModel,omitempty"`
@@ -1055,10 +1058,11 @@ func (s *HTTPServer) handleSettings(w http.ResponseWriter, r *http.Request) {
 			"presets":   presets,
 			"webUrl":    s.hub.MagpieWebURL(),
 		},
-		"desktopHarness": deskHarness,
-		"desktopModel":   deskModel,
-		"defaultHarness": s.hub.DefaultHarness(),
-		"defaultModel":   defaultModel,
+		"desktopHarness":        deskHarness,
+		"desktopModel":          deskModel,
+		"defaultHarness":        s.hub.DefaultHarness(),
+		"defaultPermissionMode": s.hub.DefaultPermissionMode(),
+		"defaultModel":          defaultModel,
 		"defaultModels":  defaultModels,
 		"sharedUserMd":        s.hub.SharedUserMD(),
 		"harnesses":           harnesses,
@@ -1092,6 +1096,12 @@ func (s *HTTPServer) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.DefaultHarness != nil {
 		if err := s.hub.SetDefaultHarness(*body.DefaultHarness); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
+	}
+	if body.DefaultPermissionMode != nil {
+		if err := s.hub.SetDefaultPermissionMode(*body.DefaultPermissionMode); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
 			return
 		}
@@ -1789,6 +1799,50 @@ func (s *HTTPServer) handleQuestionReply(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "items": items})
+}
+
+func (s *HTTPServer) handleApprovals(w http.ResponseWriter, r *http.Request) {
+	if s.hub == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"items": []hub.PendingApproval{}})
+		return
+	}
+	botID := strings.TrimSpace(r.URL.Query().Get("botId"))
+	items := s.hub.ListApprovals(botID)
+	if items == nil {
+		items = []hub.PendingApproval{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func (s *HTTPServer) handleApprovalReply(w http.ResponseWriter, r *http.Request) {
+	if s.hub == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "hub unavailable"})
+		return
+	}
+	id := strings.TrimSpace(r.PathValue("id"))
+	if id == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "missing approval id"})
+		return
+	}
+	var body struct {
+		Decision string `json:"decision"`
+		OptionID string `json:"optionId"`
+		Reason   string `json:"reason"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json body"})
+		return
+	}
+	items, err := s.hub.ReplyApproval(id, body.Decision, body.OptionID, body.Reason)
+	if err != nil {
+		if errors.Is(err, hub.ErrApprovalNotFound) {
+			writeJSON(w, http.StatusNotFound, map[string]any{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "items": items})

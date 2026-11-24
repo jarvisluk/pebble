@@ -27,8 +27,10 @@ type ClaudeHarness struct {
 
 type claudeProc struct {
 	*lineProc
-	model     string
-	sessionID string
+	model          string
+	sessionID      string
+	permissionMode string
+	hasPromptTool  bool
 }
 
 type claudeEvent struct {
@@ -37,7 +39,16 @@ type claudeEvent struct {
 	SessionID     string   `json:"session_id"`
 	SlashCommands []string `json:"slash_commands"`
 	Skills        []string `json:"skills"`
-	Message       *struct {
+	RequestID     string   `json:"request_id"`
+	Request       *struct {
+		Subtype               string         `json:"subtype"`
+		ToolName              string         `json:"tool_name"`
+		Input                 map[string]any `json:"input"`
+		PermissionSuggestions []any          `json:"permission_suggestions"`
+		DecisionReason        string         `json:"decision_reason"`
+		BlockedPath           string         `json:"blocked_path"`
+	} `json:"request"`
+	Message *struct {
 		Content []struct {
 			Type string `json:"type"`
 			Text string `json:"text"`
@@ -70,6 +81,32 @@ func envOr(key, def string) string {
 
 func (h *ClaudeHarness) Kind() string  { return "claude" }
 func (h *ClaudeHarness) Label() string { return "Claude Code" }
+
+func (h *ClaudeHarness) PermissionCapabilities() PermissionCapabilities {
+	return PermissionCapabilities{
+		Modes: []string{
+			config.PermissionModeAuto,
+			config.PermissionModeEdit,
+			config.PermissionModeAsk,
+			config.PermissionModePlan,
+		},
+		InteractiveApproval: true,
+		SupportsAllowAlways: true,
+	}
+}
+
+func claudeCLIPermMode(mode string) string {
+	switch mode {
+	case config.PermissionModeEdit:
+		return "acceptEdits"
+	case config.PermissionModeAsk:
+		return "default"
+	case config.PermissionModePlan:
+		return "plan"
+	default:
+		return "bypassPermissions"
+	}
+}
 
 // Models returns Claude Code's aliases; any model ID the CLI accepts
 // (e.g. one routed through a gateway) can also be typed in.
@@ -147,10 +184,15 @@ func (h *ClaudeHarness) Reload() {
 
 func (h *ClaudeHarness) proc(opts RunOptions) (*claudeProc, func(), error) {
 	bot := opts.Bot
+	mode := EffectivePermissionMode(opts)
+	needPromptTool := mode != config.PermissionModeAuto
 	return h.pool.acquire(
 		bot.ID,
 		func(p *claudeProc) bool {
-			return p.model == bot.Model && p.sessionID == opts.SessionID
+			return p.model == bot.Model &&
+				p.sessionID == opts.SessionID &&
+				p.permissionMode == mode &&
+				p.hasPromptTool == needPromptTool
 		},
 		func() (*claudeProc, error) {
 			return h.startProc(opts, false)
@@ -160,6 +202,8 @@ func (h *ClaudeHarness) proc(opts RunOptions) (*claudeProc, func(), error) {
 
 func (h *ClaudeHarness) startProc(opts RunOptions, ephemeral bool) (*claudeProc, error) {
 	bot := opts.Bot
+	mode := EffectivePermissionMode(opts)
+	needPromptTool := mode != config.PermissionModeAuto
 
 	// Claude Code reads CLAUDE.md; bridge _shared/BOT_HUB.md and @AGENTS.md
 	// unless the user already customized CLAUDE.md.
@@ -178,8 +222,9 @@ func (h *ClaudeHarness) startProc(opts RunOptions, ephemeral bool) (*claudeProc,
 	} else if opts.SessionID != "" {
 		args = append(args, "--resume", opts.SessionID)
 	}
-	if bot.ShouldAutoApprove() {
-		args = append(args, "--permission-mode", "bypassPermissions")
+	args = append(args, "--permission-mode", claudeCLIPermMode(mode))
+	if needPromptTool {
+		args = append(args, "--permission-prompt-tool", "stdio")
 	}
 	if len(opts.MCPCommand) > 0 {
 		mcp, _ := json.Marshal(map[string]any{"mcpServers": map[string]any{
@@ -205,7 +250,13 @@ func (h *ClaudeHarness) startProc(opts RunOptions, ephemeral bool) (*claudeProc,
 	if err != nil {
 		return nil, err
 	}
-	return &claudeProc{lineProc: lp, model: bot.Model, sessionID: opts.SessionID}, nil
+	return &claudeProc{
+		lineProc:       lp,
+		model:          bot.Model,
+		sessionID:      opts.SessionID,
+		permissionMode: mode,
+		hasPromptTool:  needPromptTool,
+	}, nil
 }
 
 func (h *ClaudeHarness) drop(botID string, p *claudeProc) {
@@ -215,7 +266,7 @@ func (h *ClaudeHarness) drop(botID string, p *claudeProc) {
 func (h *ClaudeHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnResult, error) {
 	started := time.Now()
 	bot := opts.Bot
-	ctx, cancel := withBotTimeout(ctx, bot.TimeoutSec)
+	ctx, cancel := withTurnTimeout(ctx, bot.TimeoutSec, opts)
 	defer cancel()
 
 	var (
@@ -276,16 +327,30 @@ func (h *ClaudeHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnResu
 
 	partial := &TurnResult{BotID: bot.ID, SessionID: opts.SessionID}
 	var texts []string
+	var permMu sync.Mutex
+	activePerms := make(map[string]context.CancelFunc)
+	cancelAllPerms := func() {
+		permMu.Lock()
+		for id, c := range activePerms {
+			c()
+			delete(activePerms, id)
+		}
+		permMu.Unlock()
+	}
+	defer cancelAllPerms()
+
 	for {
 		select {
 		case <-ctx.Done():
 			// Killing is the interrupt; the next turn resumes the session.
+			cancelAllPerms()
 			partial.Text = strings.Join(texts, "\n")
 			dropProc()
 			return partial, ctxErr(ctx, bot.ID, bot.TimeoutSec)
 
 		case line, ok := <-p.lines:
 			if !ok {
+				cancelAllPerms()
 				partial.Text = strings.Join(texts, "\n")
 				dropProc()
 				return partial, fmt.Errorf("claude failed for bot %q: %s", bot.ID, p.exitDetail())
@@ -299,6 +364,98 @@ func (h *ClaudeHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnResu
 				p.sessionID = evt.SessionID
 			}
 			switch evt.Type {
+			case "control_request":
+				if evt.RequestID == "" || evt.Request == nil {
+					continue
+				}
+				if evt.Request.Subtype != "can_use_tool" {
+					_ = p.send(map[string]any{
+						"type": "control_response",
+						"response": map[string]any{
+							"subtype":    "error",
+							"request_id": evt.RequestID,
+							"error":      fmt.Sprintf("unsupported control_request subtype %q", evt.Request.Subtype),
+						},
+					})
+					continue
+				}
+				reqID := evt.RequestID
+				toolName := strings.TrimSpace(evt.Request.ToolName)
+				if toolName == "" {
+					toolName = "tool"
+				}
+				origInput := evt.Request.Input
+				suggestions := evt.Request.PermissionSuggestions
+				title, summary := SummarizeToolCall(toolName, origInput)
+				if summary == "" {
+					summary = strings.TrimSpace(evt.Request.BlockedPath)
+				}
+				if summary == "" {
+					summary = strings.TrimSpace(evt.Request.DecisionReason)
+				}
+				permReq := PermissionRequest{
+					ID:       reqID,
+					ToolName: toolName,
+					Kind:     ClassifyToolKind(toolName),
+					Title:    title,
+					Summary:  summary,
+					RawInput: origInput,
+					Options:  StandardPermissionOptions(true),
+				}
+				pCtx, pCancel := context.WithCancel(ctx)
+				permMu.Lock()
+				if prev, exists := activePerms[reqID]; exists {
+					prev()
+				}
+				activePerms[reqID] = pCancel
+				permMu.Unlock()
+				go func() {
+					defer pCancel()
+					resp := ResolveApprovalDecision(pCtx, opts, permReq)
+					permMu.Lock()
+					delete(activePerms, reqID)
+					permMu.Unlock()
+					if !p.alive() {
+						return
+					}
+					if resp.Decision == "allow_once" || resp.Decision == "allow_always" {
+						updatedInput := origInput
+						if updatedInput == nil {
+							updatedInput = map[string]any{}
+						}
+						allowBody := map[string]any{
+							"behavior":     "allow",
+							"updatedInput": updatedInput,
+						}
+						if resp.Decision == "allow_always" && len(suggestions) > 0 {
+							allowBody["updatedPermissions"] = suggestions
+						}
+						_ = p.send(map[string]any{
+							"type": "control_response",
+							"response": map[string]any{
+								"subtype":    "success",
+								"request_id": reqID,
+								"response":   allowBody,
+							},
+						})
+						return
+					}
+					reason := strings.TrimSpace(resp.Reason)
+					if reason == "" {
+						reason = "User denied permission"
+					}
+					_ = p.send(map[string]any{
+						"type": "control_response",
+						"response": map[string]any{
+							"subtype":    "success",
+							"request_id": reqID,
+							"response": map[string]any{
+								"behavior": "deny",
+								"message":  reason,
+							},
+						},
+					})
+				}()
 			case "system":
 				if evt.Subtype == "init" && (len(evt.SlashCommands) > 0 || len(evt.Skills) > 0) {
 					var list []SlashCommand

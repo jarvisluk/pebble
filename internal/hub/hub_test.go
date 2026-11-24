@@ -1464,3 +1464,222 @@ func TestSlashPassthroughCommandsMentionsAndAttachments(t *testing.T) {
 	}
 }
 
+
+
+type permCapHarness struct {
+	kind string
+	caps harness.PermissionCapabilities
+	fn   func(ctx context.Context, opts harness.RunOptions) (*harness.TurnResult, error)
+}
+
+func (p *permCapHarness) Kind() string                                            { return p.kind }
+func (p *permCapHarness) Label() string                                           { return p.kind }
+func (p *permCapHarness) Models(context.Context) ([]string, error)                { return nil, nil }
+func (p *permCapHarness) Close()                                                  {}
+func (p *permCapHarness) PermissionCapabilities() harness.PermissionCapabilities  { return p.caps }
+func (p *permCapHarness) RunTurn(ctx context.Context, opts harness.RunOptions) (*harness.TurnResult, error) {
+	return p.fn(ctx, opts)
+}
+
+func TestPermissionModeApprovalLifecycleAndSessionAllow(t *testing.T) {
+	tmp := t.TempDir()
+	store, err := state.NewStore(filepath.Join(tmp, "sessions.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	msgStore, err := state.NewMessageStore(filepath.Join(tmp, "messages"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var mu sync.Mutex
+	var unattendedSawNilPerm bool
+	var lastDecisions []string
+
+	fullHarness := &permCapHarness{
+		kind: "capfull",
+		caps: harness.PermissionCapabilities{
+			Modes:               []string{config.PermissionModeAuto, config.PermissionModeEdit, config.PermissionModeAsk, config.PermissionModePlan},
+			InteractiveApproval: true,
+			SupportsAllowAlways: true,
+		},
+		fn: func(ctx context.Context, opts harness.RunOptions) (*harness.TurnResult, error) {
+			if opts.Ephemeral {
+				mu.Lock()
+				unattendedSawNilPerm = opts.OnPermission == nil
+				mu.Unlock()
+				dec := harness.ResolveApprovalDecision(ctx, opts, harness.PermissionRequest{
+					ToolName: "bash",
+					Kind:     "shell",
+					RawInput: map[string]any{"command": "rm -rf /tmp/x"},
+				})
+				return &harness.TurnResult{BotID: opts.Bot.ID, Text: dec.Decision}, nil
+			}
+			if opts.OnPermission == nil {
+				return &harness.TurnResult{BotID: opts.Bot.ID, Text: "no-perm-cb"}, nil
+			}
+			resp, err := opts.OnPermission(ctx, harness.PermissionRequest{
+				ID:       "r1",
+				ToolName: "bash",
+				Kind:     "shell",
+				Title:    "bash",
+				Summary:  "echo hi",
+				RawInput: map[string]any{"command": "echo hi", "secret": "s3cr3t"},
+				Options: []harness.PermissionOption{
+					{ID: "real_once", Kind: "allow_once", Label: "Allow once"},
+					{ID: "session_allow", Kind: "allow_always", Label: "Allow for session"},
+					{ID: "deny", Kind: "reject", Label: "Deny"},
+				},
+			})
+			if err != nil {
+				return nil, err
+			}
+			mu.Lock()
+			lastDecisions = append(lastDecisions, resp.Decision+":"+resp.OptionID+":"+resp.Reason)
+			mu.Unlock()
+			return &harness.TurnResult{BotID: opts.Bot.ID, SessionID: "s1", Text: resp.Decision}, nil
+		},
+	}
+
+	autoOnlyHarness := &permCapHarness{
+		kind: "capauto",
+		caps: harness.PermissionCapabilities{Modes: []string{config.PermissionModeAuto}},
+		fn: func(_ context.Context, opts harness.RunOptions) (*harness.TurnResult, error) {
+			return &harness.TurnResult{BotID: opts.Bot.ID, Text: "auto"}, nil
+		},
+	}
+
+	reg := harness.NewRegistry()
+	reg.Register(fullHarness)
+	reg.Register(autoOnlyHarness)
+
+	cfg := &config.HubConfig{
+		ProjectRoot: tmp,
+		SharedDir:   filepath.Join(tmp, "workspaces", "_shared"),
+		StateFile:   filepath.Join(tmp, "sessions.json"),
+		MessagesDir: filepath.Join(tmp, "messages"),
+		Bots: []config.BotConfig{
+			{ID: "dev", Name: "Dev", Workspace: filepath.Join(tmp, "workspaces", "dev"), Harness: "capfull", PermissionMode: config.PermissionModeAsk},
+		},
+	}
+	h := New(cfg, store, msgStore, reg)
+	defer h.Close()
+
+	// 1. /mode command queries & updates mode.
+	resQ, err := h.HandleInput(context.Background(), "dev", "/mode", SendOptions{Source: "web"})
+	if err != nil || !strings.Contains(resQ.Text, "当前权限模式：ask") {
+		t.Fatalf("/mode query failed: res=%+v err=%v", resQ, err)
+	}
+	if _, err := h.HandleInput(context.Background(), "dev", "/mode invalid", SendOptions{Source: "web"}); err == nil {
+		t.Fatal("expected /mode invalid to fail")
+	}
+
+	// 2. Interactive approval + ReplyApproval("allow_always") + audit message + sessionAllow cache hit.
+	done1 := make(chan *harness.TurnResult, 1)
+	go func() {
+		r, err := h.HandleInput(context.Background(), "dev", "run tool 1", SendOptions{Source: "web"})
+		if err != nil {
+			t.Errorf("turn 1 error: %v", err)
+		}
+		done1 <- r
+	}()
+
+	var apr PendingApproval
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		list := h.ListApprovals("dev")
+		if len(list) == 1 {
+			apr = list[0]
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if apr.ID == "" || apr.RawInput["secret"] != "[REDACTED]" {
+		t.Fatalf("expected redacted pending approval, got %+v", apr)
+	}
+	if _, err := h.ReplyApproval(apr.ID, "allow_always", "session_allow", ""); err != nil {
+		t.Fatalf("ReplyApproval failed: %v", err)
+	}
+	<-done1
+
+	// Subsequent call for same tool must auto-allow immediately using real protocol optionId ("real_once", NOT "session_allow")!
+	res2, err := h.HandleInput(context.Background(), "dev", "run tool 2", SendOptions{Source: "web"})
+	if err != nil || res2.Text != "allow_once" {
+		t.Fatalf("expected sessionAllow hit -> allow_once, got %+v err=%v", res2, err)
+	}
+	mu.Lock()
+	if len(lastDecisions) < 2 || lastDecisions[1] != "allow_once:real_once:" {
+		mu.Unlock()
+		t.Fatalf("expected second decision to select real_once (not session_allow), got %+v", lastDecisions)
+	}
+	mu.Unlock()
+
+	// 3. ResetSession clears sessionAllow -> prompts again, then ReplyApproval("reject", reason).
+	if _, _, err := h.ResetSession("dev"); err != nil {
+		t.Fatal(err)
+	}
+	done3 := make(chan error, 1)
+	go func() {
+		_, err := h.HandleInput(context.Background(), "dev", "run tool 3", SendOptions{Source: "web"})
+		done3 <- err
+	}()
+	var apr3 PendingApproval
+	deadline = time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if list := h.ListApprovals("dev"); len(list) == 1 {
+			apr3 = list[0]
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if apr3.ID == "" {
+		t.Fatal("expected prompt after ResetSession cleared sessionAllow")
+	}
+	if _, err := h.ReplyApproval(apr3.ID, "reject", "deny", "危险命令"); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done3; err != nil {
+		t.Fatal(err)
+	}
+
+	msgs, _ := h.Messages("dev", 20)
+	var sawAuditAllow, sawAuditDeny bool
+	for _, m := range msgs {
+		if m.Role == "system" && strings.Contains(m.Text, "本次会话始终允许：bash") {
+			sawAuditAllow = true
+		}
+		if m.Role == "system" && strings.Contains(m.Text, "已拒绝 bash") && strings.Contains(m.Text, "危险命令") {
+			sawAuditDeny = true
+		}
+	}
+	if !sawAuditAllow || !sawAuditDeny {
+		t.Fatalf("missing audit messages in %+v", msgs)
+	}
+
+	// 4. Unattended RunIsolated with permissionMode="ask" sets OnPermission=nil and auto-denies.
+	isoRes, err := h.RunIsolated(context.Background(), "dev", "routine", IsolatedOptions{
+		Source:         "routine",
+		PermissionMode: config.PermissionModeAsk,
+	})
+	if err != nil || isoRes.Text != "reject" {
+		t.Fatalf("expected unattended ask to auto-deny, got res=%+v err=%v", isoRes, err)
+	}
+	mu.Lock()
+	if !unattendedSawNilPerm {
+		mu.Unlock()
+		t.Fatal("expected OnPermission == nil for unattended routine")
+	}
+	mu.Unlock()
+
+	// 5. Switching harness to autoOnly auto-falls back permissionMode to "auto"; setting unsupported mode explicitly fails.
+	capAutoKind := "capauto"
+	askMode := config.PermissionModeAsk
+	st, err := h.UpdateBot("dev", BotUpdate{Harness: &capAutoKind})
+	if err != nil || st.PermissionMode != config.PermissionModeAuto {
+		t.Fatalf("expected auto fallback when switching harness, got st=%+v err=%v", st, err)
+	}
+	if _, err := h.UpdateBot("dev", BotUpdate{PermissionMode: &askMode}); err == nil {
+		t.Fatal("expected explicit unsupported permission mode on capauto to fail")
+	}
+}

@@ -418,3 +418,148 @@ func TestOpenCodeListCommandsAndAgentsArrayAndLocalFallback(t *testing.T) {
 		}
 	}
 }
+
+
+func TestOpenCodePermissionFlowAndAgentSwitch(t *testing.T) {
+	evCh := make(chan string, 16)
+	var (
+		mu          sync.Mutex
+		permReplies []map[string]any
+		agentPosts  []map[string]any
+		promptCount int
+		prompted    = make(chan struct{}, 4)
+	)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/info":
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/event":
+			w.Header().Set("Content-Type", "text/event-stream")
+			flusher, _ := w.(http.Flusher)
+			_, _ = fmt.Fprintf(w, "data: {\"type\":\"server.connected\",\"data\":{}}\n\n")
+			if flusher != nil {
+				flusher.Flush()
+			}
+			for {
+				select {
+				case <-r.Context().Done():
+					return
+				case msg := <-evCh:
+					_, _ = fmt.Fprintf(w, "data: %s\n\n", msg)
+					if flusher != nil {
+						flusher.Flush()
+					}
+				}
+			}
+		case r.Method == http.MethodPost && r.URL.Path == "/api/session":
+			_, _ = w.Write([]byte(`{"data":{"id":"ses_p1"}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/session/ses_p1/agent":
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			mu.Lock()
+			agentPosts = append(agentPosts, body)
+			mu.Unlock()
+			_, _ = w.Write([]byte(`{}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/session/ses_p1/prompt":
+			mu.Lock()
+			promptCount++
+			mu.Unlock()
+			_, _ = w.Write([]byte(`{}`))
+			prompted <- struct{}{}
+		case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/api/session/ses_p1/permission/") && strings.HasSuffix(r.URL.Path, "/reply"):
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			mu.Lock()
+			permReplies = append(permReplies, body)
+			mu.Unlock()
+			_, _ = w.Write([]byte(`{}`))
+			evCh <- `{"type":"session.text.ended","data":{"sessionID":"ses_p1","text":"perm handled"}}`
+			evCh <- `{"type":"session.execution.succeeded","data":{"sessionID":"ses_p1"}}`
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	h := NewOpenCodeHarness(srv.URL)
+	defer h.Close()
+
+	// 1. Plan mode sets agent="plan" and auto-rejects non-read actions (e.g. bash) without invoking OnPermission.
+	go func() {
+		<-prompted
+		evCh <- `{"type":"permission.asked","data":{"id":"p1","sessionID":"ses_p1","action":"bash","resources":["ls"],"metadata":{"apiKey":"topsecret"},"message":"List files"}}`
+	}()
+	if _, err := h.RunTurn(context.Background(), RunOptions{
+		Bot:    config.BotConfig{ID: "b1", Workspace: t.TempDir(), PermissionMode: config.PermissionModePlan},
+		Prompt: "plan",
+		OnPermission: func(_ context.Context, req PermissionRequest) (PermissionResponse, error) {
+			t.Fatalf("plan mode should auto-reject bash without prompting, got %+v", req)
+			return PermissionResponse{}, nil
+		},
+	}); err != nil {
+		t.Fatalf("turn 1 error: %v", err)
+	}
+
+	// 2. Ask mode switches agent back to "build" and prompts OnPermission (allow_once -> "once", apiKey redacted).
+	go func() {
+		<-prompted
+		evCh <- `{"type":"permission.asked","data":{"id":"p1b","sessionID":"ses_p1","action":"bash","resources":["ls"],"metadata":{"apiKey":"topsecret"},"message":"List files"}}`
+	}()
+	if _, err := h.RunTurn(context.Background(), RunOptions{
+		Bot:       config.BotConfig{ID: "b1", Workspace: t.TempDir(), PermissionMode: config.PermissionModeAsk},
+		SessionID: "ses_p1",
+		Prompt:    "ask allow",
+		OnPermission: func(_ context.Context, req PermissionRequest) (PermissionResponse, error) {
+			if req.Kind != "shell" || req.RawInput["apiKey"] != "[REDACTED]" {
+				t.Fatalf("unexpected perm req: %+v", req)
+			}
+			return PermissionResponse{Decision: "allow_once"}, nil
+		},
+	}); err != nil {
+		t.Fatalf("turn 2 error: %v", err)
+	}
+
+	// 3. permission.replied externally cancels pending OnPermission.
+	permCancelled := make(chan struct{})
+	permEntered := make(chan struct{})
+	go func() {
+		<-prompted
+		evCh <- `{"type":"permission.asked","data":{"id":"p2","sessionID":"ses_p1","action":"write","resources":["/tmp/x"]}}`
+		<-permEntered
+		evCh <- `{"type":"permission.replied","data":{"sessionID":"ses_p1","requestID":"p2","reply":"once"}}`
+		evCh <- `{"type":"session.text.ended","data":{"sessionID":"ses_p1","text":"external reply"}}`
+		evCh <- `{"type":"session.execution.succeeded","data":{"sessionID":"ses_p1"}}`
+	}()
+	res3, err := h.RunTurn(context.Background(), RunOptions{
+		Bot:       config.BotConfig{ID: "b1", Workspace: t.TempDir(), PermissionMode: config.PermissionModeAsk},
+		SessionID: "ses_p1",
+		Prompt:    "ask",
+		OnPermission: func(pCtx context.Context, _ PermissionRequest) (PermissionResponse, error) {
+			close(permEntered)
+			<-pCtx.Done()
+			close(permCancelled)
+			return PermissionResponse{Decision: "cancelled"}, pCtx.Err()
+		},
+	})
+	if err != nil {
+		t.Fatalf("turn 3 error: %v", err)
+	}
+	if res3.Text != "external reply" {
+		t.Fatalf("unexpected turn 3 text: %q", res3.Text)
+	}
+	select {
+	case <-permCancelled:
+	case <-time.After(time.Second):
+		t.Fatal("permission.replied did not cancel pending OnPermission")
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(permReplies) != 2 || permReplies[0]["decision"] != "reject" || permReplies[1]["decision"] != "once" {
+		t.Fatalf("unexpected permission replies: %+v", permReplies)
+	}
+	if len(agentPosts) != 1 || agentPosts[0]["agent"] != "build" {
+		t.Fatalf("expected agent switch back to build, got %+v", agentPosts)
+	}
+}

@@ -323,3 +323,44 @@ func TestSchedulerCronSecondsAndWebhooks(t *testing.T) {
 		t.Fatalf("expected NextRunAt for second-level cron, got %+v", st)
 	}
 }
+
+
+func TestRoutinePermissionModeForwarding(t *testing.T) {
+	fh := &fakeRoutineHarness{reply: "checked"}
+	h, _ := newTestSchedulerHub(t, fh)
+	s := New(h)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer func() {
+		cancel()
+		s.Wait()
+	}()
+	s.Start(ctx)
+
+	if _, err := h.CreateRoutine("ops", config.ScheduleConfig{
+		ID:             "ro-check",
+		Name:           "RO Check",
+		Cron:           "@every 1h",
+		PermissionMode: config.PermissionModePlan,
+		Prompt:         "audit logs",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := s.RunNow(ctx, "ops", "ro-check")
+	if err != nil || res.Status != "ok" {
+		t.Fatalf("RunNow failed: res=%+v err=%v", res, err)
+	}
+	fh.mu.Lock()
+	defer fh.mu.Unlock()
+	if len(fh.calls) == 0 {
+		t.Fatal("expected harness call")
+	}
+	last := fh.calls[len(fh.calls)-1]
+	if last.PermissionMode != config.PermissionModePlan || last.Bot.EffectivePermissionMode() != config.PermissionModePlan {
+		t.Fatalf("expected routine permissionMode=plan, got opts=%q bot=%q", last.PermissionMode, last.Bot.EffectivePermissionMode())
+	}
+	if last.OnPermission != nil {
+		t.Fatal("expected unattended routine to have OnPermission == nil")
+	}
+}

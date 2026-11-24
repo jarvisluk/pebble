@@ -90,6 +90,14 @@ func NewPiHarness() *PiHarness {
 func (h *PiHarness) Kind() string  { return "pi" }
 func (h *PiHarness) Label() string { return "Pi" }
 
+func (h *PiHarness) PermissionCapabilities() PermissionCapabilities {
+	return PermissionCapabilities{
+		Modes:               []string{config.PermissionModeAuto},
+		InteractiveApproval: false,
+		SupportsAllowAlways: false,
+	}
+}
+
 func (h *PiHarness) ListCommands(_ context.Context, bot config.BotConfig) ([]SlashCommand, error) {
 	builtins := []SlashCommand{
 		{Name: "compact", Description: "压缩当前会话上下文", Source: "harness"},

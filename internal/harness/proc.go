@@ -191,10 +191,7 @@ func mergedEnv(botEnv, extraEnv map[string]string) []string {
 }
 
 func withBotTimeout(ctx context.Context, timeoutSec int) (context.Context, context.CancelFunc) {
-	if timeoutSec <= 0 {
-		return ctx, func() {}
-	}
-	return context.WithTimeout(ctx, time.Duration(timeoutSec)*time.Second)
+	return withTurnTimeout(ctx, timeoutSec, RunOptions{})
 }
 
 type imageAttachment struct {

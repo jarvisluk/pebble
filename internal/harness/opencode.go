@@ -44,7 +44,8 @@ type OpenCodeHarness struct {
 	subsMu sync.Mutex
 	subs   map[string]chan ocEvent
 
-	applied sync.Map // sessionID -> model last applied
+	applied      sync.Map // sessionID -> model last applied
+	appliedAgent sync.Map // sessionID -> agent last applied
 }
 
 type ocEvent struct {
@@ -61,6 +62,7 @@ var ocEventTypes = []string{
 	"session.execution.failed",
 	"session.execution.interrupted",
 	"permission.asked",
+	"permission.replied",
 	"form.created",
 	"form.replied",
 	"form.cancelled",
@@ -86,6 +88,19 @@ func (h *OpenCodeHarness) apiClient(base, pw string) *ocAPI {
 
 func (h *OpenCodeHarness) Kind() string  { return "opencode" }
 func (h *OpenCodeHarness) Label() string { return "OpenCode" }
+
+func (h *OpenCodeHarness) PermissionCapabilities() PermissionCapabilities {
+	return PermissionCapabilities{
+		Modes: []string{
+			config.PermissionModeAuto,
+			config.PermissionModeEdit,
+			config.PermissionModeAsk,
+			config.PermissionModePlan,
+		},
+		InteractiveApproval: true,
+		SupportsAllowAlways: true,
+	}
+}
 
 // ensure returns a ready server (started on first use) with its event stream connected.
 func (h *OpenCodeHarness) ensure(ctx context.Context) (string, string, error) {
@@ -186,6 +201,10 @@ func (h *OpenCodeHarness) Reload() {
 		h.applied.Delete(k)
 		return true
 	})
+	h.appliedAgent.Range(func(k, _ any) bool {
+		h.appliedAgent.Delete(k)
+		return true
+	})
 }
 
 func (h *OpenCodeHarness) eventLoop(ctx context.Context, base, pw string, ready chan struct{}) {
@@ -274,7 +293,7 @@ func (h *OpenCodeHarness) unsubscribe(sid string) {
 func (h *OpenCodeHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnResult, error) {
 	started := time.Now()
 	bot := opts.Bot
-	ctx, cancel := withBotTimeout(ctx, bot.TimeoutSec)
+	ctx, cancel := withTurnTimeout(ctx, bot.TimeoutSec, opts)
 	defer cancel()
 
 	base, pw, err := h.ensure(ctx)
@@ -283,6 +302,11 @@ func (h *OpenCodeHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnRe
 	}
 	api := h.apiClient(base, pw)
 	model := modelRef(bot.Model)
+	mode := EffectivePermissionMode(opts)
+	targetAgent := strings.TrimSpace(bot.Agent)
+	if mode == config.PermissionModePlan {
+		targetAgent = "plan"
+	}
 
 	createSession := func() (string, error) {
 		title := "bot:" + bot.ID
@@ -296,8 +320,8 @@ func (h *OpenCodeHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnRe
 		if model != nil {
 			body["model"] = model
 		}
-		if bot.Agent != "" {
-			body["agent"] = bot.Agent
+		if targetAgent != "" {
+			body["agent"] = targetAgent
 		}
 		var out struct {
 			Data struct {
@@ -308,6 +332,7 @@ func (h *OpenCodeHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnRe
 			return "", fmt.Errorf("create opencode session: %w", err)
 		}
 		h.applied.Store(out.Data.ID, bot.Model)
+		h.appliedAgent.Store(out.Data.ID, targetAgent)
 		return out.Data.ID, nil
 	}
 
@@ -327,6 +352,7 @@ func (h *OpenCodeHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnRe
 			if code, err := api.do(ctx, http.MethodPost, "/api/session/"+sid+"/model", map[string]any{"model": model}, nil); err != nil {
 				if code == http.StatusNotFound {
 					h.applied.Delete(sid)
+					h.appliedAgent.Delete(sid)
 					sid = ""
 					reusedKnown = false
 				} else {
@@ -335,6 +361,22 @@ func (h *OpenCodeHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnRe
 			} else {
 				h.applied.Store(sid, bot.Model)
 			}
+		}
+	}
+	if sid != "" {
+		prevAgentRaw, hasPrevAgent := h.appliedAgent.Load(sid)
+		prevAgent, _ := prevAgentRaw.(string)
+		if (hasPrevAgent && prevAgent != targetAgent) || (!hasPrevAgent && targetAgent != "") {
+			agentToApply := targetAgent
+			if agentToApply == "" && prevAgent == "plan" {
+				agentToApply = "build"
+			}
+			if agentToApply != "" {
+				if code, _ := api.do(ctx, http.MethodPost, "/api/session/"+sid+"/agent", map[string]any{"agent": agentToApply}, nil); code == http.StatusNotFound && !reusedKnown {
+					// Ignore if server does not support /agent or custom agent name.
+				}
+			}
+			h.appliedAgent.Store(sid, targetAgent)
 		}
 	}
 	if sid == "" {
@@ -347,6 +389,7 @@ func (h *OpenCodeHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnRe
 	if opts.Ephemeral && sid != "" {
 		defer func(ephemeralSID string) {
 			h.applied.Delete(ephemeralSID)
+			h.appliedAgent.Delete(ephemeralSID)
 			dctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
 			_, _ = api.do(dctx, http.MethodDelete, "/api/session/"+ephemeralSID, nil, nil)
@@ -442,6 +485,18 @@ func (h *OpenCodeHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnRe
 	}
 	defer cancelAllForms()
 
+	var permMu sync.Mutex
+	activePerms := make(map[string]context.CancelFunc)
+	cancelAllPerms := func() {
+		permMu.Lock()
+		for id, cancel := range activePerms {
+			cancel()
+			delete(activePerms, id)
+		}
+		permMu.Unlock()
+	}
+	defer cancelAllPerms()
+
 	cancelForm := func(formID, msg string) {
 		path := "/api/session/" + sid + "/form/" + url.PathEscape(formID)
 		if msg != "" {
@@ -457,6 +512,7 @@ func (h *OpenCodeHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnRe
 		case <-ctx.Done():
 			// Stop the running execution so the session is free for the next turn.
 			cancelAllForms()
+			cancelAllPerms()
 			partial.Text = strings.Join(texts, "\n")
 			ictx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			_, _ = api.do(ictx, http.MethodPost, "/api/session/"+sid+"/interrupt", nil, nil)
@@ -468,12 +524,20 @@ func (h *OpenCodeHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnRe
 
 		case evt := <-ch:
 			var d struct {
-				ID     string `json:"id"`
-				Delta  string `json:"delta"`
-				Text   string `json:"text"`
-				Name   string `json:"name"`
-				Cost   float64
-				Tokens *struct {
+				ID         string         `json:"id"`
+				RequestID  string         `json:"requestID"`
+				Action     string         `json:"action"`
+				Permission string         `json:"permission"`
+				Resources  []string       `json:"resources"`
+				Patterns   []string       `json:"patterns"`
+				Metadata   map[string]any `json:"metadata"`
+				Message    string         `json:"message"`
+				Title      string         `json:"title"`
+				Delta      string         `json:"delta"`
+				Text       string         `json:"text"`
+				Name       string         `json:"name"`
+				Cost       float64
+				Tokens     *struct {
 					Input  int `json:"input"`
 					Output int `json:"output"`
 					Cache  struct {
@@ -522,11 +586,100 @@ func (h *OpenCodeHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnRe
 					usage.CacheReadTokens += d.Tokens.Cache.Read
 				}
 			case "permission.asked":
-				decision := "reject"
-				if bot.ShouldAutoApprove() {
-					decision = "once"
+				permID := d.ID
+				if permID == "" {
+					continue
 				}
-				_, _ = api.do(ctx, http.MethodPost, "/api/session/"+sid+"/permission/"+d.ID+"/reply", map[string]any{"decision": decision}, nil)
+				action := strings.TrimSpace(d.Action)
+				if action == "" {
+					action = strings.TrimSpace(d.Permission)
+				}
+				resources := d.Resources
+				if len(resources) == 0 {
+					resources = d.Patterns
+				}
+				rawInput := make(map[string]any, len(d.Metadata)+2)
+				for k, v := range d.Metadata {
+					rawInput[k] = v
+				}
+				if len(resources) > 0 {
+					rawInput["resources"] = resources
+				}
+				if strings.TrimSpace(d.Message) != "" {
+					rawInput["message"] = d.Message
+				}
+				toolName := action
+				if toolName == "" {
+					toolName = "tool"
+				}
+				summary := strings.TrimSpace(strings.Join(resources, ", "))
+				if summary == "" {
+					summary = strings.TrimSpace(d.Message)
+				}
+				if summary == "" {
+					summary = strings.TrimSpace(d.Title)
+				}
+				title := strings.TrimSpace(d.Title)
+				if title == "" {
+					title = strings.TrimSpace(d.Message)
+				}
+				if title == "" {
+					title = toolName
+				}
+				req := PermissionRequest{
+					ID:       permID,
+					ToolName: toolName,
+					Kind:     NormalizeToolKind(action, toolName),
+					Title:    title,
+					Summary:  summary,
+					RawInput: rawInput,
+					Options:  StandardPermissionOptions(true),
+				}
+				pCtx, pCancel := context.WithCancel(ctx)
+				permMu.Lock()
+				if prev, exists := activePerms[permID]; exists {
+					prev()
+				}
+				activePerms[permID] = pCancel
+				permMu.Unlock()
+				go func() {
+					defer pCancel()
+					resp := ResolveApprovalDecision(pCtx, opts, req)
+					permMu.Lock()
+					delete(activePerms, permID)
+					permMu.Unlock()
+					if pCtx.Err() != nil && ctx.Err() == nil {
+						// External permission.replied cancelled our pending prompt.
+						return
+					}
+					decision := "reject"
+					switch resp.Decision {
+					case "allow_once":
+						decision = "once"
+					case "allow_always":
+						decision = "always"
+					}
+					body := map[string]any{"decision": decision}
+					if decision == "reject" && strings.TrimSpace(resp.Reason) != "" {
+						body["message"] = strings.TrimSpace(resp.Reason)
+					}
+					rctx, rcancel := context.WithTimeout(context.Background(), 5*time.Second)
+					_, _ = api.do(rctx, http.MethodPost, "/api/session/"+sid+"/permission/"+url.PathEscape(permID)+"/reply", body, nil)
+					rcancel()
+				}()
+			case "permission.replied":
+				targetID := strings.TrimSpace(d.RequestID)
+				if targetID == "" {
+					targetID = strings.TrimSpace(d.ID)
+				}
+				if targetID != "" {
+					permMu.Lock()
+					if cancel, ok := activePerms[targetID]; ok {
+						cancel()
+						delete(activePerms, targetID)
+					}
+					permMu.Unlock()
+				}
 			case "form.created":
 				if d.Form == nil || d.Form.ID == "" {
 					continue

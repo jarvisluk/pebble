@@ -36,11 +36,13 @@ type Manager struct {
 	store  *state.Store
 	sender Sender
 
-	mu             sync.Mutex
-	botRuns        map[string]*botRunState
-	activeTakeover map[string]string // target -> takeover id
-	knownQuestions map[string]bool
-	botNames       map[string]string
+	mu                 sync.Mutex
+	botRuns            map[string]*botRunState
+	activeTakeover     map[string]string // target -> takeover id
+	knownQuestions     map[string]bool
+	knownApprovals     map[string]bool
+	activeApprovalBots map[string]bool
+	botNames           map[string]string
 	eventCh        chan rawEvent
 	stopCh         chan struct{}
 	stopOnce       sync.Once
@@ -78,10 +80,12 @@ func NewManagerWithSender(store *state.Store, sender Sender) *Manager {
 	m := &Manager{
 		store:          store,
 		sender:         sender,
-		botRuns:        make(map[string]*botRunState),
-		activeTakeover: make(map[string]string),
-		knownQuestions: make(map[string]bool),
-		botNames:       make(map[string]string),
+		botRuns:            make(map[string]*botRunState),
+		activeTakeover:     make(map[string]string),
+		knownQuestions:     make(map[string]bool),
+		knownApprovals:     make(map[string]bool),
+		activeApprovalBots: make(map[string]bool),
+		botNames:           make(map[string]string),
 		eventCh:        make(chan rawEvent, eventQueueSize),
 		stopCh:         make(chan struct{}),
 	}
@@ -150,6 +154,8 @@ func (m *Manager) processEvent(evt rawEvent) {
 		m.handleTakeover(evt.Payload)
 	case "questions":
 		m.handleQuestions(evt.Payload)
+	case "approvals":
+		m.handleApprovals(evt.Payload)
 	}
 }
 
@@ -392,9 +398,11 @@ func (m *Manager) handleTakeover(payload any) {
 func (m *Manager) handleQuestions(payload any) {
 	var p struct {
 		Items []struct {
-			ID     string `json:"id"`
-			BotID  string `json:"botId"`
-			Prompt string `json:"prompt"`
+			ID      string `json:"id"`
+			BotID   string `json:"botId"`
+			BotName string `json:"botName"`
+			Title   string `json:"title"`
+			Prompt  string `json:"prompt"`
 		} `json:"items"`
 	}
 	if !decodePayload(payload, &p) {
@@ -412,12 +420,18 @@ func (m *Manager) handleQuestions(payload any) {
 			continue
 		}
 		if name == "" {
+			name = strings.TrimSpace(item.BotName)
+		}
+		if name == "" {
 			name = item.BotID
 		}
 		if name == "" {
 			name = "Bot"
 		}
-		body := compactPreview(item.Prompt, 120)
+		body := compactPreview(item.Title, 120)
+		if body == "" {
+			body = compactPreview(item.Prompt, 120)
+		}
 		if body == "" {
 			body = "等待你的确认"
 		}
@@ -434,6 +448,133 @@ func (m *Manager) handleQuestions(payload any) {
 		}
 	}
 	m.mu.Unlock()
+}
+
+func (m *Manager) handleApprovals(payload any) {
+	var p struct {
+		Items []struct {
+			ID       string `json:"id"`
+			BotID    string `json:"botId"`
+			BotName  string `json:"botName"`
+			ToolName string `json:"toolName"`
+			Title    string `json:"title"`
+			Summary  string `json:"summary"`
+		} `json:"items"`
+	}
+	if !decodePayload(payload, &p) {
+		return
+	}
+	currentIDs := make(map[string]bool, len(p.Items))
+	currentBots := make(map[string]bool)
+	for _, item := range p.Items {
+		currentIDs[item.ID] = true
+		if item.BotID != "" {
+			currentBots[item.BotID] = true
+		}
+
+		m.mu.Lock()
+		seen := m.knownApprovals[item.ID]
+		m.knownApprovals[item.ID] = true
+		name := m.botNames[item.BotID]
+		run := m.botRuns[item.BotID]
+		var startedAt time.Time
+		var steps int
+		if run != nil {
+			startedAt = run.StartedAt
+			steps = run.StepCount
+		}
+		m.mu.Unlock()
+		if seen {
+			continue
+		}
+		if name == "" {
+			name = strings.TrimSpace(item.BotName)
+		}
+		if name == "" {
+			name = item.BotID
+		}
+		if name == "" {
+			name = "Bot"
+		}
+		label := strings.TrimSpace(item.ToolName)
+		if label == "" {
+			label = strings.TrimSpace(item.Title)
+		}
+		summary := compactPreview(item.Summary, 100)
+		body := label
+		if summary != "" {
+			if body != "" {
+				body += ": " + summary
+			} else {
+				body = summary
+			}
+		}
+		if body == "" {
+			body = "请求批准执行操作"
+		}
+
+		m.pushAlert(APSAlert{
+			Title: name + " 请求批准",
+			Body:  body,
+		}, "time-sensitive", "approval-"+item.BotID, "bothub://bot/"+item.BotID, item.BotID, "", "approval")
+
+		if item.BotID != "" {
+			if startedAt.IsZero() {
+				startedAt = time.Now()
+			}
+			m.mu.Lock()
+			m.activeApprovalBots[item.BotID] = true
+			m.mu.Unlock()
+			m.pushBotActivity("bot:"+item.BotID, item.BotID, name, "update", LiveActivityContentState{
+				Phase:      "approval",
+				StatusText: "等待批准",
+				StepCount:  steps,
+				StartedAt:  float64(startedAt.UnixMilli()) / 1000.0,
+				Summary:    body,
+			}, "")
+		}
+	}
+
+	type restoreItem struct {
+		botID     string
+		name      string
+		startedAt time.Time
+		steps     int
+	}
+	var toRestore []restoreItem
+	m.mu.Lock()
+	for id := range m.knownApprovals {
+		if !currentIDs[id] {
+			delete(m.knownApprovals, id)
+		}
+	}
+	for botID := range m.activeApprovalBots {
+		if !currentBots[botID] {
+			delete(m.activeApprovalBots, botID)
+			if run := m.botRuns[botID]; run != nil && run.Busy {
+				name := m.botNames[botID]
+				if name == "" {
+					name = botID
+				}
+				toRestore = append(toRestore, restoreItem{
+					botID:     botID,
+					name:      name,
+					startedAt: run.StartedAt,
+					steps:     run.StepCount,
+				})
+			}
+		}
+	}
+	m.mu.Unlock()
+
+	for _, r := range toRestore {
+		m.pushBotActivity("bot:"+r.botID, r.botID, r.name, "update", LiveActivityContentState{
+			Phase:      "running",
+			StatusText: "正在执行",
+			StepCount:  r.steps,
+			StartedAt:  float64(r.startedAt.UnixMilli()) / 1000.0,
+		}, "")
+	}
 }
 
 func (m *Manager) pushAlert(alert APSAlert, level, collapseID, deepLink, botID, target, kind string) {
