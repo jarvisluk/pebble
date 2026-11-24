@@ -8,13 +8,30 @@ struct SettingsSidebarView: View {
     var compact = true
 
     var body: some View {
-        @Bindable var r = router
         #if os(macOS)
-        List(SettingsTab.allCases, selection: $r.settingsTab) { tab in
-            NavigationLink(value: tab) {
-                tabLabel(tab)
+        List {
+            ForEach(SettingsTab.allCases) { tab in
+                let active = (router.settingsTab ?? .general) == tab
+                Button {
+                    router.settingsTab = tab
+                } label: {
+                    tabLabel(tab)
+                        .font(.system(size: AppFont.body, weight: active ? .semibold : .regular))
+                        .foregroundStyle(active ? p.text : p.text2)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 7)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .fill(active ? Color.primary.opacity(p.dark ? 0.14 : 0.08) : Color.clear)
+                        )
+                        .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .listRowInsets(EdgeInsets(top: 2, leading: 6, bottom: 2, trailing: 6))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
             }
-            .tag(tab)
         }
         .hubColumnList(compact: false, page: p.page)
         .contentMargins(.top, 4, for: .scrollContent)

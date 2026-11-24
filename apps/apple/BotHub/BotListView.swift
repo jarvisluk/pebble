@@ -74,9 +74,8 @@ struct BotListView: View {
     }
 
     var body: some View {
-        @Bindable var r = router
         #if os(macOS)
-        List(selection: $r.selected) { rows }
+        List { macRows }
             .hubColumnList(compact: compact, page: p.page)
             .contentMargins(.top, 4, for: .scrollContent)
             .refreshable {
@@ -129,6 +128,7 @@ struct BotListView: View {
             .navigationTitle("")
             .confirmAlert($confirm)
         #else
+        @Bindable var r = router
         List(selection: $r.selected) { rows }
             .hubColumnList(compact: compact, page: p.page)
             .hubListSectionSpacing(12)
@@ -148,6 +148,64 @@ struct BotListView: View {
             .confirmAlert($confirm)
         #endif
     }
+
+    #if os(macOS)
+    @ViewBuilder
+    private var macRows: some View {
+        if let to = hub.takeovers.first { takeoverSection(to) }
+        ForEach(orderedBots, id: \.1.id) { idx, bot in
+            let pinned = pinnedIds.contains(bot.id)
+            let isUnread = (hub.unread[bot.id] ?? 0) > 0
+            Button {
+                router.openBot(bot.id)
+            } label: {
+                BotRow(bot: bot, index: idx, pinned: pinned)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(router.selected == bot.id ? Color.primary.opacity(p.dark ? 0.14 : 0.08) : Color.clear)
+                    )
+                    .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .listRowInsets(EdgeInsets(top: 2, leading: 6, bottom: 2, trailing: 6))
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+            .contextMenu {
+                Button {
+                    togglePin(bot.id)
+                } label: {
+                    Label(hub.t(pinned ? "unpinBot" : "pinBot"), systemImage: pinned ? "pin.slash" : "pin")
+                }
+                Button {
+                    hub.toggleUnread(bot.id)
+                } label: {
+                    Label(hub.t(isUnread ? "markRead" : "markUnread"), systemImage: isUnread ? "envelope.open" : "envelope.badge")
+                }
+                if hub.bots.count > 1 {
+                    Divider()
+                    Button(role: .destructive) {
+                        confirm = ConfirmItem(title: hub.t("deleteBotTitle", ["name": bot.displayName]), message: hub.t("deleteBotDesc")) {
+                            try? await hub.deleteBot(bot.id)
+                            if router.selected == bot.id { router.closeBot() }
+                        }
+                    } label: {
+                        Label(hub.t("delete"), systemImage: "trash")
+                    }
+                }
+            }
+        }
+        .onMove(perform: sortMode == .manual && query.isEmpty ? moveBots : nil)
+        if orderedBots.isEmpty {
+            Text(query.isEmpty ? hub.t("noBotsYet") : hub.t("noMatchedBots"))
+                .foregroundStyle(.secondary)
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+        }
+    }
+    #endif
 
     @ViewBuilder
     private var rows: some View {
@@ -287,7 +345,7 @@ struct BotRow: View {
                             .font(.system(size: 11))
                             .foregroundStyle(.secondary)
                     }
-                    Text(bot.displayName).font(.system(size: AppFont.body, weight: .semibold)).lineLimit(1)
+                    Text(bot.displayName).font(.system(size: AppFont.body, weight: .semibold)).foregroundStyle(p.text).lineLimit(1)
                     Spacer(minLength: 4)
                     Text(formatShortTime(lastMsg?.createdAt)).font(.system(size: AppFont.caption)).foregroundStyle(p.mute)
                 }
