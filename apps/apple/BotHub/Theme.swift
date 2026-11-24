@@ -36,7 +36,8 @@ func fnv1a(_ s: String) -> UInt32 {
     return h
 }
 
-let botColors = ["#d9774b", "#e0a23a", "#7fa14a", "#7aaa98", "#5b8bb5", "#9a7bc0", "#c4605e"]
+let pebbleColor = "#7aaa98"
+let botColors = ["#d9774b", "#e0a23a", "#7fa14a", pebbleColor, "#5b8bb5", "#9a7bc0", "#c4605e"]
 let botAvatars = ["blob", "pebble-1", "pebble-2", "pebble-3", "pebble-4", "pebble-5", "pebble-6", "pebble-7"]
 
 private let legacyBotAvatarMap: [String: String] = [

@@ -7,7 +7,8 @@ import {
   type ThemePreference,
 } from './storage';
 
-export const BOT_COLORS = ['#d9774b', '#e0a23a', '#7fa14a', '#7aaa98', '#5b8bb5', '#9a7bc0', '#c4605e'];
+export const PEBBLE_COLOR = '#7aaa98';
+export const BOT_COLORS = ['#d9774b', '#e0a23a', '#7fa14a', PEBBLE_COLOR, '#5b8bb5', '#9a7bc0', '#c4605e'];
 export const BOT_AVATARS = ['blob', 'pebble-1', 'pebble-2', 'pebble-3', 'pebble-4', 'pebble-5', 'pebble-6', 'pebble-7'] as const;
 export type BotAvatarKind = (typeof BOT_AVATARS)[number];
 

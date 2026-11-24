@@ -1,8 +1,7 @@
 import SwiftUI
 import AVFoundation
 
-private let desktopDownloadMacURL = URL(string: "https://github.com/pebble-ai/bot-hub/releases/latest")!
-private let desktopDownloadWinURL = URL(string: "https://github.com/pebble-ai/bot-hub/releases/latest")!
+private let desktopDownloadURL = URL(string: "https://github.com/pebble-ai/bot-hub/releases/latest")!
 
 struct ConnectView: View {
     @Environment(HubStore.self) private var hub
@@ -133,7 +132,7 @@ struct ConnectView: View {
                     Spacer(minLength: 24)
 
                     VStack(spacing: 14) {
-                        BotAvatar(id: "assistant", size: 84, color: "#7aaa98", busy: submitting)
+                        BotAvatar(id: "assistant", size: 84, color: pebbleColor, busy: submitting)
                         Text("Pebble")
                             .font(.system(size: 20, weight: .bold))
                             .foregroundStyle(p.text)
@@ -208,11 +207,9 @@ struct ConnectView: View {
                             .font(.system(size: 12))
                             .foregroundStyle(p.mute)
                         HStack(spacing: 10) {
-                            Button("macOS") { openURL(desktopDownloadMacURL) }
+                            Button(hub.t("downloadDesktop")) { openURL(desktopDownloadURL) }
                             Text("·").foregroundStyle(p.mute)
-                            Button("Windows") { openURL(desktopDownloadWinURL) }
-                            Text("·").foregroundStyle(p.mute)
-                            ShareLink(item: desktopDownloadMacURL) {
+                            ShareLink(item: desktopDownloadURL) {
                                 Text(hub.t("sendToComputer"))
                             }
                         }

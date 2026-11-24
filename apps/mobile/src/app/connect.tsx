@@ -19,8 +19,7 @@ import {
   View,
 } from 'react-native';
 
-const DESKTOP_DOWNLOAD_MAC_URL = 'https://github.com/pebble-ai/bot-hub/releases/latest';
-const DESKTOP_DOWNLOAD_WIN_URL = 'https://github.com/pebble-ai/bot-hub/releases/latest';
+const DESKTOP_DOWNLOAD_URL = 'https://github.com/pebble-ai/bot-hub/releases/latest';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { isNativeTunnelAvailable, type TailscalePeer } from '../../modules/bothub-tunnel';
@@ -31,7 +30,7 @@ import { ModalHeader } from '../components/ModalHeader';
 import { confirmAction } from '../confirm';
 import { useI18n } from '../i18n';
 import { useHub } from '../store';
-import { MONO_FONT, useTheme } from '../theme';
+import { MONO_FONT, PEBBLE_COLOR, useTheme } from '../theme';
 
 export function ConnectContent({ standalone = false }: { standalone?: boolean }) {
   const theme = useTheme();
@@ -312,7 +311,7 @@ export function ConnectContent({ standalone = false }: { standalone?: boolean })
     >
       <View style={styles.heroInner}>
         <View style={styles.heroTop}>
-          <BotAvatar id="assistant" size={84} color="#7aaa98" busy={submitting} />
+          <BotAvatar id="assistant" size={84} color={PEBBLE_COLOR} busy={submitting} />
           <Text style={[styles.heroTitle, { color: theme.text }]}>Pebble</Text>
           <Text style={[styles.heroSub, { color: theme.text2 }]}>{t('onboardHeroSub')}</Text>
         </View>
@@ -363,17 +362,13 @@ export function ConnectContent({ standalone = false }: { standalone?: boolean })
         <View style={styles.heroFooter}>
           <Text style={[styles.heroFooterHint, { color: theme.mute }]}>{t('noDesktopYet')}</Text>
           <View style={styles.heroFooterLinks}>
-            <Pressable onPress={() => void Linking.openURL(DESKTOP_DOWNLOAD_MAC_URL)} hitSlop={8}>
-              <Text style={[styles.heroFooterLink, { color: theme.text2 }]}>macOS</Text>
-            </Pressable>
-            <Text style={[styles.heroFooterDot, { color: theme.mute }]}>·</Text>
-            <Pressable onPress={() => void Linking.openURL(DESKTOP_DOWNLOAD_WIN_URL)} hitSlop={8}>
-              <Text style={[styles.heroFooterLink, { color: theme.text2 }]}>Windows</Text>
+            <Pressable onPress={() => void Linking.openURL(DESKTOP_DOWNLOAD_URL)} hitSlop={8}>
+              <Text style={[styles.heroFooterLink, { color: theme.text2 }]}>{t('downloadDesktop')}</Text>
             </Pressable>
             <Text style={[styles.heroFooterDot, { color: theme.mute }]}>·</Text>
             <Pressable
               onPress={() =>
-                void Share.share({ message: DESKTOP_DOWNLOAD_MAC_URL, url: DESKTOP_DOWNLOAD_MAC_URL })
+                void Share.share({ message: DESKTOP_DOWNLOAD_URL, url: DESKTOP_DOWNLOAD_URL })
               }
               hitSlop={8}
             >
@@ -482,9 +477,8 @@ export function ConnectContent({ standalone = false }: { standalone?: boolean })
             </View>
           )}
 
-          <>
-            <View style={[styles.card, { backgroundColor: theme.card }]}>
-              <Text style={[styles.cardTitle, { color: theme.text }]}>{t('manualAddrTitle')}</Text>
+          <View style={[styles.card, { backgroundColor: theme.card }]}>
+            <Text style={[styles.cardTitle, { color: theme.text }]}>{t('manualAddrTitle')}</Text>
 
             <View style={styles.field}>
               <Text style={[styles.fieldLbl, { color: theme.text2 }]}>{t('labelOptional')}</Text>
@@ -706,7 +700,6 @@ export function ConnectContent({ standalone = false }: { standalone?: boolean })
               )}
             </View>
           )}
-          </>
 
           {servers.length > 0 && (
             <View style={[styles.card, { backgroundColor: theme.card }]}>
@@ -714,37 +707,7 @@ export function ConnectContent({ standalone = false }: { standalone?: boolean })
               <View style={styles.savedList}>
                 {servers.map((s) => {
                   const isCurrent = activeServer?.id === s.id;
-                  const onPickPeer = async (peer: TailscalePeer) => {
-    setLocalError('');
-    setInfoHint('');
-    setLabel(peer.hostname);
-    setAddress(peer.address);
-    const saved = servers.find((s) => s.address === peer.address && s.token);
-    if (saved) {
-      setToken(saved.token);
-      setSubmitting(true);
-      try {
-        await addAndConnectServer({ label: peer.hostname, address: peer.address, token: saved.token });
-      } catch (err: any) {
-        setSubmitting(false);
-        setLocalError(err?.message || t('connFailed'));
-      }
-      return;
-    }
-    if (token.trim()) {
-      setSubmitting(true);
-      try {
-        await addAndConnectServer({ label: peer.hostname, address: peer.address, token: token.trim() });
-      } catch (err: any) {
-        setSubmitting(false);
-        setLocalError(err?.message || t('connFailed'));
-      }
-      return;
-    }
-    setInfoHint(t('tsPeerSelectedHint'));
-  };
-
-  return (
+                  return (
                     <View key={s.id} style={[styles.savedRow, { backgroundColor: theme.s1 }]}>
                       <Pressable onPress={() => void onPickServer(s.id)} style={styles.savedInfo}>
                         <View style={styles.savedHead}>

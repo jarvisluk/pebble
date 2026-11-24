@@ -608,16 +608,7 @@
 .qr-box { width: 190px; align-self: center; border-radius: var(--r-row); background: #fff; padding: 8px; }
 
 /* ---------- unbox onboarding wizard ---------- */
-.dlg.unbox { width: min(560px, 100%); min-width: 0; max-width: 100%; }
 .unbox-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-.unbox-steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 12px; }
-.unbox-step {
-  display: flex; align-items: center; justify-content: center; min-height: 30px; padding: 5px 10px;
-  border-radius: var(--r-row); background: var(--s1); color: var(--mute);
-  font-size: var(--fs-xs); font-weight: 600; line-height: 1.25; text-align: center;
-}
-.unbox-step.on { background: var(--sel); color: var(--text); }
-.unbox-step.done { color: var(--sage-ink); }
 .unbox-list { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .unbox-item {
   background: var(--s1); border-radius: var(--r-row); padding: 10px 12px;
@@ -638,8 +629,6 @@
 .unbox-install a { color: var(--accent); font-size: var(--fs-xs); font-weight: 600; align-self: flex-start; }
 .unbox-item-err { font-size: var(--fs-xs); color: var(--danger); line-height: 1.4; word-break: break-word; }
 .unbox-qr { width: 180px; align-self: center; border-radius: 12px; background: #fff; padding: 8px; }
-.unbox-foot { justify-content: space-between; align-items: center; }
-.unbox-foot-r { display: flex; align-items: center; gap: 8px; }
 .unbox-group-hd { font-size: var(--fs-xs); font-weight: 600; color: var(--mute); text-transform: uppercase; letter-spacing: 0.04em; margin-top: 4px; }
 .unbox-more-btn { align-self: flex-start; font-size: var(--fs-xs); padding: 2px 0; }
 .unbox-item-main-row { flex-direction: row; align-items: center; gap: 10px; }

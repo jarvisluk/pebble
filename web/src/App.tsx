@@ -24,7 +24,7 @@ import { DesktopStage } from './components/DesktopStage';
 import { SettingsView } from './components/SettingsView';
 import { BotDetailPanel } from './components/BotDetailPanel';
 import { CollabPanel } from './components/CollabPanel';
-import { UnboxModal } from './components/UnboxModal';
+import { UnboxPage } from './components/onboarding/UnboxPage';
 import { ConfirmModal, CreateBotModal, LoginModal } from './components/Modals';
 
 const VIEW_ORDER = ['chat', 'settings'] as const;
@@ -94,7 +94,6 @@ export default function App() {
 
   const [createOpen, setCreateOpen] = useState(false);
   const [unboxOpen, setUnboxOpen] = useState(false);
-  const [unboxFullscreen, setUnboxFullscreen] = useState(false);
   const [unboxStep, setUnboxStep] = useState<1 | 2 | 3>(1);
   const [bootReady, setBootReady] = useState(false);
   const [loginOpen, setLoginOpen] = useState(false);
@@ -478,7 +477,6 @@ export default function App() {
     if (unboxAutoPromptedRef.current || loginOpenRef.current) return;
     if (s?.onboarding?.needsSetup) {
       unboxAutoPromptedRef.current = true;
-      setUnboxFullscreen(true);
       setUnboxStep(1);
       setUnboxOpen(true);
     }
@@ -701,21 +699,17 @@ export default function App() {
     } catch {}
   }, []);
 
-  if (unboxOpen && unboxFullscreen) {
+  if (unboxOpen) {
     return (
       <>
-        <UnboxModal
+        <UnboxPage
           open
-          fullscreen
           initialStep={unboxStep}
           bots={bots}
           settings={settings}
           models={modelsMap}
           lang={lang}
-          onClose={() => {
-            setUnboxOpen(false);
-            setUnboxFullscreen(false);
-          }}
+          onClose={() => setUnboxOpen(false)}
           onToast={showToast}
           onSettingsUpdated={setSettings}
           onLoadSettings={loadSettings}
@@ -877,8 +871,8 @@ export default function App() {
               setDeskOpen(true);
             }}
             onReopenUnbox={() => {
+              closeAllOverlays();
               setView('chat');
-              setUnboxFullscreen(false);
               setUnboxStep(1);
               setUnboxOpen(true);
             }}
@@ -1015,25 +1009,6 @@ export default function App() {
           await selectBot(st.id);
         }}
         onLoadModels={loadModels}
-      />
-
-      <UnboxModal
-        open={unboxOpen}
-        initialStep={unboxStep}
-        bots={bots}
-        settings={settings}
-        models={modelsMap}
-        lang={lang}
-        onClose={() => setUnboxOpen(false)}
-        onToast={showToast}
-        onSettingsUpdated={setSettings}
-        onLoadSettings={loadSettings}
-        onLoadModels={loadModels}
-        onReloadBots={loadBots}
-        onBotUpdated={(st) => {
-          setBots((prev) => prev.map((b) => (b.id === st.id ? { ...b, ...st } : b)));
-        }}
-        onResetModels={() => setModelsMap({})}
       />
 
       <ConfirmModal options={confirmOpts} lang={lang} onClose={() => setConfirmOpts(null)} />

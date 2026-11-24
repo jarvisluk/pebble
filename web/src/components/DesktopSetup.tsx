@@ -1,7 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { resolveLang, translate } from '../lib/i18n';
 import { applyThemePref, getThemePref } from '../lib/theme';
+import { PEBBLE_COLOR } from '../lib/pebble';
 import { BotAvatar } from './BotAvatar';
+import { DragBar } from './DragBar';
 
 interface DesktopStateResponse {
   mode?: string;
@@ -33,14 +35,6 @@ interface TailscaleStatus {
   link?: string;
   error?: string;
   peers?: TailscalePeer[];
-}
-
-interface WailsWebKitBridge {
-  messageHandlers?: {
-    external?: {
-      postMessage: (msg: string) => void;
-    };
-  };
 }
 
 function inferRemoteKind(raw: string): 'tailcat' | 'tailscale' {
@@ -242,31 +236,7 @@ export default function DesktopSetup() {
     void start({ mode: 'remote', link: fullLink });
   };
 
-  // Native macOS titlebar drag handler for Wails WebView
-  const dragArmedRef = useRef(false);
-  useEffect(() => {
-    const onMove = (e: MouseEvent) => {
-      if (!dragArmedRef.current || !(e.buttons & 1)) {
-        dragArmedRef.current = false;
-        return;
-      }
-      dragArmedRef.current = false;
-      (window as unknown as { webkit?: WailsWebKitBridge }).webkit?.messageHandlers?.external?.postMessage(
-        'wails:drag',
-      );
-    };
-    const clearArm = () => {
-      dragArmedRef.current = false;
-    };
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', clearArm);
-    window.addEventListener('blur', clearArm);
-    return () => {
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', clearArm);
-      window.removeEventListener('blur', clearArm);
-    };
-  }, []);
+  // Native macOS titlebar drag handled by <DragBar />
 
   const trimmedLink = link.trim();
   const hasToken = trimmedLink.includes('#token=') || trimmedLink.includes('token=');
@@ -282,22 +252,10 @@ export default function DesktopSetup() {
 
   return (
     <div className="dsetup-page">
-      <div
-        className="dsetup-drag"
-        onMouseDown={(e) => {
-          dragArmedRef.current = e.button === 0 && e.detail === 1;
-        }}
-        onDoubleClick={(e) => {
-          const bridge = (window as unknown as { webkit?: WailsWebKitBridge }).webkit;
-          if (bridge?.messageHandlers?.external) {
-            e.preventDefault();
-            bridge.messageHandlers.external.postMessage('wails:drag:doubleclick');
-          }
-        }}
-      />
+      <DragBar />
       <main className="dsetup-main">
         <header className="dsetup-head dsetup-hero">
-          <BotAvatar id="assistant" bots={[]} color="#7aaa98" className="pebble-guide-av-lg" busy={busy} />
+          <BotAvatar id="assistant" bots={[]} color={PEBBLE_COLOR} className="pebble-guide-av-lg" busy={busy} />
           <h1>Pebble</h1>
           <p className="dsetup-sub">{t('desktopSetupSub')}</p>
         </header>
