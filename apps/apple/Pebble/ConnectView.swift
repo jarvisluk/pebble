@@ -1,8 +1,4 @@
 import SwiftUI
-#if os(iOS)
-import UIKit
-import AVFoundation
-#endif
 
 private let desktopDownloadURL = URL(string: "https://github.com/pebble-ai/bot-hub/releases/latest")!
 
@@ -112,7 +108,7 @@ struct ConnectView: View {
             if hub.tsBound && hub.mobileTailscale == nil {
                 Task { await hub.refreshMobileTailscale(includePeers: true) }
             }
-            if startScan { toggleScanner() }
+            if platformSupportsQRScanner && startScan { scanning = true }
         }
         .onChange(of: hub.connState) { _, st in
             if st == .connected {
@@ -131,53 +127,61 @@ struct ConnectView: View {
 
     private var freshHeroContent: some View {
         GeometryReader { geo in
+            let heroScannerHeight = min(max(geo.size.height - 210, 380), 600)
             ScrollView {
                 VStack(spacing: 0) {
-                    Spacer(minLength: 24)
+                    if !scanning {
+                        Spacer(minLength: 24)
 
-                    VStack(spacing: 16) {
-                        BotAvatar(id: "assistant", size: 104, color: pebbleColor, busy: submitting)
-                        Text("Pebble")
-                            .font(.system(size: AppFont.hero, weight: .bold))
-                            .foregroundStyle(p.text)
-                        Text(hub.t("onboardHeroSub"))
-                            .font(.system(size: AppFont.body))
-                            .foregroundStyle(p.text2)
-                            .multilineTextAlignment(.center)
+                        VStack(spacing: 16) {
+                            BotAvatar(id: "assistant", size: 104, color: pebbleColor, busy: submitting)
+                            Text("Pebble")
+                                .font(.system(size: AppFont.hero, weight: .bold))
+                                .foregroundStyle(p.text)
+                            Text(hub.t("onboardHeroSub"))
+                                .font(.system(size: AppFont.body))
+                                .foregroundStyle(p.text2)
+                                .multilineTextAlignment(.center)
+                        }
+                        .transition(.opacity.combined(with: .scale(scale: 0.92)))
+
+                        Spacer(minLength: 24)
+                    } else {
+                        Spacer().frame(height: 12)
                     }
 
-                    Spacer(minLength: 24)
-
-                    #if os(iOS)
-                    if scanning {
-                        QRScanner { onScanned($0) }
-                            .frame(height: 240)
-                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                            .padding(.bottom, 16)
-                            .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                    if platformSupportsQRScanner && scanning {
+                        QRScannerBox(
+                            onCode: { onScanned($0) },
+                            onMessage: { err = $0 }
+                        )
+                        .frame(height: heroScannerHeight)
+                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .padding(.bottom, 14)
+                        .transition(.opacity.combined(with: .scale(scale: 0.96)))
                     }
-                    #endif
 
                     VStack(spacing: 10) {
-                        #if os(iOS)
-                        Button {
-                            withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
-                                toggleScanner()
+                        if platformSupportsQRScanner {
+                            Button {
+                                err = ""
+                                withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
+                                    scanning.toggle()
+                                }
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "qrcode.viewfinder")
+                                        .font(.system(size: AppFont.cardTitle, weight: .semibold))
+                                    Text(scanning ? hub.t("collapse") : hub.t("scanConnect"))
+                                        .font(.system(size: AppFont.body, weight: .semibold))
+                                }
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 48)
+                                .background(p.accent, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                .foregroundStyle(p.card)
                             }
-                        } label: {
-                            HStack(spacing: 8) {
-                                Image(systemName: "qrcode.viewfinder")
-                                    .font(.system(size: AppFont.cardTitle, weight: .semibold))
-                                Text(scanning ? hub.t("collapse") : hub.t("scanConnect"))
-                                    .font(.system(size: AppFont.body, weight: .semibold))
-                            }
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 48)
-                            .background(p.accent, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                            .foregroundStyle(p.card)
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
-                        #endif
 
                         Button {
                             scanning = false
@@ -224,11 +228,11 @@ struct ConnectView: View {
                         .foregroundStyle(p.text2)
                         .buttonStyle(.plain)
                     }
-                    .padding(.top, 24)
-                    .padding(.bottom, 20)
+                    .padding(.top, scanning ? 14 : 24)
+                    .padding(.bottom, scanning ? 12 : 20)
                 }
-                .frame(maxWidth: 360)
-                .padding(.horizontal, 24)
+                .padding(.horizontal, scanning ? 16 : 24)
+                .frame(maxWidth: scanning ? 512 : 408)
                 .frame(maxWidth: .infinity, minHeight: geo.size.height)
             }
         }
@@ -248,25 +252,30 @@ struct ConnectView: View {
                     }
                 }
             }
-            #if os(iOS)
-            Section {
-                Button {
-                    toggleScanner()
-                } label: {
-                    Label(scanning ? hub.t("collapse") : hub.t("scanConnect"), systemImage: "qrcode.viewfinder")
+            if platformSupportsQRScanner {
+                Section {
+                    Button {
+                        err = ""
+                        withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
+                            scanning.toggle()
+                        }
+                    } label: {
+                        Label(scanning ? hub.t("collapse") : hub.t("scanConnect"), systemImage: "qrcode.viewfinder")
+                    }
+                    if scanning {
+                        QRScannerBox(
+                            onCode: { onScanned($0) },
+                            onMessage: { err = $0 }
+                        )
+                        .frame(height: 420)
+                        .hubFlushFormRow()
+                    }
+                } header: {
+                    Text(hub.t("scanPairTitle"))
+                } footer: {
+                    Text(hub.t("scanPairDesc"))
                 }
-                if scanning {
-                    QRScanner { onScanned($0) }
-                        .frame(height: 240)
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .listRowInsets(EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8))
-                }
-            } header: {
-                Text(hub.t("scanPairTitle"))
-            } footer: {
-                Text(hub.t("scanPairDesc"))
             }
-            #endif
             Section {
                 TextField("", text: $address, prompt: Text(hub.t("pairingLinkPh")), axis: .vertical)
                     .monoInput()
@@ -331,37 +340,20 @@ struct ConnectView: View {
         confirm = ConfirmItem(title: hub.t("removeBtn"), message: s.label) { await hub.removeServer(s.id) }
     }
 
-    private func toggleScanner() {
-        #if os(iOS)
-        err = ""
-        if scanning { scanning = false; return }
-        switch AVCaptureDevice.authorizationStatus(for: .video) {
-        case .authorized: scanning = true
-        case .notDetermined:
-            AVCaptureDevice.requestAccess(for: .video) { ok in
-                DispatchQueue.main.async { if ok { scanning = true } else { err = hub.t("camPermReq") } }
-            }
-        default: err = hub.t("camPermReq")
-        }
-        #endif
-    }
-
-    #if os(iOS)
     private func onScanned(_ raw: String) {
         let s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        let lower = s.lowercased()
-        guard lower.hasPrefix("tailcat://") || lower.hasPrefix("tailscale://") || lower.hasPrefix("http://") || lower.hasPrefix("https://") else {
+        guard isValidPairingQR(s) else {
             err = hub.t("invalidQr")
             return
         }
-        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        triggerScanSuccessHaptic()
         scanning = false
+        err = ""
         let norm = normalizeAddress(s)
         address = norm.cleanAddress
         if !norm.token.isEmpty { token = norm.token }
         connect(address: s, token: norm.token.isEmpty ? token : norm.token)
     }
-    #endif
 
     private func pastePairingLink() {
         err = ""
@@ -510,79 +502,3 @@ struct ConnectView: View {
     }
 
 }
-
-#if os(iOS)
-/// AVFoundation 二维码扫描。
-struct QRScanner: UIViewRepresentable {
-    var onCode: (String) -> Void
-
-    func makeCoordinator() -> Coordinator { Coordinator(onCode: onCode) }
-
-    func makeUIView(context: Context) -> PreviewView {
-        let v = PreviewView()
-        v.backgroundColor = .black
-        let session = AVCaptureSession()
-        let captureDevice = AVCaptureDevice.default(for: .video)
-        if let dev = captureDevice, let input = try? AVCaptureDeviceInput(device: dev), session.canAddInput(input) {
-            session.addInput(input)
-            let out = AVCaptureMetadataOutput()
-            if session.canAddOutput(out) {
-                session.addOutput(out)
-                out.setMetadataObjectsDelegate(context.coordinator, queue: .main)
-                out.metadataObjectTypes = [.qr]
-            }
-        }
-        v.previewLayer.session = session
-        v.previewLayer.videoGravity = .resizeAspectFill
-        if let dev = captureDevice {
-            let rc = AVCaptureDevice.RotationCoordinator(device: dev, previewLayer: v.previewLayer)
-            context.coordinator.rotationCoordinator = rc
-            context.coordinator.rotationObs = rc.observe(
-                \.videoRotationAngleForHorizonLevelPreview,
-                options: [.initial, .new]
-            ) { [weak layer = v.previewLayer] _, change in
-                guard let angle = change.newValue else { return }
-                DispatchQueue.main.async {
-                    if let conn = layer?.connection, conn.isVideoRotationAngleSupported(angle) {
-                        conn.videoRotationAngle = angle
-                    }
-                }
-            }
-        }
-        context.coordinator.session = session
-        DispatchQueue.global(qos: .userInitiated).async { session.startRunning() }
-        return v
-    }
-
-    func updateUIView(_ uiView: PreviewView, context: Context) {}
-
-    static func dismantleUIView(_ uiView: PreviewView, coordinator: Coordinator) {
-        coordinator.rotationObs?.invalidate()
-        coordinator.rotationObs = nil
-        coordinator.rotationCoordinator = nil
-        let s = coordinator.session
-        DispatchQueue.global(qos: .userInitiated).async { s?.stopRunning() }
-    }
-
-    final class PreviewView: UIView {
-        override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
-        var previewLayer: AVCaptureVideoPreviewLayer { layer as! AVCaptureVideoPreviewLayer }
-    }
-
-    final class Coordinator: NSObject, AVCaptureMetadataOutputObjectsDelegate {
-        var onCode: (String) -> Void
-        var session: AVCaptureSession?
-        var rotationCoordinator: AVCaptureDevice.RotationCoordinator?
-        var rotationObs: NSKeyValueObservation?
-        var locked = false
-        init(onCode: @escaping (String) -> Void) { self.onCode = onCode }
-
-        func metadataOutput(_ output: AVCaptureMetadataOutput, didOutput objects: [AVMetadataObject], from connection: AVCaptureConnection) {
-            guard !locked, let code = (objects.first as? AVMetadataMachineReadableCodeObject)?.stringValue, !code.isEmpty else { return }
-            let lower = code.lowercased()
-            if lower.hasPrefix("tailcat://") || lower.hasPrefix("tailscale://") || lower.hasPrefix("http://") || lower.hasPrefix("https://") { locked = true }
-            onCode(code)
-        }
-    }
-}
-#endif
