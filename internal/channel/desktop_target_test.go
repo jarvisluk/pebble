@@ -11,6 +11,7 @@ import (
 
 	"bot-hub/internal/hub"
 	"bot-hub/internal/node"
+	"bot-hub/internal/protocol"
 )
 
 func TestDesktopTargetHTTP(t *testing.T) {
@@ -134,11 +135,17 @@ func TestBotBindingHTTPAndNodeExecForwarding(t *testing.T) {
 	gotCmdCh := make(chan node.Command, 1)
 	go func() {
 		cmd, err := h.Nodes().Poll(ctx, node.PollRequest{
-			ID:          "linux-box",
-			Name:        "Linux Box",
-			OS:          "linux",
-			Arch:        "amd64",
-			Permissions: []string{node.PermExec, node.PermDesktop},
+			ID:              "linux-box",
+			Name:            "Linux Box",
+			OS:              "linux",
+			Arch:            "amd64",
+			Permissions:     []string{node.PermExec, node.PermDesktop},
+			ProtocolVersion: protocol.CurrentProtocol,
+			Capabilities: []string{
+				protocol.CapNodeExecEnv,
+				protocol.CapNodeBrowserProfile,
+				protocol.CapNodeVirtualSlots,
+			},
 		}, 2*time.Second)
 		if err == nil && cmd != nil {
 			gotCmdCh <- *cmd

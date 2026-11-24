@@ -16,6 +16,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
+import ai.pebble.android.data.ApiClient
 import ai.pebble.android.data.SharedHttp
 import ai.pebble.android.data.mapToJsonObject
 import okhttp3.Request
@@ -125,6 +126,9 @@ internal class H264NativeSurfaceView(context: Context) : FrameLayout(context), T
     private var configuredH = 0
     @Volatile
     private var needKeyframe = true
+    @Volatile
+    private var hadFirstFrame = false
+    private var reportedPreFrameError = false
     private var videoW = 0
     private var videoH = 0
     private var streamFps = 60
@@ -136,6 +140,20 @@ internal class H264NativeSurfaceView(context: Context) : FrameLayout(context), T
         lastReportedConnected = connected
         lastReportedFps = fps
         onStatus?.invoke(connected, fps)
+    }
+
+    private fun emitStreamError(code: String, msg: String) {
+        mainHandler.post {
+            reportStatus(false, 0)
+            if (!hadFirstFrame) {
+                if (!reportedPreFrameError) {
+                    reportedPreFrameError = true
+                    onStreamError?.invoke(code, msg)
+                }
+            } else {
+                onStreamError?.invoke(code, msg)
+            }
+        }
     }
 
     private val fpsRunnable = object : Runnable {
@@ -228,11 +246,13 @@ internal class H264NativeSurfaceView(context: Context) : FrameLayout(context), T
         disconnect()
         if (!active || url.isBlank() || surface == null) return
 
-        val reqBuilder = Request.Builder().url(url)
+        val reqBuilder = ApiClient.attachClientHeaders(Request.Builder().url(url))
         if (token.isNotBlank()) {
             reqBuilder.addHeader("Authorization", "Bearer $token")
         }
         needKeyframe = true
+        hadFirstFrame = false
+        reportedPreFrameError = false
         frameCounter.set(0)
         lastReportedConnected = null
         lastReportedFps = -1
@@ -276,7 +296,7 @@ internal class H264NativeSurfaceView(context: Context) : FrameLayout(context), T
                         "error" -> {
                             val code = obj.optString("code", "")
                             val msg = obj.optString("error", "stream error")
-                            mainHandler.post { onStreamError?.invoke(code, msg) }
+                            emitStreamError(code, msg)
                         }
                     }
                 }
@@ -296,15 +316,16 @@ internal class H264NativeSurfaceView(context: Context) : FrameLayout(context), T
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 if (ws !== webSocket) return
-                mainHandler.post {
-                    reportStatus(false, 0)
-                    onStreamError?.invoke("", t.message ?: "connection failed")
-                }
+                emitStreamError("", t.message ?: "connection failed")
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 if (ws !== webSocket) return
-                mainHandler.post { reportStatus(false, 0) }
+                if (!hadFirstFrame) {
+                    emitStreamError("", reason.ifBlank { "closed" })
+                } else {
+                    mainHandler.post { reportStatus(false, 0) }
+                }
             }
         })
     }
@@ -326,6 +347,8 @@ internal class H264NativeSurfaceView(context: Context) : FrameLayout(context), T
         configuredPps = null
         configuredCodec = ""
         needKeyframe = true
+        hadFirstFrame = false
+        reportedPreFrameError = false
     }
 
     private fun decodeAnnexB(data: ByteArray, isKey: Boolean, isHevc: Boolean) {
@@ -395,7 +418,7 @@ internal class H264NativeSurfaceView(context: Context) : FrameLayout(context), T
                     configuredW = w
                     configuredH = h
                 } catch (e: Exception) {
-                    mainHandler.post { onStreamError?.invoke("", e.message ?: "codec error") }
+                    emitStreamError("", e.message ?: "codec error")
                     return
                 }
             }
@@ -418,6 +441,7 @@ internal class H264NativeSurfaceView(context: Context) : FrameLayout(context), T
                     mc.releaseOutputBuffer(outIdx, true)
                     if (needKeyframe) {
                         needKeyframe = false
+                        hadFirstFrame = true
                         val curFps = if (trackFps) frameCounter.get() else 0
                         mainHandler.post { reportStatus(true, curFps) }
                     }

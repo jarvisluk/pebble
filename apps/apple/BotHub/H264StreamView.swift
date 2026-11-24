@@ -194,12 +194,16 @@ final class H264StreamController {
     var connected: Bool = false
     var error: String = ""
     var screenRecordingDenied: Bool = false
+    var lastErrorCode: String = ""
+    var preFirstFrameFailureSeq: Int = 0
 
     @ObservationIgnored private let decoder = H264DecoderWorker()
     @ObservationIgnored private var task: URLSessionWebSocketTask?
     @ObservationIgnored private var receiveLoop: Task<Void, Never>?
     @ObservationIgnored private var fpsTimer: Task<Void, Never>?
     @ObservationIgnored private var generation: Int = 0
+    @ObservationIgnored private var hadFirstFrameInCurrentGen = false
+    @ObservationIgnored private var reportedFailureInCurrentGen = false
 
     func attach(layer: AVSampleBufferDisplayLayer) {
         decoder.attach(layer: layer)
@@ -211,6 +215,9 @@ final class H264StreamController {
         let gen = generation
         error = ""
         screenRecordingDenied = false
+        lastErrorCode = ""
+        hadFirstFrameInCurrentGen = false
+        reportedFailureInCurrentGen = false
         decoder.reset(generation: gen, fpsScale: 60)
         let ws = URLSession.shared.webSocketTask(with: request)
         task = ws
@@ -244,7 +251,19 @@ final class H264StreamController {
         task = nil
         if connected { connected = false }
         if fps != 0 { fps = 0 }
+        hadFirstFrameInCurrentGen = false
+        reportedFailureInCurrentGen = false
         decoder.stopAndFlush(generation: generation)
+    }
+
+    private func recordPreFrameFailure(code: String) {
+        if !code.isEmpty { lastErrorCode = code }
+        guard !hadFirstFrameInCurrentGen,
+              !screenRecordingDenied,
+              lastErrorCode != "screen_recording_denied",
+              !reportedFailureInCurrentGen else { return }
+        reportedFailureInCurrentGen = true
+        preFirstFrameFailureSeq += 1
     }
 
     func setPreset(_ preset: String) {
@@ -283,8 +302,9 @@ final class H264StreamController {
                         generation: gen,
                         onFirstFrame: { [weak self] in
                             Task { @MainActor [weak self] in
-                                guard let self, self.generation == gen, !self.connected else { return }
-                                self.connected = true
+                                guard let self, self.generation == gen else { return }
+                                self.hadFirstFrameInCurrentGen = true
+                                if !self.connected { self.connected = true }
                             }
                         },
                         onNeedKeyframe: { [weak self] in
@@ -304,6 +324,7 @@ final class H264StreamController {
                         guard let self, self.generation == gen, self.task === ws else { return }
                         if self.connected { self.connected = false }
                         if self.error.isEmpty { self.error = msg }
+                        self.recordPreFrameFailure(code: "")
                     }
                 }
                 break
@@ -341,6 +362,7 @@ final class H264StreamController {
             }
             if error != msg { error = msg }
             if connected { connected = false }
+            recordPreFrameFailure(code: code)
         }
     }
 }

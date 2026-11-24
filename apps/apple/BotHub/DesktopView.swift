@@ -18,9 +18,19 @@ struct DesktopView: View {
     var onTabChange: ((StageKind) -> Void)? = nil
     var onClose: (() -> Void)? = nil
 
+    private enum StreamMode: Equatable {
+        case wsHEVC
+        case wsH264
+        case framePolling
+    }
+
     @State private var activeTab: StageKind
     @State private var target: String
     @State private var streaming = true
+    @State private var streamMode: StreamMode = .wsHEVC
+    @State private var fallbackImage: PlatformImage?
+    @State private var fallbackMeta: H264StreamMeta?
+    @State private var frameFps = 0
     @State private var error = ""
     @State private var showText = false
     @State private var draft = ""
@@ -81,6 +91,16 @@ struct DesktopView: View {
 
     private var isWide: Bool { !compact }
 
+    private var preferredStreamMode: StreamMode {
+        if !HubStore.isLocalDesktopTarget(target) || !hub.supports("desktop.ws_h264") {
+            return .framePolling
+        }
+        if !hub.supports("desktop.ws_hevc") {
+            return .wsH264
+        }
+        return .wsHEVC
+    }
+
     private func setChatSidebar(_ open: Bool) {
         withAnimation(Self.chatSidebarAnimation) {
             showChatSidebar = open
@@ -121,13 +141,22 @@ struct DesktopView: View {
         .tint(activeTab == .desktop ? Color(hex: "#f3f1ee") : p.accent)
         .task { _ = try? await hub.refreshDesktopTargets() }
         .onAppear {
+            if !hub.supports("stage.files") && activeTab == .files {
+                activeTab = .desktop
+            }
+            streamMode = preferredStreamMode
             onTabChange?(activeTab)
         }
         .onChange(of: activeTab) { _, next in
             onTabChange?(next)
         }
+        .onChange(of: hub.supports("stage.files")) { _, canFiles in
+            if !canFiles && activeTab == .files {
+                activeTab = .desktop
+            }
+        }
         .onChange(of: initialTab) { _, next in
-            activeTab = next
+            activeTab = (!hub.supports("stage.files") && next == .files) ? .desktop : next
         }
         .onChange(of: hub.activeDesktopTarget.target) { _, newTarget in
             guard !hasBoundTarget else { return }
@@ -138,6 +167,11 @@ struct DesktopView: View {
         }
         .onChange(of: target) { _, newTarget in
             let next = newTarget.isEmpty ? "local" : newTarget
+            fallbackImage = nil
+            fallbackMeta = nil
+            frameFps = 0
+            error = ""
+            streamMode = preferredStreamMode
             if hub.activeDesktopTarget.target != next {
                 Task { try? await hub.setActiveDesktopTarget(next) }
             }
@@ -148,17 +182,33 @@ struct DesktopView: View {
             guard !Task.isCancelled, activeTab == .desktop, windowVisible else { return }
             await pollState()
         }
-        .task(id: "\(target)-\(streaming)-ws-\(activeTab.rawValue)-\(windowVisible)") {
+        .task(id: "\(target)-\(streaming)-\(streamMode)-\(activeTab.rawValue)-\(windowVisible)") {
             if activeTab != .desktop || !streaming || !windowVisible {
                 streamCtrl.stop()
                 return
             }
             try? await Task.sleep(nanoseconds: 80_000_000)
             guard !Task.isCancelled, activeTab == .desktop, streaming, windowVisible else { return }
-            if let req = hub.makeDesktopWSRequest(target: target) {
-                streamCtrl.start(request: req)
-            } else {
+
+            if streamMode != .framePolling && (!HubStore.isLocalDesktopTarget(target) || !hub.supports("desktop.ws_h264")) {
+                streamMode = .framePolling
+                return
+            }
+
+            switch streamMode {
+            case .wsHEVC, .wsH264:
+                fallbackImage = nil
+                fallbackMeta = nil
+                frameFps = 0
+                let codec = streamMode == .wsHEVC ? "hevc" : "h264"
+                if let req = hub.makeDesktopWSRequest(target: target, codec: codec) {
+                    streamCtrl.start(request: req)
+                } else {
+                    streamCtrl.stop()
+                }
+            case .framePolling:
                 streamCtrl.stop()
+                await pollFrameLoop()
             }
         }
         .onDisappear { streamCtrl.stop() }
@@ -166,6 +216,14 @@ struct DesktopView: View {
             if denied {
                 streaming = false
                 error = hub.t("deskScreenRecordingDenied")
+            }
+        }
+        .onChange(of: streamCtrl.preFirstFrameFailureSeq) { _, _ in
+            guard activeTab == .desktop, streaming, windowVisible else { return }
+            if streamMode == .wsHEVC {
+                streamMode = .wsH264
+            } else if streamMode == .wsH264 {
+                streamMode = .framePolling
             }
         }
     }
@@ -290,9 +348,14 @@ struct DesktopView: View {
                         }
                         Divider()
                     }
-                    if streamCtrl.connected {
+                    if streamMode == .framePolling && fallbackImage != nil {
                         Section {
-                            Text("H.264 · \(streamCtrl.fps) fps")
+                            Text(hub.t("deskFrameModeLabel", ["fps": "\(frameFps)"]))
+                        }
+                    } else if streamCtrl.connected {
+                        let codecLabel = streamCtrl.meta?.codec == "hevc" ? "HEVC" : "H.264"
+                        Section {
+                            Text("\(codecLabel) · \(streamCtrl.fps) fps")
                         }
                     }
                     if targets.count > 1 {
@@ -310,14 +373,20 @@ struct DesktopView: View {
         }
     }
 
+    @ViewBuilder
     private var stageModePicker: some View {
-        Picker("", selection: $activeTab) {
-            Text(hub.t("stageFilesTab")).tag(StageKind.files)
-            Text(hub.t("stageDesktopTab")).tag(StageKind.desktop)
+        if hub.supports("stage.files") {
+            Picker("", selection: $activeTab) {
+                Text(hub.t("stageFilesTab")).tag(StageKind.files)
+                Text(hub.t("stageDesktopTab")).tag(StageKind.desktop)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+        } else {
+            Text(hub.t("stageDesktopTab"))
+                .font(.system(size: AppFont.cardTitle, weight: .semibold))
         }
-        .pickerStyle(.segmented)
-        .labelsHidden()
-        .fixedSize()
     }
 
     private var desktopStage: some View {
@@ -438,7 +507,9 @@ struct DesktopView: View {
 
     private var stageView: some View {
         GeometryReader { geo in
-            let displayErr = !error.isEmpty ? error : streamCtrl.error
+            let isFrameReady = streamMode == .framePolling && fallbackImage != nil
+            let isDisplayReady = isFrameReady || streamCtrl.connected
+            let displayErr = !error.isEmpty ? error : (streamMode == .framePolling ? "" : streamCtrl.error)
             ZStack {
                 stage
                 #if os(macOS)
@@ -450,7 +521,13 @@ struct DesktopView: View {
                 #else
                 H264DisplayView(controller: streamCtrl)
                 #endif
-                if !streamCtrl.connected {
+                if streamMode == .framePolling, let img = fallbackImage {
+                    Image(platform: img)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .allowsHitTesting(false)
+                }
+                if !isDisplayReady {
                     VStack(spacing: 10) {
                         ProgressView().tint(p.accent)
                         Text(displayErr.isEmpty ? hub.t("deskH264Connecting") : displayErr)
@@ -458,10 +535,9 @@ struct DesktopView: View {
                         if !displayErr.isEmpty {
                             Button(hub.t("retry")) {
                                 error = ""
-                                if let req = hub.makeDesktopWSRequest(target: target) {
-                                    streaming = true
-                                    streamCtrl.start(request: req)
-                                }
+                                fallbackImage = nil
+                                streamMode = preferredStreamMode
+                                streaming = true
                             }
                             .buttonStyle(.borderedProminent)
                             .controlSize(.small)
@@ -469,7 +545,7 @@ struct DesktopView: View {
                     }
                     .padding(20)
                 }
-                if streamCtrl.connected, !displayErr.isEmpty {
+                if isDisplayReady, !displayErr.isEmpty {
                     VStack {
                         Spacer()
                         Text(displayErr).font(.system(size: AppFont.secondary)).foregroundStyle(pillText)
@@ -516,7 +592,8 @@ struct DesktopView: View {
     }
 
     private func map(_ loc: CGPoint, in box: CGSize) -> CGPoint? {
-        guard let m = streamCtrl.meta, m.imageWidth > 0, m.imageHeight > 0, box.width > 0, box.height > 0 else { return nil }
+        let meta = streamMode == .framePolling ? fallbackMeta : streamCtrl.meta
+        guard let m = meta, m.imageWidth > 0, m.imageHeight > 0, box.width > 0, box.height > 0 else { return nil }
         let scale = min(box.width / m.imageWidth, box.height / m.imageHeight)
         let dw = m.imageWidth * scale, dh = m.imageHeight * scale
         let rx = (loc.x - (box.width - dw) / 2) / dw
@@ -544,6 +621,71 @@ struct DesktopView: View {
         send(["kind": "type", "text": txt])
     }
 
+    private func pollFrameLoop() async {
+        var consecErrors = 0
+        var windowFrames = 0
+        var fpsWindowStart = Date()
+        while !Task.isCancelled && streaming && windowVisible && activeTab == .desktop && streamMode == .framePolling {
+            let t0 = Date()
+            var sleepNs: UInt64 = 350_000_000
+            do {
+                let fr = try await hub.fetchDesktopFrame(target)
+                if Task.isCancelled || !streaming || !windowVisible || activeTab != .desktop || streamMode != .framePolling {
+                    break
+                }
+                let decoded: PlatformImage? = await Task.detached(priority: .userInitiated) {
+                    guard !fr.jpegBase64.isEmpty,
+                          let data = Data(base64Encoded: fr.jpegBase64) else { return nil }
+                    return PlatformImage(data: data)
+                }.value
+                if Task.isCancelled || !streaming || !windowVisible || activeTab != .desktop || streamMode != .framePolling {
+                    break
+                }
+                if let img = decoded {
+                    let iw = (fr.imageWidth ?? 0) > 0 ? fr.imageWidth! : Double(img.size.width)
+                    let ih = (fr.imageHeight ?? 0) > 0 ? fr.imageHeight! : Double(img.size.height)
+                    fallbackMeta = H264StreamMeta(
+                        imageWidth: iw,
+                        imageHeight: ih,
+                        logicalX: fr.logicalX ?? 0,
+                        logicalY: fr.logicalY ?? 0,
+                        logicalWidth: (fr.logicalWidth ?? 0) > 0 ? fr.logicalWidth! : 1440,
+                        logicalHeight: (fr.logicalHeight ?? 0) > 0 ? fr.logicalHeight! : 900,
+                        fps: max(1, frameFps),
+                        codec: "jpeg",
+                        preset: "frame",
+                        bitrateKbps: 0
+                    )
+                    fallbackImage = img
+                    consecErrors = 0
+                    windowFrames += 1
+                    let elapsedWindow = Date().timeIntervalSince(fpsWindowStart)
+                    if elapsedWindow >= 1.0 {
+                        frameFps = max(1, Int((Double(windowFrames) / elapsedWindow).rounded()))
+                        windowFrames = 0
+                        fpsWindowStart = Date()
+                    }
+                    if !error.isEmpty { error = "" }
+                }
+                let elapsedNs = UInt64(max(0, Date().timeIntervalSince(t0)) * 1_000_000_000)
+                sleepNs = elapsedNs >= 230_000_000 ? 120_000_000 : (350_000_000 - elapsedNs)
+            } catch {
+                if Task.isCancelled { break }
+                if let he = error as? HubError, he.code == "screen_recording_denied" {
+                    streaming = false
+                    self.error = he.message.isEmpty ? hub.t("deskScreenRecordingDenied") : he.message
+                    break
+                }
+                consecErrors += 1
+                if fallbackImage == nil && consecErrors >= 3 {
+                    self.error = errText(error, hub.t("connFailed"))
+                }
+                sleepNs = 1_200_000_000
+            }
+            try? await Task.sleep(nanoseconds: sleepNs)
+        }
+    }
+
     private func pollState() async {
         while !Task.isCancelled && streaming && windowVisible {
             if let st = try? await hub.fetchDesktopState(target) {
@@ -554,7 +696,8 @@ struct DesktopView: View {
                     error = ""
                 }
             }
-            let interval: UInt64 = streamCtrl.connected ? 10_000_000_000 : 2_000_000_000
+            let ready = streamCtrl.connected || (streamMode == .framePolling && fallbackImage != nil)
+            let interval: UInt64 = ready ? 10_000_000_000 : 2_000_000_000
             try? await Task.sleep(nanoseconds: interval)
         }
     }

@@ -2,6 +2,18 @@ import Foundation
 
 // 与 apps/mobile/src/types.ts 对齐；服务端字段可能缺省，统一用可选值宽松解码。
 
+enum ClientProtocol {
+    static let current = 2
+}
+
+struct ServerInfo: Codable, Equatable {
+    var protocolVersion: Int
+    var minClientProtocol: Int?
+    var minNodeProtocol: Int?
+    var version: String?
+    var capabilities: [String]?
+}
+
 struct SessionRecord: Codable, Hashable {
     var sessionId: String?
     var turnCount: Int?
@@ -204,8 +216,13 @@ struct NodeInfo: Codable, Identifiable, Hashable {
     var hostname: String?
     var homeDir: String?
     var permissions: [String]?
+    var protocolVersion: Int?
+    var capabilities: [String]?
+    var version: String?
     var connected: Bool?
     var lastSeenAt: String?
+
+    var isOutdated: Bool { (protocolVersion ?? 1) < ClientProtocol.current }
 }
 
 struct ScreenState: Codable, Hashable {
@@ -236,6 +253,8 @@ struct DesktopTarget: Codable, Identifiable, Hashable {
     var supported: Bool?
     var virtual: Bool?
     var virtualSupported: Bool?
+    var protocolVersion: Int?
+    var outdated: Bool?
     var powerState: String?
     var backend: String?
     var screen: ScreenState?
@@ -314,7 +333,10 @@ struct RoutineItem: Codable, Identifiable, Hashable {
 }
 
 // 接口外层包装
-struct BotsResp: Decodable { var bots: [BotStatus]? }
+struct BotsResp: Decodable {
+    var bots: [BotStatus]?
+    var server: ServerInfo?
+}
 struct MessagesResp: Decodable { var messages: [ChatMessage]? }
 struct NodesResp: Decodable { var nodes: [NodeInfo]? }
 struct TakeoversResp: Decodable { var ok: Bool?; var items: [TakeoverRequest]? }
