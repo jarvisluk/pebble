@@ -5,6 +5,7 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
+  Modal,
   Platform,
   Pressable,
   RefreshControl,
@@ -13,7 +14,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { BotAvatar } from '../components/BotAvatar';
 import { ArrowUpDownIcon, PinIcon, SearchIcon, SettingsIcon } from '../components/Icons';
@@ -28,6 +29,8 @@ import { ConnectContent } from './connect';
 export default function BotsScreen() {
   const theme = useTheme();
   const { t, lang } = useI18n();
+  const insets = useSafeAreaInsets();
+  const [sortMenuOpen, setSortMenuOpen] = useState(false);
   const {
     ready,
     activeServer,
@@ -136,21 +139,13 @@ export default function BotsScreen() {
   };
 
   const openSortMenu = () => {
-    const pick = (mode: BotSortMode) => {
-      setSortMode(mode);
-      void saveBotSortMode(mode);
-    };
-    Alert.alert(t('sortBots'), undefined, [
-      {
-        text: `${sortMode === 'recent' ? '✓ ' : ''}${t('sortByRecent')}`,
-        onPress: () => pick('recent'),
-      },
-      {
-        text: `${sortMode === 'manual' ? '✓ ' : ''}${t('sortManual')}`,
-        onPress: () => pick('manual'),
-      },
-      { text: t('cancel'), style: 'cancel' },
-    ]);
+    setSortMenuOpen(true);
+  };
+
+  const pickSortMode = (mode: BotSortMode) => {
+    setSortMode(mode);
+    void saveBotSortMode(mode);
+    setSortMenuOpen(false);
   };
 
   const openBotActions = (bot: BotStatus) => {
@@ -399,6 +394,49 @@ export default function BotsScreen() {
           </View>
         }
       />
+
+      <Modal
+        visible={sortMenuOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setSortMenuOpen(false)}
+      >
+        <Pressable style={styles.sortBackdrop} onPress={() => setSortMenuOpen(false)}>
+          <View
+            style={[
+              styles.sortMenu,
+              {
+                top: Math.max(insets.top, 12) + 46,
+                backgroundColor: theme.card,
+                borderColor: theme.s2,
+              },
+            ]}
+          >
+            {(
+              [
+                { mode: 'recent' as BotSortMode, label: t('sortByRecent') },
+                { mode: 'manual' as BotSortMode, label: t('sortManual') },
+              ]
+            ).map((opt, idx) => {
+              const active = sortMode === opt.mode;
+              return (
+                <Pressable
+                  key={opt.mode}
+                  onPress={() => pickSortMode(opt.mode)}
+                  style={({ pressed }) => [
+                    styles.sortRow,
+                    idx === 0 && { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: theme.s2 },
+                    (active || pressed) && { backgroundColor: theme.sel },
+                  ]}
+                >
+                  <Text style={[styles.sortRowTxt, { color: theme.text }]}>{opt.label}</Text>
+                  {active && <Text style={[styles.sortCheck, { color: theme.text }]}>✓</Text>}
+                </Pressable>
+              );
+            })}
+          </View>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -552,5 +590,37 @@ const styles = StyleSheet.create({
   secondaryBtnTxt: {
     fontSize: 14,
     fontWeight: '600',
+  },
+  sortBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.18)',
+  },
+  sortMenu: {
+    position: 'absolute',
+    left: 16,
+    width: 210,
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    overflow: 'hidden',
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.14,
+    shadowRadius: 12,
+  },
+  sortRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  sortRowTxt: {
+    fontSize: 15,
+    fontWeight: '500',
+  },
+  sortCheck: {
+    fontSize: 15,
+    fontWeight: '700',
   },
 });

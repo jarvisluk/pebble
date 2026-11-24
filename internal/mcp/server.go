@@ -154,7 +154,7 @@ func toolDefinitions() []map[string]any {
 				"properties": map[string]any{
 					"text": map[string]any{
 						"type":        "string",
-						"description": "Markdown text to show to the user. Optional if images or files are provided.",
+						"description": "Markdown text to show to the user (supports headings, tables, code blocks, lists, task lists, blockquotes, inline formatting, math, footnotes, and links; send local images via the images parameter rather than Markdown image syntax). Optional if images or files are provided.",
 					},
 					"images": map[string]any{
 						"type":        "array",
@@ -367,6 +367,33 @@ func toolDefinitions() []map[string]any {
 						"description": "Fetch the complete untruncated text of a single clipped message ID.",
 					},
 				},
+			},
+		},
+		{
+			"name":        "open_stage",
+			"description": "Open a content panel in the user's Bot Hub Stage UI (next to the live chat sidebar). Use kind='files' with a workspace-relative path to open a file preview, or kind='desktop' to bring up Remote Desktop.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"kind": map[string]any{
+						"type":        "string",
+						"enum":        []string{"files", "desktop", "browser", "artifact", "mcp-app"},
+						"description": "Stage panel kind to open.",
+					},
+					"path": map[string]any{
+						"type":        "string",
+						"description": "Workspace-relative file or directory path (for kind='files').",
+					},
+					"title": map[string]any{
+						"type":        "string",
+						"description": "Optional custom tab title.",
+					},
+					"url": map[string]any{
+						"type":        "string",
+						"description": "Optional URL (for browser/artifact).",
+					},
+				},
+				"required": []string{"kind"},
 			},
 		},
 	}
@@ -639,6 +666,30 @@ func (s *Server) callTool(ctx context.Context, name string, rawArgs json.RawMess
 			path += "?" + enc
 		}
 		body, err := s.client.DoJSON(ctx, http.MethodGet, path, nil)
+		if err != nil {
+			return err.Error(), true
+		}
+		return PrettyJSON(body), false
+
+	case "open_stage":
+		if selfBotID == "" {
+			return "caller bot ID is unknown", true
+		}
+		var args struct {
+			Kind  string `json:"kind"`
+			Path  string `json:"path"`
+			Title string `json:"title"`
+			URL   string `json:"url"`
+		}
+		if err := json.Unmarshal(rawArgs, &args); err != nil || strings.TrimSpace(args.Kind) == "" {
+			return "kind is required", true
+		}
+		body, err := s.client.DoJSON(ctx, http.MethodPost, "/api/bots/"+url.PathEscape(selfBotID)+"/stage", map[string]any{
+			"kind":  strings.TrimSpace(args.Kind),
+			"path":  strings.TrimSpace(args.Path),
+			"title": strings.TrimSpace(args.Title),
+			"url":   strings.TrimSpace(args.URL),
+		})
 		if err != nil {
 			return err.Error(), true
 		}

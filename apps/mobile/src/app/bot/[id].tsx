@@ -7,6 +7,7 @@ import {
   ActivityIndicator,
   FlatList,
   Image,
+  Keyboard,
   KeyboardAvoidingView,
   Linking,
   Modal,
@@ -23,7 +24,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { BotAppearancePicker } from '../../components/BotAppearancePicker';
 import { BotAvatar } from '../../components/BotAvatar';
-import { ChevronLeftIcon, DocIcon, MonitorIcon, PaperclipIcon, SendIcon, StopIcon } from '../../components/Icons';
+import { ChevronLeftIcon, DocIcon, FolderIcon, MonitorIcon, PaperclipIcon, SendIcon, StopIcon } from '../../components/Icons';
 import { MarkdownText } from '../../components/MarkdownText';
 import { ModalHeader } from '../../components/ModalHeader';
 import { QuestionCard } from '../../components/QuestionCard';
@@ -73,6 +74,7 @@ export default function BotChatScreen() {
     tools,
     takeovers,
     activeDesktopTarget,
+    pendingStageOpen,
     usingStandby,
     questions,
     setActiveChatBot,
@@ -110,6 +112,18 @@ export default function BotChatScreen() {
   const [mentions, setMentions] = useState<MentionCandidate[]>([]);
   const [acDismissed, setAcDismissed] = useState(false);
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
+
+  useEffect(() => {
+    if (!pendingStageOpen) return;
+    const targetBot = pendingStageOpen.botId || botId;
+    if (pendingStageOpen.kind === 'files') {
+      const qs = new URLSearchParams({ tab: 'files', botId: targetBot });
+      if (pendingStageOpen.path) qs.set('path', pendingStageOpen.path);
+      router.push(`/desktop?${qs.toString()}`);
+    } else if (pendingStageOpen.kind === 'desktop') {
+      router.push(`/desktop?tab=desktop&botId=${encodeURIComponent(targetBot)}`);
+    }
+  }, [pendingStageOpen?.seq]);
 
   useEffect(() => {
     setPendingAttachments([]);
@@ -228,6 +242,43 @@ export default function BotChatScreen() {
 
   const listRef = useRef<FlatList<TimelineEntry>>(null);
   const inputRef = useRef<React.ComponentRef<typeof TextInput>>(null);
+  const [composerHeight, setComposerHeight] = useState(76);
+  const [keyboardOffset, setKeyboardOffset] = useState(0);
+  const kbHeightRef = useRef(0);
+  const baseChatHeightRef = useRef(0);
+  const curChatHeightRef = useRef(0);
+
+  const recomputeKeyboardOffset = useCallback(() => {
+    const kbH = kbHeightRef.current;
+    if (kbH <= 0) {
+      setKeyboardOffset(0);
+      return;
+    }
+    const resized = Math.max(0, baseChatHeightRef.current - curChatHeightRef.current);
+    setKeyboardOffset(Math.max(0, Math.round(kbH - resized)));
+  }, []);
+
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSub = Keyboard.addListener(showEvent, (e) => {
+      kbHeightRef.current = Math.max(0, e.endCoordinates?.height || 0);
+      recomputeKeyboardOffset();
+      setTimeout(() => {
+        if (chatList.length > 0) {
+          listRef.current?.scrollToEnd({ animated: true });
+        }
+      }, 80);
+    });
+    const hideSub = Keyboard.addListener(hideEvent, () => {
+      kbHeightRef.current = 0;
+      setKeyboardOffset(0);
+    });
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, [chatList.length, recomputeKeyboardOffset]);
 
   useEffect(() => {
     if (bots.length > 0 && !bot) {
@@ -811,6 +862,10 @@ export default function BotChatScreen() {
   };
 
   const showStop = !!bot?.busy && !input.trim();
+  const effectiveKeyboardOffset =
+    keyboardOffset > 0
+      ? keyboardOffset + (Platform.OS === 'android' ? insets.bottom : 0)
+      : 0;
   const activeDetail = detail || bot;
   const isDirty = Boolean(
     activeDetail &&
@@ -843,8 +898,16 @@ export default function BotChatScreen() {
         </View>
 
         <Pressable
+          accessibilityLabel={t('workspaceFiles')}
+          onPress={() => router.push(`/desktop?tab=files&botId=${encodeURIComponent(botId)}`)}
+          style={[styles.docBtn, { backgroundColor: theme.s1, marginRight: 6 }]}
+          hitSlop={8}
+        >
+          <FolderIcon size={18} color={theme.text2} />
+        </Pressable>
+        <Pressable
           accessibilityLabel={t('remoteDesktop')}
-          onPress={() => router.push(`/desktop?target=${encodeURIComponent(takeovers[0]?.target || 'local')}`)}
+          onPress={() => router.push(`/desktop?target=${encodeURIComponent(takeovers[0]?.target || 'local')}&botId=${encodeURIComponent(botId)}`)}
           style={[styles.docBtn, { backgroundColor: theme.s1, marginRight: 6 }]}
           hitSlop={8}
         >
@@ -914,10 +977,18 @@ export default function BotChatScreen() {
         </View>
       )}
 
-      <KeyboardAvoidingView
+      <View
         style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={0}
+        onLayout={(e) => {
+          const h = Math.round(e.nativeEvent.layout.height);
+          if (h <= 0) return;
+          curChatHeightRef.current = h;
+          if (kbHeightRef.current <= 0) {
+            baseChatHeightRef.current = h;
+          } else {
+            recomputeKeyboardOffset();
+          }
+        }}
       >
         <FlatList
           ref={listRef}
@@ -926,6 +997,7 @@ export default function BotChatScreen() {
           renderItem={renderTimelineEntry}
           contentContainerStyle={[
             styles.listContent,
+            { paddingBottom: composerHeight + effectiveKeyboardOffset + 12 },
             timelineEntries.length === 0 && styles.emptyGrow,
           ]}
           ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
@@ -971,13 +1043,29 @@ export default function BotChatScreen() {
           }
         />
 
-        {sendErr ? (
-          <View style={[styles.errBanner, { backgroundColor: theme.pink }]}>
-            <Text style={[styles.errTxt, { color: theme.danger }]}>{sendErr}</Text>
-          </View>
-        ) : null}
+        <View
+          pointerEvents="box-none"
+          onLayout={(e) => {
+            const h = Math.ceil(e.nativeEvent.layout.height);
+            if (h > 0 && Math.abs(h - composerHeight) > 1) {
+              setComposerHeight(h);
+            }
+          }}
+          style={[
+            styles.composerOverlay,
+            {
+              bottom: effectiveKeyboardOffset,
+              paddingBottom: effectiveKeyboardOffset > 0 ? 10 : Math.max(insets.bottom, 10),
+            },
+          ]}
+        >
+          {sendErr ? (
+            <View style={[styles.errBanner, { backgroundColor: theme.pink }]}>
+              <Text style={[styles.errTxt, { color: theme.danger }]}>{sendErr}</Text>
+            </View>
+          ) : null}
 
-        <View style={[styles.composerWrap, { paddingBottom: Math.max(insets.bottom, 10) }]}>
+          <View pointerEvents="box-none" style={styles.composerWrap}>
           {slashQuery !== null && filteredCommands.length > 0 && (
             <ScrollView
               horizontal
@@ -1063,7 +1151,7 @@ export default function BotChatScreen() {
             </ScrollView>
           )}
 
-          <View style={[styles.composerCapsule, { backgroundColor: theme.card }]}>
+          <View style={[styles.composerCapsule, { backgroundColor: theme.card, borderColor: theme.s2 }]}>
             <Pressable
               accessibilityLabel={t('attachFile')}
               onPress={() => void onPickAttachment()}
@@ -1110,7 +1198,8 @@ export default function BotChatScreen() {
             </Pressable>
           </View>
         </View>
-      </KeyboardAvoidingView>
+        </View>
+      </View>
 
       <Modal
         visible={detailOpen}
@@ -1345,9 +1434,16 @@ export default function BotChatScreen() {
                       </View>
                       <View style={{ gap: 4 }}>
                         <Text style={[styles.sectionLabel, { color: theme.mute }]}>{t('workspaceDir')}</Text>
-                        <Text selectable style={[styles.monoBlock, { color: theme.text2, fontFamily: MONO_FONT }]}>
-                          {activeDetail?.workspace || '-'}
-                        </Text>
+                        <Pressable
+                          onPress={() => {
+                            setDetailOpen(false);
+                            router.push(`/desktop?tab=files&botId=${encodeURIComponent(botId)}`);
+                          }}
+                        >
+                          <Text style={[styles.monoBlock, { color: theme.text2, fontFamily: MONO_FONT, textDecorationLine: 'underline' }]}>
+                            {activeDetail?.workspace || '-'}
+                          </Text>
+                        </Pressable>
                       </View>
                       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 4 }}>
                         <Text style={[styles.instructionsTxt, { color: theme.text, flex: 1 }]}>{t('privateSessions')}</Text>
@@ -2072,6 +2168,13 @@ const styles = StyleSheet.create({
   errTxt: {
     fontSize: 15,
   },
+  composerOverlay: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 10,
+  },
   composerWrap: {
     paddingHorizontal: 12,
     paddingTop: 6,
@@ -2098,12 +2201,18 @@ const styles = StyleSheet.create({
   },
   composerCapsule: {
     borderRadius: 24,
+    borderWidth: StyleSheet.hairlineWidth,
     paddingLeft: 6,
     paddingRight: 6,
     paddingVertical: 6,
     flexDirection: 'row',
     alignItems: 'flex-end',
     gap: 8,
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
   },
   attachBtn: {
     width: 36,

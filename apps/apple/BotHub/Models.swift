@@ -473,3 +473,76 @@ func decodeAny<T: Decodable>(_ obj: Any, as: T.Type = T.self) -> T? {
           let data = try? JSONSerialization.data(withJSONObject: obj) else { return nil }
     return try? JSONDecoder().decode(T.self, from: data)
 }
+
+struct WorkspaceFileEntry: Decodable, Identifiable, Hashable {
+    var name: String
+    var path: String
+    var isDir: Bool
+    var isSymlink: Bool?
+    var isShared: Bool?
+    var size: Int64
+    var modTime: String
+    var mimeType: String?
+    var id: String { path }
+}
+
+struct WorkspaceListResult: Decodable {
+    var botId: String
+    var path: String
+    var parent: String
+    var entries: [WorkspaceFileEntry]
+    var truncated: Bool?
+}
+
+struct WorkspaceFileContent: Decodable {
+    var botId: String
+    var path: String
+    var name: String
+    var size: Int64
+    var modTime: String
+    var mimeType: String
+    var kind: String // text | markdown | image | binary
+    var content: String?
+    var truncated: Bool?
+}
+
+struct WorkspaceFileTicketResp: Decodable {
+    var ticket: String
+    var path: String
+    var expiresIn: Int
+}
+
+enum StageKind: String, Codable, Hashable {
+    case files
+    case desktop
+    case browser
+    case artifact
+    case mcpApp = "mcp-app"
+}
+
+struct StageTab: Identifiable, Hashable {
+    var id: String
+    var kind: StageKind
+    var title: String
+    var botId: String?
+    var path: String?
+    var url: String?
+    var resourceUri: String?
+    var closable: Bool = true
+}
+
+struct StageOpenEvent: Decodable, Equatable {
+    var id: String?
+    var kind: String
+    var title: String?
+    var botId: String?
+    var path: String?
+    var url: String?
+    var resourceUri: String?
+    var closable: Bool?
+}
+
+struct PendingChatInsert: Equatable {
+    var seq: Int
+    var text: String
+}

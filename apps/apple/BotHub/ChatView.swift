@@ -228,6 +228,9 @@ struct ChatView: View {
                         }
                     } else {
                         if !router.detailOpen {
+                            Button { router.openFiles(botId: botId) } label: {
+                                Label(hub.t("workspaceFiles"), systemImage: "folder")
+                            }
                             Button { router.openDesktop(hub.takeovers.first?.target ?? "local") } label: {
                                 Label(hub.t("remoteDesktop"), systemImage: hub.takeovers.isEmpty ? "display" : "exclamationmark.triangle")
                             }
@@ -237,7 +240,9 @@ struct ChatView: View {
                 }
             }
             #else
-            .modifier(MacChatToolbarModifier(inDesktopSidebar: inDesktopSidebar, titleView: titleView, onOpenDesktop: {
+            .modifier(MacChatToolbarModifier(inDesktopSidebar: inDesktopSidebar, titleView: titleView, onOpenFiles: {
+                router.openFiles(botId: botId)
+            }, onOpenDesktop: {
                 router.openDesktop(hub.takeovers.first?.target ?? "local")
             }, onToggleDetail: {
                 router.detailOpen.toggle()
@@ -246,6 +251,12 @@ struct ChatView: View {
             .task(id: botId) {
                 hub.setActiveChat(botId)
                 try? await hub.loadMessages(botId)
+            }
+            .onChange(of: hub.pendingChatInsert?.seq) { _, seq in
+                guard seq != nil, let insert = hub.pendingChatInsert, !insert.text.isEmpty else { return }
+                let needsSpace = !input.isEmpty && !(input.last?.isWhitespace ?? false)
+                input += (needsSpace ? " " : "") + insert.text
+                focused = true
             }
             .onDisappear { hub.setActiveChat(nil) }
             .onChange(of: hub.bots.map(\.id)) { _, ids in
@@ -1325,6 +1336,7 @@ private struct MacChatToolbarModifier<TitleView: View>: ViewModifier {
     @Environment(HubStore.self) private var hub
     var inDesktopSidebar: Bool
     var titleView: TitleView
+    var onOpenFiles: () -> Void
     var onOpenDesktop: () -> Void
     var onToggleDetail: () -> Void
     var hasTakeover: Bool
@@ -1340,6 +1352,9 @@ private struct MacChatToolbarModifier<TitleView: View>: ViewModifier {
                         titleView
                     }
                     ToolbarItemGroup(placement: .primaryAction) {
+                        Button(action: onOpenFiles) {
+                            Label(hub.t("workspaceFiles"), systemImage: "folder")
+                        }
                         Button(action: onOpenDesktop) {
                             Label(hub.t("remoteDesktop"), systemImage: hasTakeover ? "exclamationmark.triangle" : "display")
                         }

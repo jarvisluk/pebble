@@ -61,6 +61,7 @@ func TestMCPStdioToolsFlow(t *testing.T) {
 		"desktop_task":     true,
 		"request_takeover": true,
 		"recall_session":   true,
+		"open_stage":       true,
 	}
 	if len(listResp.Result.Tools) != len(want) {
 		t.Fatalf("expected %d core tools, got %d: %+v", len(want), len(listResp.Result.Tools), listResp.Result.Tools)

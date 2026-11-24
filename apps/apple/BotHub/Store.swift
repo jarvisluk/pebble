@@ -142,6 +142,8 @@ final class HubStore {
     var usingStandby = false
     var managedMode = false
     var routines: [String: [RoutineItem]] = [:]
+    var pendingStageOpen: StageOpenEvent?
+    var pendingChatInsert: PendingChatInsert?
 
     @ObservationIgnored private var activeChat: String?
     @ObservationIgnored private var connSeq = 0
@@ -285,6 +287,10 @@ final class HubStore {
             if let arr = p["nodes"], let list = decodeAny(arr, as: [NodeInfo].self) { nodes = list }
         case "desktop_target":
             if let at = decodeAny(p, as: ActiveDesktopTarget.self) { activeDesktopTarget = at }
+        case "stage_open":
+            if let ev = decodeAny(p, as: StageOpenEvent.self) {
+                pendingStageOpen = ev
+            }
         case "takeover":
             if let arr = p["items"], let list = decodeAny(arr, as: [TakeoverRequest].self) {
                 #if os(macOS)
@@ -967,5 +973,27 @@ final class HubStore {
         let r: QuestionsResp = try await api.call("/api/questions/\(enc(id))/reply", method: "POST",
                                                   body: ["answers": answers, "cancelled": cancelled])
         questions = r.items ?? []
+    }
+
+    func listWorkspaceFiles(botId: String, path: String = "", showHidden: Bool = false) async throws -> WorkspaceListResult {
+        try await api.listWorkspaceFiles(botId: botId, path: path, showHidden: showHidden)
+    }
+
+    func readWorkspaceFile(botId: String, path: String) async throws -> WorkspaceFileContent {
+        try await api.readWorkspaceFile(botId: botId, path: path)
+    }
+
+    func workspaceFileImageURL(botId: String, path: String) async throws -> URL? {
+        let tk = try await api.issueWorkspaceFileTicket(botId: botId, path: path)
+        return api.workspaceFileRawURL(botId: botId, path: path, ticket: tk.ticket, download: false)
+    }
+
+    func downloadWorkspaceFileToTemp(botId: String, path: String, fileName: String) async throws -> URL {
+        try await api.downloadWorkspaceFileToTemp(botId: botId, path: path, fileName: fileName)
+    }
+
+    func insertIntoChat(_ text: String) {
+        let nextSeq = (pendingChatInsert?.seq ?? 0) + 1
+        pendingChatInsert = PendingChatInsert(seq: nextSeq, text: text)
     }
 }

@@ -3,7 +3,9 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
+  Animated,
   BackHandler,
+  Easing,
   KeyboardAvoidingView,
   Linking,
   Platform,
@@ -26,6 +28,14 @@ const SETTINGS_TABS: Array<{ id: SettingsTab; labelKey: I18nKey }> = [
 ];
 
 import { BotAvatar } from '../components/BotAvatar';
+import {
+  ChevronRightIcon,
+  CpuIcon,
+  GlobeIcon,
+  MemoryIcon,
+  MonitorIcon,
+  SettingsIcon,
+} from '../components/Icons';
 import { ModalHeader } from '../components/ModalHeader';
 import { confirmAction } from '../confirm';
 import { hasNotificationPermission, requestNotificationPermission } from '../../modules/bothub-notifications';
@@ -60,6 +70,25 @@ export default function SettingsScreen() {
   const { width } = useWindowDimensions();
   const isWide = width >= 768;
   const [tab, setTab] = useState<SettingsTab>('general');
+  const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
+  const pageAnim = useRef(new Animated.Value(1)).current;
+  const pageDirRef = useRef<1 | -1>(1);
+  const firstRenderRef = useRef(true);
+
+  useEffect(() => {
+    if (firstRenderRef.current) {
+      firstRenderRef.current = false;
+      return;
+    }
+    if (isWide) return;
+    pageAnim.setValue(0);
+    Animated.timing(pageAnim, {
+      toValue: 1,
+      duration: 220,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [mobileDetailOpen, isWide, pageAnim]);
   const theme = useTheme();
   const { pref: themePref, setPref: setThemePref } = useThemePref();
   const { pref: langPref, setPref: setLangPref, t } = useI18n();
@@ -365,12 +394,17 @@ export default function SettingsScreen() {
 
   useEffect(() => {
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (!isWide && mobileDetailOpen) {
+        pageDirRef.current = -1;
+        setMobileDetailOpen(false);
+        return true;
+      }
       if (!dirty) return false;
       requestClose();
       return true;
     });
     return () => sub.remove();
-  }, [dirty, requestClose]);
+  }, [dirty, isWide, mobileDetailOpen, requestClose]);
 
   const onConnectMagpie = (harnessId: string) => {
     const targetModel = defaultModel.trim() || settings?.harnesses.find((h) => h.id === harnessId)?.defaultModel || '';
@@ -441,14 +475,40 @@ export default function SettingsScreen() {
 
   const candidateModels = models[primaryHarness] || [];
   const mp = settings?.magpie;
+  const activeTabItem = SETTINGS_TABS.find((item) => item.id === tab) || SETTINGS_TABS[0];
+  const isNarrowDetail = !isWide && mobileDetailOpen;
+  const isNarrowList = !isWide && !mobileDetailOpen;
+
+  const renderTabIcon = (id: SettingsTab, color: string) => {
+    switch (id) {
+      case 'general':
+        return <SettingsIcon size={18} color={color} />;
+      case 'models':
+        return <CpuIcon size={18} color={color} />;
+      case 'memory':
+        return <MemoryIcon size={18} color={color} />;
+      case 'desktop':
+        return <MonitorIcon size={18} color={color} />;
+      case 'remote':
+        return <GlobeIcon size={18} color={color} />;
+    }
+  };
 
   return (
     <View style={[styles.root, { backgroundColor: theme.page }]}>
       <ModalHeader
-        title={t('settings')}
-        onClose={requestClose}
-        rightLabel={t('save')}
-        onRightPress={() => void onSave(false)}
+        title={isNarrowDetail ? t(activeTabItem.labelKey) : t('settings')}
+        closeLabel={isNarrowDetail ? t('backBtn') : undefined}
+        onClose={
+          isNarrowDetail
+            ? () => {
+                pageDirRef.current = -1;
+                setMobileDetailOpen(false);
+              }
+            : requestClose
+        }
+        rightLabel={isNarrowList ? undefined : t('save')}
+        onRightPress={isNarrowList ? undefined : () => void onSave(false)}
         rightDisabled={!dirty || saving}
         rightLoading={saving}
       />
@@ -456,49 +516,72 @@ export default function SettingsScreen() {
         style={[styles.flex, isWide && { flexDirection: 'row' }]}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        {isWide ? (
+        {isWide && (
           <View style={[styles.sideNav, { borderRightColor: theme.s2 }]}>
             {SETTINGS_TABS.map((item) => {
               const active = tab === item.id;
+              const iconColor = active ? theme.text : theme.text2;
               return (
                 <Pressable
                   key={item.id}
                   onPress={() => setTab(item.id)}
                   style={[styles.sideNavItem, active && { backgroundColor: theme.card }]}
                 >
-                  <Text style={[styles.sideNavTxt, { color: active ? theme.text : theme.text2 }]}>
+                  {renderTabIcon(item.id, iconColor)}
+                  <Text style={[styles.sideNavTxt, { color: iconColor }]}>
                     {t(item.labelKey)}
                   </Text>
                 </Pressable>
               );
             })}
           </View>
-        ) : (
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.tabStrip}
-            style={{ flexGrow: 0 }}
-          >
-            {SETTINGS_TABS.map((item) => {
-              const active = tab === item.id;
-              return (
+        )}
+        <Animated.View
+          style={[
+            styles.flex,
+            !isWide && {
+              opacity: pageAnim,
+              transform: [
+                {
+                  translateX: pageAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [pageDirRef.current * 28, 0],
+                  }),
+                },
+              ],
+            },
+          ]}
+        >
+        {isNarrowList ? (
+          <ScrollView contentContainerStyle={styles.scroll} style={styles.flex}>
+            <View style={[styles.catCard, { backgroundColor: theme.card }]}>
+              {SETTINGS_TABS.map((item, idx) => (
                 <Pressable
                   key={item.id}
-                  onPress={() => setTab(item.id)}
-                  style={[
-                    styles.pill,
-                    { backgroundColor: active ? theme.accentSoft : theme.s1 },
+                  onPress={() => {
+                    pageDirRef.current = 1;
+                    setTab(item.id);
+                    setMobileDetailOpen(true);
+                  }}
+                  style={({ pressed }) => [
+                    styles.catRow,
+                    idx < SETTINGS_TABS.length - 1 && {
+                      borderBottomWidth: StyleSheet.hairlineWidth,
+                      borderBottomColor: theme.s2,
+                    },
+                    pressed && { backgroundColor: theme.sel },
                   ]}
                 >
-                  <Text style={[styles.pillTxt, { color: active ? theme.accent : theme.text2 }]}>
+                  {renderTabIcon(item.id, theme.text2)}
+                  <Text style={[styles.catRowTxt, { color: theme.text }]}>
                     {t(item.labelKey)}
                   </Text>
+                  <ChevronRightIcon size={16} color={theme.mute} />
                 </Pressable>
-              );
-            })}
+              ))}
+            </View>
           </ScrollView>
-        )}
+        ) : (
         <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled" style={styles.flex}>
           {error ? (
             <View style={[styles.msgCard, { backgroundColor: theme.pink }]}>
@@ -1591,6 +1674,8 @@ export default function SettingsScreen() {
           </>
           )}
         </ScrollView>
+        )}
+        </Animated.View>
       </KeyboardAvoidingView>
     </View>
   );
@@ -1600,8 +1685,11 @@ const styles = StyleSheet.create({
   root: { flex: 1 },
   flex: { flex: 1 },
   sideNav: { width: 220, borderRightWidth: StyleSheet.hairlineWidth, padding: 12, gap: 4 },
-  sideNavItem: { borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10 },
+  sideNavItem: { borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, flexDirection: 'row', alignItems: 'center', gap: 10 },
   sideNavTxt: { fontSize: 14, fontWeight: '600' },
+  catCard: { borderRadius: 22, overflow: 'hidden' },
+  catRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 14 },
+  catRowTxt: { flex: 1, fontSize: 16, fontWeight: '500' },
   tabStrip: { paddingHorizontal: 16, paddingVertical: 8, gap: 8 },
   scroll: { padding: 16, gap: 12, paddingBottom: 36 },
   msgCard: { borderRadius: 16, paddingHorizontal: 14, paddingVertical: 10 },

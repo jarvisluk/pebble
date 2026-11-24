@@ -125,3 +125,39 @@ export function PinIcon({ size = 14, color }: IconProps) {
     </Svg>
   );
 }
+
+export function ChevronRightIcon({ size = 16, color }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
+      <Path d="M9 18l6-6-6-6" />
+    </Svg>
+  );
+}
+
+export function CpuIcon({ size = 19, color }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round">
+      <Rect x="6" y="6" width="12" height="12" rx="2" />
+      <Rect x="9.5" y="9.5" width="5" height="5" rx="0.8" />
+      <Path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4" />
+    </Svg>
+  );
+}
+
+export function MemoryIcon({ size = 19, color }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round">
+      <Path d="M12 2L2 7l10 5 10-5-10-5z" />
+      <Path d="M2 12l10 5 10-5" />
+      <Path d="M2 17l10 5 10-5" />
+    </Svg>
+  );
+}
+
+export function FolderIcon({ size = 19, color }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round">
+      <Path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+    </Svg>
+  );
+}

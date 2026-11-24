@@ -49,8 +49,8 @@ struct BotHubApp: App {
             }
         }
 
-        WindowGroup(hub.t("remoteDesktop"), id: "desktop", for: String.self) { $target in
-            MacDesktopWindowRootView(target: target ?? "local")
+        WindowGroup(hub.t("remoteDesktop"), id: "desktop", for: DesktopWindowRequest.self) { $req in
+            MacDesktopWindowRootView(request: req ?? DesktopWindowRequest(target: "local"))
                 .frame(minWidth: 720, minHeight: 480)
                 .environment(hub)
                 .environment(router)
@@ -70,6 +70,13 @@ struct BotHubApp: App {
 }
 
 #if os(macOS)
+struct DesktopWindowRequest: Codable, Hashable {
+    var target: String
+    var initialTab: StageKind = .desktop
+    var botId: String? = nil
+    var initialPath: String? = nil
+}
+
 private struct MacMenuBarLabel: View {
     @Environment(Router.self) private var router
     @Environment(\.openWindow) private var openWindow
@@ -78,8 +85,8 @@ private struct MacMenuBarLabel: View {
     var body: some View {
         Label("Pebble", systemImage: "bubble.left.and.bubble.right.fill")
             .onAppear {
-                router.onOpenDesktopWindow = { target in
-                    openWindow(id: "desktop", value: target)
+                router.onOpenDesktopWindow = { req in
+                    openWindow(id: "desktop", value: req)
                 }
                 appDelegate.onReopenWindow = {
                     openWindow(id: "main")
@@ -128,8 +135,8 @@ private struct MacWindowRootView: View {
         .font(.system(size: AppFont.body))
         .preferredColorScheme(scheme0)
         .onAppear {
-            router.onOpenDesktopWindow = { target in
-                openWindow(id: "desktop", value: target)
+            router.onOpenDesktopWindow = { req in
+                openWindow(id: "desktop", value: req)
             }
             appDelegate.onReopenWindow = {
                 openWindow(id: "main")
@@ -164,17 +171,31 @@ private struct MacWindowRootView: View {
 }
 
 private struct MacDesktopWindowRootView: View {
-    var target: String
+    var request: DesktopWindowRequest
+    @Environment(HubStore.self) private var hub
     @Environment(Router.self) private var router
+    @Environment(\.colorScheme) private var scheme
 
-    private let darkPalette = Palette(dark: true)
+    private var scheme0: ColorScheme? {
+        hub.themePref == "light" ? .light : hub.themePref == "dark" ? .dark : nil
+    }
+
+    private var activePalette: Palette {
+        let dark = hub.themePref == "dark" || (hub.themePref == "system" && scheme == .dark)
+        return Palette(dark: dark)
+    }
 
     var body: some View {
-        DesktopView(initialTarget: target, initialBotId: router.selected)
-            .environment(\.palette, darkPalette)
-            .tint(darkPalette.accent)
-            .font(.system(size: AppFont.body))
-            .preferredColorScheme(.dark)
+        DesktopView(
+            initialTarget: request.target,
+            initialBotId: request.botId ?? router.selected,
+            initialTab: request.initialTab,
+            initialPath: request.initialPath
+        )
+        .environment(\.palette, activePalette)
+        .tint(activePalette.accent)
+        .font(.system(size: AppFont.body))
+        .preferredColorScheme(scheme0)
     }
 }
 
@@ -273,6 +294,9 @@ enum SettingsTab: String, CaseIterable, Identifiable, Hashable {
 struct DesktopPresentation: Identifiable, Equatable {
     let id = UUID()
     var target: String
+    var initialTab: StageKind = .desktop
+    var botId: String? = nil
+    var initialPath: String? = nil
 }
 
 @MainActor
@@ -287,7 +311,9 @@ final class Router {
     var settingsTab: SettingsTab? = nil
     var settingsDirty = false
     var requestLeaveSettings = false
-    @ObservationIgnored var onOpenDesktopWindow: ((String) -> Void)?
+    #if os(macOS)
+    @ObservationIgnored var onOpenDesktopWindow: ((DesktopWindowRequest) -> Void)?
+    #endif
 
     func openBot(_ id: String) {
         inSettings = false
@@ -331,11 +357,38 @@ final class Router {
         sheet = nil
         #if os(macOS)
         if let onOpenDesktopWindow {
-            onOpenDesktopWindow(dest)
+            onOpenDesktopWindow(DesktopWindowRequest(target: dest, initialTab: .desktop, botId: selected))
             return
         }
         #endif
-        desktop = DesktopPresentation(target: dest)
+        desktop = DesktopPresentation(target: dest, initialTab: .desktop, botId: selected)
+    }
+
+    func openFiles(botId: String, path: String? = nil) {
+        sheet = nil
+        #if os(macOS)
+        if let onOpenDesktopWindow {
+            onOpenDesktopWindow(DesktopWindowRequest(target: "local", initialTab: .files, botId: botId, initialPath: path))
+            return
+        }
+        #endif
+        desktop = DesktopPresentation(target: "local", initialTab: .files, botId: botId, initialPath: path)
+    }
+
+    func handleStageOpen(_ ev: StageOpenEvent) {
+        let targetBot = ev.botId ?? selected
+        if let bid = targetBot, !bid.isEmpty, bid != selected {
+            openBot(bid)
+        }
+        let kind = StageKind(rawValue: ev.kind) ?? .files
+        sheet = nil
+        #if os(macOS)
+        if let onOpenDesktopWindow {
+            onOpenDesktopWindow(DesktopWindowRequest(target: "local", initialTab: kind, botId: targetBot, initialPath: ev.path))
+            return
+        }
+        #endif
+        desktop = DesktopPresentation(target: "local", initialTab: kind, botId: targetBot, initialPath: ev.path)
     }
 }
 
@@ -481,15 +534,24 @@ struct RootView: View {
         }
         #if os(iOS)
         .fullScreenCover(item: $r.desktop) { pres in
-            DesktopView(initialTarget: pres.target, initialBotId: router.selected)
-                .environment(\.palette, palette)
-                .environment(router)
-                .environment(hub)
-                .tint(palette.accent)
-                .buttonBorderShape(.capsule)
-                .preferredColorScheme(scheme0)
+            DesktopView(
+                initialTarget: pres.target,
+                initialBotId: pres.botId ?? router.selected,
+                initialTab: pres.initialTab,
+                initialPath: pres.initialPath
+            )
+            .environment(\.palette, palette)
+            .environment(router)
+            .environment(hub)
+            .tint(palette.accent)
+            .buttonBorderShape(.capsule)
+            .preferredColorScheme(scheme0)
         }
         #endif
+        .onChange(of: hub.pendingStageOpen) { _, ev in
+            guard let ev else { return }
+            router.handleStageOpen(ev)
+        }
         .onChange(of: showGate) { _, gate in
             if gate {
                 router.sheet = nil

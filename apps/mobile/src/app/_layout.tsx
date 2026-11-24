@@ -11,7 +11,7 @@ import { ThemeProvider, useTheme } from '../theme';
 
 function ConnectionGuard() {
   const pathname = usePathname();
-  const { ready, activeServer, connState, bots, interruptBot } = useHub();
+  const { ready, activeServer, connState, bots, interruptBot, addAndConnectServer } = useHub();
 
   useEffect(() => {
     const handleUrl = (raw: string | null | undefined) => {
@@ -20,7 +20,13 @@ function ConnectionGuard() {
       const [pathPart, queryPart] = stripped.split('?');
       const segs = pathPart.split('/').filter(Boolean);
       const head = (segs[0] || '').toLowerCase();
-      if (head === 'bot' && segs[1]) {
+      if (head === 'connect') {
+        const params = new URLSearchParams(queryPart || '');
+        const link = params.get('link');
+        if (link) {
+          addAndConnectServer({ label: '', address: link, token: '' }).catch(() => {});
+        }
+      } else if (head === 'bot' && segs[1]) {
         router.push(`/bot/${encodeURIComponent(segs[1])}`);
       } else if (head === 'desktop') {
         const params = new URLSearchParams(queryPart || '');
@@ -33,7 +39,7 @@ function ConnectionGuard() {
     Linking.getInitialURL().then(handleUrl).catch(() => {});
     const sub = Linking.addEventListener('url', (ev) => handleUrl(ev.url));
     return () => sub.remove();
-  }, [interruptBot]);
+  }, [addAndConnectServer, interruptBot]);
 
   useEffect(() => {
     if (!ready || pathname === '/') return;

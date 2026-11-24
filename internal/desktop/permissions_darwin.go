@@ -192,8 +192,16 @@ func platformPermissions(_ context.Context) []PermissionItem {
 }
 
 func openMacSystemSettings(uri string) error {
-	cmd := exec.Command("/usr/bin/open", uri)
-	return cmd.Start()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return exec.CommandContext(ctx, "/usr/bin/open", uri).Run()
+}
+
+func triggerAutomationSystemEventsPrompt(ctx context.Context) error {
+	runCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(runCtx, "/usr/bin/osascript", "-e", `tell application "System Events" to get name of first application process`)
+	return cmd.Run()
 }
 
 func requestPlatformPermission(ctx context.Context, id string, openSettings bool) (*PermissionRequestResult, error) {
@@ -218,26 +226,59 @@ func requestPlatformPermission(ctx context.Context, id string, openSettings bool
 	if !openSettings {
 		switch id {
 		case "screen_recording":
-			C.bhRequestScreenRecording()
+			granted := C.bhRequestScreenRecording()
 			prompted = true
+			if granted == 0 {
+				if err := openMacSystemSettings(uri); err != nil {
+					return nil, err
+				}
+				opened = true
+			}
 		case "accessibility":
 			C.bhRequestAccessibility()
 			prompted = true
 		case "input_monitoring":
-			C.bhRequestInputMonitoring()
-			prompted = true
-		case "automation":
-			// Trigger consent dialog asynchronously if needed so HTTP request returns promptly.
-			done := make(chan struct{})
-			go func() {
-				_ = C.bhAutomationSystemEventsStatus(1)
-				close(done)
-			}()
-			select {
-			case <-done:
-			case <-time.After(300 * time.Millisecond):
+			if C.bhInputMonitoringStatus() == 0 {
+				if err := openMacSystemSettings(uri); err != nil {
+					return nil, err
+				}
+				opened = true
+			} else {
+				granted := C.bhRequestInputMonitoring()
+				prompted = true
+				if granted == 0 && C.bhInputMonitoringStatus() == 0 {
+					if err := openMacSystemSettings(uri); err != nil {
+						return nil, err
+					}
+					opened = true
+				}
 			}
-			prompted = true
+		case "automation":
+			st := int(C.bhAutomationSystemEventsStatus(0))
+			if st == -1743 {
+				if err := openMacSystemSettings(uri); err != nil {
+					return nil, err
+				}
+				opened = true
+			} else {
+				errCh := make(chan error, 1)
+				go func() {
+					errCh <- triggerAutomationSystemEventsPrompt(context.Background())
+				}()
+				select {
+				case err := <-errCh:
+					if err != nil {
+						if openErr := openMacSystemSettings(uri); openErr != nil {
+							return nil, openErr
+						}
+						opened = true
+					} else {
+						prompted = true
+					}
+				case <-time.After(600 * time.Millisecond):
+					prompted = true
+				}
+			}
 		case "full_disk_access":
 			if err := openMacSystemSettings(uri); err != nil {
 				return nil, err

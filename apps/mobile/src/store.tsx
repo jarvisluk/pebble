@@ -39,6 +39,7 @@ import type {
   ScreenState,
   ServerProfile,
   SettingsData,
+  StageOpenEvent,
   TailcatStatus,
   TakeoverRequest,
 } from './types';
@@ -143,6 +144,7 @@ interface HubContextValue {
   tools: Record<string, string>;
   settings: SettingsData | null;
   models: Record<string, string[]>;
+  pendingStageOpen: (StageOpenEvent & { seq: number }) | null;
   nodes: NodeInfo[];
   tailcat: TailcatStatus | null;
   mobileTailscale: MobileTailscaleState | null;
@@ -254,6 +256,7 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
     target: 'local',
     temporary: false,
   });
+  const [pendingStageOpen, setPendingStageOpen] = useState<(StageOpenEvent & { seq: number }) | null>(null);
   const [routines, setRoutines] = useState<Record<string, RoutineItem[]>>({});
 
   const activeChatRef = useRef<string | null>(null);
@@ -405,6 +408,17 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
               name: payload.name ? String(payload.name) : undefined,
               temporary: Boolean(payload.temporary),
               expiresAt: payload.expiresAt ? String(payload.expiresAt) : undefined,
+            });
+          } else if (type === 'stage_open' && payload?.kind) {
+            setPendingStageOpen({
+              seq: Date.now(),
+              id: payload.id ? String(payload.id) : undefined,
+              kind: payload.kind,
+              title: payload.title ? String(payload.title) : undefined,
+              botId: payload.botId ? String(payload.botId) : undefined,
+              path: payload.path ? String(payload.path) : undefined,
+              url: payload.url ? String(payload.url) : undefined,
+              resourceUri: payload.resourceUri ? String(payload.resourceUri) : undefined,
             });
           } else if (type === 'takeover' && Array.isArray(payload?.items)) {
             const items = payload.items as TakeoverRequest[];
@@ -1310,6 +1324,7 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
         questions,
         desktopTargets,
         activeDesktopTarget,
+        pendingStageOpen,
         setActiveDesktopTarget,
         setActiveChatBot,
         addAndConnectServer,

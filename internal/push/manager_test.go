@@ -3,6 +3,7 @@ package push
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -113,5 +114,58 @@ func TestManagerLiveActivityThrottleAndTakeover(t *testing.T) {
 	alertPayload, _ := reqs[2].Payload.(APNSPayload)
 	if alertPayload.APS.InterruptionLevel != "time-sensitive" || alertPayload.DeepLink != "bothub://desktop?target=local" {
 		t.Fatalf("unexpected takeover alert payload: %+v", alertPayload)
+	}
+}
+
+func TestCompactPreviewStripsMarkdown(t *testing.T) {
+	raw := `## 周报汇总
+
+| 模块 | 状态 |
+| :--- | ---: |
+| **API** | ~~旧版~~ *正常*<br>详见 [文档](https://example.com) |
+
+- [x] 完成 ` + "`deploy.sh`" + ` 检查
+> 引用内容 [^1]
+
+![架构图](https://example.com/a.png) ![](local.png)
+
+$$
+\sum_{i=1}^{n} i = \frac{n(n+1)}{2}
+$$
+
+<details><summary>展开详情</summary>支持 <kbd>⌘K</kbd> 与 H<sub>2</sub>O</details>
+
+` + "```go\nfmt.Println(1)\n```" + `
+
+[^1]: 脚注说明，价格 $100 - $200 与 snake_case 保留。`
+
+	got := compactPreview(raw, 500)
+	wantParts := []string{
+		"周报汇总",
+		"模块 · 状态",
+		"API · 旧版 正常 详见 文档",
+		"完成 deploy.sh 检查",
+		"引用内容 [1]",
+		"[图片: 架构图]",
+		"[图片]",
+		"∑_i=1^n i = (n(n+1))/2",
+		"展开详情 支持 ⌘K 与 H2O",
+		"[代码]",
+		"[1] 脚注说明，价格 $100 - $200 与 snake_case 保留。",
+	}
+	for _, part := range wantParts {
+		if !strings.Contains(got, part) {
+			t.Fatalf("compactPreview missing %q in %q", part, got)
+		}
+	}
+	for _, forbidden := range []string{"##", "| :---", "~~", "**", "```", "https://example.com", "$$", `\sum`, `\frac`, "<details>", "<kbd>"} {
+		if strings.Contains(got, forbidden) {
+			t.Fatalf("compactPreview still contains %q in %q", forbidden, got)
+		}
+	}
+
+	trunc := compactPreview("**一二三四五六七八九十**", 6)
+	if trunc != "一二三四五…" {
+		t.Fatalf("expected truncated preview '一二三四五…', got %q", trunc)
 	}
 }

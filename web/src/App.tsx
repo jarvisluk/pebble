@@ -12,6 +12,9 @@ import type {
   ScreenState,
   SettingsData,
   SettingsTab,
+  StageKind,
+  StageOpenEvent,
+  StageTab,
   TakeoverRequest,
 } from './types';
 import { api, setUnauthorizedHandler } from './lib/api';
@@ -21,6 +24,7 @@ import { useViewTransition } from './lib/useViewTransition';
 import { Sidebar } from './components/Sidebar';
 import { ChatView } from './components/ChatView';
 import { DesktopStage } from './components/DesktopStage';
+import { WorkspaceFilesPane } from './components/WorkspaceFilesPane';
 import { SettingsView } from './components/SettingsView';
 import { BotDetailPanel } from './components/BotDetailPanel';
 import { CollabPanel } from './components/CollabPanel';
@@ -80,6 +84,12 @@ export default function App() {
   const [mobileSideOpen, setMobileSideOpen] = useState(false);
 
   const [deskOpen, setDeskOpen] = useState(false);
+  const [stageKind, setStageKind] = useState<StageKind>('desktop');
+  const [stageTabs, setStageTabs] = useState<StageTab[]>([]);
+  const [activeStageTabId, setActiveStageTabId] = useState<string>('desktop');
+  const [filesOpenPath, setFilesOpenPath] = useState('');
+  const [filesOpenSeq, setFilesOpenSeq] = useState(0);
+  const [stageInsert, setStageInsert] = useState<{ seq: number; text: string } | null>(null);
   const [deskTarget, setDeskTarget] = useState('local');
   const [activeDeskTarget, setActiveDeskTarget] = useState<ActiveDesktopTarget>({
     target: 'local',
@@ -452,6 +462,51 @@ export default function App() {
       }
     });
 
+    on('stage_open', ({ botId, payload }: { botId?: string; payload?: StageOpenEvent }) => {
+      if (!payload?.kind) return;
+      const targetBotId = payload.botId || botId;
+      if (targetBotId && targetBotId !== activeBotIdRef.current) {
+        void selectBot(targetBotId);
+      }
+      if (payload.kind === 'files') {
+        setStageKind('files');
+        setActiveStageTabId('files');
+        setFilesOpenPath(payload.path || '');
+        setFilesOpenSeq((n) => n + 1);
+        setDeskOpen(true);
+        return;
+      }
+      if (payload.kind === 'desktop') {
+        setStageKind('desktop');
+        setActiveStageTabId('desktop');
+        setDeskOpen(true);
+        return;
+      }
+      const tabId = payload.id || `${payload.kind}:${Date.now()}`;
+      const newTab: StageTab = {
+        id: tabId,
+        kind: payload.kind,
+        title: payload.title || payload.kind,
+        botId: targetBotId,
+        path: payload.path,
+        url: payload.url,
+        resourceUri: payload.resourceUri,
+        closable: payload.closable !== false,
+      };
+      setStageTabs((prev) => {
+        const idx = prev.findIndex((x) => x.id === tabId);
+        if (idx >= 0) {
+          const copy = [...prev];
+          copy[idx] = newTab;
+          return copy;
+        }
+        return [...prev, newTab];
+      });
+      setStageKind(payload.kind);
+      setActiveStageTabId(tabId);
+      setDeskOpen(true);
+    });
+
     on('takeover', ({ payload }: { payload?: { items?: TakeoverRequest[] } }) => {
       setTakeovers(payload?.items || []);
     });
@@ -822,9 +877,26 @@ export default function App() {
                 setMobileSideOpen(true);
               }
             }}
-            onToggleDesktop={() => setDeskOpen((v) => !v)}
+            onToggleDesktop={() => {
+              if (deskOpen && stageKind === 'desktop') {
+                setDeskOpen(false);
+              } else {
+                setStageKind('desktop');
+                setActiveStageTabId('desktop');
+                setDeskOpen(true);
+              }
+            }}
+            onOpenFiles={() => {
+              setStageKind('files');
+              setActiveStageTabId('files');
+              setFilesOpenPath('');
+              setFilesOpenSeq((n) => n + 1);
+              setDeskOpen(true);
+            }}
             onOpenDesktopTarget={(target) => {
               void selectDesktopTarget(target || 'local');
+              setStageKind('desktop');
+              setActiveStageTabId('desktop');
               setDeskOpen(true);
             }}
             onSwitchBackLocal={() => void selectDesktopTarget('local')}
@@ -888,34 +960,10 @@ export default function App() {
 
       <div
         id="deskShell"
-        className={`desk-fs-shell${deskChatOpen ? ' chat-open' : ''}`}
+        className={`desk-fs-shell stage-shell${deskChatOpen ? ' chat-open' : ''}`}
+        data-surface={stageKind === 'desktop' ? 'dark' : 'adaptive'}
         hidden={!deskOpen}
       >
-        <div className="desk-fs-main">
-          <DesktopStage
-            open={deskOpen}
-            target={deskTarget}
-            activeDeskTarget={activeDeskTarget}
-            screenUpdateSeq={screenSeq}
-            liveScreen={liveScreen}
-            takeovers={takeovers}
-            chatOpen={deskChatOpen}
-            activeBotName={activeBot?.name}
-            lang={lang}
-            onChangeTarget={(next) => void selectDesktopTarget(next)}
-            onActiveTargetSync={(next) => applyActiveDesktopTarget(next)}
-            onTakeoversChange={setTakeovers}
-            onResolveTakeover={handleResolveTakeover}
-            onToggleChat={() => setDeskChatOpen((v) => !v)}
-            onOpenPermissions={() => {
-              setDeskOpen(false);
-              setSettingsTab('desktop');
-              setView('settings');
-              void loadSettings();
-            }}
-            onClose={() => setDeskOpen(false)}
-          />
-        </div>
         {deskChatOpen && (
           <div className="desk-chat-shade" onClick={() => setDeskChatOpen(false)} />
         )}
@@ -937,11 +985,14 @@ export default function App() {
               inDesktopSidebar
               lang={lang}
               inputRef={deskInputRef}
+              pendingInsert={stageInsert}
               onReplyQuestion={handleReplyQuestion}
               onOpenMenu={() => {}}
               onToggleDesktop={() => {}}
               onOpenDesktopTarget={(target) => {
                 setDeskTarget(target || 'local');
+                setStageKind('desktop');
+                setActiveStageTabId('desktop');
               }}
               onResolveTakeover={(to) => void handleResolveTakeover(to)}
               onOpenDetail={() => {}}
@@ -960,6 +1011,135 @@ export default function App() {
             />
           )}
         </aside>
+        <div className="desk-fs-main">
+          <header className="stage-topbar">
+            <div className="stage-topbar-left">
+              <button
+                type="button"
+                className={`stage-pill-btn${deskChatOpen ? ' on' : ''}`}
+                title={t('deskChatSidebarTitle')}
+                onClick={() => setDeskChatOpen((v) => !v)}
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                </svg>
+                <span>{activeBot?.name || t('stageChatToggle')}</span>
+              </button>
+              <nav className="stage-tabs" aria-label="Stage tabs">
+                <button
+                  type="button"
+                  className={`stage-tab${activeStageTabId === 'files' ? ' active' : ''}`}
+                  onClick={() => {
+                    setStageKind('files');
+                    setActiveStageTabId('files');
+                  }}
+                >
+                  {t('stageFilesTab')}
+                </button>
+                <button
+                  type="button"
+                  className={`stage-tab${activeStageTabId === 'desktop' ? ' active' : ''}`}
+                  onClick={() => {
+                    setStageKind('desktop');
+                    setActiveStageTabId('desktop');
+                  }}
+                >
+                  {t('stageDesktopTab')}
+                </button>
+                {stageTabs.map((tab) => (
+                  <div key={tab.id} className={`stage-tab-wrap${activeStageTabId === tab.id ? ' active' : ''}`}>
+                    <button
+                      type="button"
+                      className={`stage-tab${activeStageTabId === tab.id ? ' active' : ''}`}
+                      onClick={() => {
+                        setStageKind(tab.kind);
+                        setActiveStageTabId(tab.id);
+                      }}
+                    >
+                      {tab.title}
+                    </button>
+                    {tab.closable !== false && (
+                      <button
+                        type="button"
+                        className="stage-tab-x"
+                        aria-label={t('close')}
+                        onClick={() => {
+                          setStageTabs((prev) => prev.filter((x) => x.id !== tab.id));
+                          if (activeStageTabId === tab.id) {
+                            setStageKind('files');
+                            setActiveStageTabId('files');
+                          }
+                        }}
+                      >
+                        ×
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </nav>
+            </div>
+            <button
+              type="button"
+              className="stage-pill-btn stage-close-btn"
+              title={t('stageClose')}
+              aria-label={t('stageClose')}
+              onClick={() => setDeskOpen(false)}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                <path d="M6 6l12 12M18 6 6 18" />
+              </svg>
+            </button>
+          </header>
+
+          {deskOpen && (
+            <>
+              <div className="stage-pane-slot" hidden={activeStageTabId !== 'desktop'}>
+                <DesktopStage
+                  open={deskOpen && activeStageTabId === 'desktop'}
+                  target={deskTarget}
+                  activeDeskTarget={activeDeskTarget}
+                  screenUpdateSeq={screenSeq}
+                  liveScreen={liveScreen}
+                  takeovers={takeovers}
+                  chatOpen={deskChatOpen}
+                  embeddedInStage
+                  activeBotName={activeBot?.name}
+                  lang={lang}
+                  onChangeTarget={(next) => void selectDesktopTarget(next)}
+                  onActiveTargetSync={(next) => applyActiveDesktopTarget(next)}
+                  onTakeoversChange={setTakeovers}
+                  onResolveTakeover={handleResolveTakeover}
+                  onToggleChat={() => setDeskChatOpen((v) => !v)}
+                  onOpenPermissions={() => {
+                    setDeskOpen(false);
+                    setSettingsTab('desktop');
+                    setView('settings');
+                    void loadSettings();
+                  }}
+                  onClose={() => setDeskOpen(false)}
+                />
+              </div>
+              <div className="stage-pane-slot" hidden={activeStageTabId !== 'files'}>
+                <WorkspaceFilesPane
+                  botId={activeBotId || ''}
+                  initialPath={filesOpenPath}
+                  openSeq={filesOpenSeq}
+                  lang={lang}
+                  onQuotePath={(relPath) => {
+                    setDeskChatOpen(true);
+                    setStageInsert({ seq: Date.now(), text: `@${relPath} ` });
+                  }}
+                  onToast={showToast}
+                />
+              </div>
+              {activeStageTabId !== 'desktop' && activeStageTabId !== 'files' && (
+                <div className="ws-preview-empty">
+                  {t('stagePlaceholderDesc', { kind: stageKind })}
+                </div>
+              )}
+            </>
+          )}
+        </div>
       </div>
 
       <div id="shade" className={`shade${shadeOpen ? ' open' : ''}`} onClick={closeAllOverlays} />
@@ -983,6 +1163,15 @@ export default function App() {
         onLoadModels={loadModels}
         onRefreshDetail={(id) => openPanel(id)}
         onSettingsUpdated={setSettings}
+        onOpenFiles={(botId) => {
+          setPanelOpen(false);
+          if (botId !== activeBotId) void selectBot(botId);
+          setStageKind('files');
+          setActiveStageTabId('files');
+          setFilesOpenPath('');
+          setFilesOpenSeq((n) => n + 1);
+          setDeskOpen(true);
+        }}
       />
 
       <CollabPanel

@@ -1,4 +1,10 @@
-import type { MentionCandidate, MessageMedia, SlashCommandItem } from '../types';
+import type {
+  MentionCandidate,
+  MessageMedia,
+  SlashCommandItem,
+  WorkspaceFileContent,
+  WorkspaceListResult,
+} from '../types';
 
 export class APIError extends Error {
   status: number;
@@ -85,4 +91,49 @@ export async function uploadBotAttachment(
     throw new APIError(data.error || `HTTP ${res.status}`, res.status, data.code);
   }
   return data as { media: MessageMedia; workspacePath?: string };
+}
+
+export async function fetchWorkspaceFiles(
+  botId: string,
+  path = '',
+  showHidden = false
+): Promise<WorkspaceListResult> {
+  const qs = new URLSearchParams();
+  if (path) qs.set('path', path);
+  if (showHidden) qs.set('showHidden', '1');
+  const q = qs.toString();
+  return api<WorkspaceListResult>(
+    `/api/bots/${encodeURIComponent(botId)}/files${q ? `?${q}` : ''}`
+  );
+}
+
+export async function fetchWorkspaceFileContent(
+  botId: string,
+  path: string
+): Promise<WorkspaceFileContent> {
+  const qs = new URLSearchParams({ path });
+  return api<WorkspaceFileContent>(
+    `/api/bots/${encodeURIComponent(botId)}/files/content?${qs.toString()}`
+  );
+}
+
+export async function requestWorkspaceFileTicket(
+  botId: string,
+  path: string
+): Promise<{ ticket: string; path: string; expiresIn: number }> {
+  return api<{ ticket: string; path: string; expiresIn: number }>(
+    `/api/bots/${encodeURIComponent(botId)}/files/ticket`,
+    { method: 'POST', body: { path } }
+  );
+}
+
+export function workspaceFileRawURL(
+  botId: string,
+  path: string,
+  ticket: string,
+  download = false
+): string {
+  const qs = new URLSearchParams({ path, ticket });
+  if (download) qs.set('download', '1');
+  return `/api/bots/${encodeURIComponent(botId)}/files/raw?${qs.toString()}`;
 }

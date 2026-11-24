@@ -9,7 +9,10 @@ struct DesktopView: View {
 
     var initialTarget: String
     var initialBotId: String? = nil
+    var initialTab: StageKind = .desktop
+    var initialPath: String? = nil
 
+    @State private var activeTab: StageKind
     @State private var target: String
     @State private var streaming = true
     @State private var error = ""
@@ -26,6 +29,8 @@ struct DesktopView: View {
     #endif
     @State private var showChatSheet = false
     @State private var chatBotId: String
+    @State private var showHiddenFiles = false
+    @State private var filesRefreshSeq = 0
     @FocusState private var draftFocused: Bool
 
     private let stage = Color.black
@@ -33,9 +38,12 @@ struct DesktopView: View {
     private let pillText = Color(hex: "#f3f1ee")
     private let pillMute = Color(hex: "#a6a09a")
 
-    init(initialTarget: String, initialBotId: String? = nil) {
+    init(initialTarget: String, initialBotId: String? = nil, initialTab: StageKind = .desktop, initialPath: String? = nil) {
         self.initialTarget = initialTarget
         self.initialBotId = initialBotId
+        self.initialTab = initialTab
+        self.initialPath = initialPath
+        _activeTab = State(initialValue: initialTab)
         _target = State(initialValue: initialTarget.isEmpty ? "local" : initialTarget)
         _chatBotId = State(initialValue: initialBotId ?? "")
     }
@@ -71,7 +79,8 @@ struct DesktopView: View {
                         .frame(width: 340)
                     Rectangle().fill(p.s2).frame(width: 1)
                 }
-                desktopStage
+                stageContent
+                    .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
             }
             #else
             if isWide {
@@ -80,12 +89,12 @@ struct DesktopView: View {
                         .navigationSplitViewColumnWidth(min: 320, ideal: 360, max: 420)
                 } detail: {
                     NavigationStack {
-                        desktopStage
+                        stageContent
                     }
                 }
             } else {
                 NavigationStack {
-                    desktopStage
+                    stageContent
                 }
                 .sheet(isPresented: $showChatSheet) {
                     NavigationStack {
@@ -96,9 +105,11 @@ struct DesktopView: View {
             }
             #endif
         }
-        .tint(Color(hex: "#f3f1ee"))
-        .preferredColorScheme(.dark)
+        .tint(activeTab == .desktop ? Color(hex: "#f3f1ee") : p.accent)
         .task { _ = try? await hub.refreshDesktopTargets() }
+        .onChange(of: initialTab) { _, next in
+            activeTab = next
+        }
         .onChange(of: hub.activeDesktopTarget.target) { _, newTarget in
             let next = newTarget.isEmpty ? "local" : newTarget
             if target != next {
@@ -111,11 +122,20 @@ struct DesktopView: View {
                 Task { try? await hub.setActiveDesktopTarget(next) }
             }
         }
-        .task(id: "\(target)-\(streaming)") {
+        .task(id: "\(target)-\(streaming)-\(activeTab.rawValue)") {
+            guard activeTab == .desktop else { return }
+            try? await Task.sleep(nanoseconds: 80_000_000)
+            guard !Task.isCancelled, activeTab == .desktop else { return }
             await pollState()
         }
-        .task(id: "\(target)-\(streaming)-\(hub.baseURL)") {
-            if streaming, let req = hub.makeDesktopWSRequest(target: target) {
+        .task(id: "\(target)-\(streaming)-ws-\(activeTab.rawValue)") {
+            if activeTab != .desktop || !streaming {
+                streamCtrl.stop()
+                return
+            }
+            try? await Task.sleep(nanoseconds: 80_000_000)
+            guard !Task.isCancelled, activeTab == .desktop, streaming else { return }
+            if let req = hub.makeDesktopWSRequest(target: target) {
                 streamCtrl.start(request: req)
             } else {
                 streamCtrl.stop()
@@ -128,6 +148,142 @@ struct DesktopView: View {
                 error = hub.t("deskScreenRecordingDenied")
             }
         }
+    }
+
+    @ViewBuilder
+    private var stageContent: some View {
+        ZStack {
+            WorkspaceFilesView(
+                botId: resolvedBotId ?? "",
+                initialPath: initialPath,
+                showHidden: $showHiddenFiles,
+                refreshTrigger: filesRefreshSeq,
+                onQuotePath: { relPath in
+                    hub.insertIntoChat("@\(relPath) ")
+                    #if os(macOS)
+                    showMacChatSidebar = true
+                    #else
+                    if isWide {
+                        columnVisibility = .all
+                    } else {
+                        showChatSheet = true
+                    }
+                    #endif
+                }
+            )
+            .opacity(activeTab == .files ? 1 : 0)
+            .allowsHitTesting(activeTab == .files)
+
+            if activeTab == .desktop {
+                desktopStage
+                    .environment(\.palette, Palette(dark: true))
+                    .environment(\.colorScheme, .dark)
+            } else if activeTab != .files {
+                ContentUnavailableView(
+                    activeTab.rawValue,
+                    systemImage: "square.grid.2x2",
+                    description: Text(hub.t("stagePlaceholderDesc", ["kind": activeTab.rawValue]))
+                )
+                .background(p.page)
+            }
+        }
+        .navigationTitle("")
+        .inlineNavTitle()
+        .toolbar {
+            #if os(iOS)
+            ToolbarItem(placement: .topBarLeading) {
+                Button { dismiss() } label: {
+                    Label(hub.t("close"), systemImage: "xmark")
+                }
+            }
+            #endif
+            ToolbarItem(placement: .principal) {
+                stageModePicker
+            }
+            ToolbarItemGroup(placement: .hubTrailing) {
+                #if os(macOS)
+                Button { showMacChatSidebar.toggle() } label: {
+                    Label(hub.t("deskChatSidebar"), systemImage: "bubble.left.and.bubble.right")
+                }
+                #else
+                if !isWide {
+                    Button { showChatSheet = true } label: {
+                        Label(hub.t("deskChatSidebar"), systemImage: "bubble.left.and.bubble.right")
+                    }
+                }
+                #endif
+                if activeTab == .files {
+                    Menu {
+                        Toggle(isOn: $showHiddenFiles) {
+                            Label(hub.t("showHiddenFiles"), systemImage: "eye")
+                        }
+                        Button {
+                            filesRefreshSeq += 1
+                        } label: {
+                            Label(hub.t("refreshFiles"), systemImage: "arrow.clockwise")
+                        }
+                    } label: {
+                        Label(hub.t("more"), systemImage: "ellipsis.circle").labelStyle(.iconOnly)
+                    }
+                    .menuIndicator(.hidden)
+                } else if activeTab == .desktop {
+                    Button { streaming.toggle() } label: {
+                        Label(streaming ? hub.t("collapse") : hub.t("connect"), systemImage: streaming ? "pause.fill" : "play.fill")
+                    }
+
+                    Menu {
+                        Toggle(isOn: Binding(
+                            get: { showText },
+                            set: { v in
+                                showText = v
+                                if v { draftFocused = true }
+                            }
+                        )) {
+                            Label(hub.t("aaInput"), systemImage: "keyboard")
+                        }
+                        Divider()
+                        Button(hub.t("keyEnter")) { send(["kind": "key", "key": "Return"]) }
+                        Button(hub.t("keyBackspace")) { send(["kind": "key", "key": "Backspace"]) }
+                        Button("Esc") { send(["kind": "key", "key": "Escape"]) }
+                        Button("Tab") { send(["kind": "key", "key": "Tab"]) }
+                        Divider()
+                        Button(hub.t("keyScrollUp")) { send(["kind": "scroll", "deltaY": 8]) }
+                        Button(hub.t("keyScrollDown")) { send(["kind": "scroll", "deltaY": -8]) }
+                    } label: {
+                        Label(hub.t("aaInput"), systemImage: "keyboard").labelStyle(.iconOnly)
+                    }
+                    .menuIndicator(.hidden)
+
+                    Menu {
+                        if streamCtrl.connected {
+                            Section {
+                                Text("H.264 · \(streamCtrl.fps) fps")
+                            }
+                        }
+                        if targets.count > 1 {
+                            Picker("", selection: $target) {
+                                ForEach(targets) { tr in
+                                    Text(tr.name ?? tr.id).tag(tr.id)
+                                }
+                            }
+                        }
+                    } label: {
+                        Label(hub.t("settings"), systemImage: "slider.horizontal.3").labelStyle(.iconOnly)
+                    }
+                    .menuIndicator(.hidden)
+                }
+            }
+        }
+    }
+
+    private var stageModePicker: some View {
+        Picker("", selection: $activeTab) {
+            Text(hub.t("stageFilesTab")).tag(StageKind.files)
+            Text(hub.t("stageDesktopTab")).tag(StageKind.desktop)
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .frame(maxWidth: 200)
     }
 
     private var desktopStage: some View {
@@ -173,75 +329,6 @@ struct DesktopView: View {
             }
         }
         .background(stage.ignoresSafeArea())
-        .navigationTitle(target == "local" ? hub.t("localDesktopName") : (targets.first(where: { $0.id == target })?.name ?? hub.t("remoteDesktop")))
-        .inlineNavTitle()
-        .toolbar {
-            #if os(iOS)
-            ToolbarItem(placement: .hubLeading) {
-                Button { dismiss() } label: {
-                    Label(hub.t("close"), systemImage: "chevron.backward")
-                }
-            }
-            #endif
-            ToolbarItemGroup(placement: .hubTrailing) {
-                #if os(macOS)
-                Button { showMacChatSidebar.toggle() } label: {
-                    Label(hub.t("deskChatSidebar"), systemImage: "bubble.left.and.bubble.right")
-                }
-                #else
-                if !isWide {
-                    Button { showChatSheet = true } label: {
-                        Label(hub.t("deskChatSidebar"), systemImage: "bubble.left.and.bubble.right")
-                    }
-                }
-                #endif
-
-                Button { streaming.toggle() } label: {
-                    Label(streaming ? hub.t("collapse") : hub.t("connect"), systemImage: streaming ? "pause.fill" : "play.fill")
-                }
-
-                Menu {
-                    Toggle(isOn: Binding(
-                        get: { showText },
-                        set: { v in
-                            showText = v
-                            if v { draftFocused = true }
-                        }
-                    )) {
-                        Label(hub.t("aaInput"), systemImage: "keyboard")
-                    }
-                    Divider()
-                    Button(hub.t("keyEnter")) { send(["kind": "key", "key": "Return"]) }
-                    Button(hub.t("keyBackspace")) { send(["kind": "key", "key": "Backspace"]) }
-                    Button("Esc") { send(["kind": "key", "key": "Escape"]) }
-                    Button("Tab") { send(["kind": "key", "key": "Tab"]) }
-                    Divider()
-                    Button(hub.t("keyScrollUp")) { send(["kind": "scroll", "deltaY": 8]) }
-                    Button(hub.t("keyScrollDown")) { send(["kind": "scroll", "deltaY": -8]) }
-                } label: {
-                    Label(hub.t("aaInput"), systemImage: "keyboard").labelStyle(.iconOnly)
-                }
-                .menuIndicator(.hidden)
-
-                Menu {
-                    if streamCtrl.connected {
-                        Section {
-                            Text("H.264 · \(streamCtrl.fps) fps")
-                        }
-                    }
-                    if targets.count > 1 {
-                        Picker("", selection: $target) {
-                            ForEach(targets) { tr in
-                                Text(tr.name ?? tr.id).tag(tr.id)
-                            }
-                        }
-                    }
-                } label: {
-                    Label(hub.t("settings"), systemImage: "slider.horizontal.3").labelStyle(.iconOnly)
-                }
-                .menuIndicator(.hidden)
-            }
-        }
     }
 
     @ViewBuilder
