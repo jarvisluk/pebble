@@ -21,32 +21,59 @@ static jstring cStrToJStr(JNIEnv* env, const char* cs) {
 import "C"
 import (
 	"net"
+	"net/netip"
+	"time"
 	"unsafe"
 
-	"github.com/wlynxg/anet"
 	"tailscale.com/net/netmon"
 )
 
 func init() {
-	netmon.RegisterInterfaceGetter(func() ([]netmon.Interface, error) {
-		ifs, err := anet.Interfaces()
-		if err != nil {
-			return nil, err
-		}
-		ret := make([]netmon.Interface, 0, len(ifs))
-		for i := range ifs {
-			ifi := ifs[i]
-			addrs, _ := anet.InterfaceAddrsByInterface(&ifi)
-			if addrs == nil {
-				addrs = []net.Addr{}
-			}
-			ret = append(ret, netmon.Interface{
-				Interface: &ifi,
-				AltAddrs:  addrs,
-			})
-		}
-		return ret, nil
-	})
+	netmon.RegisterInterfaceGetter(androidInterfaces)
+}
+
+func androidInterfaces() ([]netmon.Interface, error) {
+	var addrs []net.Addr
+	if ip, ok := androidOutboundIP("udp4", "8.8.8.8:53"); ok {
+		addrs = append(addrs, &net.IPNet{IP: ip.AsSlice(), Mask: net.CIDRMask(32, 32)})
+	}
+	if ip, ok := androidOutboundIP("udp6", "[2001:4860:4860::8888]:53"); ok {
+		addrs = append(addrs, &net.IPNet{IP: ip.AsSlice(), Mask: net.CIDRMask(128, 128)})
+	}
+	if len(addrs) == 0 {
+		addrs = []net.Addr{}
+	}
+	return []netmon.Interface{{
+		Interface: &net.Interface{
+			Index: 1,
+			MTU:   1500,
+			Name:  "android",
+			Flags: net.FlagUp | net.FlagRunning,
+		},
+		AltAddrs: addrs,
+	}}, nil
+}
+
+func androidOutboundIP(network, addr string) (netip.Addr, bool) {
+	d := net.Dialer{Timeout: 2 * time.Second}
+	c, err := d.Dial(network, addr)
+	if err != nil {
+		return netip.Addr{}, false
+	}
+	defer c.Close()
+	ua, ok := c.LocalAddr().(*net.UDPAddr)
+	if !ok {
+		return netip.Addr{}, false
+	}
+	ip, ok := netip.AddrFromSlice(ua.IP)
+	if !ok {
+		return netip.Addr{}, false
+	}
+	ip = ip.Unmap()
+	if ip.IsLoopback() || ip.IsUnspecified() {
+		return netip.Addr{}, false
+	}
+	return ip, true
 }
 
 //export Java_bothub_tunnel_BothubTunnelModule_nativeStartTunnel
