@@ -154,12 +154,17 @@ export const CollabPanel: React.FC<CollabPanelProps> = ({
                   .filter(Boolean)
                   .join(' · ');
 
+                const senderId = out ? botId : peerId || '';
+                const senderColor = senderId ? botColor(senderId, bots) : undefined;
                 return (
                   <React.Fragment key={m.id}>
                     {stampEl}
-                    <div className={`msg ${out ? 'me' : 'bot peer'}`}>
+                    <div
+                      className={`msg ${out ? 'me' : 'bot peer'}`}
+                      style={senderColor ? ({ '--bot-accent': senderColor } as React.CSSProperties) : undefined}
+                    >
                       <div className="label">
-                        <BotAvatar id={out ? botId : peerId || ''} bots={bots} />
+                        <BotAvatar id={senderId} bots={bots} />
                         {label}
                       </div>
                       <div className="bubble">

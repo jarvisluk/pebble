@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT_BASE="$ROOT/build/mobile/android/jniLibs"
 MOD_LIBS="$ROOT/apps/mobile/modules/bothub-tunnel/android/src/main/jniLibs"
+NATIVE_LIBS="$ROOT/apps/android/app/src/main/jniLibs"
 
 ANDROID_SDK="${ANDROID_HOME:-}"
 if [ -z "$ANDROID_SDK" ]; then
@@ -47,4 +48,8 @@ rm -rf "$MOD_LIBS"
 mkdir -p "$MOD_LIBS"
 cp -R "$OUT_BASE/arm64-v8a" "$OUT_BASE/x86_64" "$MOD_LIBS/"
 
-echo "Built Android jniLibs under $OUT_BASE (synced to $MOD_LIBS)"
+rm -rf "$NATIVE_LIBS"
+mkdir -p "$NATIVE_LIBS"
+cp -R "$OUT_BASE/arm64-v8a" "$OUT_BASE/x86_64" "$NATIVE_LIBS/"
+
+echo "Built Android jniLibs under $OUT_BASE (synced to $MOD_LIBS and $NATIVE_LIBS)"

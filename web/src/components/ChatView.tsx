@@ -773,6 +773,11 @@ export const ChatView: React.FC<ChatViewProps> = ({
                             <button
                               type="button"
                               className="collab-chip"
+                              style={
+                                entry.peerId
+                                  ? ({ '--bot-accent': botColor(entry.peerId, bots) } as React.CSSProperties)
+                                  : undefined
+                              }
                               onClick={() => entry.peerId && onOpenCollab?.(entry.peerId)}
                             >
                               <BotAvatar id={entry.peerId} bots={bots} />
