@@ -62,7 +62,7 @@ body.resizing-side, body.resizing-side * { cursor: col-resize !important; user-s
 .set-save[hidden] { display: none; }
 
 .main-split { flex: 1; min-height: 0; display: flex; position: relative; gap: var(--gap); }
-.chat-col { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.chat-col { position: relative; flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .desk-pane { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .desk-pane[hidden] { display: none; }
 
@@ -129,7 +129,7 @@ body.resizing-side, body.resizing-side * { cursor: col-resize !important; user-s
     z-index: 7;
     box-shadow: -12px 0 32px rgba(0, 0, 0, .35);
   }
-  .thread { padding: 12px 0; }
+  .thread { padding: 12px 0 calc(var(--composer-h, 56px) + 12px); }
   .set-body { padding: 12px 4px 24px; }
   .bubble { max-width: 92%; }
   .msg.me .bubble { max-width: 85%; }

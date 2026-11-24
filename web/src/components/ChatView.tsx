@@ -187,6 +187,8 @@ export const ChatView: React.FC<ChatViewProps> = ({
   const [acDismissed, setAcDismissed] = useState(false);
   const [previewImg, setPreviewImg] = useState<MessageMedia | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const chatColRef = useRef<HTMLDivElement>(null);
+  const composerWrapRef = useRef<HTMLDivElement>(null);
   const acRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -294,6 +296,27 @@ export const ChatView: React.FC<ChatViewProps> = ({
       ta.style.height = `${Math.min(ta.scrollHeight, 220)}px`;
     }
   }, [draft, inputRef]);
+
+  useLayoutEffect(() => {
+    const el = composerWrapRef.current;
+    const col = chatColRef.current;
+    if (!el || !col) return;
+    let prevH = 0;
+    const sync = () => {
+      const h = Math.ceil(el.getBoundingClientRect().height);
+      const sc = scrollRef.current;
+      const nearBottom = sc ? sc.scrollHeight - sc.scrollTop - sc.clientHeight < 160 : false;
+      col.style.setProperty('--composer-h', `${h}px`);
+      if (h > prevH && nearBottom && sc) {
+        sc.scrollTop = sc.scrollHeight;
+      }
+      prevH = h;
+    };
+    sync();
+    const ro = new ResizeObserver(sync);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   useEffect(() => {
     const sc = scrollRef.current;
@@ -672,7 +695,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
       )}
 
       <div className="main-split">
-        <div className="chat-col">
+        <div ref={chatColRef} className="chat-col">
           <div ref={scrollRef} id={inDesktopSidebar ? undefined : 'scroll'} className="scroll">
             <div id={inDesktopSidebar ? undefined : 'thread'} className="thread">
               {!activeBot ? (
@@ -823,7 +846,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
             </div>
           </div>
 
-          <div className="composer-wrap">
+          <div ref={composerWrapRef} className="composer-wrap">
             {attachments.length > 0 && (
               <div className="composer-attachments">
                 {attachments.map((att) => (
