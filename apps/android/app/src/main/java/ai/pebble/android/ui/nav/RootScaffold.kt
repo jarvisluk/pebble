@@ -35,6 +35,7 @@ import ai.pebble.android.data.PebbleStore
 import ai.pebble.android.data.StageKind
 import ai.pebble.android.data.StageOpenEvent
 import ai.pebble.android.ui.bots.BotDetailScreen
+import ai.pebble.android.ui.bots.BotInfoSheet
 import ai.pebble.android.ui.bots.BotListScreen
 import ai.pebble.android.ui.bots.CreateBotSheet
 import ai.pebble.android.ui.chat.ChatScreen
@@ -51,6 +52,7 @@ sealed interface SheetRoute {
     data class Connect(val scan: Boolean = false) : SheetRoute
     data object CreateBot : SheetRoute
     data object Devices : SheetRoute
+    data class BotInfo(val botId: String) : SheetRoute
 }
 
 data class DesktopPresentation(
@@ -71,6 +73,7 @@ class PebbleRouter {
     var requestLeaveSettings by mutableStateOf(false)
 
     fun openBot(id: String) {
+        if (sheet is SheetRoute.BotInfo) sheet = null
         inSettings = false
         selectedBotId = id
     }
@@ -232,9 +235,7 @@ fun RootScaffold(
                             store = store,
                             botId = bid,
                             onClose = { router.detailOpen = false },
-                            onDeletedBot = { router.closeBot() },
                             onOpenDesktop = { router.openDesktop(it) },
-                            onOpenFiles = { router.openFiles(it) },
                         )
                     } else {
                         ChatScreen(
@@ -245,6 +246,7 @@ fun RootScaffold(
                             onOpenDesktop = { router.openDesktop(it) },
                             onOpenFiles = { router.openFiles(it) },
                             onToggleDetail = { router.detailOpen = true },
+                            onOpenBotInfo = { router.sheet = SheetRoute.BotInfo(bid) },
                         )
                     }
                 }
@@ -322,6 +324,7 @@ fun RootScaffold(
                                 onOpenDesktop = { router.openDesktop(it) },
                                 onOpenFiles = { router.openFiles(it) },
                                 onToggleDetail = { router.detailOpen = !router.detailOpen },
+                                onOpenBotInfo = { router.sheet = SheetRoute.BotInfo(selId) },
                             )
                         } else {
                             Box(
@@ -359,15 +362,13 @@ fun RootScaffold(
                                 store = store,
                                 botId = selId,
                                 onClose = { router.detailOpen = false },
-                                onDeletedBot = { router.closeBot() },
                                 onOpenDesktop = { router.openDesktop(it) },
-                                onOpenFiles = { router.openFiles(it) },
                             )
                         }
                     }
                 }
 
-                // Medium tablet (600..839dp): detail opens in a ModalBottomSheet so chat stays legible
+                // Medium tablet (600..839dp): workspace panel opens in a ModalBottomSheet so chat stays legible
                 val selId = router.selectedBotId
                 if (!hasInspectorSpace && router.detailOpen && selId != null && store.bots.any { it.id == selId }) {
                     ModalBottomSheet(
@@ -379,9 +380,7 @@ fun RootScaffold(
                             store = store,
                             botId = selId,
                             onClose = { router.detailOpen = false },
-                            onDeletedBot = { router.closeBot() },
                             onOpenDesktop = { router.openDesktop(it) },
-                            onOpenFiles = { router.openFiles(it) },
                         )
                     }
                 }
@@ -432,6 +431,29 @@ fun RootScaffold(
                         onManageConnections = { router.sheet = SheetRoute.Connect(false) },
                         onOpenDesktop = { router.openDesktop(it) },
                     )
+                }
+            }
+            is SheetRoute.BotInfo -> {
+                ModalBottomSheet(
+                    onDismissRequest = { router.sheet = null },
+                    sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+                    containerColor = p.page,
+                ) {
+                    Box(modifier = Modifier.fillMaxHeight(0.92f)) {
+                        BotInfoSheet(
+                            store = store,
+                            botId = sheet.botId,
+                            onClose = { router.sheet = null },
+                            onDeletedBot = {
+                                router.sheet = null
+                                router.closeBot()
+                            },
+                            onOpenFiles = {
+                                router.sheet = null
+                                router.openFiles(it)
+                            },
+                        )
+                    }
                 }
             }
             null -> Unit

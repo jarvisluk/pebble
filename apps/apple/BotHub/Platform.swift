@@ -153,6 +153,36 @@ private struct MacSeamlessWindowToolbarModifier: ViewModifier {
         }
     }
 }
+
+private struct MacClearInitialFocusBridge: NSViewRepresentable {
+    final class Coordinator {
+        var didClear = false
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        scheduleClear(for: view, coordinator: context.coordinator)
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        scheduleClear(for: nsView, coordinator: context.coordinator)
+    }
+
+    private func scheduleClear(for view: NSView, coordinator: Coordinator) {
+        guard !coordinator.didClear else { return }
+        DispatchQueue.main.async { [weak view] in
+            guard let window = view?.window, !coordinator.didClear else { return }
+            coordinator.didClear = true
+            window.makeFirstResponder(nil)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak window] in
+                window?.makeFirstResponder(nil)
+            }
+        }
+    }
+}
 #endif
 
 extension ToolbarItemPlacement {
@@ -283,6 +313,15 @@ extension View {
             }
             return .handled
         }
+        #else
+        self
+        #endif
+    }
+
+    @ViewBuilder
+    func hubClearInitialFocus() -> some View {
+        #if os(macOS)
+        self.background(MacClearInitialFocusBridge())
         #else
         self
         #endif

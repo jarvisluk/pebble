@@ -203,12 +203,14 @@ enum SheetRoute: Identifiable, Equatable {
     case connect(scan: Bool)
     case createBot
     case devices
+    case botInfo(String)
 
     var id: String {
         switch self {
         case let .connect(scan): return "connect-\(scan)"
         case .createBot: return "create"
         case .devices: return "devices"
+        case let .botInfo(botId): return "botInfo-\(botId)"
         }
     }
 }
@@ -266,6 +268,7 @@ final class Router {
     var requestLeaveSettings = false
 
     func openBot(_ id: String) {
+        if case .botInfo = sheet { sheet = nil }
         inSettings = false
         selected = id
         preferredColumn = .detail
@@ -570,18 +573,25 @@ struct SheetHost: View {
     @Environment(\.palette) private var p
     var route: SheetRoute
 
+    private var frameSize: (CGFloat, CGFloat) {
+        switch route {
+        case .createBot: return (520, 620)
+        case .botInfo: return (520, 640)
+        case .devices: return (520, 600)
+        case .connect: return (480, 540)
+        }
+    }
+
     var body: some View {
         Group {
             switch route {
             case let .connect(scan): ConnectView(startScan: scan)
             case .createBot: CreateBotView()
             case .devices: DevicesView()
+            case let .botInfo(botId): BotInfoSheet(botId: botId)
             }
         }
-        .hubSheetFrame(
-            width: route == .createBot || route == .devices ? 520 : 480,
-            height: route == .createBot ? 620 : route == .devices ? 600 : 540
-        )
+        .hubSheetFrame(width: frameSize.0, height: frameSize.1)
         .background(p.page)
     }
 }

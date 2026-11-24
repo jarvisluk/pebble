@@ -108,8 +108,151 @@ fun BotDetailScreen(
     store: PebbleStore,
     botId: String,
     onClose: () -> Unit,
-    onDeletedBot: () -> Unit,
     onOpenDesktop: (String) -> Unit,
+) {
+    val p = LocalPalette.current
+
+    var err by remember(botId) { mutableStateOf("") }
+    var previewConnected by remember(botId) { mutableStateOf(false) }
+    var previewError by remember(botId) { mutableStateOf("") }
+    var editingRoutine by remember(botId) { mutableStateOf<RoutineItem?>(null) }
+    var creatingRoutine by remember(botId) { mutableStateOf(false) }
+
+    LaunchedEffect(botId) {
+        runCatching { store.fetchRoutines(botId) }
+    }
+
+    if (creatingRoutine || editingRoutine != null) {
+        ModalBottomSheet(
+            onDismissRequest = {
+                creatingRoutine = false
+                editingRoutine = null
+            },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+            containerColor = p.page,
+        ) {
+            RoutineEditorSheet(
+                store = store,
+                botId = botId,
+                routine = editingRoutine,
+                onDismiss = {
+                    creatingRoutine = false
+                    editingRoutine = null
+                },
+            )
+        }
+    }
+
+    val previewTarget = store.takeovers.firstOrNull()?.target ?: "local"
+    val previewWsUrl = store.makeDesktopWsUrl(previewTarget).orEmpty()
+
+    Scaffold(
+        containerColor = p.page,
+        topBar = {
+            TopAppBar(
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = p.page,
+                    titleContentColor = p.text,
+                ),
+                navigationIcon = {
+                    IconButton(onClick = onClose) {
+                        Icon(Icons.Rounded.Close, contentDescription = store.t("close"), tint = p.text)
+                    }
+                },
+                title = {
+                    Text(store.t("rightPanelTitle"), fontSize = PebbleFont.title, fontWeight = FontWeight.Bold)
+                },
+            )
+        },
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .imePadding()
+                .verticalScroll(rememberScrollState())
+                .navigationBarsPadding()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            if (err.isNotEmpty()) {
+                SectionCard {
+                    Box(modifier = Modifier.padding(14.dp)) {
+                        StatusTextBanner(text = err, error = true)
+                    }
+                }
+            }
+
+            // Borderless Live Remote Desktop Thumbnail Preview
+            if (store.isConnected && previewWsUrl.isNotEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(16f / 10f)
+                        .clip(PebbleDimens.cardShape)
+                        .background(Color.Black)
+                        .clickable { onOpenDesktop(previewTarget) },
+                ) {
+                    H264SurfaceView(
+                        url = previewWsUrl,
+                        token = store.authToken,
+                        preset = "low",
+                        active = true,
+                        onStatus = { connected, _ -> previewConnected = connected },
+                        onStreamError = { _, msg -> previewError = msg },
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                    if (!previewConnected) {
+                        Column(
+                            modifier = Modifier
+                                .align(Alignment.Center)
+                                .padding(16.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            if (previewError.isNotEmpty()) {
+                                Icon(Icons.Rounded.DesktopWindows, contentDescription = null, tint = Color.White.copy(alpha = 0.6f))
+                                Text(previewError, color = Color.White.copy(alpha = 0.7f), fontSize = PebbleFont.caption, textAlign = TextAlign.Center, maxLines = 2)
+                            } else {
+                                CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp, color = Color.White)
+                            }
+                        }
+                    }
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(12.dp)
+                            .size(30.dp)
+                            .clip(CircleShape)
+                            .background(Color.Black.copy(alpha = 0.55f)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(Icons.Rounded.OpenInFull, contentDescription = null, tint = Color.White, modifier = Modifier.size(15.dp))
+                    }
+                }
+            }
+
+            // Routines
+            RoutinesBlock(
+                store = store,
+                botId = botId,
+                onCreate = { creatingRoutine = true },
+                onEdit = { editingRoutine = it },
+                onError = { err = it },
+            )
+
+            Spacer(Modifier.height(16.dp))
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun BotInfoSheet(
+    store: PebbleStore,
+    botId: String,
+    onClose: () -> Unit,
+    onDeletedBot: () -> Unit,
     onOpenFiles: (String) -> Unit = {},
 ) {
     val p = LocalPalette.current
@@ -133,12 +276,6 @@ fun BotDetailScreen(
     var memLoading by remember(botId) { mutableStateOf(false) }
     var memText by remember(botId) { mutableStateOf("") }
     var memSaving by remember(botId) { mutableStateOf(false) }
-
-    var previewConnected by remember(botId) { mutableStateOf(false) }
-    var previewError by remember(botId) { mutableStateOf("") }
-
-    var editingRoutine by remember(botId) { mutableStateOf<RoutineItem?>(null) }
-    var creatingRoutine by remember(botId) { mutableStateOf(false) }
 
     val index = store.bots.indexOfFirst { it.id == botId }
     val bot = if (index >= 0) store.bots[index] else null
@@ -183,7 +320,6 @@ fun BotDetailScreen(
         editPrivate = src?.privateSessions == true
         loading = true
         scope.launch { loadMem() }
-        scope.launch { runCatching { store.fetchRoutines(botId) } }
         runCatching { store.botDetail(botId) }.getOrNull()?.let { apply(it) }
         loading = false
     }
@@ -219,30 +355,6 @@ fun BotDetailScreen(
     }
 
     ConfirmAlertDialog(item = confirm, onDismiss = { confirm = null })
-
-    if (creatingRoutine || editingRoutine != null) {
-        ModalBottomSheet(
-            onDismissRequest = {
-                creatingRoutine = false
-                editingRoutine = null
-            },
-            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-            containerColor = p.page,
-        ) {
-            RoutineEditorSheet(
-                store = store,
-                botId = botId,
-                routine = editingRoutine,
-                onDismiss = {
-                    creatingRoutine = false
-                    editingRoutine = null
-                },
-            )
-        }
-    }
-
-    val previewTarget = store.takeovers.firstOrNull()?.target ?: "local"
-    val previewWsUrl = store.makeDesktopWsUrl(previewTarget).orEmpty()
 
     Scaffold(
         containerColor = p.page,
@@ -294,56 +406,6 @@ fun BotDetailScreen(
                 SectionCard {
                     Box(modifier = Modifier.padding(14.dp)) {
                         StatusTextBanner(text = err, error = true)
-                    }
-                }
-            }
-
-            // Live Remote Desktop Thumbnail Preview
-            if (store.isConnected && previewWsUrl.isNotEmpty()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .aspectRatio(16f / 10f)
-                        .clip(PebbleDimens.cardShape)
-                        .background(Color.Black)
-                        .border(1.dp, if (p.dark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.08f), PebbleDimens.cardShape)
-                        .clickable { onOpenDesktop(previewTarget) },
-                ) {
-                    H264SurfaceView(
-                        url = previewWsUrl,
-                        token = store.authToken,
-                        preset = "low",
-                        active = true,
-                        onStatus = { connected, _ -> previewConnected = connected },
-                        onStreamError = { _, msg -> previewError = msg },
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                    if (!previewConnected) {
-                        Column(
-                            modifier = Modifier
-                                .align(Alignment.Center)
-                                .padding(16.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(6.dp),
-                        ) {
-                            if (previewError.isNotEmpty()) {
-                                Icon(Icons.Rounded.DesktopWindows, contentDescription = null, tint = Color.White.copy(alpha = 0.6f))
-                                Text(previewError, color = Color.White.copy(alpha = 0.7f), fontSize = PebbleFont.caption, textAlign = TextAlign.Center, maxLines = 2)
-                            } else {
-                                CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp, color = Color.White)
-                            }
-                        }
-                    }
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(12.dp)
-                            .size(30.dp)
-                            .clip(CircleShape)
-                            .background(Color.Black.copy(alpha = 0.55f)),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(Icons.Rounded.OpenInFull, contentDescription = null, tint = Color.White, modifier = Modifier.size(15.dp))
                     }
                 }
             }
@@ -612,15 +674,6 @@ fun BotDetailScreen(
                     }
                 }
             }
-
-            // Routines
-            RoutinesBlock(
-                store = store,
-                botId = botId,
-                onCreate = { creatingRoutine = true },
-                onEdit = { editingRoutine = it },
-                onError = { err = it },
-            )
 
             // Danger actions
             SectionCard {

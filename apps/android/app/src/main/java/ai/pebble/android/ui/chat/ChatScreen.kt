@@ -39,6 +39,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.FormatListBulleted
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.Check
@@ -48,7 +49,6 @@ import androidx.compose.material.icons.rounded.Computer
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.DesktopWindows
 import androidx.compose.material.icons.rounded.Folder
-import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.PanTool
 import androidx.compose.material.icons.rounded.PhotoLibrary
@@ -61,6 +61,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
@@ -147,6 +148,7 @@ fun ChatScreen(
     onOpenDesktop: (String) -> Unit = {},
     onOpenFiles: (String) -> Unit = {},
     onToggleDetail: (() -> Unit)? = null,
+    onOpenBotInfo: (() -> Unit)? = null,
     onSelectBot: ((String) -> Unit)? = null,
     onCloseSidebar: (() -> Unit)? = null,
 ) {
@@ -360,37 +362,27 @@ fun ChatScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(p.page),
+            .background(if (inDesktopSidebar) p.card else p.page),
     ) {
-        TopAppBar(
-            colors = TopAppBarDefaults.topAppBarColors(
-                containerColor = p.page,
-                titleContentColor = p.text,
-            ),
-            navigationIcon = {
-                if (compact && !inDesktopSidebar && onBack != null) {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = store.t("back"), tint = p.text)
-                    }
-                }
-            },
-            title = {
+        if (inDesktopSidebar) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Box {
                     Row(
                         modifier = Modifier
                             .clip(RoundedCornerShape(10.dp))
-                            .then(
-                                if (inDesktopSidebar && store.bots.size > 1) {
-                                    Modifier.clickable { botSwitcherOpen = true }
-                                } else Modifier
-                            )
-                            .padding(vertical = 4.dp, horizontal = 2.dp),
+                            .then(if (store.bots.size > 1) Modifier.clickable { botSwitcherOpen = true } else Modifier)
+                            .padding(vertical = 2.dp, horizontal = 2.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         BotAvatar(
                             id = botId,
-                            size = 28.dp,
+                            size = 24.dp,
                             index = index,
                             avatar = bot?.avatar,
                             color = bot?.color,
@@ -399,17 +391,17 @@ fun ChatScreen(
                         )
                         Text(
                             text = botName,
-                            fontSize = PebbleFont.title,
-                            fontWeight = FontWeight.Bold,
+                            color = p.text,
+                            fontSize = PebbleFont.cardTitle,
+                            fontWeight = FontWeight.SemiBold,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f, fill = false),
                         )
-                        if (inDesktopSidebar && store.bots.size > 1) {
-                            Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = null, tint = p.mute, modifier = Modifier.size(18.dp))
+                        if (store.bots.size > 1) {
+                            Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = null, tint = p.mute, modifier = Modifier.size(16.dp))
                         }
                     }
-
                     DropdownMenu(
                         expanded = botSwitcherOpen,
                         onDismissRequest = { botSwitcherOpen = false },
@@ -431,15 +423,56 @@ fun ChatScreen(
                         }
                     }
                 }
-            },
-            actions = {
-                if (inDesktopSidebar) {
-                    if (onCloseSidebar != null) {
-                        IconButton(onClick = onCloseSidebar) {
-                            Icon(Icons.Rounded.Close, contentDescription = store.t("close"), tint = p.text)
+                Spacer(Modifier.weight(1f))
+                if (onCloseSidebar != null) {
+                    IconButton(onClick = onCloseSidebar, modifier = Modifier.size(28.dp)) {
+                        Icon(Icons.Rounded.Close, contentDescription = store.t("close"), tint = p.text, modifier = Modifier.size(18.dp))
+                    }
+                }
+            }
+            HorizontalDivider(thickness = 0.5.dp, color = p.s2)
+        } else {
+            TopAppBar(
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = p.page,
+                    titleContentColor = p.text,
+                ),
+                navigationIcon = {
+                    if (compact && onBack != null) {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = store.t("back"), tint = p.text)
                         }
                     }
-                } else {
+                },
+                title = {
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .then(if (onOpenBotInfo != null) Modifier.clickable { onOpenBotInfo() } else Modifier)
+                            .padding(vertical = 4.dp, horizontal = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        BotAvatar(
+                            id = botId,
+                            size = 28.dp,
+                            index = index,
+                            avatar = bot?.avatar,
+                            color = bot?.color,
+                            busy = bot?.isBusy == true,
+                            interactive = true,
+                        )
+                        Text(
+                            text = botName,
+                            fontSize = PebbleFont.title,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
+                    }
+                },
+                actions = {
                     IconButton(onClick = { onOpenFiles(botId) }) {
                         Icon(
                             imageVector = Icons.Rounded.Folder,
@@ -456,12 +489,12 @@ fun ChatScreen(
                     }
                     if (onToggleDetail != null) {
                         IconButton(onClick = onToggleDetail) {
-                            Icon(Icons.Rounded.Info, contentDescription = store.t("botDetails"), tint = p.text)
+                            Icon(Icons.AutoMirrored.Rounded.FormatListBulleted, contentDescription = store.t("rightPanelTitle"), tint = p.text)
                         }
                     }
-                }
-            },
-        )
+                },
+            )
+        }
 
         // Status banners
         if (!inDesktopSidebar && store.usingStandby) {
@@ -564,8 +597,8 @@ fun ChatScreen(
                 state = listState,
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(
-                    start = if (compact) 10.dp else 16.dp,
-                    end = if (compact) 10.dp else 16.dp,
+                    start = if (inDesktopSidebar) 12.dp else if (compact) 10.dp else 16.dp,
+                    end = if (inDesktopSidebar) 12.dp else if (compact) 10.dp else 16.dp,
                     top = 12.dp,
                     bottom = 86.dp,
                 ),
@@ -670,6 +703,7 @@ fun ChatScreen(
                                     soft = pal.soft,
                                     onPreviewMedia = { previewMedia = it },
                                     botId = botId,
+                                    inSidebar = inDesktopSidebar,
                                 )
                             }
                         }
@@ -736,9 +770,20 @@ fun ChatScreen(
                     .align(Alignment.BottomCenter)
                     .widthIn(max = 840.dp)
                     .fillMaxWidth()
-                    .padding(horizontal = if (compact) 10.dp else 14.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                    .background(if (inDesktopSidebar) p.card else Color.Transparent),
             ) {
+                if (inDesktopSidebar) {
+                    HorizontalDivider(thickness = 0.5.dp, color = p.s2)
+                }
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(
+                            horizontal = if (inDesktopSidebar) 12.dp else if (compact) 10.dp else 14.dp,
+                            vertical = if (inDesktopSidebar) 10.dp else 8.dp,
+                        ),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
                 if (showSlashAC || showMentionAC) {
                     Surface(
                         color = p.card,
@@ -906,12 +951,13 @@ fun ChatScreen(
                 ) {
                     Box {
                         Surface(
-                            color = p.card,
+                            color = if (inDesktopSidebar) p.s1 else p.card,
                             shape = CircleShape,
-                            shadowElevation = 3.dp,
+                            shadowElevation = if (inDesktopSidebar) 0.dp else 3.dp,
                             modifier = Modifier
                                 .size(44.dp)
                                 .clip(CircleShape)
+                                .then(if (inDesktopSidebar) Modifier.border(0.5.dp, p.s2, CircleShape) else Modifier)
                                 .clickable { attachMenuOpen = true },
                         ) {
                             Box(contentAlignment = Alignment.Center) {
@@ -943,9 +989,9 @@ fun ChatScreen(
                     }
 
                     Surface(
-                        color = p.card,
+                        color = if (inDesktopSidebar) p.s1 else p.card,
                         shape = PebbleDimens.composerShape,
-                        shadowElevation = 3.dp,
+                        shadowElevation = if (inDesktopSidebar) 0.dp else 3.dp,
                         modifier = Modifier
                             .weight(1f)
                             .border(0.5.dp, p.s2, PebbleDimens.composerShape),
@@ -1007,6 +1053,7 @@ fun ChatScreen(
                             )
                         }
                     }
+                }
                 }
             }
         }
