@@ -262,7 +262,7 @@ export const UnboxModal: React.FC<UnboxModalProps> = ({
           void startHarnessLogin(id);
         }
       } else if (st.state === 'error' && st.error) {
-        setErr(st.error);
+        setExpandedInstall((prev) => new Set(prev).add(id));
       }
     } catch (e) {
       if (e instanceof Error && e.message !== 'unauthorized') setErr(e.message);
@@ -291,15 +291,24 @@ export const UnboxModal: React.FC<UnboxModalProps> = ({
         if (h?.requiresLogin && h.authStatus === 'needs_login') {
           void startHarnessLogin(id);
         }
+      } else if (st.state === 'error') {
+        setExpandedInstall((prev) => new Set(prev).add(id));
       }
     } catch (e) {
-      if (e instanceof Error && e.message !== 'unauthorized') setErr(e.message);
+      setExpandedInstall((prev) => new Set(prev).add(id));
+      if (e instanceof Error && e.message !== 'unauthorized') {
+        setInstallTasks((prev) => ({
+          ...prev,
+          [id]: { target: id, kind: 'install', state: 'error', error: e.message },
+        }));
+      }
     }
   };
 
   const persistHarness = async () => {
     const primary = bots[0];
-    if (!primary || !selectedHarness || primary.harness === selectedHarness) return;
+    const target = (settings?.harnesses || []).find((h) => h.id === selectedHarness);
+    if (!primary || !selectedHarness || !target?.installed || primary.harness === selectedHarness) return;
     const st = await api<BotStatus>(`/api/bots/${encodeURIComponent(primary.id)}`, {
       method: 'PATCH',
       body: { harness: selectedHarness },
@@ -312,8 +321,9 @@ export const UnboxModal: React.FC<UnboxModalProps> = ({
     const dm = defaultModel.trim();
     const prevDm = settings?.defaultModel || '';
     const prevDh = settings?.defaultHarness || '';
+    const target = (settings?.harnesses || []).find((h) => h.id === selectedHarness);
     const body: Record<string, unknown> = {};
-    if (selectedHarness && selectedHarness !== prevDh) body.defaultHarness = selectedHarness;
+    if (target?.installed && selectedHarness !== prevDh) body.defaultHarness = selectedHarness;
     if (dm !== prevDm) body.defaultModel = dm;
     if (markCompleted) body.onboardingCompleted = true;
     if (Object.keys(body).length) {
@@ -325,16 +335,15 @@ export const UnboxModal: React.FC<UnboxModalProps> = ({
   const handleSkip = async () => {
     if (tailcatTimerRef.current) window.clearTimeout(tailcatTimerRef.current);
     clearSetupTimers();
-    if (settings && !settings.onboarding?.completed) {
-      try {
-        const updated = await api<SettingsData>('/api/settings', {
-          method: 'PUT',
-          body: { onboardingCompleted: true },
-        });
-        onSettingsUpdated(updated);
-      } catch (e) {
-        if (e instanceof Error && e.message === 'unauthorized') return;
+    try {
+      await persistHarness();
+      if (settings && !settings.onboarding?.completed) {
+        await persistModelAndComplete(true);
+      } else {
+        await persistModelAndComplete(false);
       }
+    } catch (e) {
+      if (e instanceof Error && e.message === 'unauthorized') return;
     }
     onClose();
   };
@@ -400,12 +409,14 @@ export const UnboxModal: React.FC<UnboxModalProps> = ({
     const loginTask = loginTasks[h.id];
     const installing = instTask?.state === 'running';
     const loggingIn = loginTask?.state === 'running';
+    const installErr = instTask?.state === 'error' ? instTask.error || t('ubInstallFailed') : '';
+    const loginErr = loginTask?.state === 'error' ? loginTask.error || '' : '';
     const needsLogin = Boolean(h.installed && h.authStatus === 'needs_login');
 
     const lastLog = installing
-      ? instTask?.logs?.[instTask.logs.length - 1]
+      ? instTask?.logs?.[instTask.logs.length - 1] || t('ubInstalling')
       : loggingIn
-        ? loginTask?.logs?.[loginTask.logs.length - 1]
+        ? loginTask?.logs?.[loginTask.logs.length - 1] || t('ubLoggingIn')
         : '';
 
     const descKey = `ubDesc_${h.id}`;
@@ -459,28 +470,26 @@ export const UnboxModal: React.FC<UnboxModalProps> = ({
                   </button>
                 )}
               </>
+            ) : h.canAutoInstall ? (
+              <button
+                type="button"
+                className="mp go"
+                disabled={installing}
+                onClick={() => void startHarnessInstall(h.id)}
+              >
+                {installing ? t('ubInstalling') : t('ubOneClickInstall')}
+              </button>
             ) : (
-              <>
-                {h.canAutoInstall && (
-                  <button
-                    type="button"
-                    className="mp go"
-                    disabled={installing}
-                    onClick={() => void startHarnessInstall(h.id)}
-                  >
-                    {installing ? t('ubInstalling') : t('ubOneClickInstall')}
-                  </button>
-                )}
-                <button type="button" className="mp" onClick={toggleInstall}>
-                  {expanded ? t('ubHideInstall') : t('ubViewInstall')}
-                </button>
-              </>
+              <button type="button" className="mp go" onClick={toggleInstall}>
+                {expanded ? t('ubHideInstall') : t('ubOneClickInstall')}
+              </button>
             )}
           </div>
         </div>
 
-        {h.installed && needsLogin && (loggingIn || loginTask?.loginUrl) && (
+        {h.installed && needsLogin && (loggingIn || loginTask?.loginUrl || loginErr) && (
           <div className="unbox-install">
+            {loginErr && <div className="unbox-item-err">{loginErr}</div>}
             <div className="row-inline row-wrap">
               {loginTask?.loginUrl && (
                 <a href={loginTask.loginUrl} target="_blank" rel="noopener noreferrer">
@@ -494,8 +503,9 @@ export const UnboxModal: React.FC<UnboxModalProps> = ({
           </div>
         )}
 
-        {!h.installed && expanded && (
+        {!h.installed && (expanded || installErr) && (
           <div className="unbox-install">
+            {installErr && <div className="unbox-item-err">{installErr}</div>}
             {cmdText && (
               <div className="cmd">
                 <code>{cmdText}</code>
@@ -517,54 +527,24 @@ export const UnboxModal: React.FC<UnboxModalProps> = ({
     );
   };
 
-  return (
-    <div
-      id="unboxDlg"
-      className={fullscreen ? `dsetup-page unbox-full-page${open ? ' open' : ''}` : `dlg-wrap${open ? ' open' : ''}`}
-      aria-label={t('ubAria')}
-    >
-      {fullscreen && (
-        <div
-          className="dsetup-drag"
-          onMouseDown={(e) => {
-            dragArmedRef.current = e.button === 0 && e.detail === 1;
-          }}
-          onDoubleClick={(e) => {
-            const bridge = (window as unknown as {
-              webkit?: { messageHandlers?: { external?: { postMessage: (m: string) => void } } };
-            }).webkit;
-            if (bridge?.messageHandlers?.external) {
-              e.preventDefault();
-              bridge.messageHandlers.external.postMessage('wails:drag:doubleclick');
-            }
-          }}
-        />
-      )}
-      <div className={fullscreen ? 'dlg unbox unbox-full-card' : 'dlg unbox'}>
-        <div className="dlg-h dlg-h-col">
-          <div className="unbox-top">
-            <div>
-              <h3 id="ubTitle">{headerMeta.title}</h3>
-              <p id="ubSub">{headerMeta.sub}</p>
-            </div>
-            <button type="button" id="ubSkipTop" className="link-btn" onClick={() => void handleSkip()}>
-              {t('ubSkip')}
-            </button>
-          </div>
-          <div className="unbox-steps" aria-label={t('ubStepsAria')}>
-            {([1, 2, 3] as const).map((n) => (
-              <div
-                key={n}
-                className={`unbox-step${n === step ? ' on' : ''}${n < step ? ' done' : ''}`}
-                data-ub-step={n}
-              >
-                {t(`ubStep${n}Label`)}
-              </div>
-            ))}
-          </div>
-        </div>
+  const listClass = fullscreen ? 'unbox-list unbox-full-grid' : 'unbox-list';
 
-        <div className="dlg-b">
+  const stepBar = (
+    <div className="unbox-steps" aria-label={t('ubStepsAria')}>
+      {([1, 2, 3] as const).map((n) => (
+        <div
+          key={n}
+          className={`unbox-step${n === step ? ' on' : ''}${n < step ? ' done' : ''}`}
+          data-ub-step={n}
+        >
+          {t(`ubStep${n}Label`)}
+        </div>
+      ))}
+    </div>
+  );
+
+  const stepBody = (
+    <>
           {step === 1 && (
             <div id="ubStep1" className="set-stack">
               <div className="set-card-hd">
@@ -579,9 +559,9 @@ export const UnboxModal: React.FC<UnboxModalProps> = ({
               ) : (
                 <>
                   <div className="unbox-group-hd">{t('ubInstalledGroup')}</div>
-                  <div id="ubHarnessInstalled" className="unbox-list">
+                  <div id="ubHarnessInstalled" className={listClass}>
                     {installedHarnesses.length === 0 ? (
-                      <div className="set-card-desc">{t('ubNoInstalledYet')}</div>
+                      <div className="set-card-desc unbox-grid-span">{t('ubNoInstalledYet')}</div>
                     ) : (
                       installedHarnesses.map(renderHarnessRow)
                     )}
@@ -590,7 +570,7 @@ export const UnboxModal: React.FC<UnboxModalProps> = ({
                   {uninstalledHarnesses.length > 0 && (
                     <>
                       <div className="unbox-group-hd">{t('ubAvailableGroup')}</div>
-                      <div id="ubHarnessAvailable" className="unbox-list">
+                      <div id="ubHarnessAvailable" className={listClass}>
                         {recommendedUninstalled.map(renderHarnessRow)}
                       </div>
                       {advancedUninstalled.length > 0 && (
@@ -602,7 +582,7 @@ export const UnboxModal: React.FC<UnboxModalProps> = ({
                           >
                             {showAdvanced ? t('ubHideMoreEngines') : t('ubMoreEngines')}
                           </button>
-                          {showAdvanced && <div className="unbox-list">{advancedUninstalled.map(renderHarnessRow)}</div>}
+                          {showAdvanced && <div className={listClass}>{advancedUninstalled.map(renderHarnessRow)}</div>}
                         </>
                       )}
                     </>
@@ -881,25 +861,27 @@ export const UnboxModal: React.FC<UnboxModalProps> = ({
                 </div>
               )}
 
-              <div className="fld">
-                <label>
-                  {t('ubDefaultModelLbl')} <em>{t('ubDefaultModelHint')}</em>
-                </label>
-                <input
-                  id="ubDefaultModel"
-                  className="mono"
-                  spellCheck={false}
-                  list="ubDefaultModelList"
-                  placeholder={t('ubDefaultModelPh')}
-                  value={defaultModel}
-                  onChange={(e) => setDefaultModel(e.target.value)}
-                />
-                <datalist id="ubDefaultModelList">
-                  {(models[selectedHarness] || []).map((m) => (
-                    <option key={m} value={m} />
-                  ))}
-                </datalist>
-              </div>
+              {mp?.installed && (
+                <div className="fld">
+                  <label>
+                    {t('ubDefaultModelLbl')} <em>{t('ubDefaultModelHint')}</em>
+                  </label>
+                  <input
+                    id="ubDefaultModel"
+                    className="mono"
+                    spellCheck={false}
+                    list="ubDefaultModelList"
+                    placeholder={t('ubDefaultModelPh')}
+                    value={defaultModel}
+                    onChange={(e) => setDefaultModel(e.target.value)}
+                  />
+                  <datalist id="ubDefaultModelList">
+                    {(models[selectedHarness] || []).map((m) => (
+                      <option key={m} value={m} />
+                    ))}
+                  </datalist>
+                </div>
+              )}
             </div>
           )}
 
@@ -1000,29 +982,91 @@ export const UnboxModal: React.FC<UnboxModalProps> = ({
           <div id="ubErr" className="msg-err">
             {err}
           </div>
-        </div>
+    </>
+  );
 
-        <div className="dlg-f unbox-foot">
-          {step > 1 && (
-            <button
-              type="button"
-              id="ubPrev"
-              className="btn"
-              onClick={() => {
-                setErr('');
-                setStep((s) => (s > 1 ? ((s - 1) as 1 | 2 | 3) : s));
-              }}
-            >
-              {t('ubPrev')}
-            </button>
-          )}
-          <span id="ubFootSpacer" />
-          <div className="unbox-foot-r">
-            <button type="button" id="ubNext" className="btn go" disabled={busy} onClick={() => void handleNext()}>
-              {step === 3 ? t('ubFinish') : step === 1 && !anyInstalled ? t('ubContinue') : t('ubNext')}
+  const footActions = (
+    <>
+      {step > 1 && (
+        <button
+          type="button"
+          id="ubPrev"
+          className="btn"
+          onClick={() => {
+            setErr('');
+            setStep((s) => (s > 1 ? ((s - 1) as 1 | 2 | 3) : s));
+          }}
+        >
+          {t('ubPrev')}
+        </button>
+      )}
+      <span id="ubFootSpacer" />
+      <div className="unbox-foot-r">
+        <button type="button" id="ubNext" className="btn go" disabled={busy} onClick={() => void handleNext()}>
+          {step === 3 ? t('ubFinish') : step === 1 && !anyInstalled ? t('ubContinue') : t('ubNext')}
+        </button>
+      </div>
+    </>
+  );
+
+  if (fullscreen) {
+    if (!open) return null;
+    return (
+      <div id="unboxDlg" className="unbox-full-page open" aria-label={t('ubAria')}>
+        <div
+          className="dsetup-drag"
+          onMouseDown={(e) => {
+            dragArmedRef.current = e.button === 0 && e.detail === 1;
+          }}
+          onDoubleClick={(e) => {
+            const bridge = (window as unknown as {
+              webkit?: { messageHandlers?: { external?: { postMessage: (m: string) => void } } };
+            }).webkit;
+            if (bridge?.messageHandlers?.external) {
+              e.preventDefault();
+              bridge.messageHandlers.external.postMessage('wails:drag:doubleclick');
+            }
+          }}
+        />
+        <main className="unbox-full-main">
+          <header className="unbox-full-head">
+            <div className="unbox-top">
+              <div>
+                <h1 id="ubTitle">{headerMeta.title}</h1>
+                <p id="ubSub">{headerMeta.sub}</p>
+              </div>
+              <button type="button" id="ubSkipTop" className="link-btn" onClick={() => void handleSkip()}>
+                {t('ubSkip')}
+              </button>
+            </div>
+            {stepBar}
+          </header>
+          <section className="unbox-full-card">{stepBody}</section>
+          <footer className="unbox-full-foot">{footActions}</footer>
+        </main>
+      </div>
+    );
+  }
+
+  return (
+    <div id="unboxDlg" className={`dlg-wrap${open ? ' open' : ''}`} aria-label={t('ubAria')}>
+      <div className="dlg unbox">
+        <div className="dlg-h dlg-h-col">
+          <div className="unbox-top">
+            <div>
+              <h3 id="ubTitle">{headerMeta.title}</h3>
+              <p id="ubSub">{headerMeta.sub}</p>
+            </div>
+            <button type="button" id="ubSkipTop" className="link-btn" onClick={() => void handleSkip()}>
+              {t('ubSkip')}
             </button>
           </div>
+          {stepBar}
         </div>
+
+        <div className="dlg-b">{stepBody}</div>
+
+        <div className="dlg-f unbox-foot">{footActions}</div>
       </div>
     </div>
   );

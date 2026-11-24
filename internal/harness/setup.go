@@ -81,11 +81,17 @@ func installCommandForTarget(target string) ([]string, error) {
 				return []string{brewPath, "install", "--cask", "codex"}, nil
 			}
 		}
-		return nil, errors.New("未检测到 npm 或 brew，请先安装 Node.js 后重试")
+		return nil, errors.New("npm or brew not found; please install Node.js first")
+	case "pi":
+		npmPath, ok := findBinary("npm")
+		if !ok {
+			return nil, errors.New("npm not found; please install Node.js first")
+		}
+		return []string{npmPath, "install", "-g", "@mariozechner/pi-coding-agent"}, nil
 	case "magpie":
 		return []string{"bash", "-lc", "curl -fsSL https://usemagpie.ai/install.sh | sh"}, nil
 	default:
-		return nil, fmt.Errorf("不支持一键安装 %q", target)
+		return nil, fmt.Errorf("auto-install is not supported for %q", target)
 	}
 }
 
@@ -156,25 +162,28 @@ func StartInstall(target string) (SetupTask, error) {
 			Target:    target,
 			Kind:      "install",
 			State:     "running",
-			Logs:      []string{"正在启动安装..."},
 			UpdatedAt: time.Now().UnixMilli(),
 		},
 	}
 	setupTasks[key] = ent
 	setupMu.Unlock()
 
-	cmd := exec.Command(argv[0], argv[1:]...)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Env = augmentedEnv(nil)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		cancel()
 		return setTaskError(key, err), err
 	}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
+		cancel()
 		return setTaskError(key, err), err
 	}
 	if err := cmd.Start(); err != nil {
+		cancel()
 		return setTaskError(key, err), err
 	}
 
@@ -183,6 +192,7 @@ func StartInstall(target string) (SetupTask, error) {
 	setupMu.Unlock()
 
 	go func() {
+		defer cancel()
 		var wg sync.WaitGroup
 		readPipe := func(r io.Reader) {
 			defer wg.Done()
@@ -197,6 +207,9 @@ func StartInstall(target string) (SetupTask, error) {
 		wg.Wait()
 
 		waitErr := cmd.Wait()
+		if ctx.Err() == context.DeadlineExceeded && cmd.Process != nil {
+			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		}
 		if target == "magpie" {
 			InvalidateMagpieCache()
 		}
@@ -209,6 +222,11 @@ func StartInstall(target string) (SetupTask, error) {
 		}
 		cur.cmd = nil
 		cur.task.UpdatedAt = time.Now().UnixMilli()
+		if ctx.Err() == context.DeadlineExceeded {
+			cur.task.State = "error"
+			cur.task.Error = "installation timed out"
+			return
+		}
 		if waitErr != nil {
 			cur.task.State = "error"
 			cur.task.Error = waitErr.Error()
@@ -216,18 +234,17 @@ func StartInstall(target string) (SetupTask, error) {
 		}
 		if target == "magpie" && !MagpieInstalled() {
 			cur.task.State = "error"
-			cur.task.Error = "安装脚本已退出，但未检测到 magpie 命令"
+			cur.task.Error = "installer finished but magpie binary was not found in PATH"
 			return
 		}
 		if target != "magpie" {
 			if okInstalled, _ := DetectHarness(target); !okInstalled {
 				cur.task.State = "error"
-				cur.task.Error = fmt.Sprintf("安装完成但未检测到 %s 命令，请检查 PATH", target)
+				cur.task.Error = fmt.Sprintf("installer finished but %s binary was not found in PATH", target)
 				return
 			}
 		}
 		cur.task.State = "done"
-		cur.task.Logs = append(cur.task.Logs, "安装完成")
 	}()
 
 	return cloneTask(ent.task), nil
@@ -264,25 +281,28 @@ func StartLogin(kind string) (SetupTask, error) {
 			Kind:       "login",
 			State:      "running",
 			AuthStatus: "needs_login",
-			Logs:       []string{"正在拉起登录流程..."},
 			UpdatedAt:  time.Now().UnixMilli(),
 		},
 	}
 	setupTasks[key] = ent
 	setupMu.Unlock()
 
-	cmd := exec.Command(argv[0], argv[1:]...)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Env = augmentedEnv(nil)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		cancel()
 		return setTaskError(key, err), err
 	}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
+		cancel()
 		return setTaskError(key, err), err
 	}
 	if err := cmd.Start(); err != nil {
+		cancel()
 		return setTaskError(key, err), err
 	}
 
@@ -291,6 +311,7 @@ func StartLogin(kind string) (SetupTask, error) {
 	setupMu.Unlock()
 
 	go func() {
+		defer cancel()
 		var wg sync.WaitGroup
 		var openedOnce sync.Once
 		readPipe := func(r io.Reader) {
@@ -319,6 +340,9 @@ func StartLogin(kind string) (SetupTask, error) {
 		wg.Wait()
 
 		waitErr := cmd.Wait()
+		if ctx.Err() == context.DeadlineExceeded && cmd.Process != nil {
+			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		}
 		status, detail := DetectHarnessAuth(context.Background(), kind)
 
 		setupMu.Lock()
@@ -336,7 +360,11 @@ func StartLogin(kind string) (SetupTask, error) {
 		}
 		if status == "ready" {
 			cur.task.State = "done"
-			cur.task.Logs = append(cur.task.Logs, "登录已验证完成")
+			return
+		}
+		if ctx.Err() == context.DeadlineExceeded {
+			cur.task.State = "error"
+			cur.task.Error = "login timed out"
 			return
 		}
 		if waitErr != nil {
@@ -345,7 +373,7 @@ func StartLogin(kind string) (SetupTask, error) {
 			return
 		}
 		cur.task.State = "error"
-		cur.task.Error = "登录流程已退出，但尚未检测到有效登录凭证"
+		cur.task.Error = "login exited without valid credentials"
 	}()
 
 	return cloneTask(ent.task), nil

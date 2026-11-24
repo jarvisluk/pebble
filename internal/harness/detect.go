@@ -111,7 +111,7 @@ var harnessInstallMeta = map[string]HarnessInstallInfo{
 		Binary:         "pi",
 		Command:        "npm install -g @mariozechner/pi-coding-agent",
 		URL:            "https://github.com/badlogic/pi-mono",
-		CanAutoInstall: false,
+		CanAutoInstall: true,
 		RequiresLogin:  false,
 		Category:       "advanced",
 		Summary:        "极客轻量 Agent",

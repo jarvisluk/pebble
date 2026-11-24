@@ -612,9 +612,9 @@
 .unbox-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .unbox-steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 12px; }
 .unbox-step {
-  display: flex; align-items: center; justify-content: center; height: 28px; padding: 0 10px;
+  display: flex; align-items: center; justify-content: center; min-height: 30px; padding: 5px 10px;
   border-radius: var(--r-row); background: var(--s1); color: var(--mute);
-  font-size: var(--fs-xs); font-weight: 600;
+  font-size: var(--fs-xs); font-weight: 600; line-height: 1.25; text-align: center;
 }
 .unbox-step.on { background: var(--sel); color: var(--text); }
 .unbox-step.done { color: var(--sage-ink); }
@@ -626,16 +626,17 @@
 }
 .unbox-item.on { background: var(--sel); border-color: var(--accent); }
 .unbox-item-hd { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; flex-wrap: wrap; }
-.unbox-item-main { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; text-align: left; }
+.unbox-item-main { display: flex; flex-direction: column; gap: 2px; flex: 1 1 160px; min-width: 0; text-align: left; }
 .unbox-item-name { font-size: var(--fs-base); font-weight: 600; color: var(--text); }
 .unbox-item-path {
-  font-size: var(--fs-xs); color: var(--mute); font-family: var(--mono);
+  font-size: var(--fs-xs); color: var(--mute); font-family: var(--font);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .unbox-item-acts { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 .unbox-item .mp:not(.ok):not(.go):not(.bad) { background: var(--card); }
 .unbox-install { display: flex; flex-direction: column; gap: 6px; padding-top: 4px; }
 .unbox-install a { color: var(--accent); font-size: var(--fs-xs); font-weight: 600; align-self: flex-start; }
+.unbox-item-err { font-size: var(--fs-xs); color: var(--danger); line-height: 1.4; word-break: break-word; }
 .unbox-qr { width: 180px; align-self: center; border-radius: 12px; background: #fff; padding: 8px; }
 .unbox-foot { justify-content: space-between; align-items: center; }
 .unbox-foot-r { display: flex; align-items: center; gap: 8px; }
@@ -643,15 +644,8 @@
 .unbox-more-btn { align-self: flex-start; font-size: var(--fs-xs); padding: 2px 0; }
 .unbox-item-main-row { flex-direction: row; align-items: center; gap: 10px; }
 .unbox-item-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
-.harness-icon {
-  width: 30px; height: 30px; border-radius: 8px; flex: none;
-  display: inline-flex; align-items: center; justify-content: center;
-  background: var(--card); color: var(--text); border: 1px solid var(--s2);
-}
 .unbox-defaults { gap: 8px; margin-top: 4px; }
 .dsetup-tabs { display: flex; align-items: center; gap: 6px; }
-.unbox-full-page { align-items: center; justify-content: flex-start; overflow-y: auto; padding: 52px 18px 28px; }
-.unbox-full-card { margin: auto; width: min(600px, 100%); max-height: calc(100dvh - 80px); box-shadow: none; border: 1px solid var(--s2); transform: none; }
 
   /* question cards */
   .q-card {
@@ -925,3 +919,126 @@
   color: var(--text-2);
 }
 .dsetup-status.warn { color: var(--danger); }
+
+/* Harness brand icons */
+.harness-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--card);
+  color: var(--text);
+  border: 1px solid var(--s2);
+  overflow: hidden;
+}
+.harness-icon-img {
+  width: 20px;
+  height: 20px;
+  display: block;
+  object-fit: contain;
+}
+.harness-icon-svg {
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text);
+}
+.harness-icon-svg svg {
+  width: 20px;
+  height: 20px;
+  display: block;
+}
+.harness-icon-fallback {
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  color: var(--text-2);
+}
+
+/* Full-screen first-run onboarding page */
+.unbox-full-page {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: var(--page);
+  color: var(--text);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 56px 24px 40px;
+}
+.unbox-full-main {
+  width: min(840px, 100%);
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.unbox-full-head {
+  padding: 0 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.unbox-full-head h1 {
+  font-size: var(--fs-xl);
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--text);
+}
+.unbox-full-head p {
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  margin-top: 4px;
+}
+.unbox-full-head .unbox-step {
+  background: var(--card);
+  color: var(--mute);
+}
+.unbox-full-head .unbox-step.on {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+.unbox-full-head .unbox-step.done {
+  color: var(--sage-ink);
+}
+.unbox-full-card {
+  background: var(--card);
+  border-radius: var(--r-card);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.unbox-full-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.unbox-grid-span {
+  grid-column: 1 / -1;
+}
+.unbox-full-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 4px 0;
+}
+@media (max-width: 760px) {
+  .unbox-full-page {
+    padding: 48px 16px 32px;
+  }
+  .unbox-full-card {
+    padding: 16px;
+  }
+  .unbox-full-grid {
+    grid-template-columns: 1fr;
+  }
+}

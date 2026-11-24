@@ -2,18 +2,11 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { resolveLang, translate } from '../lib/i18n';
 import { applyThemePref, getThemePref } from '../lib/theme';
 
-interface DesktopHarnessItem {
-  id: string;
-  label: string;
-  installed: boolean;
-}
-
 interface DesktopStateResponse {
   mode?: string;
   link?: string;
   status?: string;
   dataDir?: string;
-  harnesses?: DesktopHarnessItem[];
 }
 
 interface WailsWebKitBridge {
@@ -24,6 +17,13 @@ interface WailsWebKitBridge {
   };
 }
 
+function inferRemoteKind(raw: string): 'tailcat' | 'tailscale' {
+  const s = raw.trim().toLowerCase();
+  if (!s) return 'tailcat';
+  if (s.startsWith('tailcat://')) return 'tailcat';
+  return 'tailscale';
+}
+
 export default function DesktopSetup() {
   const [lang] = useState(() => resolveLang());
   const t = useCallback(
@@ -32,7 +32,6 @@ export default function DesktopSetup() {
   );
 
   const [dataDir, setDataDir] = useState('');
-  const [harnesses, setHarnesses] = useState<DesktopHarnessItem[] | null>(null);
   const [remoteKind, setRemoteKind] = useState<'tailcat' | 'tailscale'>('tailcat');
   const [link, setLink] = useState('');
   const [status, setStatus] = useState('');
@@ -59,9 +58,9 @@ export default function DesktopSetup() {
     const s = (await res.json()) as DesktopStateResponse;
     if (!mountedRef.current) return false;
     setDataDir(s.dataDir || '');
-    setHarnesses(Array.isArray(s.harnesses) ? s.harnesses : []);
     if (!linkTouchedRef.current && s.link) {
       setLink((prev) => prev || s.link || '');
+      setRemoteKind(inferRemoteKind(s.link));
     }
     const st = s.status || '';
     setStatus(st);
@@ -134,14 +133,6 @@ export default function DesktopSetup() {
       window.removeEventListener('blur', clearArm);
     };
   }, []);
-
-  const installed = harnesses ? harnesses.filter((h) => h.installed) : [];
-  const harnessSummary =
-    harnesses === null
-      ? t('desktopSetupDetecting')
-      : installed.length > 0
-        ? t('desktopSetupDetectedPrefix') + installed.map((h) => h.label).join(lang === 'en' ? ', ' : '、')
-        : t('desktopSetupNoneDetected');
 
   const trimmedLink = link.trim();
   const hasToken = trimmedLink.includes('#token=') || trimmedLink.includes('token=');
@@ -219,8 +210,12 @@ export default function DesktopSetup() {
             className="dsetup-textarea"
             value={link}
             onChange={(e) => {
+              const val = e.target.value;
               linkTouchedRef.current = true;
-              setLink(e.target.value);
+              setLink(val);
+              const trimmed = val.trim().toLowerCase();
+              if (trimmed.startsWith('tailcat://')) setRemoteKind('tailcat');
+              else if (trimmed.startsWith('tailscale://')) setRemoteKind('tailscale');
             }}
             placeholder={
               remoteKind === 'tailscale'
@@ -236,7 +231,7 @@ export default function DesktopSetup() {
             <button
               type="button"
               className="btn go"
-              disabled={busy}
+              disabled={busy || !trimmedLink}
               onClick={() => start({ mode: 'remote', link: trimmedLink })}
             >
               {t('desktopSetupRemoteBtn')}
