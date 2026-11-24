@@ -849,6 +849,10 @@ export default function BotChatScreen() {
   };
 
   const showStop = !!bot?.busy && !input.trim();
+  const effectiveKeyboardOffset =
+    keyboardOffset > 0
+      ? keyboardOffset + (Platform.OS === 'android' ? insets.bottom : 0)
+      : 0;
   const activeDetail = detail || bot;
   const isDirty = Boolean(
     activeDetail &&
@@ -972,7 +976,7 @@ export default function BotChatScreen() {
           renderItem={renderTimelineEntry}
           contentContainerStyle={[
             styles.listContent,
-            { paddingBottom: composerHeight + keyboardOffset + 12 },
+            { paddingBottom: composerHeight + effectiveKeyboardOffset + 12 },
             timelineEntries.length === 0 && styles.emptyGrow,
           ]}
           ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
@@ -1029,8 +1033,8 @@ export default function BotChatScreen() {
           style={[
             styles.composerOverlay,
             {
-              bottom: keyboardOffset,
-              paddingBottom: keyboardOffset > 0 ? 8 : Math.max(insets.bottom, 10),
+              bottom: effectiveKeyboardOffset,
+              paddingBottom: effectiveKeyboardOffset > 0 ? 10 : Math.max(insets.bottom, 10),
             },
           ]}
         >
