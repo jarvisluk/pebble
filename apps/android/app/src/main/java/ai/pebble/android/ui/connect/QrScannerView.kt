@@ -57,6 +57,7 @@ import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.graphics.ClipOp
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.layout.onSizeChanged
@@ -96,6 +97,7 @@ fun QrScannerBox(
     onCode: (String) -> Unit,
     onMessage: (String) -> Unit,
     modifier: Modifier = Modifier,
+    shape: Shape = RoundedCornerShape(16.dp),
 ) {
     val context = LocalContext.current
     val view = LocalView.current
@@ -185,7 +187,7 @@ fun QrScannerBox(
 
     Box(
         modifier = modifier
-            .clip(RoundedCornerShape(16.dp))
+            .clip(shape)
             .background(Color.Black),
     ) {
         if (hasCameraPerm) {

@@ -127,33 +127,27 @@ struct ConnectView: View {
 
     private var freshHeroContent: some View {
         GeometryReader { geo in
-            let heroScannerHeight = min(max(geo.size.height - 270, 360), 540)
+            let heroScannerHeight = min(max(geo.size.height - 210, 380), 600)
             ScrollView {
                 VStack(spacing: 0) {
                     if !scanning {
                         Spacer(minLength: 24)
-                    } else {
-                        Spacer().frame(height: 12)
-                    }
 
-                    VStack(spacing: scanning ? 4 : 16) {
-                        if !scanning {
+                        VStack(spacing: 16) {
                             BotAvatar(id: "assistant", size: 104, color: pebbleColor, busy: submitting)
-                                .transition(.opacity.combined(with: .scale(scale: 0.85)))
+                            Text("Pebble")
+                                .font(.system(size: AppFont.hero, weight: .bold))
+                                .foregroundStyle(p.text)
+                            Text(hub.t("onboardHeroSub"))
+                                .font(.system(size: AppFont.body))
+                                .foregroundStyle(p.text2)
+                                .multilineTextAlignment(.center)
                         }
-                        Text("Pebble")
-                            .font(.system(size: AppFont.hero, weight: .bold))
-                            .foregroundStyle(p.text)
-                        Text(hub.t("onboardHeroSub"))
-                            .font(.system(size: AppFont.body))
-                            .foregroundStyle(p.text2)
-                            .multilineTextAlignment(.center)
-                    }
+                        .transition(.opacity.combined(with: .scale(scale: 0.92)))
 
-                    if !scanning {
                         Spacer(minLength: 24)
                     } else {
-                        Spacer().frame(height: 14)
+                        Spacer().frame(height: 12)
                     }
 
                     if platformSupportsQRScanner && scanning {
@@ -274,8 +268,7 @@ struct ConnectView: View {
                             onMessage: { err = $0 }
                         )
                         .frame(height: 420)
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .listRowInsets(EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8))
+                        .hubFlushFormRow()
                     }
                 } header: {
                     Text(hub.t("scanPairTitle"))

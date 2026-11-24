@@ -971,6 +971,30 @@ struct HubPrimaryButtonStyle: ButtonStyle {
 }
 
 @available(iOS 18.0, macOS 15.0, *)
+private struct HubFlushRowKey: ContainerValueKey {
+    static let defaultValue = false
+}
+
+@available(iOS 18.0, macOS 15.0, *)
+extension ContainerValues {
+    var hubFlushRow: Bool {
+        get { self[HubFlushRowKey.self] }
+        set { self[HubFlushRowKey.self] = newValue }
+    }
+}
+
+extension View {
+    @ViewBuilder
+    func hubFlushFormRow() -> some View {
+        if #available(iOS 18.0, macOS 15.0, *) {
+            self.containerValue(\.hubFlushRow, true)
+        } else {
+            self.listRowInsets(EdgeInsets())
+        }
+    }
+}
+
+@available(iOS 18.0, macOS 15.0, *)
 struct HubFormStyle: FormStyle {
     @Environment(\.palette) private var p
 
@@ -991,20 +1015,22 @@ struct HubFormStyle: FormStyle {
                                 Group(subviews: section.content) { subviews in
                                     VStack(alignment: .leading, spacing: 0) {
                                         ForEach(Array(subviews.enumerated()), id: \.element.id) { idx, subview in
+                                            let flush = subview.containerValues.hubFlushRow
                                             if idx > 0 {
                                                 Rectangle()
                                                     .fill(Color.primary.opacity(p.dark ? 0.10 : 0.08))
                                                     .frame(height: 0.5)
-                                                    .padding(.leading, 16)
+                                                    .padding(.leading, flush ? 0 : 16)
                                             }
                                             subview
                                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                                .padding(.horizontal, 16)
-                                                .padding(.vertical, 12)
+                                                .padding(.horizontal, flush ? 0 : 16)
+                                                .padding(.vertical, flush ? 0 : 12)
                                         }
                                     }
                                     .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
                                     .background(cardFill, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                                    .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
                                 }
                             }
                             if !section.footer.isEmpty {
