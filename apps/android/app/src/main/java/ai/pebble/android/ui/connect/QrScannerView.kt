@@ -80,6 +80,14 @@ import java.util.concurrent.atomic.AtomicBoolean
 import androidx.compose.ui.res.painterResource
 import ai.pebble.android.ui.theme.PebbleIcons
 
+private fun isValidPairingQr(code: String): Boolean {
+    val lower = code.lowercase()
+    return lower.startsWith("tailcat://") ||
+        lower.startsWith("tailscale://") ||
+        lower.startsWith("http://") ||
+        lower.startsWith("https://")
+}
+
 @Composable
 fun QrScannerBox(
     onCode: (String) -> Unit,
@@ -98,9 +106,19 @@ fun QrScannerBox(
     }
     var torchOn by remember { mutableStateOf(false) }
     var cameraRef by remember { mutableStateOf<Camera?>(null) }
+    var cameraProviderRef by remember { mutableStateOf<ProcessCameraProvider?>(null) }
     var focusIndicator by remember { mutableStateOf<Offset?>(null) }
     var bottomBarHeightPx by remember { mutableIntStateOf(0) }
     val locked = remember { AtomicBoolean(false) }
+    val disposed = remember { AtomicBoolean(false) }
+
+    fun releaseCamera() {
+        torchOn = false
+        runCatching { cameraRef?.cameraControl?.enableTorch(false) }
+        cameraRef = null
+        runCatching { cameraProviderRef?.unbindAll() }
+        cameraProviderRef = null
+    }
 
     val scanner = remember {
         val opts = BarcodeScannerOptions.Builder()
@@ -111,6 +129,8 @@ fun QrScannerBox(
 
     DisposableEffect(Unit) {
         onDispose {
+            disposed.set(true)
+            releaseCamera()
             runCatching { scanner.close() }
         }
     }
@@ -136,9 +156,12 @@ fun QrScannerBox(
             scanner.process(image)
                 .addOnSuccessListener { barcodes ->
                     val raw = barcodes.firstNotNullOfOrNull { it.rawValue }?.trim().orEmpty()
-                    if (raw.isNotEmpty()) {
+                    if (raw.isNotEmpty() && isValidPairingQr(raw)) {
+                        releaseCamera()
                         view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
                         onCode(raw)
+                    } else if (raw.isNotEmpty()) {
+                        onMessage(L.t("invalidQr"))
                     } else {
                         onMessage(L.t("scanNoQrFound"))
                     }
@@ -178,6 +201,8 @@ fun QrScannerBox(
                     val future = ProcessCameraProvider.getInstance(ctx)
                     future.addListener({
                         val provider = runCatching { future.get() }.getOrNull() ?: return@addListener
+                        if (disposed.get()) return@addListener
+                        cameraProviderRef = provider
                         val preview = Preview.Builder().build().also {
                             it.surfaceProvider = pv.surfaceProvider
                         }
@@ -198,13 +223,10 @@ fun QrScannerBox(
                                 .addOnSuccessListener { barcodes ->
                                     val code = barcodes.firstNotNullOfOrNull { it.rawValue }?.trim()
                                     if (!code.isNullOrEmpty() && !locked.get()) {
-                                        val lower = code.lowercase()
-                                        val isValid = lower.startsWith("tailcat://") ||
-                                            lower.startsWith("tailscale://") ||
-                                            lower.startsWith("http://") ||
-                                            lower.startsWith("https://")
+                                        val isValid = isValidPairingQr(code)
                                         if (isValid && locked.compareAndSet(false, true)) {
                                             pv.post {
+                                                releaseCamera()
                                                 view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
                                                 onCode(code)
                                             }
@@ -219,6 +241,10 @@ fun QrScannerBox(
                         }
 
                         runCatching {
+                            if (disposed.get()) {
+                                provider.unbindAll()
+                                return@addListener
+                            }
                             provider.unbindAll()
                             val cam = provider.bindToLifecycle(
                                 lifecycleOwner,
@@ -226,7 +252,12 @@ fun QrScannerBox(
                                 preview,
                                 analysis,
                             )
-                            cameraRef = cam
+                            if (disposed.get()) {
+                                runCatching { cam.cameraControl.enableTorch(false) }
+                                provider.unbindAll()
+                            } else {
+                                cameraRef = cam
+                            }
                         }
                     }, ContextCompat.getMainExecutor(ctx))
 
@@ -340,7 +371,7 @@ fun QrScannerBox(
                     ScannerPillButton(
                         icon = {
                             Icon(
-                                painter = painterResource( PebbleIcons.PhotoLibrary),
+                                painter = painterResource(PebbleIcons.PhotoLibrary),
                                 contentDescription = L.t("scanPickPhoto"),
                                 tint = Color.White,
                                 modifier = Modifier.size(16.dp),
