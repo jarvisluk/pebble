@@ -134,6 +134,14 @@ struct Palette {
         let hex = botColorHex(id, index, custom: custom)
         return (Color(hex: hex), contrastText(hex), Color(hex: dark ? "#2a2a2a" : mixHex(hex, "#ffffff", 0.16)))
     }
+
+    func botCollab(_ id: String, _ index: Int, custom: String? = nil) -> (bg: Color, ink: Color) {
+        let hex = botColorHex(id, index, custom: custom)
+        return (
+            bg: Color(hex: dark ? mixHex(hex, "#171717", 0.28) : mixHex(hex, "#ffffff", 0.16)),
+            ink: Color(hex: dark ? mixHex(hex, "#ffffff", 0.72) : mixHex(hex, "#1d1b19", 0.62))
+        )
+    }
 }
 
 private struct PaletteKey: EnvironmentKey {

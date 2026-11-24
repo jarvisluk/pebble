@@ -253,7 +253,7 @@ export const WorkspaceFilesPane: React.FC<WorkspaceFilesPaneProps> = ({
                   <button
                     key={ent.path}
                     type="button"
-                    className={`ws-row${active ? ' sel' : ''}`}
+                    className={`ws-row${active ? ' sel' : ''}${ent.isShared ? ' is-shared' : ''}`}
                     onClick={() => handleEntryClick(ent)}
                   >
                     <span className="ws-row-ico">
