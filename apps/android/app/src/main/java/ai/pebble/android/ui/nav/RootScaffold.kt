@@ -307,6 +307,7 @@ fun RootScaffold(
                             onDeletedBot = { if (router.selectedBotId == it) router.closeBot() },
                             onOpenSettings = { router.openSettings(compact = false) },
                             onOpenDesktop = { router.openDesktop(it) },
+                            onCreateBot = { router.sheet = SheetRoute.CreateBot },
                         )
                     }
                     Box(modifier = Modifier.width(0.5.dp).fillMaxHeight().background(p.s2))

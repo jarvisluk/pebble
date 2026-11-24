@@ -81,58 +81,17 @@ struct BotListView: View {
             .refreshable {
                 if hub.isConnected { try? await hub.refreshBots() } else { await hub.reconnect() }
             }
-            .safeAreaInset(edge: .top, spacing: 0) {
-                HStack(spacing: 6) {
-                    NativeSearchBar(text: $query, placeholder: hub.t("searchBot"))
-                        .frame(minWidth: 0, maxWidth: .infinity)
-                        .frame(height: 28)
-                    Menu {
-                        Picker(hub.t("sortBots"), selection: $sortModeRaw) {
-                            Text(hub.t("sortByRecent")).tag(BotSortMode.recent.rawValue)
-                            Text(hub.t("sortManual")).tag(BotSortMode.manual.rawValue)
-                        }
-                    } label: {
-                        Label(hub.t("sortBots"), systemImage: "arrow.up.arrow.down")
-                            .labelStyle(.iconOnly)
-                            .foregroundStyle(.secondary)
-                            .frame(width: 26, height: 26)
-                    }
-                    .menuIndicator(.hidden)
-                    .buttonStyle(.borderless)
-                    .help(hub.t("sortBots"))
-                }
-                .padding(.horizontal, 12)
-                .padding(.top, 4)
-                .padding(.bottom, 6)
-            }
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                HStack {
-                    Button { go(.createBot) } label: {
-                        Label(hub.t("newBot"), systemImage: "plus")
-                            .font(.system(size: AppFont.secondary, weight: .medium))
-                            .foregroundStyle(.primary)
-                    }
-                    .buttonStyle(.borderless)
-                    Spacer()
-                    Button { router.openSettings(compact: compact) } label: {
-                        Label(hub.t("settings"), systemImage: "gearshape")
-                            .font(.system(size: AppFont.secondary, weight: .medium))
-                            .foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.borderless)
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-            }
+            .safeAreaInset(edge: .top, spacing: 0) { sidebarSearchSortBar }
+            .safeAreaInset(edge: .bottom, spacing: 0) { sidebarFooterBar }
             .frame(minWidth: 0, maxWidth: .infinity)
             .navigationTitle("")
             .confirmAlert($confirm)
         #else
         @Bindable var r = router
-        List(selection: $r.selected) { rows }
+        let base = List(selection: $r.selected) { rows }
             .hubColumnList(compact: compact, page: p.page)
             .hubListSectionSpacing(12)
-            .contentMargins(.top, 8, for: .scrollContent)
+            .contentMargins(.top, compact ? 8 : 4, for: .scrollContent)
             .refreshable {
                 if hub.isConnected { try? await hub.refreshBots() } else { await hub.reconnect() }
             }
@@ -146,6 +105,83 @@ struct BotListView: View {
                 SettingsSidebarView(compact: true)
             }
             .confirmAlert($confirm)
+        if compact {
+            base
+        } else {
+            base
+                .safeAreaInset(edge: .top, spacing: 0) { sidebarSearchSortBar }
+                .safeAreaInset(edge: .bottom, spacing: 0) { sidebarFooterBar }
+        }
+        #endif
+    }
+
+    @ViewBuilder
+    private var sidebarSearchSortBar: some View {
+        HStack(spacing: 6) {
+            NativeSearchBar(text: $query, placeholder: hub.t("searchBot"))
+                .frame(minWidth: 0, maxWidth: .infinity)
+                #if os(macOS)
+                .frame(height: 28)
+                #else
+                .frame(height: 36)
+                #endif
+            Menu {
+                Picker(hub.t("sortBots"), selection: $sortModeRaw) {
+                    Text(hub.t("sortByRecent")).tag(BotSortMode.recent.rawValue)
+                    Text(hub.t("sortManual")).tag(BotSortMode.manual.rawValue)
+                }
+            } label: {
+                Label(hub.t("sortBots"), systemImage: "arrow.up.arrow.down")
+                    .labelStyle(.iconOnly)
+                    .foregroundStyle(.secondary)
+                    #if os(macOS)
+                    .frame(width: 26, height: 26)
+                    #else
+                    .frame(width: 32, height: 32)
+                    #endif
+            }
+            #if os(macOS)
+            .menuIndicator(.hidden)
+            .buttonStyle(.borderless)
+            .help(hub.t("sortBots"))
+            #endif
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 4)
+        .padding(.bottom, 6)
+    }
+
+    @ViewBuilder
+    private var sidebarFooterBar: some View {
+        HStack {
+            Button { go(.createBot) } label: {
+                Label(hub.t("newBot"), systemImage: "plus")
+                    .font(.system(size: AppFont.secondary, weight: .medium))
+                    .foregroundStyle(.primary)
+            }
+            #if os(macOS)
+            .buttonStyle(.borderless)
+            #else
+            .buttonStyle(.plain)
+            #endif
+            Spacer()
+            Button { router.openSettings(compact: compact) } label: {
+                Label(hub.t("settings"), systemImage: "gearshape")
+                    .font(.system(size: AppFont.secondary, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+            #if os(macOS)
+            .buttonStyle(.borderless)
+            #else
+            .buttonStyle(.plain)
+            #endif
+        }
+        #if os(macOS)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        #else
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
         #endif
     }
 
@@ -160,18 +196,17 @@ struct BotListView: View {
                 router.openBot(bot.id)
             } label: {
                 BotRow(bot: bot, index: idx, pinned: pinned)
-                    .padding(.horizontal, 10)
                     .padding(.vertical, 6)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .fill(router.selected == bot.id ? Color.primary.opacity(p.dark ? 0.14 : 0.08) : Color.clear)
-                    )
-                    .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .listRowInsets(EdgeInsets(top: 2, leading: 6, bottom: 2, trailing: 6))
-            .listRowBackground(Color.clear)
+            .listRowBackground(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(router.selected == bot.id ? Color.primary.opacity(p.dark ? 0.14 : 0.08) : Color.clear)
+                    .padding(.horizontal, 11)
+            )
             .listRowSeparator(.hidden)
             .contextMenu {
                 Button {
@@ -210,13 +245,15 @@ struct BotListView: View {
     @ViewBuilder
     private var rows: some View {
         #if os(iOS)
-        NativeSearchBar(text: $query, placeholder: hub.t("searchBot"))
-            .frame(height: 36)
-            .padding(.horizontal, -8)
-            .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
-            .listRowBackground(Color.clear)
-            .listRowSeparator(.hidden)
-            .selectionDisabled()
+        if compact {
+            NativeSearchBar(text: $query, placeholder: hub.t("searchBot"))
+                .frame(height: 36)
+                .padding(.horizontal, -8)
+                .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+                .selectionDisabled()
+        }
         #endif
         if let to = hub.takeovers.first { takeoverSection(to) }
         Section {
@@ -266,18 +303,20 @@ struct BotListView: View {
     #if os(iOS)
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
-        ToolbarItem(placement: .hubLeading) {
-            Menu {
-                Picker(hub.t("sortBots"), selection: $sortModeRaw) {
-                    Text(hub.t("sortByRecent")).tag(BotSortMode.recent.rawValue)
-                    Text(hub.t("sortManual")).tag(BotSortMode.manual.rawValue)
+        if compact {
+            ToolbarItem(placement: .hubLeading) {
+                Menu {
+                    Picker(hub.t("sortBots"), selection: $sortModeRaw) {
+                        Text(hub.t("sortByRecent")).tag(BotSortMode.recent.rawValue)
+                        Text(hub.t("sortManual")).tag(BotSortMode.manual.rawValue)
+                    }
+                } label: {
+                    Label(hub.t("sortBots"), systemImage: "arrow.up.arrow.down")
                 }
-            } label: {
-                Label(hub.t("sortBots"), systemImage: "arrow.up.arrow.down")
             }
-        }
-        ToolbarItemGroup(placement: .hubTrailing) {
-            Button { router.openSettings(compact: compact) } label: { Label(hub.t("settings"), systemImage: "gearshape") }
+            ToolbarItemGroup(placement: .hubTrailing) {
+                Button { router.openSettings(compact: compact) } label: { Label(hub.t("settings"), systemImage: "gearshape") }
+            }
         }
     }
     #endif
