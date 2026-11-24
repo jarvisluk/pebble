@@ -32,7 +32,11 @@ class HubException(
     val unauthorized: Boolean = false,
     val status: Int = 0,
     val isKey: Boolean = false,
-) : Exception(message)
+    val code: String = "",
+) : Exception(message) {
+    val isUnsupportedCapability: Boolean
+        get() = status == 404 || status == 405 || status == 501 || code == "capability_unsupported"
+}
 
 fun errText(error: Throwable, fallback: String): String {
     if (error is HubException) {
@@ -128,10 +132,17 @@ class ApiClient(
     val base: String,
     val token: String,
 ) {
+    companion object {
+        fun attachClientHeaders(builder: Request.Builder): Request.Builder =
+            builder
+                .header("X-Pebble-Protocol", CLIENT_PROTOCOL.toString())
+                .header("X-Pebble-Client", "android")
+    }
+
     suspend fun rawBytes(path: String, method: String = "GET", body: Map<String, Any?>? = null): ByteArray =
         withContext(Dispatchers.IO) {
             val url = resolveUrl(path)
-            val builder = Request.Builder().url(url)
+            val builder = attachClientHeaders(Request.Builder().url(url))
             if (token.isNotEmpty()) {
                 builder.header("Authorization", "Bearer $token")
             }
@@ -155,8 +166,8 @@ class ApiClient(
                     throw HubException(L.t("invalidTokenErr"), unauthorized = true, status = 401)
                 }
                 if (code !in 200..299) {
-                    val errText = extractErrorMessage(bytes) ?: "HTTP $code"
-                    throw HubException(errText, status = code)
+                    val (errText, errCode) = extractErrorDetails(bytes)
+                    throw HubException(errText ?: "HTTP $code", status = code, code = errCode)
                 }
                 bytes
             }
@@ -187,9 +198,11 @@ class ApiClient(
             .setType(MultipartBody.FORM)
             .addFormDataPart("file", safeName, fileBody)
             .build()
-        val builder = Request.Builder()
-            .url(url)
-            .post(multipart)
+        val builder = attachClientHeaders(
+            Request.Builder()
+                .url(url)
+                .post(multipart),
+        )
         if (token.isNotEmpty()) {
             builder.header("Authorization", "Bearer $token")
         }
@@ -204,8 +217,8 @@ class ApiClient(
                 throw HubException(L.t("invalidTokenErr"), unauthorized = true, status = 401)
             }
             if (code !in 200..299) {
-                val errText = extractErrorMessage(respBytes) ?: "HTTP $code"
-                throw HubException(errText, status = code)
+                val (errText, errCode) = extractErrorDetails(respBytes)
+                throw HubException(errText ?: "HTTP $code", status = code, code = errCode)
             }
             HubJson.decodeFromString(String(respBytes, Charsets.UTF_8))
         }
@@ -255,10 +268,12 @@ class ApiClient(
         return if (path.startsWith("http://") || path.startsWith("https://")) path else "$base$path"
     }
 
-    private fun extractErrorMessage(bytes: ByteArray): String? = runCatching {
-        val elem = HubJson.parseToJsonElement(String(bytes, Charsets.UTF_8))
-        elem.jsonObject["error"]?.asDisplayString()
-    }.getOrNull()
+    private fun extractErrorDetails(bytes: ByteArray): Pair<String?, String> = runCatching {
+        val obj = HubJson.parseToJsonElement(String(bytes, Charsets.UTF_8)).jsonObject
+        val msg = obj["error"]?.asDisplayString()
+        val code = obj["code"]?.asDisplayString().orEmpty()
+        msg to code
+    }.getOrDefault(null to "")
 }
 
 class EventStream {
@@ -280,9 +295,11 @@ class EventStream {
             var delayMs = 1000L
             while (isActive) {
                 try {
-                    val reqBuilder = Request.Builder()
-                        .url("$base/api/events")
-                        .header("Accept", "text/event-stream")
+                    val reqBuilder = ApiClient.attachClientHeaders(
+                        Request.Builder()
+                            .url("$base/api/events")
+                            .header("Accept", "text/event-stream"),
+                    )
                     if (token.isNotEmpty()) {
                         reqBuilder.header("Authorization", "Bearer $token")
                     }

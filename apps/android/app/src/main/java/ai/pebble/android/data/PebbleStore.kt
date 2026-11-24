@@ -192,11 +192,54 @@ class PebbleStore(context: Context) {
         private set
     var activeDesktopTarget by mutableStateOf(ActiveDesktopTarget(target = "local"))
         private set
+    var serverInfo by mutableStateOf<ServerInfo?>(null)
+        private set
+    var unsupportedCaps by mutableStateOf<Set<String>>(emptySet())
+        private set
+    var dismissedCompatProto by mutableIntStateOf(0)
+        private set
     val routines = mutableStateMapOf<String, List<RoutineItem>>()
     var pendingStageOpen by mutableStateOf<StageOpenEvent?>(null)
         private set
     var pendingChatInsert by mutableStateOf<PendingChatInsert?>(null)
         private set
+
+    fun supports(cap: String): Boolean {
+        if (cap in unsupportedCaps) return false
+        val info = serverInfo
+        if (info != null) {
+            return info.capabilities?.contains(cap) == true
+        }
+        return true
+    }
+
+    fun markUnsupported(cap: String) {
+        if (cap !in unsupportedCaps) {
+            unsupportedCaps = unsupportedCaps + cap
+        }
+    }
+
+    val isClientOutdated: Boolean
+        get() = (serverInfo?.protocolVersion ?: 0) > CLIENT_PROTOCOL
+
+    val isClientUpgradeRequired: Boolean
+        get() = (serverInfo?.minClientProtocol ?: 1) > CLIENT_PROTOCOL
+
+    val showCompatBanner: Boolean
+        get() {
+            val info = serverInfo ?: return false
+            if (info.protocolVersion <= CLIENT_PROTOCOL) return false
+            return isClientUpgradeRequired || dismissedCompatProto != info.protocolVersion
+        }
+
+    fun dismissCompatBanner() {
+        serverInfo?.protocolVersion?.let { dismissedCompatProto = it }
+    }
+
+    companion object {
+        fun isLocalDesktopTarget(target: String): Boolean =
+            target.isEmpty() || target == "local" || target.startsWith("virtual:") || target.startsWith("local:virtual:")
+    }
 
     // UI Callback for opening external URLs (Tailscale auth)
     var onOpenExternalUrl: ((String) -> Unit)? = null
@@ -498,6 +541,9 @@ class PebbleStore(context: Context) {
         usingStandby = false
         connState = ConnState.CONNECTING
         connError = ""
+        serverInfo = null
+        unsupportedCaps = emptySet()
+        dismissedCompatProto = 0
 
         try {
             connectEndpoint(profile, profile.address, profile.token, isStandby = false, seq = seq)
@@ -592,6 +638,8 @@ class PebbleStore(context: Context) {
             val client = ApiClient(url, tok)
             val data = client.call<BotsResp>("/api/bots")
             if (seq != connSeq) return
+            serverInfo = data.server
+            unsupportedCaps = emptySet()
             val list = data.bots.orEmpty()
             bots = list
             msgs.clear(); last.clear(); unread.clear(); tools.clear(); models.clear(); routines.clear()
@@ -640,6 +688,7 @@ class PebbleStore(context: Context) {
         val tok = authToken
         try {
             val d = api.call<BotsResp>("/api/bots")
+            serverInfo = d.server
             bots = d.bots.orEmpty()
             startStream(url, tok)
             activeChat?.let { bid ->
@@ -737,6 +786,7 @@ class PebbleStore(context: Context) {
             PebbleTunnel.stop()
             baseURL = ""; authToken = ""
             bots = emptyList(); msgs.clear(); last.clear()
+            serverInfo = null; unsupportedCaps = emptySet(); dismissedCompatProto = 0
             connState = ConnState.IDLE
             connError = ""
         }
@@ -750,7 +800,9 @@ class PebbleStore(context: Context) {
 
     suspend fun refreshBots() {
         if (baseURL.isEmpty()) return
-        bots = api.call<BotsResp>("/api/bots").bots.orEmpty()
+        val d = api.call<BotsResp>("/api/bots")
+        serverInfo = d.server
+        bots = d.bots.orEmpty()
     }
 
     suspend fun loadMessages(botId: String) {
@@ -1112,15 +1164,19 @@ class PebbleStore(context: Context) {
             ),
         )
 
-    fun makeDesktopWsUrl(target: String, preset: String? = null): String? {
+    suspend fun fetchDesktopFrame(target: String): DesktopFrame =
+        api.call("/api/desktop/frame?target=${encodeURIComponent(target)}&windowId=&maxDim=1280&quality=72")
+
+    fun makeDesktopWsUrl(target: String, preset: String? = null, codec: String = "hevc"): String? {
         if (baseURL.isBlank()) return null
         val wsBase = when {
             baseURL.startsWith("https://", ignoreCase = true) -> "wss://" + baseURL.substring(8)
             baseURL.startsWith("http://", ignoreCase = true) -> "ws://" + baseURL.substring(7)
             else -> return null
         }
+        val resolvedCodec = codec.ifBlank { "hevc" }
         val presetPart = if (!preset.isNullOrBlank()) "&preset=${encodeURIComponent(preset)}" else ""
-        return "$wsBase/api/desktop/stream/ws?target=${encodeURIComponent(target)}&codec=hevc$presetPart"
+        return "$wsBase/api/desktop/stream/ws?target=${encodeURIComponent(target)}&codec=${encodeURIComponent(resolvedCodec)}$presetPart"
     }
 
     suspend fun sendDesktopInput(body: Map<String, Any?>) {

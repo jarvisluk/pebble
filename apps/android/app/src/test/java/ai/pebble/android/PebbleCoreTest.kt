@@ -1,7 +1,12 @@
 package ai.pebble.android
 
 import ai.pebble.android.data.BotStatus
+import ai.pebble.android.data.BotsResp
+import ai.pebble.android.data.CLIENT_PROTOCOL
 import ai.pebble.android.data.HubJson
+import ai.pebble.android.data.NodeInfo
+import ai.pebble.android.data.PebbleStore
+import ai.pebble.android.data.ServerInfo
 import ai.pebble.android.data.countToolCalls
 import ai.pebble.android.data.formatDurationMs
 import ai.pebble.android.data.normalizeAddress
@@ -140,5 +145,44 @@ class PebbleCoreTest {
 
         val mathRendered = renderMathAnnotated("\\frac{\\alpha}{\\beta} + x^2", palette.text)
         assertTrue(mathRendered.text.contains("α/β"))
+    }
+
+    @Test
+    fun protocolCompatibilityModelsAndTargetHelpersWork() {
+        val modern = HubJson.decodeFromString<BotsResp>(
+            """
+            {
+              "bots": [{"id": "b1", "name": "Alpha"}],
+              "server": {
+                "protocolVersion": 2,
+                "minClientProtocol": 1,
+                "minNodeProtocol": 1,
+                "version": "0.1.0",
+                "capabilities": ["desktop.ws_h264", "stage.files"],
+                "futureField": {"nested": true}
+              }
+            }
+            """.trimIndent(),
+        )
+        assertEquals(2, modern.server?.protocolVersion)
+        assertEquals(listOf("desktop.ws_h264", "stage.files"), modern.server?.capabilities)
+
+        val legacy = HubJson.decodeFromString<BotsResp>("""{"bots":[{"id":"b1"}]}""")
+        assertEquals(null, legacy.server)
+        assertEquals(1, legacy.bots?.size)
+
+        val unknownServer = HubJson.decodeFromString<ServerInfo>("""{"protocolVersion":3,"brandNewFlag":true}""")
+        assertEquals(3, unknownServer.protocolVersion)
+
+        assertTrue(NodeInfo(id = "n1", protocolVersion = 1).isOutdated)
+        assertTrue(NodeInfo(id = "n2", protocolVersion = null).isOutdated)
+        assertFalse(NodeInfo(id = "n3", protocolVersion = CLIENT_PROTOCOL).isOutdated)
+
+        assertTrue(PebbleStore.isLocalDesktopTarget(""))
+        assertTrue(PebbleStore.isLocalDesktopTarget("local"))
+        assertTrue(PebbleStore.isLocalDesktopTarget("virtual:bot1"))
+        assertTrue(PebbleStore.isLocalDesktopTarget("local:virtual:bot1"))
+        assertFalse(PebbleStore.isLocalDesktopTarget("node-1"))
+        assertFalse(PebbleStore.isLocalDesktopTarget("node-1:virtual:bot1"))
     }
 }

@@ -13,12 +13,23 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.intOrNull
 
+const val CLIENT_PROTOCOL = 2
+
 val HubJson = Json {
     ignoreUnknownKeys = true
     isLenient = true
     coerceInputValues = true
     explicitNulls = false
 }
+
+@Serializable
+data class ServerInfo(
+    val protocolVersion: Int = 1,
+    val minClientProtocol: Int? = null,
+    val minNodeProtocol: Int? = null,
+    val version: String? = null,
+    val capabilities: List<String>? = null,
+)
 
 @Serializable
 data class SessionRecord(
@@ -238,9 +249,14 @@ data class NodeInfo(
     val hostname: String? = null,
     val homeDir: String? = null,
     val permissions: List<String>? = null,
+    val protocolVersion: Int? = null,
+    val capabilities: List<String>? = null,
+    val version: String? = null,
     val connected: Boolean? = null,
     val lastSeenAt: String? = null,
-)
+) {
+    val isOutdated: Boolean get() = (protocolVersion ?: 1) < CLIENT_PROTOCOL
+}
 
 @Serializable
 data class ScreenState(
@@ -273,6 +289,8 @@ data class DesktopTarget(
     val supported: Boolean? = null,
     val virtual: Boolean? = null,
     val virtualSupported: Boolean? = null,
+    val protocolVersion: Int? = null,
+    val outdated: Boolean? = null,
     val powerState: String? = null,
     val backend: String? = null,
     val screen: ScreenState? = null,
@@ -280,7 +298,7 @@ data class DesktopTarget(
 
 @Serializable
 data class DesktopFrame(
-    val jpegBase64: String,
+    val jpegBase64: String = "",
     val imageWidth: Double? = null,
     val imageHeight: Double? = null,
     val logicalX: Double? = null,
@@ -459,7 +477,7 @@ data class DesktopPermissionRequestResp(
 )
 
 // Response wrappers
-@Serializable data class BotsResp(val bots: List<BotStatus>? = null)
+@Serializable data class BotsResp(val bots: List<BotStatus>? = null, val server: ServerInfo? = null)
 @Serializable data class MessagesResp(val messages: List<ChatMessage>? = null)
 @Serializable data class NodesResp(val nodes: List<NodeInfo>? = null)
 @Serializable data class TakeoversResp(val ok: Boolean? = null, val items: List<TakeoverRequest>? = null)

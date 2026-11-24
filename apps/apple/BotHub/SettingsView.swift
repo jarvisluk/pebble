@@ -450,14 +450,23 @@ struct SettingsView: View {
             } else {
                 ForEach(hub.nodes) { node in
                     let on = node.connected ?? false
-                    HStack(spacing: 10) {
+                    let outdated = hub.serverInfo != nil && node.isOutdated
+                    HStack(spacing: 8) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(node.name ?? node.id).font(.system(size: AppFont.body, weight: .semibold))
                             Text("\(node.os ?? "")/\(node.arch ?? "")\((node.hostname ?? "").isEmpty ? "" : " · \(node.hostname!)")")
                                 .font(.system(size: AppFont.caption, design: .monospaced))
                                 .foregroundStyle(.secondary)
+                            if outdated {
+                                Text(hub.t("nodeOutdatedHint"))
+                                    .font(.system(size: AppFont.caption))
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                         Spacer()
+                        if outdated {
+                            Tag(text: hub.t("nodeOutdatedTag"), bg: p.pink, fg: p.pinkInk)
+                        }
                         Tag(text: on ? hub.t("online") : hub.t("offline"), bg: on ? p.sage : p.s2, fg: on ? p.sageInk : .secondary)
                     }
                 }
@@ -1047,8 +1056,13 @@ struct SettingsView: View {
         let snap = host.snapshot
         return Section(hub.t("macHostSection")) {
             LabeledContent(hub.t("macCurrentMode")) {
-                Text(snap.mode == "remote" ? hub.t("macModeRemoteTag") : hub.t("macModeLocalTag"))
-                    .foregroundStyle(.secondary)
+                HStack(spacing: 6) {
+                    if host.daemonOutdated {
+                        Tag(text: hub.t("nodeOutdatedTag"), bg: p.pink, fg: p.pinkInk)
+                    }
+                    Text(snap.mode == "remote" ? hub.t("macModeRemoteTag") : hub.t("macModeLocalTag"))
+                        .foregroundStyle(.secondary)
+                }
             }
             if !snap.dataDir.isEmpty {
                 LabeledContent(hub.t("macDataDir")) {

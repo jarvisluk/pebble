@@ -17,7 +17,7 @@ import type {
   TailscaleStatus,
   ThemePref,
 } from '../types';
-import { api } from '../lib/api';
+import { api, CLIENT_PROTOCOL } from '../lib/api';
 import { translate } from '../lib/i18n';
 import { applyThemePref, getThemePref } from '../lib/theme';
 import type { ViewDir, ViewState } from '../lib/useViewTransition';
@@ -1653,13 +1653,21 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       .filter(Boolean)
                       .join(' · ');
                     const canDesk = n.connected && (n.permissions || []).includes('desktop');
+                    const isOutdated = typeof n.protocolVersion === 'number' && n.protocolVersion < CLIENT_PROTOCOL;
                     return (
                       <div key={n.id} className="node-row">
                         <div>
                           <div className="nm">{n.name || n.id}</div>
-                          <div className="meta">{meta}</div>
+                          <div className="meta" title={isOutdated ? t('nodeOutdatedHint') : undefined}>
+                            {isOutdated ? [meta, t('nodeOutdatedHint')].filter(Boolean).join(' · ') : meta}
+                          </div>
                         </div>
                         <div className="row-inline-sm">
+                          {isOutdated && (
+                            <span className="mp bad" title={t('nodeOutdatedHint')}>
+                              {t('nodeOutdatedTag')}
+                            </span>
+                          )}
                           {canDesk && (
                             <button type="button" className="mp" onClick={() => onOpenDesktopTarget(n.id)}>
                               {t('openDesktop')}
