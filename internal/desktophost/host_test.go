@@ -13,6 +13,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"bot-hub/internal/protocol"
 )
 
 func TestAppendPathIfMissing(t *testing.T) {
@@ -120,8 +122,11 @@ func TestControlServerEndpointsAndAuth(t *testing.T) {
 	if err := json.Unmarshal(recStatus.Body.Bytes(), &snap); err != nil {
 		t.Fatalf("decode snapshot: %v", err)
 	}
-	if snap.DataDir != dir || snap.Mode != "" {
+	if snap.DataDir != dir || snap.Mode != "" || snap.DaemonProtocol != protocol.CurrentProtocol {
 		t.Fatalf("unexpected snapshot: %+v", snap)
+	}
+	if len(protocol.DaemonCapabilities()) == 0 {
+		t.Fatal("expected daemon capabilities")
 	}
 
 	// Update local-node prefs

@@ -8,6 +8,10 @@ struct HubError: LocalizedError {
     var message: String
     var unauthorized = false
     var status = 0
+    var code = ""
+    var isUnsupportedCapability: Bool {
+        status == 404 || status == 405 || status == 501 || code == "capability_unsupported"
+    }
     var errorDescription: String? { message }
 }
 
@@ -86,11 +90,22 @@ struct APIClient {
     var base: String
     var token: String
 
+    private static var appVersion: String {
+        (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "0.1.0"
+    }
+
+    static func attachClientHeaders(_ req: inout URLRequest) {
+        req.setValue("\(ClientProtocol.current)", forHTTPHeaderField: "X-Pebble-Protocol")
+        req.setValue("apple", forHTTPHeaderField: "X-Pebble-Client")
+        req.setValue(appVersion, forHTTPHeaderField: "X-Pebble-Version")
+    }
+
     func raw(_ path: String, method: String = "GET", body: [String: Any]? = nil) async throws -> Data {
         guard let url = URL(string: base + path) else { throw HubError(message: L.t("enterValidAddr")) }
         var req = URLRequest(url: url)
         req.httpMethod = method
         req.timeoutInterval = 30
+        Self.attachClientHeaders(&req)
         if let body {
             req.setValue("application/json", forHTTPHeaderField: "Content-Type")
             req.httpBody = try JSONSerialization.data(withJSONObject: body)
@@ -101,7 +116,11 @@ struct APIClient {
         if code == 401 { throw HubError(message: L.t("invalidTokenErr"), unauthorized: true, status: 401) }
         if !(200..<300).contains(code) {
             let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-            throw HubError(message: (obj?["error"] as? String) ?? "HTTP \(code)", status: code)
+            throw HubError(
+                message: (obj?["error"] as? String) ?? "HTTP \(code)",
+                status: code,
+                code: (obj?["code"] as? String) ?? ""
+            )
         }
         return data
     }
@@ -117,6 +136,7 @@ struct APIClient {
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.timeoutInterval = 60
+        Self.attachClientHeaders(&req)
         req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         if !token.isEmpty { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
 
@@ -134,7 +154,11 @@ struct APIClient {
         if code == 401 { throw HubError(message: L.t("invalidTokenErr"), unauthorized: true, status: 401) }
         if !(200..<300).contains(code) {
             let obj = try? JSONSerialization.jsonObject(with: respData) as? [String: Any]
-            throw HubError(message: (obj?["error"] as? String) ?? "HTTP \(code)", status: code)
+            throw HubError(
+                message: (obj?["error"] as? String) ?? "HTTP \(code)",
+                status: code,
+                code: (obj?["code"] as? String) ?? ""
+            )
         }
         return try JSONDecoder().decode(InboundAttachmentResponse.self, from: respData)
     }
@@ -199,6 +223,7 @@ final class EventStream {
                     guard let url = URL(string: base + "/api/events") else { return }
                     var req = URLRequest(url: url)
                     req.timeoutInterval = 70
+                    APIClient.attachClientHeaders(&req)
                     req.setValue("text/event-stream", forHTTPHeaderField: "Accept")
                     if !token.isEmpty { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
                     let (bytes, resp) = try await hubAPISession.bytes(for: req)

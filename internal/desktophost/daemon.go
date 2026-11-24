@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"bot-hub/internal/channel"
+	"bot-hub/internal/protocol"
 )
 
 // DaemonOptions configures RunDaemon.
@@ -368,10 +369,13 @@ func RunDaemon(ctx context.Context, opts DaemonOptions) error {
 		}
 	}()
 
-	handshake := map[string]string{
-		"url":     "http://" + ln.Addr().String(),
-		"token":   secret,
-		"dataDir": dir,
+	handshake := map[string]any{
+		"url":             "http://" + ln.Addr().String(),
+		"token":           secret,
+		"dataDir":         dir,
+		"protocolVersion": protocol.CurrentProtocol,
+		"capabilities":    protocol.DaemonCapabilities(),
+		"version":         protocol.AppVersion,
 	}
 	rawHS, _ := json.Marshal(handshake)
 	if _, err := fmt.Fprintf(out, "%s\n", rawHS); err != nil {

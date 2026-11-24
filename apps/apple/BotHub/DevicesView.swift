@@ -59,6 +59,11 @@ struct DevicesView: View {
                             Tag(text: hub.online ? hub.t("streamConnected") : hub.t("reconnecting"),
                                 bg: hub.online ? p.sage : p.s2, fg: hub.online ? p.sageInk : .secondary)
                         }
+                        if hub.isClientOutdated {
+                            Text(hub.t(hub.isClientUpgradeRequired ? "clientUpgradeRequired" : "clientUpdateHint"))
+                                .font(.system(size: AppFont.secondary))
+                                .foregroundStyle(hub.isClientUpgradeRequired ? p.pinkInk : .secondary)
+                        }
                     } else {
                         Text(hub.t("notConnectedHost")).foregroundStyle(.secondary)
                     }
@@ -110,16 +115,25 @@ struct DevicesView: View {
 
     private func nodeRow(_ node: NodeInfo) -> some View {
         let on = node.connected ?? false
+        let outdated = hub.serverInfo != nil && node.isOutdated
         let perms = node.permissions ?? []
         let labels = ["files": hub.t("permFiles"), "exec": hub.t("permExec"), "desktop": hub.t("permDesktop")]
         return VStack(alignment: .leading, spacing: 6) {
-            HStack {
+            HStack(spacing: 6) {
                 Text(node.name ?? node.id).font(.system(size: AppFont.body, weight: .semibold))
                 Spacer()
+                if outdated {
+                    Tag(text: hub.t("nodeOutdatedTag"), bg: p.pink, fg: p.pinkInk)
+                }
                 Tag(text: on ? hub.t("online") : hub.t("offline"), bg: on ? p.sage : p.s2, fg: on ? p.sageInk : .secondary)
             }
             Text("\(node.os ?? "")/\(node.arch ?? "")\((node.hostname ?? "").isEmpty ? "" : " · \(node.hostname!)")")
                 .font(.system(size: AppFont.secondary, design: .monospaced)).foregroundStyle(.secondary)
+            if outdated {
+                Text(hub.t("nodeOutdatedHint"))
+                    .font(.system(size: AppFont.caption))
+                    .foregroundStyle(.secondary)
+            }
             if !perms.isEmpty {
                 HStack(spacing: 6) {
                     ForEach(perms, id: \.self) { Tag(text: labels[$0] ?? $0, bg: p.s1, fg: .secondary) }

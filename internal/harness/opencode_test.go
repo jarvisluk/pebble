@@ -418,3 +418,43 @@ func TestOpenCodeListCommandsAndAgentsArrayAndLocalFallback(t *testing.T) {
 		}
 	}
 }
+
+func TestOpenCodeModelsCLIAndMissingBinary(t *testing.T) {
+	tmp := t.TempDir()
+	fakeOC := filepath.Join(tmp, "opencode")
+	script := "#!/bin/sh\n" +
+		"if [ \"$1\" = \"models\" ]; then\n" +
+		"  printf 'https://ignore.example.com/url\\n'\n" +
+		"  printf 'openai/gpt-5\\n'\n" +
+		"  printf 'anthropic/claude-sonnet-4\\n'\n" +
+		"  exit 0\n" +
+		"fi\n" +
+		"exit 1\n"
+	if err := os.WriteFile(fakeOC, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("OPENCODE_BIN", fakeOC)
+	h := NewOpenCodeHarness("")
+	defer h.Close()
+
+	models, err := h.Models(context.Background())
+	if err != nil {
+		t.Fatalf("expected CLI models without error, got %v", err)
+	}
+	if len(models) != 2 || models[0] != "openai/gpt-5" || models[1] != "anthropic/claude-sonnet-4" {
+		t.Fatalf("unexpected parsed opencode models: %#v", models)
+	}
+
+	// Missing binary should return empty best-effort without starting serve or erroring.
+	t.Setenv("OPENCODE_BIN", filepath.Join(tmp, "missing-opencode"))
+	hMissing := NewOpenCodeHarness("")
+	defer hMissing.Close()
+	modelsMissing, err := hMissing.Models(context.Background())
+	if err != nil {
+		t.Fatalf("expected nil error when opencode binary is missing, got %v", err)
+	}
+	if len(modelsMissing) != 0 {
+		t.Fatalf("expected empty models when opencode binary is missing, got %#v", modelsMissing)
+	}
+}

@@ -239,6 +239,7 @@ private val zhStrings: Map<String, String> = mapOf(
     "providerAdded" to "已添加模型源",
     "addFailed" to "添加失败",
     "loadModelsFailed" to "加载模型列表失败",
+    "noModels" to "暂无可选模型",
     "magpieTakeover" to "Magpie 原生接管",
     "notInstalled" to "未安装",
     "gatewayOk" to "网关运行中",
@@ -535,6 +536,13 @@ private val zhStrings: Map<String, String> = mapOf(
     "moreActions" to "更多操作",
     "hotkeyEsc" to "Esc",
     "hotkeyTab" to "Tab",
+    "deskFrameModeLabel" to "兼容帧 · {fps} fps",
+    "deskFrameModeShort" to "兼容帧",
+    "clientUpdateHint" to "服务端已更新，升级客户端后可使用全部新功能",
+    "clientUpgradeRequired" to "当前客户端版本过低，部分操作已受限，请升级客户端",
+    "nodeOutdatedTag" to "旧版本",
+    "nodeOutdatedHint" to "节点版本过低，虚拟屏等新能力不可用",
+    "dismiss" to "忽略",
 )
 
 private val enStrings: Map<String, String> = mapOf(
@@ -758,6 +766,7 @@ private val enStrings: Map<String, String> = mapOf(
     "providerAdded" to "Provider added",
     "addFailed" to "Add failed",
     "loadModelsFailed" to "Failed to load models",
+    "noModels" to "No models available",
     "magpieTakeover" to "Magpie Gateway",
     "notInstalled" to "Not installed",
     "gatewayOk" to "Gateway running",
@@ -1054,4 +1063,11 @@ private val enStrings: Map<String, String> = mapOf(
     "moreActions" to "More",
     "hotkeyEsc" to "Esc",
     "hotkeyTab" to "Tab",
+    "deskFrameModeLabel" to "Compat Frame · {fps} fps",
+    "deskFrameModeShort" to "Compat Frame",
+    "clientUpdateHint" to "Server updated. Update the app for all new features.",
+    "clientUpgradeRequired" to "Client version is outdated. Some actions are limited; please update.",
+    "nodeOutdatedTag" to "Outdated",
+    "nodeOutdatedHint" to "Node is outdated; newer capabilities like virtual screens are unavailable.",
+    "dismiss" to "Dismiss",
 )

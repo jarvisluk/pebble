@@ -14,14 +14,14 @@ struct CreateBotView: View {
     @State private var harness = "opencode"
     @State private var harnessTouched = false
     @State private var model = ""
-    @State private var loadingModels = false
+    @State private var loadingModelsFor: Set<String> = []
     @State private var instructions = ""
     @State private var submitting = false
     @State private var err = ""
 
     private var harnesses: [HarnessInfo] {
         if let h = hub.settings?.harnesses, !h.isEmpty { return h }
-        return ["opencode", "codebuddy", "qoder", "codex", "claude", "grok", "pi"].map { HarnessInfo(id: $0, label: $0) }
+        return ["opencode", "codebuddy", "qoder", "codex", "claude", "grok", "trae", "pi", "dsh", "agy"].map { HarnessInfo(id: $0, label: $0) }
     }
 
     private func slug(_ s: String) -> String {
@@ -73,23 +73,45 @@ struct CreateBotView: View {
                     options: harnesses.map { ($0.id, $0.title) }
                 )
                 let cands = hub.models[harness] ?? []
+                let trimmedModel = model.trimmingCharacters(in: .whitespaces)
+                let isLoadingModels = loadingModelsFor.contains(harness)
                 HubFormField(label: hub.t("modelOptional")) {
                     HStack(spacing: 8) {
                         TextField("", text: $model, prompt: Text(ph.isEmpty ? hub.t("inheritDefaultPh") : ph))
                             .monoInput()
                         Menu {
-                            if !model.trimmingCharacters(in: .whitespaces).isEmpty {
+                            if !trimmedModel.isEmpty {
                                 Button(hub.t("clear")) { model = "" }
                                 Divider()
                             }
                             if cands.isEmpty {
-                                Button(loadingModels ? hub.t("loading") : hub.t("optionalModels")) {
-                                    loadCands(for: harness)
+                                if isLoadingModels {
+                                    Text(hub.t("loading"))
+                                } else {
+                                    Text(hub.t("noModels"))
+                                    Button {
+                                        loadCands(for: harness, force: true)
+                                    } label: {
+                                        Label(hub.t("refresh"), systemImage: "arrow.clockwise")
+                                    }
                                 }
-                                .disabled(loadingModels)
                             } else {
-                                ForEach(Array(cands.prefix(40)), id: \.self) { m in
-                                    Button(m) { model = m }
+                                ForEach(cands, id: \.self) { m in
+                                    Button {
+                                        model = m
+                                    } label: {
+                                        if m == trimmedModel {
+                                            Label(m, systemImage: "checkmark")
+                                        } else {
+                                            Text(m)
+                                        }
+                                    }
+                                }
+                                Divider()
+                                Button {
+                                    loadCands(for: harness, force: true)
+                                } label: {
+                                    Label(hub.t("refresh"), systemImage: "arrow.clockwise")
                                 }
                             }
                         } label: {
@@ -126,19 +148,20 @@ struct CreateBotView: View {
                     harness = hub.settings?.defaultHarness ?? harnesses.first?.id ?? "opencode"
                 }
             }
-            .task(id: harness) {
+            .task(id: "\(harness)|\(hub.isConnected)|\(hub.modelsGeneration)") {
                 if hub.isConnected && (hub.models[harness] ?? []).isEmpty {
                     loadCands(for: harness)
                 }
             }
     }
 
-    private func loadCands(for target: String) {
-        guard !loadingModels else { return }
-        loadingModels = true
+    private func loadCands(for target: String, force: Bool = false) {
+        guard !target.isEmpty else { return }
+        guard force || !loadingModelsFor.contains(target) else { return }
+        loadingModelsFor.insert(target)
         Task {
-            _ = try? await hub.loadModels(target)
-            loadingModels = false
+            _ = try? await hub.loadModels(target, force: force)
+            loadingModelsFor.remove(target)
         }
     }
 

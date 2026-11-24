@@ -20,6 +20,7 @@ import (
 	"bot-hub/internal/config"
 	"bot-hub/internal/harness"
 	"bot-hub/internal/node"
+	"bot-hub/internal/protocol"
 	"bot-hub/internal/state"
 	"bot-hub/internal/syncer"
 	"bot-hub/internal/tunnel"
@@ -59,6 +60,7 @@ type Snapshot struct {
 	CanFailback         bool     `json:"canFailback"`
 	TailscaleBound      bool     `json:"tailscaleBound"`
 	TailscaleControlURL string   `json:"tailscaleControlUrl"`
+	DaemonProtocol      int      `json:"daemonProtocol,omitempty"`
 }
 
 // RemoteTarget describes a parsed remote connection link.
@@ -170,6 +172,7 @@ func (h *Host) Snapshot() Snapshot {
 		CanFailback:         p.Mode == "local" && linkTrimmed != "",
 		TailscaleBound:      p.TailscaleBound,
 		TailscaleControlURL: p.TailscaleControlURL,
+		DaemonProtocol:      protocol.CurrentProtocol,
 	}
 }
 

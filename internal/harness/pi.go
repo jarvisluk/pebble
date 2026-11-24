@@ -135,6 +135,10 @@ func (h *PiHarness) ListAgents(_ context.Context, bot config.BotConfig) ([]Agent
 	return mergeAgents(local), nil
 }
 
+func (h *PiHarness) resolveBinary() (string, bool) {
+	return resolveBinaryFor("PI_BIN", "pi", h.binary)
+}
+
 // Models lists `pi --list-models` as provider/model IDs (cached on success).
 func (h *PiHarness) Models(ctx context.Context) ([]string, error) {
 	h.modelsMu.Lock()
@@ -142,9 +146,15 @@ func (h *PiHarness) Models(ctx context.Context) ([]string, error) {
 	if len(h.models) > 0 {
 		return append([]string(nil), h.models...), nil
 	}
-	fctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	bin, ok := h.resolveBinary()
+	if !ok {
+		return nil, nil
+	}
+	fctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(fctx, h.binary, "--list-models", "--offline").Output()
+	cmd := exec.CommandContext(fctx, bin, "--list-models", "--offline")
+	cmd.Env = augmentedEnv(nil)
+	out, err := cmd.Output()
 	if err != nil {
 		return nil, nil
 	}

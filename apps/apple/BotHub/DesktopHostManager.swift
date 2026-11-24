@@ -23,12 +23,16 @@ struct DesktopHostSnapshot: Codable, Equatable {
     var canFailback: Bool = false
     var tailscaleBound: Bool = false
     var tailscaleControlUrl: String = ""
+    var daemonProtocol: Int? = nil
 }
 
 private struct DaemonHandshake: Codable {
     var url: String
     var token: String
     var dataDir: String
+    var protocolVersion: Int?
+    var capabilities: [String]?
+    var version: String?
 }
 
 @MainActor
@@ -41,6 +45,12 @@ final class DesktopHostManager {
     var ready = false
     var daemonError = ""
     var tsBinding = false
+    var daemonProtocol: Int = 0
+
+    var daemonOutdated: Bool {
+        let p = snapshot.daemonProtocol ?? daemonProtocol
+        return ready && p > 0 && p < ClientProtocol.current
+    }
 
     @ObservationIgnored private var process: Process?
     @ObservationIgnored private var stdinPipe: Pipe?
@@ -84,6 +94,7 @@ final class DesktopHostManager {
                     self.sseTask = nil
                     self.ready = false
                     self.starting = false
+                    self.daemonProtocol = 0
                     if p.terminationStatus != 0 {
                         self.daemonError = "host-daemon 异常退出（code \(p.terminationStatus)）"
                     }
@@ -127,6 +138,7 @@ final class DesktopHostManager {
         controlURL = hs.url
         controlToken = hs.token
         snapshot.dataDir = hs.dataDir
+        daemonProtocol = hs.protocolVersion ?? 1
         ready = true
         starting = false
         startControlStream()
@@ -151,6 +163,7 @@ final class DesktopHostManager {
         process = nil
         ready = false
         starting = false
+        daemonProtocol = 0
     }
 
     private func resolveBinaryPath() -> String? {

@@ -276,7 +276,10 @@ export const StepMagpie: React.FC<StepMagpieProps> = ({
                   onError('');
                   onBusyChange(true);
                   try {
-                    const list = await onLoadModels(selectedHarness);
+                    const d = await api<{ models?: string[] }>(
+                      `/api/models?harness=${encodeURIComponent(selectedHarness)}&source=magpie`
+                    );
+                    const list = d.models || [];
                     const model = defaultModel.trim() || list[0] || '';
                     if (!model) {
                       onError(t('ubPickModelFirst'));
