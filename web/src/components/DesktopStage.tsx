@@ -318,9 +318,10 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
     };
 
     statsTimerRef.current = window.setInterval(() => {
-      if (wsRef.current !== ws) return;
-      setFps(frameCount);
+      if (wsRef.current !== ws || document.hidden) return;
+      const next = frameCount;
       frameCount = 0;
+      setFps((prev) => (prev === next ? prev : next));
     }, 1000);
 
     ws.onmessage = (ev) => {

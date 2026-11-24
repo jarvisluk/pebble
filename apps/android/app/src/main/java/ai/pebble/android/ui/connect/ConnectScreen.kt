@@ -28,18 +28,6 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.rounded.ArrowOutward
-import androidx.compose.material.icons.rounded.Check
-import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.ContentPaste
-import androidx.compose.material.icons.rounded.DeleteOutline
-import androidx.compose.material.icons.rounded.ExpandLess
-import androidx.compose.material.icons.rounded.ExpandMore
-import androidx.compose.material.icons.rounded.Hub
-import androidx.compose.material.icons.rounded.QrCodeScanner
-import androidx.compose.material.icons.rounded.VpnKey
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -94,6 +82,8 @@ import ai.pebble.android.ui.theme.TagPill
 import ai.pebble.android.ui.theme.pebbleFieldColors
 import ai.pebble.android.ui.theme.readClipboardText
 import kotlinx.coroutines.launch
+import androidx.compose.ui.res.painterResource
+import ai.pebble.android.ui.theme.PebbleIcons
 
 private const val DESKTOP_DOWNLOAD_URL = "https://github.com/pebble-ai/bot-hub/releases/latest"
 
@@ -345,7 +335,7 @@ fun ConnectScreen(
                                 contentColor = p.onAccent,
                             ),
                         ) {
-                            Icon(Icons.Rounded.QrCodeScanner, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Icon(painterResource(PebbleIcons.QrCodeScanner), contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.size(8.dp))
                             Text(
                                 text = if (scanning) store.t("collapse") else store.t("scanConnect"),
@@ -459,11 +449,11 @@ fun ConnectScreen(
                 navigationIcon = {
                     if (isGate && isFreshOnboarding && manualOpen) {
                         IconButton(onClick = { manualOpen = false }) {
-                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = store.t("backBtn"), tint = p.text)
+                            Icon(painterResource(PebbleIcons.ArrowBack), contentDescription = store.t("backBtn"), tint = p.text)
                         }
                     } else if (!isGate && onClose != null) {
                         IconButton(onClick = onClose) {
-                            Icon(Icons.Rounded.Close, contentDescription = store.t("close"), tint = p.text)
+                            Icon(painterResource(PebbleIcons.Close), contentDescription = store.t("close"), tint = p.text)
                         }
                     }
                 },
@@ -554,7 +544,7 @@ fun ConnectScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
-                            Icon(Icons.Rounded.QrCodeScanner, contentDescription = null, tint = p.accent)
+                            Icon(painterResource(PebbleIcons.QrCodeScanner), contentDescription = null, tint = p.accent)
                             Text(
                                 text = if (scanning) store.t("collapse") else store.t("scanConnect"),
                                 color = p.text,
@@ -602,7 +592,7 @@ fun ConnectScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            Icon(Icons.Rounded.ContentPaste, contentDescription = null, tint = p.accent, modifier = Modifier.size(18.dp))
+                            Icon(painterResource(PebbleIcons.ContentPaste), contentDescription = null, tint = p.accent, modifier = Modifier.size(18.dp))
                             Text(store.t("pasteLinkBtn"), color = p.accent, fontSize = PebbleFont.body, fontWeight = FontWeight.Medium)
                         }
 
@@ -623,7 +613,7 @@ fun ConnectScreen(
                                 modifier = Modifier.weight(1f),
                             )
                             Icon(
-                                imageVector = if (manualAdvOpen) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                                painter = painterResource(if (manualAdvOpen) PebbleIcons.ExpandLess else PebbleIcons.ExpandMore),
                                 contentDescription = null,
                                 tint = p.mute,
                             )
@@ -776,7 +766,7 @@ fun ConnectScreen(
                                                     overflow = TextOverflow.Ellipsis,
                                                 )
                                             }
-                                            Icon(Icons.Rounded.ArrowOutward, contentDescription = null, tint = p.accent, modifier = Modifier.size(18.dp))
+                                            Icon(painterResource(PebbleIcons.ArrowOutward), contentDescription = null, tint = p.accent, modifier = Modifier.size(18.dp))
                                         }
                                     }
                                 }
@@ -786,7 +776,7 @@ fun ConnectScreen(
                                     modifier = Modifier.fillMaxWidth(),
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
-                                    Icon(Icons.Rounded.VpnKey, contentDescription = null, tint = p.accent, modifier = Modifier.size(18.dp))
+                                    Icon(painterResource(PebbleIcons.VpnKey), contentDescription = null, tint = p.accent, modifier = Modifier.size(18.dp))
                                     Spacer(Modifier.size(8.dp))
                                     Text(store.t("tsNeedsLogin"), color = p.text, fontSize = PebbleFont.body, modifier = Modifier.weight(1f))
                                     val auth = ts?.authUrl
@@ -832,7 +822,7 @@ fun ConnectScreen(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                                 ) {
-                                    Icon(Icons.Rounded.Hub, contentDescription = null, tint = p.accent, modifier = Modifier.size(18.dp))
+                                    Icon(painterResource(PebbleIcons.Hub), contentDescription = null, tint = p.accent, modifier = Modifier.size(18.dp))
                                     Text(store.t("tsBindAccount"), color = p.text, fontSize = PebbleFont.body, fontWeight = FontWeight.Medium)
                                 }
                                 CardDivider()
@@ -846,7 +836,7 @@ fun ConnectScreen(
                                 ) {
                                     Text(store.t("tsAdvanced"), color = p.text2, fontSize = PebbleFont.secondary, modifier = Modifier.weight(1f))
                                     Icon(
-                                        imageVector = if (tsAdvOpen) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                                        painter = painterResource(if (tsAdvOpen) PebbleIcons.ExpandLess else PebbleIcons.ExpandMore),
                                         contentDescription = null,
                                         tint = p.mute,
                                     )
@@ -937,10 +927,10 @@ private fun SavedHostRow(
             )
         }
         if (isActive) {
-            Icon(Icons.Rounded.Check, contentDescription = null, tint = p.accent, modifier = Modifier.size(18.dp))
+            Icon(painterResource(PebbleIcons.Check), contentDescription = null, tint = p.accent, modifier = Modifier.size(18.dp))
         }
         IconButton(onClick = onDelete) {
-            Icon(Icons.Rounded.DeleteOutline, contentDescription = null, tint = p.mute, modifier = Modifier.size(19.dp))
+            Icon(painterResource(PebbleIcons.DeleteOutline), contentDescription = null, tint = p.mute, modifier = Modifier.size(19.dp))
         }
     }
 }

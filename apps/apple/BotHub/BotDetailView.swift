@@ -5,6 +5,7 @@ struct BotDetailView: View {
     @Environment(HubStore.self) private var hub
     @Environment(Router.self) private var router
     @Environment(\.palette) private var p
+    @Environment(\.hubWindowVisible) private var windowVisible
     var botId: String
     @Binding var isPresented: Bool
 
@@ -47,16 +48,19 @@ struct BotDetailView: View {
             .scrollDismissesKeyboard(.interactively)
             .background(p.page.ignoresSafeArea())
         }
-        .task(id: "\(botId)-\(effectiveTarget)") {
-            if hub.isConnected {
-                if hub.desktopTargets.isEmpty {
-                    _ = try? await hub.refreshDesktopTargets()
-                }
-                if let req = hub.makeDesktopWSRequest(target: effectiveTarget) {
-                    previewStream.start(request: req)
-                }
+        .task(id: botId) {
+            if hub.isConnected && hub.desktopTargets.isEmpty {
+                _ = try? await hub.refreshDesktopTargets()
             }
             try? await hub.fetchRoutines(botId)
+        }
+        .task(id: "\(botId)-\(hub.isConnected)-\(windowVisible)-\(effectiveTarget)") {
+            guard windowVisible, hub.isConnected,
+                  let req = hub.makeDesktopWSRequest(target: effectiveTarget, preset: "preview") else {
+                previewStream.stop()
+                return
+            }
+            previewStream.start(request: req, trackFPS: false)
         }
         .onDisappear { previewStream.stop() }
     }

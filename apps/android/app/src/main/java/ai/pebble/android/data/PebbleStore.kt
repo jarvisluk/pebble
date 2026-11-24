@@ -40,11 +40,16 @@ fun parseIsoInstant(s: String?): Instant? {
     return runCatching { Instant.parse(s) }.getOrNull()
 }
 
+private val hhmmEnFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("h:mm a", Locale.US)
+private val hhmmZhFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm", Locale.CHINA)
+private val previewCodeRegex = Regex("```[\\s\\S]*?```")
+private val previewMdRegex = Regex("[#>*`_\\[\\]]")
+private val previewWsRegex = Regex("\\s+")
+
 private fun formatHhMm(instant: Instant): String {
     val zdt = instant.atZone(ZoneId.systemDefault())
-    val pattern = if (L.lang == "en") "h:mm a" else "HH:mm"
-    val loc = if (L.lang == "en") Locale.US else Locale.CHINA
-    return DateTimeFormatter.ofPattern(pattern, loc).format(zdt)
+    val fmt = if (L.lang == "en") hhmmEnFormatter else hhmmZhFormatter
+    return fmt.format(zdt)
 }
 
 fun formatShortTime(iso: String?): String {
@@ -78,9 +83,9 @@ fun formatClockTime(iso: String?): String {
 }
 
 fun plainPreview(s: String): String {
-    var out = s.replace(Regex("```[\\s\\S]*?```"), L.t("codeTag"))
-    out = out.replace(Regex("[#>*`_\\[\\]]"), "")
-    out = out.replace(Regex("\\s+"), " ")
+    var out = s.replace(previewCodeRegex, L.t("codeTag"))
+    out = out.replace(previewMdRegex, "")
+    out = out.replace(previewWsRegex, " ")
     return out.trim()
 }
 
@@ -114,7 +119,8 @@ class PebbleStore(context: Context) {
     private val secureStore = SecureStore(appContext)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val stream = EventStream()
-    private val mediaCache = LinkedHashMap<String, ByteArray>(32, 0.75f, true)
+    private val mediaCache = LinkedHashMap<String, ByteArray>(64, 0.75f, true)
+    private var mediaCacheBytes = 0L
 
     // Preferences
     var themePref by mutableStateOf(prefs.getString("pebble.theme", "system") ?: "system")
@@ -397,7 +403,7 @@ class PebbleStore(context: Context) {
                         NotificationHelper.updateBotActivity(appContext, st.id, st.displayName, statusLabel, botSteps[st.id] ?: 0)
                     }
                 } else {
-                    tools.remove(st.id)
+                    if (tools.containsKey(st.id)) tools.remove(st.id)
                     val hadBusy = activeBusyBots.remove(st.id) || wasBusy
                     val steps = botSteps.remove(st.id) ?: 0
                     if (hadBusy && !inForeground) {
@@ -413,7 +419,7 @@ class PebbleStore(context: Context) {
             "tool_use" -> {
                 val bid = p["botId"]?.asDisplayString() ?: return
                 val tool = p["tool"]?.asDisplayString().orEmpty()
-                tools[bid] = tool
+                if (tools[bid] != tool) tools[bid] = tool
                 if (tool.isNotBlank()) {
                     val steps = (botSteps[bid] ?: 0) + 1
                     botSteps[bid] = steps
@@ -767,12 +773,18 @@ class PebbleStore(context: Context) {
             mediaCache[key]?.let { return it }
         }
         val bytes = api.rawBytes(path)
+        val maxEntries = 64
+        val maxBytes = 32L * 1024L * 1024L
         synchronized(mediaCache) {
-            if (mediaCache.size >= 40) {
-                val oldest = mediaCache.keys.firstOrNull()
-                if (oldest != null) mediaCache.remove(oldest)
+            mediaCache.remove(key)?.let { mediaCacheBytes -= it.size }
+            while (mediaCache.isNotEmpty() && (mediaCache.size >= maxEntries || mediaCacheBytes + bytes.size > maxBytes)) {
+                val it = mediaCache.entries.iterator()
+                val eldest = it.next()
+                mediaCacheBytes -= eldest.value.size
+                it.remove()
             }
             mediaCache[key] = bytes
+            mediaCacheBytes += bytes.size
         }
         return bytes
     }
@@ -1100,14 +1112,15 @@ class PebbleStore(context: Context) {
             ),
         )
 
-    fun makeDesktopWsUrl(target: String): String? {
+    fun makeDesktopWsUrl(target: String, preset: String? = null): String? {
         if (baseURL.isBlank()) return null
         val wsBase = when {
             baseURL.startsWith("https://", ignoreCase = true) -> "wss://" + baseURL.substring(8)
             baseURL.startsWith("http://", ignoreCase = true) -> "ws://" + baseURL.substring(7)
             else -> return null
         }
-        return "$wsBase/api/desktop/stream/ws?target=${encodeURIComponent(target)}&codec=hevc"
+        val presetPart = if (!preset.isNullOrBlank()) "&preset=${encodeURIComponent(preset)}" else ""
+        return "$wsBase/api/desktop/stream/ws?target=${encodeURIComponent(target)}&codec=hevc$presetPart"
     }
 
     suspend fun sendDesktopInput(body: Map<String, Any?>) {

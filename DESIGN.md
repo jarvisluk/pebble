@@ -73,7 +73,7 @@ Web 样式按 `tokens.css` → `primitives.css` → `layout.css` → `features.c
 
 - **字段与选择**：输入框、`<select>`、文本域统一高 `36px`、`--r-row`、`--s1` 底、`1px` 透明边（悬停 `--s2`、焦点 `--accent`）；下拉用原生 `<select>` 或 `<input list>` + `<datalist>`；复选框用原生 checkbox + `accent-color: var(--accent)`；按钮高 `36px` 全圆角 `600` 字重；焦点 `outline: 2px solid var(--accent)`。
 - **卡片与面板**：`--card` 底、`--r-card` 圆角；单层卡片内列表行直接铺在卡片上、行间 `1px --s2` 分隔线，`--s1` 只留给 `.note` 提示块与展开表单。
-- **头像**：8 种无底色圆矢量造型（`blob` + `pebble-1`~`pebble-7`），支持呼吸、眨眼、游移与工作态扫视；未自定义色时按列表序或 ID 哈希取 7 色色板 `#d9774b #e0a23a #7fa14a #7aaa98 #5b8bb5 #9a7bc0 #c4605e`。尺寸：列表 `40` · 会话头 `28` · 详情 `64` · 空会话 `72` · 对话框 `44` · 设置行 `28` · 工作中 `24` · 协作标签 `16`。
+- **头像**：8 种无底色圆矢量造型（`blob` + `pebble-1`~`pebble-7`），未自定义色时按列表序或 ID 哈希取 7 色色板 `#d9774b #e0a23a #7fa14a #7aaa98 #5b8bb5 #9a7bc0 #c4605e`。尺寸：列表 `40` · 会话头 `28` · 详情 `64` · 空会话 `72` · 对话框 `44` · 设置行 `28` · 工作中 `24` · 协作标签 `16`。动效采用按需驱动：静息态保持静止零功耗（0 FPS），仅在工作态（`busy` 呼吸与扫视，低帧率节流）、点击/选中弹跳（1.4s 后停止）或 Web 指针悬停凝视（移开收敛后停止）时驱动重绘。
 - **气泡**：Bot 用 `--card`，我的用 `--bot-accent-soft`（深色 `#2a2a2a`）配正文色，内边距 `10×16`。
 
 ## 7. 引导页模式
@@ -82,7 +82,7 @@ Web 样式按 `tokens.css` → `primitives.css` → `layout.css` → `features.c
 
 ## 8. 动效
 
-统一使用 `:root` Token：`--ease-out: cubic-bezier(.22, 1, .36, 1)`、`--dur-fast: 150ms`、`--dur-view: 220ms`、`--dur-panel: 250ms`，并遵循 `prefers-reduced-motion: reduce`。
+统一使用 `:root` Token：`--ease-out: cubic-bezier(.22, 1, .36, 1)`、`--dur-fast: 150ms`、`--dur-view: 220ms`、`--dur-panel: 250ms`，并遵循 `prefers-reduced-motion: reduce`。窗口不可见、最小化、被完全遮挡或应用进入后台时自动暂停一切持续动效、脉冲指示与视频流预览，确保闲置零占用。
 
 | 场景 | 动效 |
 |---|---|
@@ -98,7 +98,7 @@ Web 样式按 `tokens.css` → `primitives.css` → `layout.css` → `features.c
 
 - **布局分支**：只按 `horizontalSizeClass` / 视口宽度分支，不按设备类型分支；列表样式、底色与边距显式声明。
 - **启动门禁**：未连接可用主机或未选定桌面运行模式时停留在全屏连接/模式选择页，就绪后进入主界面。
-- **导航与弹层**：`NavigationSplitView`（窄屏折叠为栈）；设置、新建、配对等用 `Form` / `List` + 系统 sheet；文件与远程桌面工作台（Stage）在移动端以全屏模态展示、在 macOS 原生端于主窗口内全窗切换展示（左上角提供返回会话按钮，远程桌面支持鼠标、滚轮与原生键盘事件透传），同时保留菜单栏 `MenuBarExtra`。
+- **导航与弹层**：`NavigationSplitView`（窄屏折叠为栈）；设置、新建、配对等使用统一跨端表单与 Sheet 原语（Apple 端遵循 `Theme.swift` 原语白名单，避免裸用跨端渲染分裂的系统默认 `Form` 与宽屏 `List(.sidebar)`，详见 `docs/rules/native-clients.md`）；文件与远程桌面工作台（Stage）在移动端以全屏模态展示、在 macOS 原生端于主窗口内全窗切换展示（左上角提供返回会话按钮，远程桌面支持鼠标、滚轮与原生键盘事件透传），同时保留菜单栏 `MenuBarExtra`。
 - **控件与颜色**：使用系统胶囊按钮、`Picker`、`Toggle`、`alert` 与 `ContentUnavailableView`；页面底 `--page`、卡片 `--card`，全局 `tint` 保持中性，Bot 局部强调取头像色。
 - **保留自绘**：仅 Bot 头像、消息气泡（含附件）、协作提示条、输入附件与 `/` / `@` 联想条、远程桌面舞台。
 - **字号**：全端统一清晰 6 档常量（对应 `caption / secondary / body / cardTitle / title / hero`，禁止在业务视图中散落硬编码字号）：桌面端（Web / macOS 原生）遵循第 3 节 `12 / 13 / 14 / 15 / 17 / 20`；移动端（iOS / iPadOS / Android 原生）采用 `12 / 13 / 15 / 16 / 17 / 20`（正文 `15`、顶栏/卡片标题 `16`，其余档位与桌面一致）。

@@ -29,19 +29,42 @@ func resolveDefaultModel(_ g: String, _ h: String) -> String {
     return h.isEmpty || h == "opencode" || h == "pi" ? g : ""
 }
 
-func parseISO(_ s: String?) -> Date? {
-    guard let s, !s.isEmpty else { return nil }
+private let isoLock = NSLock()
+private let isoFracFormatter: ISO8601DateFormatter = {
     let f = ISO8601DateFormatter()
     f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-    if let d = f.date(from: s) { return d }
+    return f
+}()
+private let isoPlainFormatter: ISO8601DateFormatter = {
+    let f = ISO8601DateFormatter()
     f.formatOptions = [.withInternetDateTime]
-    return f.date(from: s)
+    return f
+}()
+private let hhmmEnFormatter: DateFormatter = {
+    let f = DateFormatter()
+    f.locale = Locale(identifier: "en_US")
+    f.dateFormat = "h:mm a"
+    return f
+}()
+private let hhmmZhFormatter: DateFormatter = {
+    let f = DateFormatter()
+    f.locale = Locale(identifier: "zh_CN")
+    f.dateFormat = "HH:mm"
+    return f
+}()
+
+func parseISO(_ s: String?) -> Date? {
+    guard let s, !s.isEmpty else { return nil }
+    isoLock.lock()
+    defer { isoLock.unlock() }
+    if let d = isoFracFormatter.date(from: s) { return d }
+    return isoPlainFormatter.date(from: s)
 }
 
 private func hhmm(_ d: Date) -> String {
-    let f = DateFormatter()
-    f.locale = Locale(identifier: L.lang == "en" ? "en_US" : "zh_CN")
-    f.dateFormat = L.lang == "en" ? "h:mm a" : "HH:mm"
+    isoLock.lock()
+    defer { isoLock.unlock() }
+    let f = L.lang == "en" ? hhmmEnFormatter : hhmmZhFormatter
     return f.string(from: d)
 }
 
@@ -64,10 +87,21 @@ func formatStamp(_ iso: String?) -> String {
     return L.lang == "en" ? "\(c.month ?? 0)/\(c.day ?? 0) \(t)" : "\(c.month ?? 0)月\(c.day ?? 0)日 \(t)"
 }
 
+private let previewCodeRegex = try? NSRegularExpression(pattern: "```[\\s\\S]*?```")
+private let previewMdRegex = try? NSRegularExpression(pattern: "[#>*`_\\[\\]]")
+private let previewWsRegex = try? NSRegularExpression(pattern: "\\s+")
+
 func plainPreview(_ s: String) -> String {
-    var out = s.replacingOccurrences(of: "```[\\s\\S]*?```", with: L.t("codeTag"), options: .regularExpression)
-    out = out.replacingOccurrences(of: "[#>*`_\\[\\]]", with: "", options: .regularExpression)
-    out = out.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+    var out = s
+    if let re = previewCodeRegex {
+        out = re.stringByReplacingMatches(in: out, range: NSRange(out.startIndex..., in: out), withTemplate: NSRegularExpression.escapedTemplate(for: L.t("codeTag")))
+    }
+    if let re = previewMdRegex {
+        out = re.stringByReplacingMatches(in: out, range: NSRange(out.startIndex..., in: out), withTemplate: "")
+    }
+    if let re = previewWsRegex {
+        out = re.stringByReplacingMatches(in: out, range: NSRange(out.startIndex..., in: out), withTemplate: " ")
+    }
     return out.trimmingCharacters(in: .whitespaces)
 }
 
@@ -253,7 +287,9 @@ final class HubStore {
 
     private func startStream(_ url: String, _ tok: String) {
         stream.start(base: url, token: tok,
-                     onStatus: { [weak self] ok in self?.online = ok },
+                     onStatus: { [weak self] ok in
+                         if self?.online != ok { self?.online = ok }
+                     },
                      onUnauthorized: { [weak self] in
                          self?.connState = .unauthorized
                          self?.connError = L.t("needsToken")
@@ -270,13 +306,13 @@ final class HubStore {
         case "bot_status":
             if let st = decodeAny(p, as: BotStatus.self) {
                 upsertBot(st)
-                if !st.isBusy { tools[st.id] = nil }
+                if !st.isBusy && tools[st.id] != nil { tools[st.id] = nil }
                 LiveActivityManager.shared.handleBotStatus(st)
             }
         case "tool_use":
             if let bid = p["botId"] as? String {
                 let tool = (p["tool"] as? String) ?? ""
-                tools[bid] = tool
+                if tools[bid] != tool { tools[bid] = tool }
                 LiveActivityManager.shared.handleToolUse(botId: bid, tool: tool)
             }
         case "bot_created":
@@ -983,14 +1019,18 @@ final class HubStore {
         try await api.call("/api/desktop/frame?target=\(enc(target))&windowId=&maxDim=1280&quality=72")
     }
 
-    func makeDesktopWSRequest(target: String) -> URLRequest? {
+    func makeDesktopWSRequest(target: String, preset: String? = nil) -> URLRequest? {
         guard !baseURL.isEmpty, var comps = URLComponents(string: baseURL) else { return nil }
         comps.scheme = (comps.scheme?.lowercased() == "https") ? "wss" : "ws"
         comps.path = "/api/desktop/stream/ws"
-        comps.queryItems = [
+        var q = [
             URLQueryItem(name: "target", value: target),
             URLQueryItem(name: "codec", value: "hevc"),
         ]
+        if let preset, !preset.isEmpty {
+            q.append(URLQueryItem(name: "preset", value: preset))
+        }
+        comps.queryItems = q
         guard let url = comps.url else { return nil }
         var req = URLRequest(url: url)
         if !authToken.isEmpty {

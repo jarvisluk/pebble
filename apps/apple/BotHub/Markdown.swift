@@ -135,6 +135,62 @@ struct MarkdownText: View {
         }
     }
 
+    private final class ParsedBlocksBox {
+        let blocks: [Block]
+        init(_ blocks: [Block]) { self.blocks = blocks }
+    }
+
+    private final class InlineAttrBox {
+        let attr: AttributedString
+        init(_ attr: AttributedString) { self.attr = attr }
+    }
+
+    private static let parsedCache: NSCache<NSString, ParsedBlocksBox> = {
+        let c = NSCache<NSString, ParsedBlocksBox>()
+        c.countLimit = 256
+        return c
+    }()
+
+    private static let inlineCache: NSCache<NSString, InlineAttrBox> = {
+        let c = NSCache<NSString, InlineAttrBox>()
+        c.countLimit = 512
+        return c
+    }()
+
+    private static func compileRegex(_ pattern: String, options: NSRegularExpression.Options = []) -> NSRegularExpression {
+        try! NSRegularExpression(pattern: pattern, options: options)
+    }
+
+    private static let rxDetailsOpen = compileRegex("^<details(\\s+open)?\\s*>", options: [.caseInsensitive])
+    private static let rxDetailsClose = compileRegex("</details>", options: [.caseInsensitive])
+    private static let rxSummary = compileRegex("<summary>([\\s\\S]*?)</summary>", options: [.caseInsensitive])
+    private static let rxSummaryOpen = compileRegex("^<summary>", options: [.caseInsensitive])
+    private static let rxSummaryClose = compileRegex("</summary>$", options: [.caseInsensitive])
+    private static let rxHeading = compileRegex("^#{1,6}\\s+")
+    private static let rxRule = compileRegex("^(?:-\\s*){3,}$|^(?:\\*\\s*){3,}$|^(?:_\\s*){3,}$")
+    private static let rxTableAlign = compileRegex("^:?-{3,}:?$")
+    private static let rxListUl = compileRegex("^[-*+]\\s+")
+    private static let rxListOl = compileRegex("^(\\d+)[.)]\\s+")
+    private static let rxListTask = compileRegex("^\\[[xX ]\\]\\s+")
+    private static let rxFootnoteDef = compileRegex("^\\[\\^([^\\]]+)\\]:\\s*")
+    private static let rxSafeTag = compileRegex("^<(sup|sub|u|s|del|b|strong|i|em|code|kbd|mark)>([\\s\\S]*?)</\\1>", options: [.caseInsensitive])
+    private static let rxBrTag = compileRegex("^<br\\s*/?>", options: [.caseInsensitive])
+    private static let rxAutolink = compileRegex("^<(https?://[^>\\s]+|mailto:[^>\\s]+)>", options: [.caseInsensitive])
+    private static let rxFootnoteRef = compileRegex("^\\[\\^([^\\]]+)\\](?!:)")
+    private static let rxNumericOnly = compileRegex("^\\d+(?:[.,]\\d+)?$")
+    private static let rxBareURL = compileRegex("^https?://[^\\s<]+")
+
+    private static func firstRange(_ rx: NSRegularExpression, in s: String, anchored: Bool = false) -> Range<String.Index>? {
+        let nsRange = NSRange(s.startIndex..., in: s)
+        let opts: NSRegularExpression.MatchingOptions = anchored ? [.anchored] : []
+        guard let m = rx.firstMatch(in: s, options: opts, range: nsRange) else { return nil }
+        return Range(m.range, in: s)
+    }
+
+    private static func hasMatch(_ rx: NSRegularExpression, in s: String) -> Bool {
+        firstRange(rx, in: s) != nil
+    }
+
     private func inline(_ s: String, baseColor: Color) -> Text {
         Text(Self.buildInlineAttributed(s, palette: p, baseColor: baseColor))
     }
@@ -142,6 +198,10 @@ struct MarkdownText: View {
     // MARK: - Block Parser
 
     static func parse(_ src: String) -> [Block] {
+        let cacheKey = src as NSString
+        if let cached = parsedCache.object(forKey: cacheKey) {
+            return cached.blocks
+        }
         var out: [Block] = []
         let lines = src.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n")
         var i = 0
@@ -214,10 +274,10 @@ struct MarkdownText: View {
             }
 
             // 3. <details>...</details> collapsible block
-            if let dm = t.range(of: "^<details(\\s+open)?\\s*>", options: [.regularExpression, .caseInsensitive]) {
+            if let dm = firstRange(rxDetailsOpen, in: t) {
                 var endLineIdx: Int? = nil
                 for k in i..<lines.count {
-                    if lines[k].range(of: "</details>", options: .caseInsensitive) != nil {
+                    if hasMatch(rxDetailsClose, in: lines[k]) {
                         endLineIdx = k
                         break
                     }
@@ -239,12 +299,15 @@ struct MarkdownText: View {
                     rawBlock = rawBlock.trimmingCharacters(in: .whitespacesAndNewlines)
                     var summary = "详情"
                     var bodyText = rawBlock
-                    if let sm = rawBlock.range(of: "<summary>([\\s\\S]*?)</summary>", options: [.regularExpression, .caseInsensitive]) {
-                        let matched = String(rawBlock[sm])
-                        let inner = matched
-                            .replacingOccurrences(of: "(?i)^<summary>", with: "", options: .regularExpression)
-                            .replacingOccurrences(of: "(?i)</summary>$", with: "", options: .regularExpression)
-                            .trimmingCharacters(in: .whitespacesAndNewlines)
+                    if let sm = firstRange(rxSummary, in: rawBlock) {
+                        var inner = String(rawBlock[sm])
+                        if let openR = firstRange(rxSummaryOpen, in: inner) {
+                            inner.removeSubrange(openR)
+                        }
+                        if let closeR = firstRange(rxSummaryClose, in: inner) {
+                            inner.removeSubrange(closeR)
+                        }
+                        inner = inner.trimmingCharacters(in: .whitespacesAndNewlines)
                         if !inner.isEmpty { summary = inner }
                         bodyText.removeSubrange(sm)
                         bodyText = bodyText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -265,7 +328,7 @@ struct MarkdownText: View {
             }
 
             // 5. Headings H1–H6
-            if let m = t.range(of: "^#{1,6}\\s+", options: .regularExpression) {
+            if let m = firstRange(rxHeading, in: t) {
                 flushPara()
                 flushList()
                 let level = t[m].filter { $0 == "#" }.count
@@ -275,7 +338,7 @@ struct MarkdownText: View {
             }
 
             // 6. Horizontal rule
-            if t.range(of: "^(?:-\\s*){3,}$|^(?:\\*\\s*){3,}$|^(?:_\\s*){3,}$", options: .regularExpression) != nil {
+            if hasMatch(rxRule, in: t) {
                 flushPara()
                 flushList()
                 out.append(.rule)
@@ -358,6 +421,7 @@ struct MarkdownText: View {
 
         flushPara()
         flushList()
+        parsedCache.setObject(ParsedBlocksBox(out), forKey: cacheKey)
         return out
     }
 
@@ -414,7 +478,7 @@ struct MarkdownText: View {
         guard !cells.isEmpty else { return nil }
         var aligns: [TableAlign] = []
         for c in cells {
-            guard c.range(of: "^:?-{3,}:?$", options: .regularExpression) != nil else { return nil }
+            guard hasMatch(rxTableAlign, in: c) else { return nil }
             if c.hasPrefix(":") && c.hasSuffix(":") { aligns.append(.center) }
             else if c.hasSuffix(":") { aligns.append(.right) }
             else { aligns.append(.left) }
@@ -437,9 +501,9 @@ struct MarkdownText: View {
 
         var marker = "•"
         var body = ""
-        if let m = rest.range(of: "^[-*+]\\s+", options: .regularExpression) {
+        if let m = firstRange(rxListUl, in: rest) {
             body = String(rest[m.upperBound...])
-        } else if let m = rest.range(of: "^\\d+[.)]\\s+", options: .regularExpression) {
+        } else if let m = firstRange(rxListOl, in: rest) {
             let digits = rest[m].prefix { $0.isNumber }
             marker = "\(digits)."
             body = String(rest[m.upperBound...])
@@ -449,7 +513,7 @@ struct MarkdownText: View {
 
         var task = false
         var checked = false
-        if let tm = body.range(of: "^\\[[xX ]\\]\\s+", options: .regularExpression) {
+        if let tm = firstRange(rxListTask, in: body) {
             task = true
             let markChar = body[body.index(after: body.startIndex)]
             checked = markChar == "x" || markChar == "X"
@@ -459,7 +523,7 @@ struct MarkdownText: View {
     }
 
     private static func parseFootnoteDef(_ t: String) -> (id: String, text: String)? {
-        guard let m = t.range(of: "^\\[\\^([^\\]]+)\\]:\\s*", options: .regularExpression) else { return nil }
+        guard let m = firstRange(rxFootnoteDef, in: t) else { return nil }
         let prefix = String(t[m])
         guard let closeIdx = prefix.firstIndex(of: "]") else { return nil }
         let idStart = prefix.index(prefix.startIndex, offsetBy: 2)
@@ -752,7 +816,7 @@ struct MarkdownText: View {
     private static let safeInlineTags = Set(["sup", "sub", "u", "s", "del", "b", "strong", "i", "em", "code", "kbd", "mark"])
 
     private static func matchSafeInlineTag(_ src: String) -> (tag: String, inner: String, length: Int)? {
-        guard let m = src.range(of: "^<(sup|sub|u|s|del|b|strong|i|em|code|kbd|mark)>([\\s\\S]*?)</\\1>", options: [.regularExpression, .caseInsensitive]) else {
+        guard let m = firstRange(rxSafeTag, in: src, anchored: true) else {
             return nil
         }
         let full = String(src[m])
@@ -771,6 +835,10 @@ struct MarkdownText: View {
             var plain = AttributedString(src)
             plain.foregroundColor = baseColor
             return plain
+        }
+        let cacheKey: NSString? = depth == 0 ? ("\(palette.dark ? 1 : 0)|\(baseColor.description)|\(src)" as NSString) : nil
+        if let cacheKey, let cached = inlineCache.object(forKey: cacheKey) {
+            return cached.attr
         }
 
         let chars = Array(src)
@@ -842,7 +910,7 @@ struct MarkdownText: View {
             // 3. <br> / safe attribute-free HTML tags / autolink <https://...>
             if ch == "<" {
                 let tail = String(chars[i...])
-                if let m = tail.range(of: "^<br\\s*/?>", options: [.regularExpression, .caseInsensitive]) {
+                if let m = firstRange(rxBrTag, in: tail, anchored: true) {
                     plainBuf.append("\n")
                     i += tail[m].count
                     continue
@@ -883,7 +951,7 @@ struct MarkdownText: View {
                     i += safeTag.length
                     continue
                 }
-                if let m = tail.range(of: "^<(https?://[^>\\s]+|mailto:[^>\\s]+)>", options: [.regularExpression, .caseInsensitive]) {
+                if let m = firstRange(rxAutolink, in: tail, anchored: true) {
                     let matched = String(tail[m])
                     let urlStr = String(matched.dropFirst().dropLast())
                     if let url = URL(string: urlStr) {
@@ -927,7 +995,7 @@ struct MarkdownText: View {
             // 5. Footnote ref [^id]
             if ch == "[", i + 1 < n, chars[i + 1] == "^" {
                 let tail = String(chars[i...])
-                if let m = tail.range(of: "^\\[\\^([^\\]]+)\\](?!:)", options: .regularExpression) {
+                if let m = firstRange(rxFootnoteRef, in: tail, anchored: true) {
                     let matched = String(tail[m])
                     let id = String(matched.dropFirst(2).dropLast())
                     flushPlain()
@@ -983,7 +1051,7 @@ struct MarkdownText: View {
                 }
                 if let end {
                     let expr = String(chars[(i + 1)..<end])
-                    if expr.range(of: "^\\d+(?:[.,]\\d+)?$", options: .regularExpression) == nil {
+                    if !hasMatch(rxNumericOnly, in: expr) {
                         flushPlain()
                         var padL = AttributedString(" ")
                         padL.backgroundColor = palette.s1
@@ -1059,7 +1127,7 @@ struct MarkdownText: View {
             // 12. Bare URL
             if ch == "h", (i == 0 || chars[i - 1].isWhitespace || chars[i - 1] == "(") {
                 let tail = String(chars[i...])
-                if let m = tail.range(of: "^https?://[^\\s<]+", options: .regularExpression) {
+                if let m = firstRange(rxBareURL, in: tail, anchored: true) {
                     let rawUrl = String(tail[m])
                     let (cleanUrl, trailing) = splitTrailingPunct(rawUrl)
                     if cleanUrl.count > 8, let url = URL(string: cleanUrl) {
@@ -1081,6 +1149,9 @@ struct MarkdownText: View {
         }
 
         flushPlain()
+        if let cacheKey {
+            inlineCache.setObject(InlineAttrBox(result), forKey: cacheKey)
+        }
         return result
     }
 

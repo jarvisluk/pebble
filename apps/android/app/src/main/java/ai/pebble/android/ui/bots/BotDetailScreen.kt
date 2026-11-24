@@ -25,16 +25,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Add
-import androidx.compose.material.icons.rounded.Check
-import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.DesktopWindows
-import androidx.compose.material.icons.rounded.ExpandLess
-import androidx.compose.material.icons.rounded.ExpandMore
-import androidx.compose.material.icons.rounded.Folder
-import androidx.compose.material.icons.rounded.MoreVert
-import androidx.compose.material.icons.rounded.OpenInFull
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -58,6 +48,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -66,6 +57,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -103,6 +97,8 @@ import ai.pebble.android.ui.theme.copyToClipboard
 import ai.pebble.android.ui.theme.pebbleFieldColors
 import kotlinx.coroutines.launch
 import java.util.Locale
+import androidx.compose.ui.res.painterResource
+import ai.pebble.android.ui.theme.PebbleIcons
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -154,7 +150,18 @@ fun BotDetailScreen(
         ?: "local"
     val previewBadgeLabel = store.desktopTargets.firstOrNull { it.id == previewTarget }?.name?.takeIf { it.isNotEmpty() }
         ?: previewTarget
-    val previewWsUrl = store.makeDesktopWsUrl(previewTarget).orEmpty()
+    val previewWsUrl = store.makeDesktopWsUrl(previewTarget, preset = "preview").orEmpty()
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var isStarted by remember(lifecycleOwner) {
+        mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))
+    }
+    DisposableEffect(lifecycleOwner) {
+        val obs = LifecycleEventObserver { _, _ ->
+            isStarted = lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+        }
+        lifecycleOwner.lifecycle.addObserver(obs)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
+    }
 
     Scaffold(
         containerColor = p.page,
@@ -166,7 +173,7 @@ fun BotDetailScreen(
                 ),
                 navigationIcon = {
                     IconButton(onClick = onClose) {
-                        Icon(Icons.Rounded.Close, contentDescription = store.t("close"), tint = p.text)
+                        Icon(painterResource(PebbleIcons.Close), contentDescription = store.t("close"), tint = p.text)
                     }
                 },
                 title = {
@@ -207,8 +214,9 @@ fun BotDetailScreen(
                         H264SurfaceView(
                             url = previewWsUrl,
                             token = store.authToken,
-                            preset = "low",
-                            active = true,
+                            preset = "preview",
+                            active = isStarted,
+                            trackFps = false,
                             onStatus = { connected, _ -> previewConnected = connected },
                             onStreamError = { _, msg -> previewError = msg },
                             modifier = Modifier.fillMaxSize(),
@@ -223,7 +231,7 @@ fun BotDetailScreen(
                             verticalArrangement = Arrangement.spacedBy(6.dp),
                         ) {
                             if (previewError.isNotEmpty()) {
-                                Icon(Icons.Rounded.DesktopWindows, contentDescription = null, tint = Color.White.copy(alpha = 0.6f))
+                                Icon(painterResource(PebbleIcons.DesktopWindows), contentDescription = null, tint = Color.White.copy(alpha = 0.6f))
                                 Text(previewError, color = Color.White.copy(alpha = 0.7f), fontSize = PebbleFont.caption, textAlign = TextAlign.Center, maxLines = 2)
                             } else {
                                 CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp, color = Color.White)
@@ -255,7 +263,7 @@ fun BotDetailScreen(
                             .background(Color.Black.copy(alpha = 0.55f)),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Icon(Icons.Rounded.OpenInFull, contentDescription = null, tint = Color.White, modifier = Modifier.size(15.dp))
+                        Icon(painterResource(PebbleIcons.OpenInFull), contentDescription = null, tint = Color.White, modifier = Modifier.size(15.dp))
                     }
                 }
             }
@@ -443,7 +451,7 @@ fun BotInfoSheet(
                 ),
                 navigationIcon = {
                     IconButton(onClick = onClose) {
-                        Icon(Icons.Rounded.Close, contentDescription = store.t("close"), tint = p.text)
+                        Icon(painterResource(PebbleIcons.Close), contentDescription = store.t("close"), tint = p.text)
                     }
                 },
                 title = {
@@ -540,8 +548,7 @@ fun BotInfoSheet(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(store.t("appearance"), color = p.text, fontSize = PebbleFont.body, modifier = Modifier.weight(1f))
-                        Icon(
-                            if (appearOpen) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                        Icon(painterResource(if (appearOpen) PebbleIcons.ExpandLess else PebbleIcons.ExpandMore),
                             contentDescription = null,
                             tint = p.mute,
                         )
@@ -681,7 +688,7 @@ fun BotInfoSheet(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(store.t("techDetails"), color = p.text, fontSize = PebbleFont.body, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
-                        Icon(if (techOpen) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore, contentDescription = null, tint = p.mute)
+                        Icon(painterResource(if (techOpen) PebbleIcons.ExpandLess else PebbleIcons.ExpandMore), contentDescription = null, tint = p.mute)
                     }
                     AnimatedVisibility(visible = techOpen) {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -717,7 +724,7 @@ fun BotInfoSheet(
                                         modifier = Modifier.weight(1f),
                                     )
                                     Icon(
-                                        imageVector = Icons.Rounded.Folder,
+                                        painter = painterResource( PebbleIcons.Folder),
                                         contentDescription = store.t("workspaceFiles"),
                                         tint = pal.accent,
                                         modifier = Modifier.size(16.dp),
@@ -744,7 +751,7 @@ fun BotInfoSheet(
                                         overflow = TextOverflow.Ellipsis,
                                         modifier = Modifier.widthIn(max = 170.dp),
                                     )
-                                    Icon(Icons.Rounded.ExpandMore, contentDescription = null, tint = p.mute, modifier = Modifier.size(18.dp))
+                                    Icon(painterResource(PebbleIcons.ExpandMore), contentDescription = null, tint = p.mute, modifier = Modifier.size(18.dp))
                                 }
                                 DropdownMenu(
                                     expanded = screenMenuOpen,
@@ -756,7 +763,7 @@ fun BotInfoSheet(
                                             text = { Text(label, color = p.text, fontSize = PebbleFont.body) },
                                             trailingIcon = {
                                                 if (editDesktopTarget == id) {
-                                                    Icon(Icons.Rounded.Check, contentDescription = null, tint = pal.accent, modifier = Modifier.size(16.dp))
+                                                    Icon(painterResource(PebbleIcons.Check), contentDescription = null, tint = pal.accent, modifier = Modifier.size(16.dp))
                                                 }
                                             },
                                             onClick = {
@@ -787,7 +794,7 @@ fun BotInfoSheet(
                                         overflow = TextOverflow.Ellipsis,
                                         modifier = Modifier.widthIn(max = 170.dp),
                                     )
-                                    Icon(Icons.Rounded.ExpandMore, contentDescription = null, tint = p.mute, modifier = Modifier.size(18.dp))
+                                    Icon(painterResource(PebbleIcons.ExpandMore), contentDescription = null, tint = p.mute, modifier = Modifier.size(18.dp))
                                 }
                                 DropdownMenu(
                                     expanded = browserMenuOpen,
@@ -799,7 +806,7 @@ fun BotInfoSheet(
                                             text = { Text(label, color = p.text, fontSize = PebbleFont.body) },
                                             trailingIcon = {
                                                 if (editBrowserMode == id) {
-                                                    Icon(Icons.Rounded.Check, contentDescription = null, tint = pal.accent, modifier = Modifier.size(16.dp))
+                                                    Icon(painterResource(PebbleIcons.Check), contentDescription = null, tint = pal.accent, modifier = Modifier.size(16.dp))
                                                 }
                                             },
                                             onClick = {
@@ -981,7 +988,7 @@ private fun RoutinesBlock(
         title = store.t("routines"),
         trailing = {
             IconButton(onClick = onCreate, modifier = Modifier.size(28.dp)) {
-                Icon(Icons.Rounded.Add, contentDescription = store.t("addShort"), tint = p.accent, modifier = Modifier.size(20.dp))
+                Icon(painterResource(PebbleIcons.Add), contentDescription = store.t("addShort"), tint = p.accent, modifier = Modifier.size(20.dp))
             }
         },
     )
@@ -1091,7 +1098,7 @@ private fun RoutinesBlock(
                             }
                             Box {
                                 IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(32.dp)) {
-                                    Icon(Icons.Rounded.MoreVert, contentDescription = store.t("moreActions"), tint = p.text2)
+                                    Icon(painterResource(PebbleIcons.MoreVert), contentDescription = store.t("moreActions"), tint = p.text2)
                                 }
                                 DropdownMenu(
                                     expanded = menuOpen,

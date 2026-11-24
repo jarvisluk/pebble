@@ -56,6 +56,7 @@ fun H264SurfaceView(
     token: String,
     preset: String = "auto",
     active: Boolean = true,
+    trackFps: Boolean = true,
     controller: H264StreamController? = null,
     onMeta: (DesktopStreamMeta) -> Unit = {},
     onStatus: (connected: Boolean, fps: Int) -> Unit = { _, _ -> },
@@ -79,7 +80,7 @@ fun H264SurfaceView(
                 view.onMeta = onMeta
                 view.onStatus = onStatus
                 view.onStreamError = onStreamError
-                view.updateConfig(url, token, preset, active)
+                view.updateConfig(url, token, preset, active, trackFps)
             }
         },
         update = { view ->
@@ -87,7 +88,7 @@ fun H264SurfaceView(
             view.onMeta = onMeta
             view.onStatus = onStatus
             view.onStreamError = onStreamError
-            view.updateConfig(url, token, preset, active)
+            view.updateConfig(url, token, preset, active, trackFps)
         },
     )
 }
@@ -109,6 +110,9 @@ internal class H264NativeSurfaceView(context: Context) : FrameLayout(context), T
     private var token: String = ""
     private var preset: String = "auto"
     private var active: Boolean = false
+    private var trackFps: Boolean = true
+    private var lastReportedConnected: Boolean? = null
+    private var lastReportedFps: Int = -1
 
     private var vps: ByteArray? = null
     private var sps: ByteArray? = null
@@ -127,11 +131,18 @@ internal class H264NativeSurfaceView(context: Context) : FrameLayout(context), T
     private var ptsUs = 0L
     private val frameCounter = AtomicInteger(0)
 
+    private fun reportStatus(connected: Boolean, fps: Int) {
+        if (lastReportedConnected == connected && lastReportedFps == fps) return
+        lastReportedConnected = connected
+        lastReportedFps = fps
+        onStatus?.invoke(connected, fps)
+    }
+
     private val fpsRunnable = object : Runnable {
         override fun run() {
             val fps = frameCounter.getAndSet(0)
-            if (ws != null) {
-                onStatus?.invoke(!needKeyframe, fps)
+            if (ws != null && trackFps) {
+                reportStatus(!needKeyframe, fps)
                 mainHandler.postDelayed(this, 1000)
             }
         }
@@ -142,12 +153,19 @@ internal class H264NativeSurfaceView(context: Context) : FrameLayout(context), T
         addView(textureView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
     }
 
-    fun updateConfig(nextUrl: String, nextToken: String, nextPreset: String, nextActive: Boolean) {
+    fun updateConfig(nextUrl: String, nextToken: String, nextPreset: String, nextActive: Boolean, nextTrackFps: Boolean = true) {
         val resolvedPreset = nextPreset.ifBlank { "auto" }
         val connChanged = url != nextUrl || token != nextToken || active != nextActive
         url = nextUrl
         token = nextToken
         active = nextActive
+        if (trackFps != nextTrackFps) {
+            trackFps = nextTrackFps
+            mainHandler.removeCallbacks(fpsRunnable)
+            if (trackFps && ws != null) {
+                mainHandler.postDelayed(fpsRunnable, 1000)
+            }
+        }
         if (preset != resolvedPreset) {
             preset = resolvedPreset
             ws?.send(JSONObject().put("type", "profile").put("preset", resolvedPreset).toString())
@@ -216,7 +234,11 @@ internal class H264NativeSurfaceView(context: Context) : FrameLayout(context), T
         }
         needKeyframe = true
         frameCounter.set(0)
-        mainHandler.postDelayed(fpsRunnable, 1000)
+        lastReportedConnected = null
+        lastReportedFps = -1
+        if (trackFps) {
+            mainHandler.postDelayed(fpsRunnable, 1000)
+        }
 
         ws = SharedHttp.wsClient.newWebSocket(reqBuilder.build(), object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
@@ -275,14 +297,14 @@ internal class H264NativeSurfaceView(context: Context) : FrameLayout(context), T
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 if (ws !== webSocket) return
                 mainHandler.post {
-                    onStatus?.invoke(false, 0)
+                    reportStatus(false, 0)
                     onStreamError?.invoke("", t.message ?: "connection failed")
                 }
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 if (ws !== webSocket) return
-                mainHandler.post { onStatus?.invoke(false, 0) }
+                mainHandler.post { reportStatus(false, 0) }
             }
         })
     }
@@ -396,9 +418,12 @@ internal class H264NativeSurfaceView(context: Context) : FrameLayout(context), T
                     mc.releaseOutputBuffer(outIdx, true)
                     if (needKeyframe) {
                         needKeyframe = false
-                        mainHandler.post { onStatus?.invoke(true, frameCounter.get()) }
+                        val curFps = if (trackFps) frameCounter.get() else 0
+                        mainHandler.post { reportStatus(true, curFps) }
                     }
-                    frameCounter.incrementAndGet()
+                    if (trackFps) {
+                        frameCounter.incrementAndGet()
+                    }
                     outIdx = mc.dequeueOutputBuffer(info, 0)
                 }
             } catch (_: Exception) {
