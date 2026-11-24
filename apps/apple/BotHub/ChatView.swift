@@ -82,6 +82,7 @@ struct ChatView: View {
     private var bot: BotStatus? { index >= 0 ? hub.bots[index] : nil }
     private var name: String { bot?.displayName ?? botId }
     private var list: [ChatMessage] { hub.msgs[botId] ?? [] }
+    private var botApprovals: [PendingApproval] { hub.approvals.filter { $0.botId == botId } }
     private var botQuestions: [PendingQuestion] { hub.questions.filter { $0.botId == botId } }
 
     var body: some View {
@@ -351,6 +352,9 @@ struct ChatView: View {
                             }
                             .padding(.vertical, 6)
                         }
+                        ForEach(botApprovals) { apr in
+                            ApprovalCardView(approval: apr, pal: pal)
+                        }
                         ForEach(botQuestions) { q in
                             QuestionCardView(question: q, pal: pal)
                         }
@@ -365,6 +369,7 @@ struct ChatView: View {
                 .defaultScrollAnchor(.bottom)
                 .scrollDismissesKeyboard(.interactively)
                 .onChange(of: list.count) { _, _ in withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
+                .onChange(of: botApprovals.count) { _, _ in withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
                 .onChange(of: botQuestions.count) { _, _ in withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
                 .onChange(of: bot?.isBusy) { _, _ in withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
             }
@@ -675,6 +680,49 @@ private struct ChatComposerView: View {
                         mentions = []
                     }
                 }
+
+            let permModes = hub.supportedPermissionModes(for: hub.bots.first(where: { $0.id == botId })?.harness)
+            if permModes.count > 1 {
+                let botPerm = hub.clampPermissionMode(hub.bots.first(where: { $0.id == botId })?.permissionMode,
+                                                      harnessId: hub.bots.first(where: { $0.id == botId })?.harness)
+                let isPlan = botPerm == "plan"
+                Menu {
+                    ForEach(permModes, id: \.self) { m in
+                        Button {
+                            guard m != botPerm else { return }
+                            Task {
+                                do {
+                                    try await hub.updateBot(botId, ["permissionMode": m])
+                                } catch {
+                                    sendErr = errText(error, hub.t("updateFailed"))
+                                }
+                            }
+                        } label: {
+                            if botPerm == m {
+                                Label(hub.t("permMode_\(m)"), systemImage: "checkmark")
+                            } else {
+                                Text(hub.t("permMode_\(m)"))
+                            }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(hub.t("permMode_\(botPerm)"))
+                            .font(.system(size: AppFont.caption, weight: .medium))
+                            .lineLimit(1)
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.system(size: AppFont.caption, weight: .regular))
+                    }
+                    .foregroundStyle(isPlan ? p.lilacInk : p.text2)
+                    .padding(.horizontal, 10)
+                    .frame(height: 36)
+                    .background(isPlan ? p.lilac : (inDesktopSidebar ? p.s1 : p.card), in: Capsule())
+                    .overlay(Capsule().stroke(isPlan ? p.lilacInk.opacity(0.4) : p.s2, lineWidth: 0.5))
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .accessibilityLabel(hub.t("permMode"))
+            }
 
             Button {
                 showStop ? interrupt() : submit()
@@ -1394,6 +1442,178 @@ struct QuestionCardView: View {
         }
         Task {
             try? await hub.replyQuestion(id: question.id, answers: answers, cancelled: cancelled)
+            submitting = false
+        }
+    }
+}
+
+struct ApprovalCardView: View {
+    @Environment(HubStore.self) private var hub
+    @Environment(\.palette) private var p
+    var approval: PendingApproval
+    var pal: (accent: Color, text: Color, soft: Color)
+
+    @State private var reason = ""
+    @State private var showRaw = false
+    @State private var submitting = false
+    @State private var err = ""
+
+    private var kindColors: (bg: Color, fg: Color) {
+        switch approval.kind ?? "other" {
+        case "shell": return (p.pink, p.pinkInk)
+        case "write": return (p.lilac, p.lilacInk)
+        case "read": return (p.sage, p.sageInk)
+        default: return (p.s1, p.text2)
+        }
+    }
+
+    private var kindLabel: String {
+        let k = (approval.kind ?? "").isEmpty ? "other" : approval.kind!
+        let key = "permKind_\(k)"
+        let t = hub.t(key)
+        return t == key ? k : t
+    }
+
+    private var opts: [PermissionOption] { approval.options ?? [] }
+    private var allowOnceOpt: PermissionOption? { opts.first(where: { $0.kind == "allow_once" }) }
+    private var allowAlwaysOpt: PermissionOption? { opts.first(where: { $0.kind == "allow_always" }) }
+    private var rejectOpt: PermissionOption? { opts.first(where: { $0.kind == "reject" }) }
+
+    var body: some View {
+        let kc = kindColors
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center, spacing: 8) {
+                Text(kindLabel)
+                    .font(.system(size: AppFont.caption, weight: .semibold))
+                    .foregroundStyle(kc.fg)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(kc.bg, in: Capsule())
+
+                Text(approval.toolName)
+                    .font(.system(size: AppFont.cardTitle, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(p.text)
+                    .lineLimit(2)
+
+                Spacer(minLength: 8)
+
+                Text(hub.t("approvalWaitingBadge"))
+                    .font(.system(size: AppFont.caption, weight: .semibold))
+                    .foregroundStyle(p.busy)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(p.busy.opacity(0.16), in: Capsule())
+            }
+
+            if let title = approval.title?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !title.isEmpty, title != approval.toolName {
+                Text(title)
+                    .font(.system(size: AppFont.body, weight: .medium))
+                    .foregroundStyle(p.text)
+            }
+
+            if let summary = approval.summary?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !summary.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    Text(summary)
+                        .font(.system(size: AppFont.secondary, design: .monospaced))
+                        .foregroundStyle(p.text)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding(10)
+                .background(p.s1, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(p.s2, lineWidth: 0.5))
+            }
+
+            if let rawPretty = approval.rawInputPretty, !rawPretty.isEmpty {
+                DisclosureGroup(isExpanded: $showRaw) {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        Text(rawPretty)
+                            .font(.system(size: AppFont.caption, design: .monospaced))
+                            .foregroundStyle(p.text2)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .padding(10)
+                    .background(p.s1, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(p.s2, lineWidth: 0.5))
+                    .padding(.top, 4)
+                } label: {
+                    Text(hub.t("approvalParams"))
+                        .font(.system(size: AppFont.secondary))
+                        .foregroundStyle(p.text2)
+                }
+            }
+
+            TextField("", text: $reason, prompt: Text(hub.t("approvalReasonPh")))
+                .font(.system(size: AppFont.body))
+                .disabled(submitting)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(p.s1, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(p.s2, lineWidth: 0.5))
+
+            if !err.isEmpty {
+                StatusText(text: err)
+            }
+
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    Spacer(minLength: 0)
+                    actionButtons
+                }
+                FlowLayout(spacing: 8) {
+                    actionButtons
+                }
+            }
+        }
+        .padding(16)
+        .background(p.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(p.busy.opacity(0.45), lineWidth: 1))
+        .onChange(of: approval.id) { _, _ in
+            reason = ""
+            showRaw = false
+            submitting = false
+            err = ""
+        }
+    }
+
+    @ViewBuilder
+    private var actionButtons: some View {
+        Button(hub.t("approvalReject")) {
+            let trimmed = reason.trimmingCharacters(in: .whitespacesAndNewlines)
+            submit("reject", optionId: rejectOpt?.id, denyReason: trimmed.isEmpty ? nil : trimmed)
+        }
+        .buttonStyle(.bordered)
+        .disabled(submitting)
+
+        if let alwaysOpt = allowAlwaysOpt {
+            Button(hub.t("approvalAllowAlways")) {
+                submit("allow_always", optionId: alwaysOpt.id, denyReason: nil)
+            }
+            .buttonStyle(.bordered)
+            .disabled(submitting)
+        }
+
+        Button(hub.t("approvalAllowOnce")) {
+            submit("allow_once", optionId: allowOnceOpt?.id, denyReason: nil)
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(pal.accent)
+        .disabled(submitting)
+    }
+
+    private func submit(_ decision: String, optionId: String?, denyReason: String?) {
+        guard !submitting else { return }
+        submitting = true
+        err = ""
+        Task {
+            do {
+                try await hub.replyApproval(id: approval.id, decision: decision, optionId: optionId, reason: denyReason)
+            } catch {
+                err = errText(error, hub.t("updateFailed"))
+            }
             submitting = false
         }
     }

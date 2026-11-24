@@ -188,6 +188,8 @@ class PebbleStore(context: Context) {
         private set
     var questions by mutableStateOf<List<PendingQuestion>>(emptyList())
         private set
+    var approvals by mutableStateOf<List<PendingApproval>>(emptyList())
+        private set
     var desktopTargets by mutableStateOf<List<DesktopTarget>>(emptyList())
         private set
     var activeDesktopTarget by mutableStateOf(ActiveDesktopTarget(target = "local"))
@@ -207,6 +209,7 @@ class PebbleStore(context: Context) {
     private val botSteps = mutableMapOf<String, Int>()
     private val activeBusyBots = mutableSetOf<String>()
     private val activeTakeoverIds = mutableSetOf<String>()
+    private val activeApprovalIds = mutableSetOf<String>()
 
     init {
         L.lang = resolvedLang
@@ -480,6 +483,32 @@ class PebbleStore(context: Context) {
                 val arr = p["items"] as? JsonArray ?: return
                 questions = runCatching { HubJson.decodeFromJsonElement<List<PendingQuestion>>(arr) }.getOrDefault(emptyList())
             }
+            "approvals" -> {
+                val arr = p["items"] as? JsonArray ?: return
+                val list = runCatching { HubJson.decodeFromJsonElement<List<PendingApproval>>(arr) }.getOrDefault(emptyList())
+                approvals = list
+                val nextIds = list.map { it.id }.toSet()
+                for (oldId in activeApprovalIds - nextIds) {
+                    NotificationHelper.cancelApprovalAlert(appContext, oldId)
+                }
+                for (item in list) {
+                    if (item.id !in activeApprovalIds && (!inForeground || activeChat != item.botId)) {
+                        val bName = item.botName ?: bots.firstOrNull { it.id == item.botId }?.displayName ?: item.botId
+                        val label = item.toolName.ifBlank { item.title.orEmpty() }
+                        val sum = item.summary.orEmpty().trim()
+                        val body = listOf(label, sum).filter { it.isNotEmpty() }.joinToString(": ")
+                        NotificationHelper.showApprovalAlert(
+                            appContext,
+                            item.id,
+                            item.botId,
+                            bName,
+                            body,
+                        )
+                    }
+                }
+                activeApprovalIds.clear()
+                activeApprovalIds.addAll(nextIds)
+            }
             "routine_updated", "routine_run" -> {
                 val bid = p["botId"]?.asDisplayString() ?: return
                 scope.launch {
@@ -621,6 +650,7 @@ class PebbleStore(context: Context) {
                 }
             }
             scope.launch { runCatching { client.call<QuestionsResp>("/api/questions") }.getOrNull()?.items?.let { if (seq == connSeq) questions = it } }
+            scope.launch { runCatching { client.call<ApprovalsResp>("/api/approvals") }.getOrNull()?.items?.let { if (seq == connSeq) approvals = it } }
             startStream(url, tok)
         } catch (err: Throwable) {
             if (seq == connSeq) {
@@ -737,6 +767,8 @@ class PebbleStore(context: Context) {
             PebbleTunnel.stop()
             baseURL = ""; authToken = ""
             bots = emptyList(); msgs.clear(); last.clear()
+            takeovers = emptyList(); questions = emptyList(); approvals = emptyList()
+            activeTakeoverIds.clear(); activeApprovalIds.clear()
             connState = ConnState.IDLE
             connError = ""
         }
@@ -809,7 +841,8 @@ class PebbleStore(context: Context) {
         val body = mutableMapOf<String, Any?>("message" to text, "source" to "mobile")
         if (mediaIds.isNotEmpty()) body["mediaIds"] = mediaIds
         val d = api.call<TextResp>("/api/bots/${encodeURIComponent(botId)}/message", method = "POST", body = body)
-        if (text in listOf("/bots", "/status", "/reset") && !d.text.isNullOrEmpty()) {
+        val trimmed = text.trim()
+        if ((trimmed in listOf("/bots", "/status", "/reset", "/mode") || trimmed.startsWith("/mode ")) && !d.text.isNullOrEmpty()) {
             pushIncoming(
                 botId,
                 ChatMessage(
@@ -822,7 +855,7 @@ class PebbleStore(context: Context) {
                 ),
             )
         }
-        if (text == "/reset") refreshBots()
+        if (trimmed == "/reset" || trimmed.startsWith("/mode ")) refreshBots()
     }
 
     suspend fun interruptBot(botId: String): Boolean =
@@ -931,6 +964,7 @@ class PebbleStore(context: Context) {
     suspend fun saveSettings(
         changed: Boolean,
         defaultHarness: String,
+        defaultPermissionMode: String,
         defaultModel: String,
         defaultModels: Map<String, String>,
         sharedUserMd: String,
@@ -942,6 +976,7 @@ class PebbleStore(context: Context) {
                 method = "PUT",
                 body = mapOf(
                     "defaultHarness" to defaultHarness,
+                    "defaultPermissionMode" to defaultPermissionMode,
                     "defaultModel" to defaultModel,
                     "defaultModels" to defaultModels,
                     "sharedUserMd" to sharedUserMd,
@@ -1143,6 +1178,33 @@ class PebbleStore(context: Context) {
             body = mapOf("answers" to answers, "cancelled" to cancelled),
         )
         questions = r.items.orEmpty()
+    }
+
+    fun harnessInfo(id: String?): HarnessInfo? {
+        if (id.isNullOrEmpty()) return null
+        return settings?.harnesses?.firstOrNull { it.id == id }
+    }
+
+    fun supportedPermissionModes(harnessId: String?): List<String> =
+        harnessInfo(harnessId)?.supportedModes ?: listOf("auto")
+
+    fun clampPermissionMode(raw: String?, harnessId: String?): String {
+        val modes = supportedPermissionModes(harnessId)
+        val cur = raw?.trim().orEmpty()
+        if (cur.isNotEmpty() && cur in modes) return cur
+        return if ("auto" in modes) "auto" else modes.firstOrNull() ?: "auto"
+    }
+
+    suspend fun replyApproval(id: String, decision: String, optionId: String? = null, reason: String? = null) {
+        val body = mutableMapOf<String, Any?>("decision" to decision)
+        if (!optionId.isNullOrEmpty()) body["optionId"] = optionId
+        if (!reason.isNullOrEmpty()) body["reason"] = reason
+        val r = api.call<ApprovalsResp>(
+            "/api/approvals/${encodeURIComponent(id)}/reply",
+            method = "POST",
+            body = body,
+        )
+        approvals = r.items.orEmpty()
     }
 
     // MARK: Workspace Files & Stage

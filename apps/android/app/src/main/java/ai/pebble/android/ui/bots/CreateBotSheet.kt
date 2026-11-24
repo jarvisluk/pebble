@@ -78,6 +78,8 @@ fun CreateBotSheet(
     var color by remember { mutableStateOf("") }
     var harness by remember { mutableStateOf("opencode") }
     var harnessTouched by remember { mutableStateOf(false) }
+    var permMode by remember { mutableStateOf("auto") }
+    var permModeTouched by remember { mutableStateOf(false) }
     var model by remember { mutableStateOf("") }
     var loadingModels by remember { mutableStateOf(false) }
     var instructions by remember { mutableStateOf("") }
@@ -85,6 +87,7 @@ fun CreateBotSheet(
     var err by remember { mutableStateOf("") }
 
     var harnessMenuOpen by remember { mutableStateOf(false) }
+    var permMenuOpen by remember { mutableStateOf(false) }
     var modelMenuOpen by remember { mutableStateOf(false) }
 
     val harnesses = remember(store.settings?.harnesses) {
@@ -113,12 +116,17 @@ fun CreateBotSheet(
         if (!harnessTouched) {
             harness = store.settings?.defaultHarness ?: harnesses.firstOrNull()?.id ?: "opencode"
         }
+        if (!permModeTouched) {
+            val fallback = store.settings?.defaultPermissionMode ?: "auto"
+            permMode = store.clampPermissionMode(fallback, harness)
+        }
     }
 
     LaunchedEffect(harness) {
         if (store.isConnected && store.models[harness].isNullOrEmpty()) {
             loadCands(harness)
         }
+        permMode = store.clampPermissionMode(permMode, harness)
     }
 
     fun create() {
@@ -134,6 +142,9 @@ fun CreateBotSheet(
             return
         }
         val body = mutableMapOf<String, Any?>("id" to id, "name" to n, "harness" to harness)
+        val supportedModes = store.supportedPermissionModes(harness)
+        val effectivePerm = if (permMode in supportedModes) permMode else store.clampPermissionMode(permMode, harness)
+        body["permissionMode"] = effectivePerm
         val d = desc.trim()
         val m = model.trim()
         val ins = instructions.trim()
@@ -307,6 +318,70 @@ fun CreateBotSheet(
                                         },
                                     )
                                 }
+                            }
+                        }
+
+                        val supportedModes = store.supportedPermissionModes(harness)
+                        val activePerm = if (permMode in supportedModes) permMode else store.clampPermissionMode(permMode, harness)
+                        if (supportedModes.size <= 1) {
+                            val onlyMode = supportedModes.firstOrNull() ?: "auto"
+                            Column(
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp),
+                                verticalArrangement = Arrangement.spacedBy(2.dp),
+                            ) {
+                                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                    Text(store.t("permMode"), color = p.text2, fontSize = PebbleFont.body, modifier = Modifier.weight(1f))
+                                    Text(store.t("permMode_$onlyMode"), color = p.text2, fontSize = PebbleFont.secondary)
+                                }
+                                Text(
+                                    store.t("permModeUnsupported", mapOf("mode" to store.t("permMode_$onlyMode"))),
+                                    color = p.mute,
+                                    fontSize = PebbleFont.caption,
+                                )
+                            }
+                        } else {
+                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Box {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(PebbleDimens.rowShape)
+                                            .clickable { permMenuOpen = true }
+                                            .padding(horizontal = 4.dp, vertical = 10.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Text(store.t("permMode"), color = p.text2, fontSize = PebbleFont.body, modifier = Modifier.weight(1f))
+                                        Text(
+                                            text = store.t("permMode_$activePerm"),
+                                            color = p.text,
+                                            fontSize = PebbleFont.body,
+                                            fontWeight = FontWeight.Medium,
+                                        )
+                                        Icon(painterResource(PebbleIcons.ArrowDropDown), contentDescription = null, tint = p.mute)
+                                    }
+                                    DropdownMenu(
+                                        expanded = permMenuOpen,
+                                        onDismissRequest = { permMenuOpen = false },
+                                        containerColor = p.card,
+                                    ) {
+                                        supportedModes.forEach { m ->
+                                            DropdownMenuItem(
+                                                text = { Text(store.t("permMode_$m"), color = p.text) },
+                                                onClick = {
+                                                    permMode = m
+                                                    permModeTouched = true
+                                                    permMenuOpen = false
+                                                },
+                                            )
+                                        }
+                                    }
+                                }
+                                Text(
+                                    store.t("permDesc_$activePerm"),
+                                    color = p.mute,
+                                    fontSize = PebbleFont.caption,
+                                    modifier = Modifier.padding(horizontal = 4.dp),
+                                )
                             }
                         }
 

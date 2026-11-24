@@ -13,6 +13,8 @@ struct CreateBotView: View {
     @State private var color = ""
     @State private var harness = "opencode"
     @State private var harnessTouched = false
+    @State private var permMode = "auto"
+    @State private var permModeTouched = false
     @State private var model = ""
     @State private var loadingModels = false
     @State private var instructions = ""
@@ -72,6 +74,33 @@ struct CreateBotView: View {
                     ),
                     options: harnesses.map { ($0.id, $0.title) }
                 )
+                let supportedModes = hub.supportedPermissionModes(for: harness)
+                let activePerm = supportedModes.contains(permMode) ? permMode : hub.clampPermissionMode(permMode, harnessId: harness)
+                if supportedModes.count <= 1 {
+                    let onlyMode = supportedModes.first ?? "auto"
+                    VStack(alignment: .leading, spacing: 3) {
+                        LabeledContent(hub.t("permMode")) {
+                            Text(hub.t("permMode_\(onlyMode)")).foregroundStyle(p.text2)
+                        }
+                        Text(hub.t("permModeUnsupported", ["mode": hub.t("permMode_\(onlyMode)")]))
+                            .font(.system(size: AppFont.caption))
+                            .foregroundStyle(p.mute)
+                    }
+                } else {
+                    VStack(alignment: .leading, spacing: 3) {
+                        HubMenuPicker(
+                            title: hub.t("permMode"),
+                            selection: Binding(
+                                get: { activePerm },
+                                set: { permMode = $0; permModeTouched = true }
+                            ),
+                            options: supportedModes.map { ($0, hub.t("permMode_\($0)")) }
+                        )
+                        Text(hub.t("permDesc_\(activePerm)"))
+                            .font(.system(size: AppFont.caption))
+                            .foregroundStyle(p.mute)
+                    }
+                }
                 let cands = hub.models[harness] ?? []
                 HubFormField(label: hub.t("modelOptional")) {
                     HStack(spacing: 8) {
@@ -125,8 +154,12 @@ struct CreateBotView: View {
                 if !harnessTouched {
                     harness = hub.settings?.defaultHarness ?? harnesses.first?.id ?? "opencode"
                 }
+                if !permModeTouched {
+                    permMode = hub.clampPermissionMode(hub.settings?.defaultPermissionMode, harnessId: harness)
+                }
             }
             .task(id: harness) {
+                permMode = hub.clampPermissionMode(permMode, harnessId: harness)
                 if hub.isConnected && (hub.models[harness] ?? []).isEmpty {
                     loadCands(for: harness)
                 }
@@ -149,6 +182,8 @@ struct CreateBotView: View {
         if n.isEmpty { err = hub.t("fillBotName"); return }
         if id.range(of: "^[a-zA-Z0-9][a-zA-Z0-9_-]*$", options: .regularExpression) == nil { err = hub.t("idInvalid"); return }
         var body: [String: Any] = ["id": id, "name": n, "harness": harness]
+        let supportedModes = hub.supportedPermissionModes(for: harness)
+        body["permissionMode"] = supportedModes.contains(permMode) ? permMode : hub.clampPermissionMode(permMode, harnessId: harness)
         let d = desc.trimmingCharacters(in: .whitespaces), m = model.trimmingCharacters(in: .whitespaces)
         let ins = instructions.trimmingCharacters(in: .whitespacesAndNewlines)
         if !d.isEmpty { body["description"] = d }
