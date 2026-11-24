@@ -9,9 +9,11 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"bot-hub/internal/node"
+	"bot-hub/internal/protocol"
 )
 
 func (s *HTTPServer) nodes() *node.Registry {
@@ -75,6 +77,27 @@ func (s *HTTPServer) handleNodeDisconnect(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
+func (s *HTTPServer) resolveTargetNodeInfo(nodeID string) (node.NodeInfo, bool) {
+	if id := strings.TrimSpace(nodeID); id != "" {
+		return s.nodes().Get(id)
+	}
+	var sole node.NodeInfo
+	count := 0
+	for _, n := range s.nodes().List() {
+		if n.Connected {
+			sole = n
+			count++
+			if count > 1 {
+				return node.NodeInfo{}, false
+			}
+		}
+	}
+	if count == 1 {
+		return sole, true
+	}
+	return node.NodeInfo{}, false
+}
+
 func (s *HTTPServer) handleNodeCall(w http.ResponseWriter, r *http.Request) {
 	nodeID := r.PathValue("id")
 	if nodeID == "_default" {
@@ -100,31 +123,43 @@ func (s *HTTPServer) handleNodeCall(w http.ResponseWriter, r *http.Request) {
 		if nodeID == "" && boundNodeID != "" {
 			nodeID = boundNodeID
 		}
+		targetNode, hasTargetNode := s.resolveTargetNodeInfo(nodeID)
+		if boundSlot != "" && (nodeID == "" || nodeID == boundNodeID) && hasTargetNode && !targetNode.HasCapability(protocol.CapNodeVirtualSlots) {
+			writeNodeUpgradeErr(
+				w,
+				http.StatusUnprocessableEntity,
+				fmt.Sprintf("远端节点 %q 版本过低，不支持独立虚拟屏，请升级该节点或在 Bot 详情中改绑其主桌面", targetNode.ID),
+				protocol.CapNodeVirtualSlots,
+			)
+			return
+		}
 		if req.Action == "exec" {
 			var m map[string]any
 			if len(callArgs) == 0 || json.Unmarshal(callArgs, &m) == nil {
 				if m == nil {
 					m = make(map[string]any)
 				}
-				envMap, _ := m["env"].(map[string]any)
-				if envMap == nil {
-					envMap = make(map[string]any)
-				}
-				if _, hasPebble := envMap["PEBBLE_BOT_ID"]; !hasPebble {
-					if _, hasLegacy := envMap["BOT_HUB_BOT_ID"]; !hasLegacy {
-						envMap["PEBBLE_BOT_ID"] = req.BotID
+				if !hasTargetNode || targetNode.HasCapability(protocol.CapNodeExecEnv) {
+					envMap, _ := m["env"].(map[string]any)
+					if envMap == nil {
+						envMap = make(map[string]any)
 					}
+					if _, hasPebble := envMap["PEBBLE_BOT_ID"]; !hasPebble {
+						if _, hasLegacy := envMap["BOT_HUB_BOT_ID"]; !hasLegacy {
+							envMap["PEBBLE_BOT_ID"] = req.BotID
+						}
+					}
+					if _, ok := envMap["AGENT_BROWSER_SESSION"]; !ok && session != "" {
+						envMap["AGENT_BROWSER_SESSION"] = session
+					}
+					m["env"] = envMap
 				}
-				if _, ok := envMap["AGENT_BROWSER_SESSION"]; !ok && session != "" {
-					envMap["AGENT_BROWSER_SESSION"] = session
-				}
-				m["env"] = envMap
-				if isolated {
+				if isolated && (!hasTargetNode || targetNode.HasCapability(protocol.CapNodeBrowserProfile)) {
 					if _, ok := m["browserProfileBotId"]; !ok {
 						m["browserProfileBotId"] = req.BotID
 					}
 				}
-				if boundSlot != "" && (nodeID == "" || nodeID == boundNodeID) {
+				if boundSlot != "" && (nodeID == "" || nodeID == boundNodeID) && (!hasTargetNode || targetNode.HasCapability(protocol.CapNodeVirtualSlots)) {
 					if _, ok := m["desktopSlot"]; !ok {
 						m["desktopSlot"] = boundSlot
 					}

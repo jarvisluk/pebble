@@ -175,6 +175,34 @@ func findBinary(bin string) (string, bool) {
 	return "", false
 }
 
+// resolveBinaryFor resolves a harness binary honoring an optional env override
+// (which rejects fallback to host PATH if explicitly set to a missing path),
+// an explicit configured/test path, and finally findBinary(defaultName).
+func resolveBinaryFor(envKey, defaultName, configured string) (string, bool) {
+	if envKey != "" {
+		if v := strings.TrimSpace(os.Getenv(envKey)); v != "" {
+			if info, err := os.Stat(v); err == nil && !info.IsDir() {
+				return v, true
+			}
+			if p, ok := findBinary(v); ok {
+				return p, true
+			}
+			return "", false
+		}
+	}
+	if configured != "" && configured != defaultName {
+		if info, err := os.Stat(configured); err == nil && !info.IsDir() {
+			return configured, true
+		}
+		if !filepath.IsAbs(configured) {
+			if p, ok := findBinary(configured); ok {
+				return p, true
+			}
+		}
+	}
+	return findBinary(defaultName)
+}
+
 // DetectHarness checks whether the CLI binary for kind is installed on this machine.
 func DetectHarness(kind string) (installed bool, binPath string) {
 	if kind == "agy" {

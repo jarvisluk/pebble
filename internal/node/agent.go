@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"bot-hub/internal/desktop"
+	"bot-hub/internal/protocol"
 )
 
 const (
@@ -360,16 +361,32 @@ func (a *Agent) loop(ctx context.Context, done chan struct{}) {
 	}
 }
 
+func (a *Agent) capabilities() []string {
+	caps := []string{
+		protocol.CapNodeExecEnv,
+		protocol.CapNodeBrowserProfile,
+		protocol.CapNodeDesktopPermissions,
+		protocol.CapNodeDesktopPower,
+	}
+	if runtime.GOOS == "linux" && a.desktopPool().VirtualSupported() {
+		caps = append(caps, protocol.CapNodeVirtualSlots)
+	}
+	return protocol.NormalizeCapabilities(caps)
+}
+
 func (a *Agent) pollOnce(ctx context.Context) (*Command, int, error) {
 	name, perms, token := a.snapshot()
 	payload, _ := json.Marshal(PollRequest{
-		ID:          a.nodeID,
-		Name:        name,
-		OS:          runtime.GOOS,
-		Arch:        runtime.GOARCH,
-		Hostname:    a.hostname,
-		HomeDir:     a.homeDir,
-		Permissions: perms,
+		ID:              a.nodeID,
+		Name:            name,
+		OS:              runtime.GOOS,
+		Arch:            runtime.GOARCH,
+		Hostname:        a.hostname,
+		HomeDir:         a.homeDir,
+		Permissions:     perms,
+		ProtocolVersion: protocol.CurrentProtocol,
+		Capabilities:    a.capabilities(),
+		Version:         protocol.AppVersion,
 	})
 	reqCtx, cancel := context.WithTimeout(ctx, 35*time.Second)
 	defer cancel()

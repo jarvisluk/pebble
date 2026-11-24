@@ -9,8 +9,11 @@ import type {
   ScreenState,
   TakeoverRequest,
 } from '../types';
-import { api, APIError } from '../lib/api';
+import { api, APIError, isUnsupportedCapabilityError } from '../lib/api';
 import { translate } from '../lib/i18n';
+
+const isLocalTarget = (tgt: string): boolean =>
+  !tgt || tgt === 'local' || tgt.startsWith('virtual:') || tgt.startsWith('local:virtual:');
 
 interface DesktopStageProps {
   open: boolean;
@@ -23,6 +26,9 @@ interface DesktopStageProps {
   embeddedInStage?: boolean;
   activeBotName?: string;
   lang: ResolvedLang;
+  supportsWS?: boolean;
+  supportsHEVC?: boolean;
+  onUnsupportedCap?: (cap: string) => void;
   onChangeTarget: (target: string) => void;
   onActiveTargetSync?: (active: ActiveDesktopTarget) => void;
   onTakeoversChange: (items: TakeoverRequest[]) => void;
@@ -43,6 +49,9 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
   embeddedInStage = false,
   activeBotName,
   lang,
+  supportsWS = true,
+  supportsHEVC = true,
+  onUnsupportedCap,
   onChangeTarget,
   onActiveTargetSync,
   onTakeoversChange,
@@ -53,7 +62,7 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
 }) => {
   const t = (k: string, vars?: Record<string, string | number>) => translate(lang, k, vars);
 
-  const [mode, setMode] = useState<'idle' | 'connecting' | 'webrtc' | 'ws-h264' | 'error' | 'sleeping'>('idle');
+  const [mode, setMode] = useState<'idle' | 'connecting' | 'webrtc' | 'ws-h264' | 'frame' | 'error' | 'sleeping'>('idle');
   const [centerText, setCenterText] = useState('');
   const [showRetry, setShowRetry] = useState(false);
   const [showCenterMsg, setShowCenterMsg] = useState(false);
@@ -95,6 +104,8 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
   const lastMoveRef = useRef(0);
   const wheelAccRef = useRef({ dx: 0, dy: 0 });
   const wheelTimerRef = useRef<number | null>(null);
+  const frameTimerRef = useRef<number | null>(null);
+  const frameAbortRef = useRef<AbortController | null>(null);
   const streamGenRef = useRef(0);
 
   modeRef.current = mode;
@@ -114,6 +125,16 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
     if (statsTimerRef.current) {
       window.clearInterval(statsTimerRef.current);
       statsTimerRef.current = null;
+    }
+    if (frameTimerRef.current) {
+      window.clearTimeout(frameTimerRef.current);
+      frameTimerRef.current = null;
+    }
+    if (frameAbortRef.current) {
+      try {
+        frameAbortRef.current.abort();
+      } catch {}
+      frameAbortRef.current = null;
     }
     if (wheelTimerRef.current) {
       window.clearTimeout(wheelTimerRef.current);
@@ -189,26 +210,141 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
     }
   }, []);
 
-  const startWsH264Stream = useCallback(async () => {
+  const startFramePolling = useCallback(() => {
     if (!openRef.current) return;
     stopStreams();
     const gen = ++streamGenRef.current;
-    if (typeof VideoDecoder === 'undefined') {
-      setMode('error');
-      setCenterText(t('deskNoWebCodecs'));
-      setShowRetry(false);
-      setShowCenterMsg(true);
+    setActivePreset('');
+    setBitrateKbps(0);
+    setMode('connecting');
+    setCenterText(t('deskConnecting'));
+    setShowRetry(false);
+    setShowCenterMsg(true);
+
+    let hadFrame = false;
+    let frameCount = 0;
+    let consecErrors = 0;
+
+    statsTimerRef.current = window.setInterval(() => {
+      if (gen !== streamGenRef.current || (document.hidden && !document.hasFocus())) return;
+      const next = frameCount;
+      frameCount = 0;
+      setFps((prev) => (prev === next ? prev : next));
+    }, 1000);
+
+    const drawFrame = (fr: DesktopFrame): Promise<void> =>
+      new Promise((resolve, reject) => {
+        if (!fr.jpegBase64) {
+          resolve();
+          return;
+        }
+        const img = new Image();
+        img.onload = () => {
+          if (!openRef.current || gen !== streamGenRef.current) {
+            resolve();
+            return;
+          }
+          const w = img.naturalWidth || fr.imageWidth || 1280;
+          const h = img.naturalHeight || fr.imageHeight || 720;
+          const canvas = canvasRef.current;
+          if (canvas) {
+            if (canvas.width !== w || canvas.height !== h) {
+              canvas.width = w;
+              canvas.height = h;
+            }
+            const ctx = canvas.getContext('2d');
+            ctx?.drawImage(img, 0, 0, canvas.width, canvas.height);
+          }
+          frameRef.current = {
+            ...fr,
+            imageWidth: w,
+            imageHeight: h,
+            logicalX: fr.logicalX || 0,
+            logicalY: fr.logicalY || 0,
+            logicalWidth: fr.logicalWidth || 1440,
+            logicalHeight: fr.logicalHeight || 900,
+          };
+          setResLabel(`${w}×${h}`);
+          resolve();
+        };
+        img.onerror = () => reject(new Error('frame decode failed'));
+        img.src = `data:image/jpeg;base64,${fr.jpegBase64}`;
+      });
+
+    const tick = async () => {
+      if (!openRef.current || gen !== streamGenRef.current) return;
+      if (hadFrame && document.hidden && !document.hasFocus()) {
+        frameTimerRef.current = window.setTimeout(() => void tick(), 1000);
+        return;
+      }
+      const ctrl = new AbortController();
+      frameAbortRef.current = ctrl;
+      const t0 = performance.now();
+      let failed = false;
+      try {
+        const qs = `target=${encodeURIComponent(targetRef.current)}&windowId=${encodeURIComponent(
+          selectedWindowIdRef.current
+        )}&maxDim=1280&quality=72`;
+        const fr = await api<DesktopFrame>(`/api/desktop/frame?${qs}`, { signal: ctrl.signal });
+        if (!openRef.current || gen !== streamGenRef.current) return;
+        await drawFrame(fr);
+        if (!openRef.current || gen !== streamGenRef.current) return;
+        consecErrors = 0;
+        frameCount += 1;
+        hadFrame = true;
+        setRtt(Math.round(performance.now() - t0));
+        setMode('frame');
+        setShowCenterMsg(false);
+      } catch (err) {
+        if (!openRef.current || gen !== streamGenRef.current) return;
+        if (err instanceof DOMException && err.name === 'AbortError') return;
+        if (err instanceof Error && err.name === 'AbortError') return;
+        failed = true;
+        consecErrors += 1;
+        if (err instanceof APIError && err.code === 'screen_recording_denied') {
+          setMode('error');
+          setCenterText(t('deskScreenRecordingDenied'));
+          setShowRetry(true);
+          setShowCenterMsg(true);
+          return;
+        }
+        if (!hadFrame && consecErrors >= 3) {
+          setMode('error');
+          setCenterText(err instanceof Error ? err.message : t('deskConnectFailed'));
+          setShowRetry(true);
+          setShowCenterMsg(true);
+        }
+      } finally {
+        if (frameAbortRef.current === ctrl) frameAbortRef.current = null;
+      }
+      if (!openRef.current || gen !== streamGenRef.current) return;
+      const elapsed = performance.now() - t0;
+      const delay = failed ? 1500 : Math.max(120, Math.round(350 - elapsed));
+      frameTimerRef.current = window.setTimeout(() => void tick(), delay);
+    };
+
+    void tick();
+  }, [stopStreams, t]);
+
+  const startWsH264Stream = useCallback(async (allowHevcFallback = true) => {
+    if (!openRef.current) return;
+    if (!isLocalTarget(targetRef.current) || !supportsWS || typeof VideoDecoder === 'undefined') {
+      startFramePolling();
       return;
     }
+    stopStreams();
+    const gen = ++streamGenRef.current;
 
     let preferHevc = false;
-    try {
-      const sup = await VideoDecoder.isConfigSupported({
-        codec: 'hev1.1.6.L153.B0',
-        hardwareAcceleration: 'prefer-hardware',
-      });
-      preferHevc = Boolean(sup?.supported);
-    } catch {}
+    if (allowHevcFallback && supportsHEVC) {
+      try {
+        const sup = await VideoDecoder.isConfigSupported({
+          codec: 'hev1.1.6.L153.B0',
+          hardwareAcceleration: 'prefer-hardware',
+        });
+        preferHevc = Boolean(sup?.supported);
+      } catch {}
+    }
     if (!openRef.current || gen !== streamGenRef.current) return;
 
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -224,11 +360,41 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
     let frameCount = 0;
     let tsCounter = 0;
     let hadFrame = false;
+    let fallbackTriggered = false;
     let streamFps = 60;
     let streamCodec: 'h264' | 'hevc' = preferHevc ? 'hevc' : 'h264';
     let curCodec = '';
     let curWidth = 0;
     let curHeight = 0;
+
+    const handleWsFailure = (code?: string, errMsg?: string) => {
+      if (wsRef.current !== ws || !openRef.current || gen !== streamGenRef.current) return;
+      if (code === 'screen_recording_denied') {
+        setMode('error');
+        setCenterText(errMsg || t('deskScreenRecordingDenied'));
+        setShowRetry(false);
+        setShowCenterMsg(true);
+        return;
+      }
+      if (!hadFrame && !fallbackTriggered) {
+        fallbackTriggered = true;
+        if (code === 'capability_unsupported') {
+          onUnsupportedCap?.('desktop.ws_h264');
+        }
+        if (preferHevc && allowHevcFallback) {
+          void startWsH264Stream(false);
+        } else {
+          startFramePolling();
+        }
+        return;
+      }
+      if (modeRef.current !== 'error') {
+        setMode('error');
+        setCenterText(errMsg || t('deskConnectFailed'));
+        setShowRetry(true);
+        setShowCenterMsg(true);
+      }
+    };
 
     const requestKeyframe = (congested = false) => {
       needKeyframe = true;
@@ -300,16 +466,25 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
           }
         },
         error: () => {
-          requestKeyframe();
+          if (!hadFrame) {
+            handleWsFailure('decoder_error');
+          } else {
+            requestKeyframe();
+          }
         },
       });
-      dec.configure({
-        codec: targetCodec,
-        codedWidth: width,
-        codedHeight: height,
-        hardwareAcceleration: 'prefer-hardware',
-        optimizeForLatency: true,
-      });
+      try {
+        dec.configure({
+          codec: targetCodec,
+          codedWidth: width,
+          codedHeight: height,
+          hardwareAcceleration: 'prefer-hardware',
+          optimizeForLatency: true,
+        });
+      } catch {
+        handleWsFailure('codec_unsupported');
+        return;
+      }
       decoderRef.current = dec;
       curCodec = targetCodec;
       curWidth = width;
@@ -359,7 +534,6 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
             setResLabel(`${msg.imageWidth || 0}×${msg.imageHeight || 0}`);
             setActivePreset(msg.preset || '');
             setBitrateKbps(msg.bitrateKbps || 0);
-            setMode('ws-h264');
             ensureDecoder(
               msg.imageWidth || 1280,
               msg.imageHeight || 720,
@@ -369,10 +543,7 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
             if (typeof msg.preset === 'string') setActivePreset(msg.preset);
             if (typeof msg.bitrateKbps === 'number') setBitrateKbps(msg.bitrateKbps);
           } else if (msg.type === 'error') {
-            setMode('error');
-            setCenterText(msg.error || t('deskConnectFailed'));
-            setShowRetry(msg.code !== 'screen_recording_denied');
-            setShowCenterMsg(true);
+            handleWsFailure(msg.code, msg.error);
           }
         } catch {}
         return;
@@ -425,25 +596,13 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
     };
 
     ws.onerror = () => {
-      if (wsRef.current !== ws || !openRef.current) return;
-      if (modeRef.current !== 'error') {
-        setMode('error');
-        setCenterText(t('deskConnectFailed'));
-        setShowRetry(true);
-        setShowCenterMsg(true);
-      }
+      handleWsFailure(undefined, t('deskConnectFailed'));
     };
 
     ws.onclose = () => {
-      if (wsRef.current !== ws || !openRef.current) return;
-      if (modeRef.current !== 'error') {
-        setMode('error');
-        setCenterText(t('deskConnectFailed'));
-        setShowRetry(true);
-        setShowCenterMsg(true);
-      }
+      handleWsFailure(undefined, t('deskConnectFailed'));
     };
-  }, [stopStreams, t]);
+  }, [onUnsupportedCap, startFramePolling, stopStreams, supportsHEVC, supportsWS, t]);
 
   const startStream = useCallback(async () => {
     stopStreams();
@@ -488,6 +647,10 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
       void refreshWindows();
     } catch (err) {
       if (!openRef.current || gen !== streamGenRef.current) return;
+      if (isUnsupportedCapabilityError(err)) {
+        startFramePolling();
+        return;
+      }
       setMode('error');
       setCenterText(err instanceof Error ? err.message : t('deskUnreachable'));
       setShowRetry(true);
@@ -497,7 +660,11 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
 
     if (!openRef.current || gen !== streamGenRef.current) return;
     if (!hostStatusRef.current?.webrtcAvailable || typeof RTCPeerConnection === 'undefined') {
-      void startWsH264Stream();
+      if (isLocalTarget(targetRef.current)) {
+        void startWsH264Stream(true);
+      } else {
+        startFramePolling();
+      }
       return;
     }
 
@@ -634,7 +801,7 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
       if (!openRef.current || gen !== streamGenRef.current) return;
       void startWsH264Stream();
     }
-  }, [onTakeoversChange, refreshWindows, startWsH264Stream, stopStreams, t]);
+  }, [onTakeoversChange, refreshWindows, startFramePolling, startWsH264Stream, stopStreams, t]);
 
   useEffect(() => {
     if (!open) {
@@ -835,17 +1002,23 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
 
   const activeTakeover = takeovers.find((to) => to.target === target) || takeovers[0] || null;
   const dotClass =
-    mode === 'webrtc' || mode === 'ws-h264' ? 'd-dot ok' : mode === 'error' ? 'd-dot err' : 'd-dot';
+    mode === 'webrtc' || mode === 'ws-h264' || mode === 'frame'
+      ? 'd-dot ok'
+      : mode === 'error'
+        ? 'd-dot err'
+        : 'd-dot';
   const statusLabel =
     mode === 'webrtc'
       ? `WebRTC · ${fps || 0} fps`
       : mode === 'ws-h264'
         ? t('deskWsH264Label', { fps: fps || 0 })
-        : mode === 'sleeping'
-          ? t('deskSleeping')
-          : mode === 'error'
-            ? t('deskBlocked')
-            : t('deskConnectingShort');
+        : mode === 'frame'
+          ? t('deskFrameModeLabel', { fps: fps || 0 })
+          : mode === 'sleeping'
+            ? t('deskSleeping')
+            : mode === 'error'
+              ? t('deskBlocked')
+              : t('deskConnectingShort');
 
   const submitText = () => {
     if (!typeDraft) return;
@@ -875,7 +1048,7 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
             className="desk-media"
             tabIndex={0}
             data-desk-stage=""
-            hidden={mode !== 'ws-h264'}
+            hidden={mode !== 'ws-h264' && mode !== 'frame'}
             {...mediaHandlers}
           />
         </div>
@@ -996,7 +1169,9 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
                   ? 'WebRTC H.264'
                   : mode === 'ws-h264'
                     ? `${t('deskWsH264Mode')}${activePreset ? ` (${activePreset}${bitrateKbps ? ` · ${bitrateKbps}k` : ''})` : ''}`
-                    : mode}
+                    : mode === 'frame'
+                      ? t('deskFrameModeShort')
+                      : mode}
               </dd>
               <dt>{t('deskLatency')}</dt>
               <dd id="ddRtt">{rtt ? `${rtt} ms` : '—'}</dd>

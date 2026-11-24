@@ -164,6 +164,7 @@ final class HubStore {
     var tools: [String: String] = [:]
     var settings: SettingsData?
     var models: [String: [String]] = [:]
+    var modelsGeneration = 0
     var nodes: [NodeInfo] = []
     var tailcat: TailcatStatus?
     var mobileTailscale: MobileTailscaleStatus?
@@ -175,6 +176,9 @@ final class HubStore {
     var activeDesktopTarget = ActiveDesktopTarget(target: "local", name: nil, temporary: false, expiresAt: nil)
     var usingStandby = false
     var managedMode = false
+    var serverInfo: ServerInfo?
+    var unsupportedCaps: Set<String> = []
+    var dismissedCompatProto = 0
     var routines: [String: [RoutineItem]] = [:]
     var pendingStageOpen: StageOpenEvent?
     var pendingChatInsert: PendingChatInsert?
@@ -182,6 +186,42 @@ final class HubStore {
     @ObservationIgnored private var activeChat: String?
     @ObservationIgnored private var connSeq = 0
     @ObservationIgnored private let stream = EventStream()
+    @ObservationIgnored private var modelLoadTasks: [String: (UUID, Task<[String], Error>)] = [:]
+
+    func supports(_ cap: String) -> Bool {
+        if unsupportedCaps.contains(cap) { return false }
+        if let info = serverInfo {
+            return info.capabilities?.contains(cap) ?? false
+        }
+        return true
+    }
+
+    func markUnsupported(_ cap: String) {
+        unsupportedCaps.insert(cap)
+    }
+
+    var isClientOutdated: Bool {
+        (serverInfo?.protocolVersion ?? 0) > ClientProtocol.current
+    }
+
+    var isClientUpgradeRequired: Bool {
+        (serverInfo?.minClientProtocol ?? 1) > ClientProtocol.current
+    }
+
+    var showCompatBanner: Bool {
+        guard let info = serverInfo, info.protocolVersion > ClientProtocol.current else { return false }
+        return isClientUpgradeRequired || dismissedCompatProto != info.protocolVersion
+    }
+
+    func dismissCompatBanner() {
+        if let proto = serverInfo?.protocolVersion {
+            dismissedCompatProto = proto
+        }
+    }
+
+    static func isLocalDesktopTarget(_ target: String) -> Bool {
+        target.isEmpty || target == "local" || target.hasPrefix("virtual:") || target.hasPrefix("local:virtual:")
+    }
 
     init(autoConnect: Bool = true) {
         let d = UserDefaults.standard
@@ -369,6 +409,9 @@ final class HubStore {
         usingStandby = false
         connState = .connecting
         connError = ""
+        serverInfo = nil
+        unsupportedCaps = []
+        dismissedCompatProto = 0
 
         do {
             try await connectEndpoint(profile: profile, rawAddress: profile.address, rawToken: profile.token, isStandby: false, seq: seq)
@@ -457,9 +500,12 @@ final class HubStore {
             let client = APIClient(base: url, token: tok)
             let data: BotsResp = try await client.call("/api/bots")
             guard seq == connSeq else { return }
+            serverInfo = data.server
+            unsupportedCaps = []
             let list = data.bots ?? []
             bots = list
-            msgs = [:]; last = [:]; unread = [:]; tools = [:]; models = [:]; routines = [:]
+            msgs = [:]; last = [:]; unread = [:]; tools = [:]; routines = [:]
+            resetModelsCache()
             usingStandby = isStandby
             connState = .connected
             connError = ""
@@ -502,6 +548,7 @@ final class HubStore {
         let url = baseURL, tok = authToken
         do {
             let d: BotsResp = try await api.call("/api/bots")
+            serverInfo = d.server
             bots = d.bots ?? []
             startStream(url, tok)
             if let bid = activeChat {
@@ -579,6 +626,7 @@ final class HubStore {
             await Tunnel.stop()
             baseURL = ""; authToken = ""
             bots = []; msgs = [:]; last = [:]
+            serverInfo = nil; unsupportedCaps = []; dismissedCompatProto = 0
             connState = .idle
             connError = ""
         }
@@ -608,9 +656,12 @@ final class HubStore {
             let client = APIClient(base: cleanURL, token: token)
             let data: BotsResp = try await client.call("/api/bots")
             guard seq == connSeq else { return }
+            serverInfo = data.server
+            unsupportedCaps = []
             let list = data.bots ?? []
             bots = list
-            msgs = [:]; last = [:]; unread = [:]; tools = [:]; models = [:]; routines = [:]
+            msgs = [:]; last = [:]; unread = [:]; tools = [:]; routines = [:]
+            resetModelsCache()
             connState = .connected
             connError = ""
 
@@ -657,6 +708,9 @@ final class HubStore {
         takeovers = []
         questions = []
         settings = nil
+        serverInfo = nil
+        unsupportedCaps = []
+        dismissedCompatProto = 0
         connState = .idle
         connError = ""
     }
@@ -674,6 +728,7 @@ final class HubStore {
     func refreshBots() async throws {
         guard !baseURL.isEmpty else { return }
         let d: BotsResp = try await api.call("/api/bots")
+        serverInfo = d.server
         bots = d.bots ?? []
     }
 
@@ -831,10 +886,40 @@ final class HubStore {
     }
 
     @discardableResult
-    func loadModels(_ harness: String) async throws -> [String] {
-        let d: ModelsResp = try await api.call("/api/models?harness=\(enc(harness))")
-        models[harness] = d.models ?? []
-        return models[harness]!
+    func loadModels(_ harness: String, force: Bool = false) async throws -> [String] {
+        guard !harness.isEmpty else { return [] }
+        if !force, let cached = models[harness], !cached.isEmpty {
+            return cached
+        }
+        if force {
+            modelLoadTasks[harness]?.1.cancel()
+            modelLoadTasks.removeValue(forKey: harness)
+        } else if let existing = modelLoadTasks[harness] {
+            return try await existing.1.value
+        }
+        let token = UUID()
+        let task = Task<[String], Error> {
+            let d: ModelsResp = try await api.call("/api/models?harness=\(enc(harness))")
+            return d.models ?? []
+        }
+        modelLoadTasks[harness] = (token, task)
+        defer {
+            if modelLoadTasks[harness]?.0 == token {
+                modelLoadTasks.removeValue(forKey: harness)
+            }
+        }
+        let list = try await task.value
+        if !list.isEmpty || force || models[harness] == nil {
+            models[harness] = list
+        }
+        return models[harness] ?? list
+    }
+
+    private func resetModelsCache() {
+        for (_, entry) in modelLoadTasks { entry.1.cancel() }
+        modelLoadTasks.removeAll()
+        models = [:]
+        modelsGeneration += 1
     }
 
     func saveSettings(changed: Bool, defaultHarness: String, defaultModel: String, defaultModels: [String: String], sharedUserMd: String,
@@ -850,12 +935,12 @@ final class HubStore {
 
     func connectMagpie(_ harness: String, model: String) async throws {
         settings = try await api.call("/api/harnesses/\(enc(harness))/magpie", method: "POST", body: ["action": "connect", "model": model])
-        models = [:]
+        resetModelsCache()
     }
 
     func disconnectMagpie(_ harness: String) async throws {
         settings = try await api.call("/api/harnesses/\(enc(harness))/magpie", method: "POST", body: ["action": "disconnect"])
-        models = [:]
+        resetModelsCache()
     }
 
     func openMagpie() async throws {
@@ -872,6 +957,7 @@ final class HubStore {
             throw NSError(domain: "BotHub", code: 400, userInfo: [NSLocalizedDescriptionKey: st.error ?? "Magpie install failed"])
         }
         _ = try await loadSettings()
+        resetModelsCache()
     }
 
     func setDesktopWorker(harness: String, model: String) async throws {
@@ -1019,13 +1105,13 @@ final class HubStore {
         try await api.call("/api/desktop/frame?target=\(enc(target))&windowId=&maxDim=1280&quality=72")
     }
 
-    func makeDesktopWSRequest(target: String, preset: String? = nil) -> URLRequest? {
+    func makeDesktopWSRequest(target: String, preset: String? = nil, codec: String = "hevc") -> URLRequest? {
         guard !baseURL.isEmpty, var comps = URLComponents(string: baseURL) else { return nil }
         comps.scheme = (comps.scheme?.lowercased() == "https") ? "wss" : "ws"
         comps.path = "/api/desktop/stream/ws"
         var q = [
             URLQueryItem(name: "target", value: target),
-            URLQueryItem(name: "codec", value: "hevc"),
+            URLQueryItem(name: "codec", value: codec.isEmpty ? "hevc" : codec),
         ]
         if let preset, !preset.isEmpty {
             q.append(URLQueryItem(name: "preset", value: preset))
@@ -1033,6 +1119,7 @@ final class HubStore {
         comps.queryItems = q
         guard let url = comps.url else { return nil }
         var req = URLRequest(url: url)
+        APIClient.attachClientHeaders(&req)
         if !authToken.isEmpty {
             req.setValue("Bearer \(authToken)", forHTTPHeaderField: "Authorization")
         }

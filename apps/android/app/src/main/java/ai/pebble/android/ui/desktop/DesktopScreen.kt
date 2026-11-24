@@ -1,6 +1,8 @@
 package ai.pebble.android.ui.desktop
 
 import android.app.Activity
+import android.graphics.BitmapFactory
+import android.util.Base64
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
@@ -10,6 +12,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -56,6 +59,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -66,8 +70,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.lifecycle.Lifecycle
@@ -82,6 +89,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 import ai.pebble.android.data.DesktopTarget
+import ai.pebble.android.data.HubException
 import ai.pebble.android.data.PebbleStore
 import ai.pebble.android.data.StageKind
 import ai.pebble.android.data.errText
@@ -89,12 +97,22 @@ import ai.pebble.android.ui.chat.ChatScreen
 import ai.pebble.android.ui.theme.LocalPalette
 import ai.pebble.android.ui.theme.PebbleFont
 import ai.pebble.android.ui.theme.PebbleTheme
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.math.hypot
 import androidx.compose.ui.res.painterResource
 import ai.pebble.android.ui.theme.PebbleIcons
+
+private enum class DesktopStreamMode { WS_HEVC, WS_H264, FRAME_POLLING }
+
+private fun preferredDesktopStreamMode(store: PebbleStore, target: String): DesktopStreamMode = when {
+    !PebbleStore.isLocalDesktopTarget(target) || !store.supports("desktop.ws_h264") -> DesktopStreamMode.FRAME_POLLING
+    !store.supports("desktop.ws_hevc") -> DesktopStreamMode.WS_H264
+    else -> DesktopStreamMode.WS_HEVC
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -110,7 +128,10 @@ fun DesktopScreen(
     val view = LocalView.current
     val scope = rememberCoroutineScope()
 
-    var activeTab by remember(initialTab) { mutableStateOf(initialTab) }
+    val canUseFiles = store.supports("stage.files")
+    var activeTab by remember(initialTab, canUseFiles) {
+        mutableStateOf(if (!canUseFiles && initialTab == StageKind.FILES) StageKind.DESKTOP else initialTab)
+    }
     var target by remember { mutableStateOf(initialTarget.ifEmpty { "local" }) }
     var streaming by remember { mutableStateOf(true) }
     var preset by remember { mutableStateOf("auto") }
@@ -122,11 +143,20 @@ fun DesktopScreen(
     var showHiddenFiles by remember { mutableStateOf(false) }
     var filesRefreshSeq by remember { mutableIntStateOf(0) }
 
+    var streamMode by remember { mutableStateOf(preferredDesktopStreamMode(store, target)) }
+    var fallbackBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
+    var frameFps by remember { mutableIntStateOf(0) }
     var streamMeta by remember { mutableStateOf<DesktopStreamMeta?>(null) }
     var streamConnected by remember { mutableStateOf(false) }
     var streamFps by remember { mutableIntStateOf(0) }
     var streamErr by remember { mutableStateOf("") }
     val streamCtrl = remember { H264StreamController() }
+
+    LaunchedEffect(canUseFiles) {
+        if (!canUseFiles && activeTab == StageKind.FILES) {
+            activeTab = StageKind.DESKTOP
+        }
+    }
 
     var keyMenuOpen by remember { mutableStateOf(false) }
     var settingsMenuOpen by remember { mutableStateOf(false) }
@@ -190,8 +220,20 @@ fun DesktopScreen(
 
     LaunchedEffect(target) {
         val next = target.ifEmpty { "local" }
+        streamMode = preferredDesktopStreamMode(store, next)
+        fallbackBitmap = null
+        frameFps = 0
+        streamConnected = false
+        streamErr = ""
+        error = ""
         if (store.activeDesktopTarget.target != next) {
             runCatching { store.setActiveDesktopTarget(next) }
+        }
+    }
+
+    LaunchedEffect(store.serverInfo, store.unsupportedCaps, target) {
+        if ((!PebbleStore.isLocalDesktopTarget(target) || !store.supports("desktop.ws_h264")) && streamMode != DesktopStreamMode.FRAME_POLLING) {
+            streamMode = DesktopStreamMode.FRAME_POLLING
         }
     }
 
@@ -207,7 +249,7 @@ fun DesktopScreen(
         onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
     }
 
-    LaunchedEffect(target, streaming, activeTab, isStarted) {
+    LaunchedEffect(target, streaming, activeTab, isStarted, streamMode) {
         if (activeTab != StageKind.DESKTOP || !isStarted) return@LaunchedEffect
         delay(80)
         while (isActive && streaming && activeTab == StageKind.DESKTOP && isStarted) {
@@ -219,7 +261,74 @@ fun DesktopScreen(
                     error = ""
                 }
             }
-            delay(if (streamConnected) 10_000 else 2000)
+            val ready = streamConnected || (streamMode == DesktopStreamMode.FRAME_POLLING && fallbackBitmap != null)
+            delay(if (ready) 10_000 else 2000)
+        }
+    }
+
+    LaunchedEffect(target, streaming, activeTab, isStarted, streamMode) {
+        if (activeTab != StageKind.DESKTOP || !streaming || !isStarted || streamMode != DesktopStreamMode.FRAME_POLLING) {
+            return@LaunchedEffect
+        }
+        var consecErrors = 0
+        var windowFrames = 0
+        var fpsWindowStartMs = System.currentTimeMillis()
+        while (isActive && streaming && activeTab == StageKind.DESKTOP && isStarted && streamMode == DesktopStreamMode.FRAME_POLLING) {
+            val t0 = System.currentTimeMillis()
+            var sleepMs = 350L
+            runCatching {
+                val fr = store.fetchDesktopFrame(target)
+                val bmp = withContext(Dispatchers.IO) {
+                    if (fr.jpegBase64.isEmpty()) return@withContext null
+                    val raw = Base64.decode(fr.jpegBase64, Base64.DEFAULT)
+                    BitmapFactory.decodeByteArray(raw, 0, raw.size)?.asImageBitmap()
+                }
+                fr to bmp
+            }.onSuccess { (fr, bmp) ->
+                if (!isActive || !streaming || activeTab != StageKind.DESKTOP || !isStarted || streamMode != DesktopStreamMode.FRAME_POLLING) {
+                    return@onSuccess
+                }
+                if (bmp != null) {
+                    val iw = (fr.imageWidth ?: 0.0).let { if (it > 0) it else bmp.width.toDouble() }
+                    val ih = (fr.imageHeight ?: 0.0).let { if (it > 0) it else bmp.height.toDouble() }
+                    streamMeta = DesktopStreamMeta(
+                        imageWidth = iw,
+                        imageHeight = ih,
+                        logicalX = fr.logicalX ?: 0.0,
+                        logicalY = fr.logicalY ?: 0.0,
+                        logicalWidth = (fr.logicalWidth ?: 0.0).let { if (it > 0) it else 1440.0 },
+                        logicalHeight = (fr.logicalHeight ?: 0.0).let { if (it > 0) it else 900.0 },
+                        preset = "frame",
+                        bitrateKbps = 0,
+                    )
+                    fallbackBitmap = bmp
+                    consecErrors = 0
+                    windowFrames += 1
+                    val now = System.currentTimeMillis()
+                    val elapsedWin = now - fpsWindowStartMs
+                    if (elapsedWin >= 1000L) {
+                        frameFps = maxOf(1, (windowFrames * 1000L / elapsedWin).toInt())
+                        windowFrames = 0
+                        fpsWindowStartMs = now
+                    }
+                    if (error.isNotEmpty() && error != store.t("deskScreenRecordingDenied")) error = ""
+                }
+                val elapsed = System.currentTimeMillis() - t0
+                sleepMs = maxOf(120L, 350L - elapsed)
+            }.onFailure { err ->
+                if (!isActive) return@onFailure
+                if (err is HubException && err.code == "screen_recording_denied") {
+                    streaming = false
+                    error = err.message.ifEmpty { store.t("deskScreenRecordingDenied") }
+                    return@LaunchedEffect
+                }
+                consecErrors += 1
+                if (fallbackBitmap == null && consecErrors >= 3) {
+                    error = errText(err, store.t("connFailed"))
+                }
+                sleepMs = 1200L
+            }
+            delay(sleepMs)
         }
     }
 
@@ -243,7 +352,8 @@ fun DesktopScreen(
         send(mapOf("kind" to "type", "text" to txt))
     }
 
-    val wsUrl = store.makeDesktopWsUrl(target).orEmpty()
+    val wsCodec = if (streamMode == DesktopStreamMode.WS_HEVC) "hevc" else "h264"
+    val wsUrl = if (streamMode == DesktopStreamMode.FRAME_POLLING) "" else store.makeDesktopWsUrl(target, codec = wsCodec).orEmpty()
 
     PebbleTheme(dark = useDarkStage) {
         val p = LocalPalette.current
@@ -309,13 +419,22 @@ fun DesktopScreen(
                             }
                         },
                         title = {
-                            StageTabSwitcher(
-                                activeTab = activeTab,
-                                filesLabel = store.t("stageFilesTab"),
-                                desktopLabel = store.t("stageDesktopTab"),
-                                isDarkStage = activeTab == StageKind.DESKTOP,
-                                onSelect = { activeTab = it },
-                            )
+                            if (canUseFiles) {
+                                StageTabSwitcher(
+                                    activeTab = activeTab,
+                                    filesLabel = store.t("stageFilesTab"),
+                                    desktopLabel = store.t("stageDesktopTab"),
+                                    isDarkStage = activeTab == StageKind.DESKTOP,
+                                    onSelect = { activeTab = it },
+                                )
+                            } else {
+                                Text(
+                                    text = store.t("stageDesktopTab"),
+                                    color = barFg,
+                                    fontSize = PebbleFont.cardTitle,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                            }
                         },
                         actions = {
                             if (activeTab == StageKind.FILES) {
@@ -395,9 +514,23 @@ fun DesktopScreen(
                                         onDismissRequest = { settingsMenuOpen = false },
                                         containerColor = pillBg,
                                     ) {
-                                        if (streamConnected) {
+                                        if (streamMode == DesktopStreamMode.FRAME_POLLING && fallbackBitmap != null) {
                                             DropdownMenuItem(
-                                                text = { Text("H.264 · $streamFps fps", color = pillMute, fontSize = PebbleFont.secondary) },
+                                                text = {
+                                                    Text(
+                                                        store.t("deskFrameModeLabel", mapOf("fps" to "$frameFps")),
+                                                        color = pillMute,
+                                                        fontSize = PebbleFont.secondary,
+                                                    )
+                                                },
+                                                enabled = false,
+                                                onClick = {},
+                                            )
+                                            HorizontalDivider(color = Color(0xFF333333))
+                                        } else if (streamConnected) {
+                                            val codecLabel = if (streamMode == DesktopStreamMode.WS_HEVC) "HEVC" else "H.264"
+                                            DropdownMenuItem(
+                                                text = { Text("$codecLabel · $streamFps fps", color = pillMute, fontSize = PebbleFont.secondary) },
                                                 enabled = false,
                                                 onClick = {},
                                             )
@@ -651,33 +784,52 @@ fun DesktopScreen(
                                                 }
                                             },
                                     ) {
-                                        if (wsUrl.isNotEmpty()) {
-                                            H264SurfaceView(
-                                                url = wsUrl,
-                                                token = store.authToken,
-                                                preset = preset,
-                                                active = streaming && activeTab == StageKind.DESKTOP && isStarted,
-                                                controller = streamCtrl,
-                                                onMeta = { streamMeta = it },
-                                                onStatus = { conn, fps ->
-                                                    streamConnected = conn
-                                                    streamFps = fps
-                                                    if (conn) streamErr = ""
-                                                },
-                                                onStreamError = { code, msg ->
-                                                    if (code == "screen_recording_denied") {
-                                                        streaming = false
-                                                        error = store.t("deskScreenRecordingDenied")
-                                                    } else {
-                                                        streamErr = msg
-                                                    }
-                                                },
-                                                modifier = Modifier.fillMaxSize(),
-                                            )
+                                        if (streamMode == DesktopStreamMode.FRAME_POLLING) {
+                                            fallbackBitmap?.let { bmp ->
+                                                Image(
+                                                    bitmap = bmp,
+                                                    contentDescription = null,
+                                                    contentScale = ContentScale.Fit,
+                                                    modifier = Modifier.fillMaxSize(),
+                                                )
+                                            }
+                                        } else if (wsUrl.isNotEmpty()) {
+                                            key(target, streamMode) {
+                                                H264SurfaceView(
+                                                    url = wsUrl,
+                                                    token = store.authToken,
+                                                    preset = preset,
+                                                    active = streaming && activeTab == StageKind.DESKTOP && isStarted,
+                                                    controller = streamCtrl,
+                                                    onMeta = { streamMeta = it },
+                                                    onStatus = { conn, fps ->
+                                                        streamConnected = conn
+                                                        streamFps = fps
+                                                        if (conn) streamErr = ""
+                                                    },
+                                                    onStreamError = { code, msg ->
+                                                        if (code == "screen_recording_denied") {
+                                                            streaming = false
+                                                            error = store.t("deskScreenRecordingDenied")
+                                                        } else if (!streamConnected) {
+                                                            streamErr = ""
+                                                            streamMode = when (streamMode) {
+                                                                DesktopStreamMode.WS_HEVC -> DesktopStreamMode.WS_H264
+                                                                DesktopStreamMode.WS_H264 -> DesktopStreamMode.FRAME_POLLING
+                                                                DesktopStreamMode.FRAME_POLLING -> DesktopStreamMode.FRAME_POLLING
+                                                            }
+                                                        } else {
+                                                            streamErr = msg
+                                                        }
+                                                    },
+                                                    modifier = Modifier.fillMaxSize(),
+                                                )
+                                            }
                                         }
 
-                                        val displayErr = error.ifEmpty { streamErr }
-                                        if (!streamConnected) {
+                                        val isDisplayReady = (streamMode == DesktopStreamMode.FRAME_POLLING && fallbackBitmap != null) || streamConnected
+                                        val displayErr = error.ifEmpty { if (streamMode == DesktopStreamMode.FRAME_POLLING) "" else streamErr }
+                                        if (!isDisplayReady) {
                                             Column(
                                                 modifier = Modifier
                                                     .align(Alignment.Center)
@@ -697,6 +849,8 @@ fun DesktopScreen(
                                                         onClick = {
                                                             error = ""
                                                             streamErr = ""
+                                                            fallbackBitmap = null
+                                                            streamMode = preferredDesktopStreamMode(store, target)
                                                             streaming = false
                                                             streaming = true
                                                         },

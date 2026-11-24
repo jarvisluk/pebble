@@ -10,6 +10,9 @@ struct BotDetailView: View {
     @Binding var isPresented: Bool
 
     @State private var previewStream = H264StreamController()
+    @State private var previewUseFrame = false
+    @State private var previewFrameImage: PlatformImage?
+    @State private var previewFrameError = ""
 
     private var effectiveTarget: String {
         if let to = hub.takeovers.first(where: { $0.botId == botId }), let t = to.target, !t.isEmpty {
@@ -20,6 +23,10 @@ struct BotDetailView: View {
         }
         let active = hub.activeDesktopTarget.target
         return active.isEmpty ? "local" : active
+    }
+
+    private var shouldUsePreviewFrame: Bool {
+        !HubStore.isLocalDesktopTarget(effectiveTarget) || !hub.supports("desktop.ws_h264") || previewUseFrame
     }
 
     private var targetBadgeLabel: String {
@@ -54,9 +61,30 @@ struct BotDetailView: View {
             }
             try? await hub.fetchRoutines(botId)
         }
-        .task(id: "\(botId)-\(hub.isConnected)-\(windowVisible)-\(effectiveTarget)") {
-            guard windowVisible, hub.isConnected,
-                  let req = hub.makeDesktopWSRequest(target: effectiveTarget, preset: "preview") else {
+        .onChange(of: effectiveTarget) { _, _ in
+            previewUseFrame = false
+            previewFrameImage = nil
+            previewFrameError = ""
+        }
+        .onChange(of: previewStream.preFirstFrameFailureSeq) { _, _ in
+            if windowVisible && hub.isConnected {
+                previewUseFrame = true
+            }
+        }
+        .task(id: "\(botId)-\(hub.isConnected)-\(windowVisible)-\(effectiveTarget)-\(shouldUsePreviewFrame)") {
+            guard windowVisible, hub.isConnected else {
+                previewStream.stop()
+                return
+            }
+            if shouldUsePreviewFrame {
+                previewStream.stop()
+                await pollPreviewFrames()
+                return
+            }
+            previewFrameImage = nil
+            previewFrameError = ""
+            let codec = hub.supports("desktop.ws_hevc") ? "hevc" : "h264"
+            guard let req = hub.makeDesktopWSRequest(target: effectiveTarget, preset: "preview", codec: codec) else {
                 previewStream.stop()
                 return
             }
@@ -65,21 +93,53 @@ struct BotDetailView: View {
         .onDisappear { previewStream.stop() }
     }
 
+    private func pollPreviewFrames() async {
+        while !Task.isCancelled && windowVisible && hub.isConnected && shouldUsePreviewFrame {
+            do {
+                let fr = try await hub.fetchDesktopFrame(effectiveTarget)
+                if Task.isCancelled || !windowVisible { break }
+                let img: PlatformImage? = await Task.detached(priority: .utility) {
+                    guard !fr.jpegBase64.isEmpty, let data = Data(base64Encoded: fr.jpegBase64) else { return nil }
+                    return PlatformImage(data: data)
+                }.value
+                if Task.isCancelled || !windowVisible { break }
+                if let img {
+                    previewFrameImage = img
+                    if !previewFrameError.isEmpty { previewFrameError = "" }
+                }
+            } catch {
+                if Task.isCancelled { break }
+                if previewFrameImage == nil {
+                    previewFrameError = errText(error, hub.t("connFailed"))
+                }
+            }
+            try? await Task.sleep(nanoseconds: 2_500_000_000)
+        }
+    }
+
     private var desktopPreviewCard: some View {
-        Button {
+        let hasFrame = shouldUsePreviewFrame && previewFrameImage != nil
+        let isReady = hasFrame || previewStream.connected
+        let displayErr = shouldUsePreviewFrame ? previewFrameError : previewStream.error
+        return Button {
             router.openDesktop(effectiveTarget)
         } label: {
             ZStack(alignment: .topTrailing) {
                 ZStack {
                     Color.black
                     H264DisplayView(controller: previewStream)
-                    if !previewStream.connected {
+                    if let img = previewFrameImage, shouldUsePreviewFrame {
+                        Image(platform: img)
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                    }
+                    if !isReady {
                         VStack(spacing: 6) {
-                            if !previewStream.error.isEmpty {
+                            if !displayErr.isEmpty {
                                 Image(systemName: "display")
                                     .font(.system(size: AppFont.hero))
                                     .foregroundStyle(.secondary)
-                                Text(previewStream.error)
+                                Text(displayErr)
                                     .font(.system(size: AppFont.caption))
                                     .foregroundStyle(.secondary)
                                     .multilineTextAlignment(.center)
@@ -153,13 +213,16 @@ struct BotInfoSheet: View {
     private var bot: BotStatus? { index >= 0 ? hub.bots[index] : nil }
     private var active: BotStatus? { detail ?? bot }
 
+    private var canBindDesktop: Bool { hub.supports("bot.desktop_binding") }
+    private var canIsolateBrowser: Bool { hub.supports("bot.browser_isolation") }
+
     private var dirty: Bool {
         guard let a = active else { return false }
         return editName != (a.name ?? botId) || editDesc != (a.description ?? "")
             || editAvatar != (a.avatar ?? "") || editColor != (a.color ?? "")
             || editPrivate != (a.privateSessions ?? false)
-            || editDesktopTarget != (a.desktopTarget ?? "")
-            || editBrowserMode != (a.browserMode ?? "")
+            || (canBindDesktop && editDesktopTarget != (a.desktopTarget ?? ""))
+            || (canIsolateBrowser && editBrowserMode != (a.browserMode ?? ""))
             || editInst != (detail?.instructions ?? "")
     }
 
@@ -251,8 +314,12 @@ struct BotInfoSheet: View {
                             }
                             .buttonStyle(.plain)
                         }
-                        HubMenuPicker(title: hub.t("botDesktopTarget"), selection: $editDesktopTarget, options: desktopTargetOptions)
-                        HubMenuPicker(title: hub.t("botBrowserMode"), selection: $editBrowserMode, options: browserModeOptions)
+                        if canBindDesktop {
+                            HubMenuPicker(title: hub.t("botDesktopTarget"), selection: $editDesktopTarget, options: desktopTargetOptions)
+                        }
+                        if canIsolateBrowser {
+                            HubMenuPicker(title: hub.t("botBrowserMode"), selection: $editBrowserMode, options: browserModeOptions)
+                        }
                         Toggle(hub.t("privateSessions"), isOn: $editPrivate).tint(pal.accent)
                         VStack(alignment: .leading, spacing: 6) {
                             Text("AGENTS.md").font(.system(size: AppFont.secondary)).foregroundStyle(.secondary)
@@ -346,10 +413,17 @@ struct BotInfoSheet: View {
         saving = true
         Task {
             do {
-                try await hub.updateBot(botId, ["name": n, "description": editDesc.trimmingCharacters(in: .whitespaces),
-                                                "avatar": editAvatar, "color": editColor,
-                                                "instructions": editInst, "privateSessions": editPrivate,
-                                                "desktopTarget": editDesktopTarget, "browserMode": editBrowserMode])
+                var body: [String: Any] = [
+                    "name": n,
+                    "description": editDesc.trimmingCharacters(in: .whitespaces),
+                    "avatar": editAvatar,
+                    "color": editColor,
+                    "instructions": editInst,
+                    "privateSessions": editPrivate,
+                ]
+                if canBindDesktop { body["desktopTarget"] = editDesktopTarget }
+                if canIsolateBrowser { body["browserMode"] = editBrowserMode }
+                try await hub.updateBot(botId, body)
                 apply(try await hub.botDetail(botId))
             } catch { err = errText(error, hub.t("saveFailed")) }
             saving = false

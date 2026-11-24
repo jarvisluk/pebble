@@ -262,6 +262,47 @@ func TestMagpieCacheAndInvalidation(t *testing.T) {
 	mu.Unlock()
 }
 
+func TestMagpieCatalogDoesNotCacheEmptyOutput(t *testing.T) {
+	fakeBin := filepath.Join(t.TempDir(), "magpie")
+	if err := os.WriteFile(fakeBin, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MAGPIE_BIN", fakeBin)
+	InvalidateMagpieCache()
+	t.Cleanup(InvalidateMagpieCache)
+
+	origOut := runMagpieOutput
+	t.Cleanup(func() { runMagpieOutput = origOut })
+
+	calls := 0
+	runMagpieOutput = func(_ context.Context, args ...string) ([]byte, error) {
+		if len(args) == 1 && args[0] == "models" {
+			calls++
+			if calls == 1 {
+				return []byte("  Acer\n"), nil
+			}
+			return []byte("  acer/gpt-5  OpenAI\n"), nil
+		}
+		return nil, nil
+	}
+
+	ctx := t.Context()
+	if got := MagpieModels(ctx, "opencode"); len(got) != 0 {
+		t.Fatalf("expected empty models on first transient empty output, got %v", got)
+	}
+	got := MagpieModels(ctx, "opencode")
+	if len(got) != 1 || got[0] != "magpie/acer/gpt-5" {
+		t.Fatalf("expected second call to retry and populate catalog, got %v (calls=%d)", got, calls)
+	}
+	if calls != 2 {
+		t.Fatalf("expected 2 CLI calls when first returned empty, got %d", calls)
+	}
+	_ = MagpieModels(ctx, "opencode")
+	if calls != 2 {
+		t.Fatalf("expected non-empty catalog to be cached on third call, got calls=%d", calls)
+	}
+}
+
 func TestParseMagpieDataDirs(t *testing.T) {
 	raw := "files: /Users/test/.config/magpie\ncache: /Users/test/.cache/magpie\n"
 	files, cache := parseMagpieDataDirs(raw)

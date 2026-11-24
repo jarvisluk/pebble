@@ -190,6 +190,7 @@ export const CreateBotModal: React.FC<CreateBotModalProps> = ({
                 placeholder={defModel ? t('defaultModelPh', { model: defModel }) : 'provider/model'}
                 spellCheck={false}
                 value={model}
+                onFocus={() => void onLoadModels(harness)}
                 onChange={(e) => setModel(e.target.value)}
               />
               <datalist id="createModelsList">
