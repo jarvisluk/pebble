@@ -310,6 +310,7 @@ export function ConnectContent({ standalone = false }: { standalone?: boolean })
       keyboardShouldPersistTaps="handled"
     >
       <View style={styles.heroInner}>
+        <View style={styles.heroSpacer} />
         <View style={styles.heroTop}>
           <BotAvatar id="assistant" size={84} color={PEBBLE_COLOR} busy={submitting} />
           <Text style={[styles.heroTitle, { color: theme.text }]}>Pebble</Text>
@@ -317,7 +318,7 @@ export function ConnectContent({ standalone = false }: { standalone?: boolean })
         </View>
 
         {scanning && Platform.OS !== 'web' && (
-          <View style={styles.camWrap}>
+          <View style={[styles.camWrap, styles.heroCam]}>
             <CameraView
               style={styles.cam}
               facing="back"
@@ -784,20 +785,29 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   heroScroll: {
     flexGrow: 1,
-    justifyContent: 'center',
     paddingHorizontal: 24,
-    paddingVertical: 32,
+    paddingTop: 24,
+    paddingBottom: 20,
   },
   heroInner: {
+    flex: 1,
     width: '100%',
     maxWidth: 360,
     alignSelf: 'center',
-    gap: 20,
+    gap: 0,
+  },
+  heroSpacer: {
+    flex: 1,
+    minHeight: 24,
   },
   heroTop: {
     alignItems: 'center',
     gap: 10,
-    paddingBottom: 8,
+    paddingBottom: 0,
+    marginBottom: 40,
+  },
+  heroCam: {
+    marginBottom: 16,
   },
   heroTitle: {
     fontSize: 20,
@@ -836,11 +846,12 @@ const styles = StyleSheet.create({
   heroMsg: {
     fontSize: 13,
     textAlign: 'center',
+    marginTop: 12,
   },
   heroFooter: {
     alignItems: 'center',
     gap: 6,
-    paddingTop: 18,
+    paddingTop: 24,
   },
   heroFooterHint: {
     fontSize: 12,

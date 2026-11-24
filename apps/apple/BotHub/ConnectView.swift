@@ -141,7 +141,7 @@ struct ConnectView: View {
                             .foregroundStyle(p.text2)
                             .multilineTextAlignment(.center)
                     }
-                    .padding(.bottom, 28)
+                    .padding(.bottom, 40)
 
                     if scanning {
                         QRScanner { onScanned($0) }
@@ -200,8 +200,6 @@ struct ConnectView: View {
                             .padding(.top, 12)
                     }
 
-                    Spacer(minLength: 24)
-
                     VStack(spacing: 6) {
                         Text(hub.t("noDesktopYet"))
                             .font(.system(size: 12))
@@ -217,7 +215,7 @@ struct ConnectView: View {
                         .foregroundStyle(p.text2)
                         .buttonStyle(.plain)
                     }
-                    .padding(.top, 12)
+                    .padding(.top, 24)
                     .padding(.bottom, 20)
                 }
                 .frame(maxWidth: 360)
