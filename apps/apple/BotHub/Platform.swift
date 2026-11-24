@@ -119,6 +119,16 @@ var platformNotificationSettingsURL: URL? {
     #endif
 }
 
+var platformAppSettingsURL: URL? {
+    #if os(iOS)
+    return URL(string: UIApplication.openSettingsURLString)
+    #elseif os(macOS)
+    return URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy")
+    #else
+    return nil
+    #endif
+}
+
 var platformSwitchControlSize: ControlSize {
     #if os(macOS)
     return .small
@@ -486,4 +496,5 @@ extension Notification.Name {
     static let hubFocusSearch = Notification.Name("bothub.focusSearch")
     static let hubOpenSettings = Notification.Name("bothub.openSettings")
     static let hubNewBot = Notification.Name("bothub.newBot")
+    static let hubOpenUnboxPermissions = Notification.Name("bothub.openUnboxPermissions")
 }

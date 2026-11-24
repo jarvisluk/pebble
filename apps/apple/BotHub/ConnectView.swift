@@ -30,13 +30,24 @@ struct ConnectView: View {
     @State private var tsControlUrl = ""
     @State private var manualOpen = false
     @State private var manualAdvOpen = false
+    @State private var permsChecked = false
+
+    private let perms = PermissionsManager.shared
 
     private var isFreshOnboarding: Bool {
         isGate && hub.servers.isEmpty && hub.activeServer == nil
     }
 
+    private var checkingFreshPerms: Bool {
+        isFreshOnboarding && !manualOpen && !perms.unboxDone && !permsChecked
+    }
+
+    private var showUnboxPermissions: Bool {
+        isFreshOnboarding && !manualOpen && !perms.unboxDone && permsChecked && perms.hasUngrantedCore
+    }
+
     private var showFreshHero: Bool {
-        isFreshOnboarding && !manualOpen
+        isFreshOnboarding && !manualOpen && !checkingFreshPerms && !showUnboxPermissions
     }
 
     private var isConnectingGate: Bool {
@@ -54,6 +65,21 @@ struct ConnectView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(p.page)
                 .transition(.opacity)
+            } else if checkingFreshPerms {
+                p.page
+                    .ignoresSafeArea()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if showUnboxPermissions {
+                UnboxPermissionsView(onDone: {
+                    withAnimation(.spring(response: 0.34, dampingFraction: 0.88)) {
+                        perms.markUnboxDone()
+                    }
+                })
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .transition(.asymmetric(
+                    insertion: .move(edge: .leading).combined(with: .opacity),
+                    removal: .move(edge: .leading).combined(with: .opacity)
+                ))
             } else if showFreshHero {
                 freshHeroContent
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -100,9 +126,23 @@ struct ConnectView: View {
                 }
             }
         }
+        .animation(.spring(response: 0.34, dampingFraction: 0.88), value: showUnboxPermissions)
         .animation(.spring(response: 0.34, dampingFraction: 0.88), value: showFreshHero)
         .animation(.easeOut(duration: 0.22), value: isConnectingGate)
         .confirmAlert($confirm)
+        .task(id: isFreshOnboarding) {
+            guard isFreshOnboarding else { return }
+            if perms.unboxDone {
+                permsChecked = true
+                return
+            }
+            await perms.refresh()
+            if !perms.hasUngrantedCore {
+                await perms.primeSilentNetworkIfNeeded()
+                perms.markUnboxDone()
+            }
+            permsChecked = true
+        }
         .onAppear {
             if let s = hub.activeServer, hub.connState == .unauthorized || hub.connState == .error {
                 if label.isEmpty { label = s.label }

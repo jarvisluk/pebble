@@ -89,6 +89,8 @@ private struct MacWindowRootView: View {
     @Environment(\.colorScheme) private var scheme
 
     var appDelegate: MacAppDelegate
+    @State private var showMacPermsUnbox = false
+    @State private var checkingMacPerms = false
 
     private var scheme0: ColorScheme? {
         hub.themePref == "light" ? .light : hub.themePref == "dark" ? .dark : nil
@@ -103,12 +105,26 @@ private struct MacWindowRootView: View {
         !host.ready || host.snapshot.mode.isEmpty || host.snapshot.activeUrl.isEmpty
     }
 
+    private func checkAndShowMacPermsUnbox() async {
+        guard !checkingMacPerms, !showMacPermsUnbox, !PermissionsManager.shared.unboxDone else { return }
+        checkingMacPerms = true
+        defer { checkingMacPerms = false }
+        await PermissionsManager.shared.refresh()
+        if PermissionsManager.shared.hasUngrantedCore {
+            showMacPermsUnbox = true
+        } else {
+            PermissionsManager.shared.markUnboxDone()
+        }
+    }
+
     var body: some View {
         let isMacDesktopStage = router.desktop != nil && router.stageTab == .desktop
         let effectivePalette = isMacDesktopStage ? Palette(dark: true) : activePalette
         Group {
             if showSetup {
                 MacSetupView()
+            } else if showMacPermsUnbox {
+                UnboxPermissionsView(onDone: { showMacPermsUnbox = false })
             } else {
                 RootView()
             }
@@ -124,6 +140,28 @@ private struct MacWindowRootView: View {
                 openWindow(id: "main")
             }
             host.startDaemonIfNeeded()
+        }
+        .onChange(of: host.ready) { _, ready in
+            if ready {
+                Task { await PermissionsManager.shared.refresh() }
+            }
+        }
+        .onChange(of: showSetup) { wasSetup, isSetup in
+            if isSetup {
+                showMacPermsUnbox = false
+            } else if wasSetup && !PermissionsManager.shared.unboxDone {
+                Task { await checkAndShowMacPermsUnbox() }
+            }
+        }
+        .onChange(of: hub.settings?.onboarding?.needsSetup) { _, needs in
+            if needs == true && !showSetup && !PermissionsManager.shared.unboxDone {
+                Task { await checkAndShowMacPermsUnbox() }
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .hubOpenUnboxPermissions)) { _ in
+            if !showSetup {
+                showMacPermsUnbox = true
+            }
         }
         .task(id: "\(host.snapshot.mode)|\(host.snapshot.activeUrl)|\(host.snapshot.activeToken)") {
             let snap = host.snapshot
@@ -141,12 +179,12 @@ private struct MacWindowRootView: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .hubOpenSettings)) { _ in
-            if !showSetup {
+            if !showSetup && !showMacPermsUnbox {
                 router.openSettings(compact: false)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .hubNewBot)) { _ in
-            if !showSetup && hub.isConnected {
+            if !showSetup && !showMacPermsUnbox && hub.isConnected {
                 router.sheet = .createBot
             }
         }

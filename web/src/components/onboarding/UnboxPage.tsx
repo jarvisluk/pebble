@@ -1,5 +1,12 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import type { BotStatus, ResolvedLang, SettingsData } from '../../types';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type {
+  BotStatus,
+  DesktopPermissionItem,
+  DesktopPermissionRequestResponse,
+  DesktopPermissionsResponse,
+  ResolvedLang,
+  SettingsData,
+} from '../../types';
 import { api } from '../../lib/api';
 import { translate } from '../../lib/i18n';
 import { PEBBLE_COLOR } from '../../lib/pebble';
@@ -8,6 +15,15 @@ import { DragBar } from '../DragBar';
 import { StepHarness } from './StepHarness';
 import { StepMagpie } from './StepMagpie';
 import { StepPair } from './StepPair';
+import { StepPermissions } from './StepPermissions';
+
+type UnboxStepId = 'harness' | 'magpie' | 'permissions' | 'pair';
+
+function mapInitialStep(initialStep: 1 | 2 | 3): UnboxStepId {
+  if (initialStep === 2) return 'magpie';
+  if (initialStep === 3) return 'pair';
+  return 'harness';
+}
 
 export interface UnboxPageProps {
   open: boolean;
@@ -44,7 +60,7 @@ export const UnboxPage: React.FC<UnboxPageProps> = ({
 }) => {
   const t = useCallback((k: string, vars?: Record<string, string | number>) => translate(lang, k, vars), [lang]);
 
-  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [step, setStep] = useState<UnboxStepId>('harness');
   const [stepDir, setStepDir] = useState<'enter' | 'next' | 'prev'>('enter');
   const [selectedHarness, setSelectedHarness] = useState('opencode');
   const [defaultModel, setDefaultModel] = useState('');
@@ -52,6 +68,52 @@ export const UnboxPage: React.FC<UnboxPageProps> = ({
   const [busy, setBusy] = useState(false);
   const [loadingModels, setLoadingModels] = useState<Record<string, boolean>>({});
   const inflightModelsRef = useRef<Record<string, number>>({});
+  const [deskPerms, setDeskPerms] = useState<DesktopPermissionItem[]>([]);
+  const [deskPermsLoading, setDeskPermsLoading] = useState(false);
+  const [permBusyId, setPermBusyId] = useState('');
+  const permTimerRef = useRef<number | null>(null);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (permTimerRef.current !== null) {
+        window.clearTimeout(permTimerRef.current);
+        permTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  const loadDesktopPermissions = useCallback(async () => {
+    setDeskPermsLoading(true);
+    try {
+      const res = await api<DesktopPermissionsResponse>('/api/desktop/permissions?target=local');
+      if (mountedRef.current) {
+        setDeskPerms(res.items || []);
+      }
+    } catch {
+      if (mountedRef.current) {
+        setDeskPerms([]);
+      }
+    } finally {
+      if (mountedRef.current) {
+        setDeskPermsLoading(false);
+      }
+    }
+  }, []);
+
+  const schedulePermRefresh = useCallback(() => {
+    if (permTimerRef.current !== null) {
+      window.clearTimeout(permTimerRef.current);
+    }
+    permTimerRef.current = window.setTimeout(() => {
+      permTimerRef.current = null;
+      if (mountedRef.current) {
+        void loadDesktopPermissions();
+      }
+    }, 1500);
+  }, [loadDesktopPermissions]);
 
   const pickDefaultHarness = useCallback(
     (s: SettingsData | null) => {
@@ -72,12 +134,13 @@ export const UnboxPage: React.FC<UnboxPageProps> = ({
 
   useEffect(() => {
     if (!open) return;
-    setStep(initialStep);
+    setStep(mapInitialStep(initialStep));
     setStepDir('enter');
     setErr('');
     setSelectedHarness(pickDefaultHarness(settings));
     setDefaultModel(settings?.defaultModel || '');
-  }, [open, initialStep]);
+    void loadDesktopPermissions();
+  }, [open, initialStep, loadDesktopPermissions]);
 
   const fetchModels = useCallback(
     async (harnessId: string, force = false) => {
@@ -100,24 +163,60 @@ export const UnboxPage: React.FC<UnboxPageProps> = ({
 
   useEffect(() => {
     if (!open) return;
-    if ((step === 1 || step === 2) && selectedHarness) {
+    if ((step === 'harness' || step === 'magpie') && selectedHarness) {
       void fetchModels(selectedHarness);
     }
   }, [open, step, selectedHarness, fetchModels]);
+
+  const hasActionablePerms = useMemo(
+    () => deskPerms.some((p) => p.status !== 'unsupported'),
+    [deskPerms]
+  );
+
+  const steps: UnboxStepId[] = useMemo(
+    () => (hasActionablePerms ? ['harness', 'magpie', 'permissions', 'pair'] : ['harness', 'magpie', 'pair']),
+    [hasActionablePerms]
+  );
+
+  const safeStep: UnboxStepId = steps.includes(step) ? step : 'pair';
+  const stepIdx = Math.max(0, steps.indexOf(safeStep));
 
   const recheck = useCallback(async () => {
     setBusy(true);
     setErr('');
     try {
       onResetModels();
-      await onLoadSettings(true);
+      await Promise.all([onLoadSettings(true), loadDesktopPermissions()]);
       onToast(t('ubRecheckDone'));
     } catch (e) {
       if (e instanceof Error && e.message !== 'unauthorized') setErr(e.message);
     } finally {
       setBusy(false);
     }
-  }, [onLoadSettings, onResetModels, onToast, t]);
+  }, [loadDesktopPermissions, onLoadSettings, onResetModels, onToast, t]);
+
+  const requestPermissions = useCallback(
+    async (permissionId: string, openSettings: boolean) => {
+      setPermBusyId(permissionId);
+      setErr('');
+      try {
+        const res = await api<DesktopPermissionRequestResponse>('/api/desktop/permissions/request', {
+          method: 'POST',
+          body: { target: 'local', permission: permissionId, openSettings },
+        });
+        if (!mountedRef.current) return;
+        if (res.items) setDeskPerms(res.items);
+        if (res.openedSettings) onToast(t('deskPermOpened'));
+        else if (res.prompted) onToast(t('deskPermPrompted'));
+        schedulePermRefresh();
+      } catch (e) {
+        if (mountedRef.current && e instanceof Error && e.message !== 'unauthorized') setErr(e.message);
+      } finally {
+        if (mountedRef.current) setPermBusyId('');
+      }
+    },
+    [onToast, schedulePermRefresh, t]
+  );
 
   const persistHarness = async () => {
     const primary = bots[0];
@@ -164,17 +263,15 @@ export const UnboxPage: React.FC<UnboxPageProps> = ({
     setErr('');
     setBusy(true);
     try {
-      if (step === 1) {
+      if (safeStep === 'harness') {
         await persistHarness();
         await persistModelAndComplete(false);
-        setStepDir('next');
-        setStep(2);
-        return;
-      }
-      if (step === 2) {
+      } else if (safeStep === 'magpie') {
         await persistModelAndComplete(false);
+      }
+      if (stepIdx < steps.length - 1) {
         setStepDir('next');
-        setStep(3);
+        setStep(steps[stepIdx + 1]);
         return;
       }
       await persistHarness();
@@ -196,25 +293,40 @@ export const UnboxPage: React.FC<UnboxPageProps> = ({
   const hInfo = harnesses.find((h) => h.id === selectedHarness);
   const hLabel = hInfo?.label || selectedHarness || 'opencode';
 
-  const headerMeta = {
-    1: { title: t('ubStep1Title'), sub: t('ubStep1Sub') },
-    2: { title: t('ubStep2Title'), sub: t('ubStep2Sub') },
-    3: { title: t('ubStep3Title'), sub: t('ubStep3Sub') },
-  }[step];
+  const headerMeta: Record<UnboxStepId, { title: string; sub: string }> = {
+    harness: { title: t('ubStep1Title'), sub: t('ubStep1Sub') },
+    magpie: { title: t('ubStep2Title'), sub: t('ubStep2Sub') },
+    permissions: { title: t('ubPermTitle'), sub: t('ubPermSub') },
+    pair: { title: t('ubStep3Title'), sub: t('ubStep3Sub') },
+  };
+  const currentMeta = headerMeta[safeStep];
+
+  const stepShortLabel = (id: UnboxStepId) => {
+    switch (id) {
+      case 'harness':
+        return t('ubStepHarnessShort');
+      case 'magpie':
+        return 'Magpie';
+      case 'permissions':
+        return t('ubStepPermsShort');
+      case 'pair':
+        return t('ubStepPairShort');
+    }
+  };
 
   return (
     <div id="unboxDlg" className="unbox-full-page open" aria-label={t('ubAria')}>
       <DragBar />
       <div className="unbox-full-scroll">
         <main className="unbox-full-main">
-          <div key={step} className={`unbox-step-pane is-${stepDir}`}>
+          <div key={safeStep} className={`unbox-step-pane is-${stepDir}`}>
             <header className="unbox-full-head">
               <div className="unbox-top">
                 <div className="unbox-guide-lead">
                   <BotAvatar id="assistant" bots={[]} color={PEBBLE_COLOR} className="pebble-guide-av" busy={busy} />
                   <div>
-                    <h1 id="ubTitle">{headerMeta.title}</h1>
-                    <p id="ubSub">{headerMeta.sub}</p>
+                    <h1 id="ubTitle">{currentMeta.title}</h1>
+                    <p id="ubSub">{currentMeta.sub}</p>
                   </div>
                 </div>
                 <button type="button" id="ubSkipTop" className="link-btn" onClick={() => void handleSkip()}>
@@ -223,7 +335,7 @@ export const UnboxPage: React.FC<UnboxPageProps> = ({
               </div>
             </header>
             <section className="unbox-full-body">
-              {step === 1 && (
+              {safeStep === 'harness' && (
                 <StepHarness
                   t={t}
                   harnesses={harnesses}
@@ -242,7 +354,7 @@ export const UnboxPage: React.FC<UnboxPageProps> = ({
                   onError={setErr}
                 />
               )}
-              {step === 2 && (
+              {safeStep === 'magpie' && (
                 <StepMagpie
                   t={t}
                   lang={lang}
@@ -263,7 +375,19 @@ export const UnboxPage: React.FC<UnboxPageProps> = ({
                   onError={setErr}
                 />
               )}
-              {step === 3 && (
+              {safeStep === 'permissions' && (
+                <StepPermissions
+                  t={t}
+                  permissions={deskPerms}
+                  loading={deskPermsLoading}
+                  busy={busy}
+                  busyPermId={permBusyId}
+                  onRefresh={loadDesktopPermissions}
+                  onRequestAll={() => requestPermissions('all', false)}
+                  onRequestItem={(item, openSettings) => requestPermissions(item.id, openSettings)}
+                />
+              )}
+              {safeStep === 'pair' && (
                 <StepPair
                   t={t}
                   busy={busy}
@@ -282,7 +406,7 @@ export const UnboxPage: React.FC<UnboxPageProps> = ({
       <footer className="unbox-full-foot-wrap">
         <div className="unbox-full-foot">
           <div className="unbox-full-foot-l">
-            {(step > 1 || Boolean(settings?.canResetDesktopMode)) && (
+            {(stepIdx > 0 || Boolean(settings?.canResetDesktopMode)) && (
               <button
                 type="button"
                 id="ubPrev"
@@ -290,9 +414,9 @@ export const UnboxPage: React.FC<UnboxPageProps> = ({
                 disabled={busy}
                 onClick={() => {
                   setErr('');
-                  if (step > 1) {
+                  if (stepIdx > 0) {
                     setStepDir('prev');
-                    setStep((s) => (s > 1 ? ((s - 1) as 1 | 2 | 3) : s));
+                    setStep(steps[stepIdx - 1]);
                   } else if (settings?.canResetDesktopMode) {
                     setBusy(true);
                     void api('/api/desktop/reset', { method: 'POST' }).catch((e) => {
@@ -308,28 +432,32 @@ export const UnboxPage: React.FC<UnboxPageProps> = ({
           </div>
           <div className="unbox-progress" aria-label={t('ubStepsAria')}>
             <div className="unbox-progress-bars">
-              {([1, 2, 3] as const).map((n) => (
+              {steps.map((id, idx) => (
                 <span
-                  key={n}
-                  className={`unbox-progress-seg${n === step ? ' on' : ''}${n < step ? ' done' : ''}`}
-                  data-ub-step={n}
+                  key={id}
+                  className={`unbox-progress-seg${idx === stepIdx ? ' on' : ''}${idx < stepIdx ? ' done' : ''}`}
+                  data-ub-step={idx + 1}
                 />
               ))}
             </div>
             <div className="unbox-progress-labels">
-              {([1, 2, 3] as const).map((n) => (
+              {steps.map((id, idx) => (
                 <span
-                  key={n}
-                  className={`unbox-progress-lbl${n === step ? ' on' : ''}${n < step ? ' done' : ''}`}
+                  key={id}
+                  className={`unbox-progress-lbl${idx === stepIdx ? ' on' : ''}${idx < stepIdx ? ' done' : ''}`}
                 >
-                  {t(`ubStep${n}Label`)}
+                  {`${idx + 1} ${stepShortLabel(id)}`}
                 </span>
               ))}
             </div>
           </div>
           <div className="unbox-full-foot-r">
             <button type="button" id="ubNext" className="btn go" disabled={busy} onClick={() => void handleNext()}>
-              {step === 3 ? t('ubFinish') : step === 1 && !anyInstalled ? t('ubContinue') : t('ubNext')}
+              {stepIdx === steps.length - 1
+                ? t('ubFinish')
+                : safeStep === 'harness' && !anyInstalled
+                  ? t('ubContinue')
+                  : t('ubNext')}
             </button>
           </div>
         </div>

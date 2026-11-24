@@ -78,6 +78,7 @@ import (
 )
 
 const (
+	macPrivacyRoot          = "x-apple.systempreferences:com.apple.preference.security?Privacy"
 	macPrivacyScreenCapture = "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
 	macPrivacyAccessibility = "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
 	macPrivacyListenEvent   = "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"
@@ -204,9 +205,25 @@ func triggerAutomationSystemEventsPrompt(ctx context.Context) error {
 	return cmd.Run()
 }
 
+func triggerAutomationTimed(wait time.Duration) (timedOut bool, err error) {
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- triggerAutomationSystemEventsPrompt(context.Background())
+	}()
+	select {
+	case err := <-errCh:
+		return false, err
+	case <-time.After(wait):
+		return true, nil
+	}
+}
+
 func requestPlatformPermission(ctx context.Context, id string, openSettings bool) (*PermissionRequestResult, error) {
+	id = strings.ToLower(strings.TrimSpace(id))
 	var uri string
 	switch id {
+	case "all":
+		uri = macPrivacyRoot
 	case "screen_recording":
 		uri = macPrivacyScreenCapture
 	case "accessibility":
@@ -225,6 +242,24 @@ func requestPlatformPermission(ctx context.Context, id string, openSettings bool
 	opened := false
 	if !openSettings {
 		switch id {
+		case "all":
+			// Trigger every ungranted promptable permission once without auto-opening System Settings.
+			if C.bhScreenRecordingGranted() == 0 {
+				_ = C.bhRequestScreenRecording()
+				prompted = true
+			}
+			if C.bhAccessibilityGranted() == 0 {
+				_ = C.bhRequestAccessibility()
+				prompted = true
+			}
+			if C.bhInputMonitoringStatus() == -1 {
+				_ = C.bhRequestInputMonitoring()
+				prompted = true
+			}
+			if int(C.bhAutomationSystemEventsStatus(0)) == -1744 {
+				_, _ = triggerAutomationTimed(600 * time.Millisecond)
+				prompted = true
+			}
 		case "screen_recording":
 			granted := C.bhRequestScreenRecording()
 			prompted = true
@@ -261,21 +296,13 @@ func requestPlatformPermission(ctx context.Context, id string, openSettings bool
 				}
 				opened = true
 			} else {
-				errCh := make(chan error, 1)
-				go func() {
-					errCh <- triggerAutomationSystemEventsPrompt(context.Background())
-				}()
-				select {
-				case err := <-errCh:
-					if err != nil {
-						if openErr := openMacSystemSettings(uri); openErr != nil {
-							return nil, openErr
-						}
-						opened = true
-					} else {
-						prompted = true
+				timedOut, err := triggerAutomationTimed(600 * time.Millisecond)
+				if !timedOut && err != nil {
+					if openErr := openMacSystemSettings(uri); openErr != nil {
+						return nil, openErr
 					}
-				case <-time.After(600 * time.Millisecond):
+					opened = true
+				} else {
 					prompted = true
 				}
 			}

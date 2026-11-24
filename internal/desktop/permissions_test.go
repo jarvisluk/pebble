@@ -15,7 +15,15 @@ func TestEnginePermissionsListAndUnknownRequest(t *testing.T) {
 	eng.srChecked = time.Now()
 	eng.permMu.Unlock()
 
-	resp, err := eng.Permissions(context.Background())
+	resp, err := ListPermissions(context.Background())
+	if err != nil {
+		t.Fatalf("ListPermissions() error = %v", err)
+	}
+	if resp == nil || len(resp.Items) == 0 {
+		t.Fatalf("expected non-empty ListPermissions list, got %+v", resp)
+	}
+
+	resp, err = eng.Permissions(context.Background())
 	if err != nil {
 		t.Fatalf("Permissions() error = %v", err)
 	}
@@ -46,5 +54,8 @@ func TestEnginePermissionsListAndUnknownRequest(t *testing.T) {
 
 	if _, err := eng.RequestPermission(context.Background(), "nonexistent_perm", false); err == nil {
 		t.Fatalf("expected error for unknown permission id")
+	}
+	if _, err := RequestSystemPermission(context.Background(), "nonexistent_perm", false); err == nil {
+		t.Fatalf("expected error for unknown standalone permission id")
 	}
 }

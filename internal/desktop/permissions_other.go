@@ -31,6 +31,12 @@ func platformPermissions(_ context.Context) []PermissionItem {
 
 func requestPlatformPermission(ctx context.Context, id string, _ bool) (*PermissionRequestResult, error) {
 	items := platformPermissions(ctx)
+	if strings.EqualFold(strings.TrimSpace(id), "all") {
+		return &PermissionRequestResult{
+			OK:    false,
+			Items: items,
+		}, nil
+	}
 	for _, it := range items {
 		if strings.EqualFold(it.ID, id) {
 			return &PermissionRequestResult{

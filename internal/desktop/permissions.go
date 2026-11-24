@@ -43,16 +43,39 @@ func (e *Engine) resetPermissionCache() {
 	e.permMu.Unlock()
 }
 
+// ListPermissions inspects host OS permissions relevant to remote desktop and automation
+// without requiring a live capture Engine instance.
+func ListPermissions(ctx context.Context) (*PermissionsResponse, error) {
+	items := platformPermissions(ctx)
+	if items == nil {
+		items = []PermissionItem{}
+	}
+	return &PermissionsResponse{
+		Platform: runtime.GOOS,
+		Items:    items,
+	}, nil
+}
+
+// RequestSystemPermission triggers a native system permission prompt and/or opens System Settings
+// for the given permission ID (or "all" for batch prompting) without requiring a capture Engine.
+func RequestSystemPermission(ctx context.Context, id string, openSettings bool) (*PermissionRequestResult, error) {
+	id = strings.TrimSpace(id)
+	res, err := requestPlatformPermission(ctx, id, openSettings)
+	if err != nil {
+		return nil, err
+	}
+	if res != nil && res.Items == nil {
+		res.Items = []PermissionItem{}
+	}
+	return res, nil
+}
+
 // Permissions inspects host OS permissions relevant to remote desktop and automation.
 func (e *Engine) Permissions(ctx context.Context) (*PermissionsResponse, error) {
 	if e != nil {
 		e.resetPermissionCache()
 	}
-	items := platformPermissions(ctx)
-	return &PermissionsResponse{
-		Platform: runtime.GOOS,
-		Items:    items,
-	}, nil
+	return ListPermissions(ctx)
 }
 
 // RequestPermission triggers a native system permission prompt and/or opens System Settings for the given permission ID.
@@ -60,8 +83,7 @@ func (e *Engine) RequestPermission(ctx context.Context, id string, openSettings 
 	if e != nil {
 		e.resetPermissionCache()
 	}
-	id = strings.TrimSpace(id)
-	res, err := requestPlatformPermission(ctx, id, openSettings)
+	res, err := RequestSystemPermission(ctx, id, openSettings)
 	if err != nil {
 		return nil, err
 	}

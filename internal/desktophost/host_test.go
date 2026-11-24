@@ -139,6 +139,51 @@ func TestControlServerEndpointsAndAuth(t *testing.T) {
 		t.Fatalf("unexpected tailscale status: %d %s", recTS.Code, recTS.Body.String())
 	}
 
+	// Permissions endpoints
+	reqPermsUnauth := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:9000/control/permissions", nil)
+	recPermsUnauth := httptest.NewRecorder()
+	h.ServeHTTP(recPermsUnauth, reqPermsUnauth)
+	if recPermsUnauth.Code != http.StatusUnauthorized {
+		t.Fatalf("unauth GET /control/permissions = %d, want 401", recPermsUnauth.Code)
+	}
+
+	reqPerms := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:9000/control/permissions", nil)
+	reqPerms.Header.Set("Authorization", "Bearer test-secret")
+	recPerms := httptest.NewRecorder()
+	h.ServeHTTP(recPerms, reqPerms)
+	if recPerms.Code != http.StatusOK {
+		t.Fatalf("GET /control/permissions = %d, want 200: %s", recPerms.Code, recPerms.Body.String())
+	}
+	var permsResp struct {
+		Platform string `json:"platform"`
+		Items    []struct {
+			ID     string `json:"id"`
+			Status string `json:"status"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(recPerms.Body.Bytes(), &permsResp); err != nil {
+		t.Fatalf("decode /control/permissions: %v", err)
+	}
+	if permsResp.Platform == "" || len(permsResp.Items) == 0 {
+		t.Fatalf("unexpected /control/permissions payload: %+v", permsResp)
+	}
+
+	reqPermEmpty := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:9000/control/permissions/request", strings.NewReader(`{}`))
+	reqPermEmpty.Header.Set("Authorization", "Bearer test-secret")
+	recPermEmpty := httptest.NewRecorder()
+	h.ServeHTTP(recPermEmpty, reqPermEmpty)
+	if recPermEmpty.Code != http.StatusBadRequest {
+		t.Fatalf("empty POST /control/permissions/request = %d, want 400", recPermEmpty.Code)
+	}
+
+	reqPermUnknown := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:9000/control/permissions/request", strings.NewReader(`{"permission":"unknown_perm"}`))
+	reqPermUnknown.Header.Set("Authorization", "Bearer test-secret")
+	recPermUnknown := httptest.NewRecorder()
+	h.ServeHTTP(recPermUnknown, reqPermUnknown)
+	if recPermUnknown.Code != http.StatusBadRequest {
+		t.Fatalf("unknown POST /control/permissions/request = %d, want 400", recPermUnknown.Code)
+	}
+
 	// Reset
 	reqReset := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:9000/control/reset", nil)
 	reqReset.Header.Set("Authorization", "Bearer test-secret")

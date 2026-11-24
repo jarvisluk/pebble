@@ -536,6 +536,16 @@ private val zhStrings: Map<String, String> = mapOf(
     "moreActions" to "更多操作",
     "hotkeyEsc" to "Esc",
     "hotkeyTab" to "Tab",
+    "ubPermTitle" to "授权系统权限",
+    "ubPermSubMobile" to "预先授权所需权限，以便接收任务提醒、扫码配对并连接主电脑",
+    "ubPermGrantAllContinue" to "一键授权并继续",
+    "ubPermSkipLater" to "暂不设置，稍后再说",
+    "ubPermProgress" to "已就绪 {granted} / {total}",
+    "ubPermAllReady" to "所需权限已全部就绪",
+    "ubPermNotifName" to "系统通知",
+    "ubPermNotifDesc" to "在任务完成、需要人工接管或定时提醒时推送通知。",
+    "ubPermCameraName" to "相机",
+    "ubPermCameraDesc" to "用于扫描主电脑「远程访问」中的配对二维码。",
 )
 
 private val enStrings: Map<String, String> = mapOf(
@@ -1056,4 +1066,14 @@ private val enStrings: Map<String, String> = mapOf(
     "moreActions" to "More",
     "hotkeyEsc" to "Esc",
     "hotkeyTab" to "Tab",
+    "ubPermTitle" to "Grant System Permissions",
+    "ubPermSubMobile" to "Pre-authorize permissions for task alerts, QR pairing, and connecting to your computer",
+    "ubPermGrantAllContinue" to "Grant Permissions & Continue",
+    "ubPermSkipLater" to "Skip for Now",
+    "ubPermProgress" to "Ready {granted} / {total}",
+    "ubPermAllReady" to "All required permissions granted",
+    "ubPermNotifName" to "Notifications",
+    "ubPermNotifDesc" to "Notify when tasks finish, need takeover, or fire scheduled routines.",
+    "ubPermCameraName" to "Camera",
+    "ubPermCameraDesc" to "Scan the pairing QR code from your computer's Remote Access.",
 )

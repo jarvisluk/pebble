@@ -136,8 +136,15 @@ struct SetupTaskStatus: Codable {
     var error: String?
 }
 
+struct OnboardingInfo: Codable {
+    var completed: Bool?
+    var needsSetup: Bool?
+    var installedHarnesses: [String]?
+}
+
 struct SettingsData: Codable {
     var magpie: MagpieInfo?
+    var onboarding: OnboardingInfo?
     var desktopHarness: String?
     var desktopModel: String?
     var defaultHarness: String?
