@@ -38,7 +38,7 @@ struct DevicesView: View {
     }
 
     var body: some View {
-        let form = Form {
+        Form {
             Section(hub.t("currentMobileConn")) {
                 if let s = hub.activeServer {
                     LabeledContent(s.label) {
@@ -80,42 +80,11 @@ struct DevicesView: View {
             }
         }
         .hubForm()
-
-        #if os(macOS)
-        VStack(spacing: 0) {
-            HStack {
-                Text(hub.t("devicesTunnel"))
-                    .font(.system(size: AppFont.title, weight: .semibold))
-                    .foregroundStyle(p.text)
-                Spacer()
-            }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 14)
-            .background(p.page)
-            Rectangle().fill(p.s2).frame(height: 1)
-
-            form
-
-            Rectangle().fill(p.s2).frame(height: 1)
-            HStack {
-                Spacer()
-                Button(hub.t("close")) { router.sheet = nil }
-                    .buttonStyle(.borderedProminent)
-            }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 12)
-            .background(p.page)
-        }
-        .background(p.page)
+        .navigationTitle(hub.t("devicesTunnel"))
+        .inlineNavTitle()
+        .toolbar { SheetToolbar() }
+        .refreshable { await load() }
         .task { await load() }
-        #else
-        form
-            .navigationTitle(hub.t("devicesTunnel"))
-            .inlineNavTitle()
-            .toolbar { SheetToolbar() }
-            .refreshable { await load() }
-            .task { await load() }
-        #endif
     }
 
     private func load() async {

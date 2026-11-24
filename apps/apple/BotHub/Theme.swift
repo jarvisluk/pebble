@@ -619,12 +619,11 @@ struct BotAppearancePicker: View {
                 }
             }
             Text(hub.t("botColorLabel")).font(.system(size: AppFont.secondary)).foregroundStyle(.secondary)
-            #if os(macOS)
-            HStack(spacing: 6) {
+            HStack(spacing: 8) {
                 ForEach(botColors, id: \.self) { hex in
                     let active = normalizeBotHex(color) == hex
                     Button { color = hex } label: {
-                        Circle().fill(Color(hex: hex)).frame(width: 24, height: 24)
+                        Circle().fill(Color(hex: hex)).frame(width: 25, height: 25)
                             .overlay {
                                 if active {
                                     Image(systemName: "checkmark").font(.system(size: AppFont.caption, weight: .bold)).foregroundStyle(.white)
@@ -639,32 +638,253 @@ struct BotAppearancePicker: View {
                     set: { if let h = colorToHex($0) { color = h } }
                 ), supportsOpacity: false)
                 .labelsHidden()
-                .controlSize(.small)
             }
-            #else
-            HStack(spacing: 10) {
-                ForEach(botColors, id: \.self) { hex in
-                    let active = normalizeBotHex(color) == hex
-                    Button { color = hex } label: {
-                        Circle().fill(Color(hex: hex)).frame(width: 26, height: 26)
-                            .overlay {
-                                if active {
-                                    Image(systemName: "checkmark").font(.system(size: AppFont.caption, weight: .bold)).foregroundStyle(.white)
-                                }
-                            }
-                    }
-                    .buttonStyle(.plain)
-                }
-                Spacer()
-                ColorPicker("", selection: Binding(
-                    get: { Color(hex: effectiveHex) },
-                    set: { if let h = colorToHex($0) { color = h } }
-                ), supportsOpacity: false)
-                .labelsHidden()
-            }
-            #endif
         }
         .padding(.vertical, 4)
+    }
+}
+
+/// 跨平台分段选择器：iOS 与 macOS 共用同一套全宽胶囊分段样式。
+struct HubSegmentedPicker<Selection: Hashable>: View {
+    @Environment(\.palette) private var p
+    @Binding var selection: Selection
+    var options: [(Selection, String)]
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(Array(options.enumerated()), id: \.offset) { _, opt in
+                let active = selection == opt.0
+                Button {
+                    withAnimation(.easeInOut(duration: 0.16)) {
+                        selection = opt.0
+                    }
+                } label: {
+                    Text(opt.1)
+                        .font(.system(size: AppFont.secondary, weight: active ? .semibold : .regular))
+                        .foregroundStyle(active ? p.text : p.text2)
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 6)
+                        .background {
+                            if active {
+                                Capsule()
+                                    .fill(p.dark ? Color(hex: "#525256") : Color.white)
+                                    .shadow(color: p.dark ? .clear : Color.black.opacity(0.08), radius: 2, y: 1)
+                            }
+                        }
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(3)
+        .background(Capsule().fill(p.dark ? Color.white.opacity(0.09) : Color.black.opacity(0.07)))
+        .frame(maxWidth: .infinity)
+    }
+}
+
+/// 跨平台表单弹出选择器：两端统一 `标签 + 当前值 ⌄` 无边框行样式。
+struct HubMenuPicker<Selection: Hashable>: View {
+    @Environment(\.palette) private var p
+    var title: String
+    @Binding var selection: Selection
+    var options: [(Selection, String)]
+
+    private var currentLabel: String {
+        options.first(where: { $0.0 == selection })?.1 ?? ""
+    }
+
+    var body: some View {
+        LabeledContent(title) {
+            Menu {
+                ForEach(Array(options.enumerated()), id: \.offset) { _, opt in
+                    Button {
+                        selection = opt.0
+                    } label: {
+                        if selection == opt.0 {
+                            Label(opt.1, systemImage: "checkmark")
+                        } else {
+                            Text(opt.1)
+                        }
+                    }
+                }
+            } label: {
+                (Text(currentLabel).foregroundStyle(p.text2)
+                    + Text(" ")
+                    + Text(Image(systemName: "chevron.up.chevron.down"))
+                        .font(.system(size: AppFont.caption - 1, weight: .medium))
+                        .foregroundStyle(p.mute))
+            }
+            .buttonStyle(.plain)
+            .hubBorderlessMenu()
+            .menuIndicator(.hidden)
+            .fixedSize()
+        }
+    }
+}
+
+/// 跨平台表单左侧固定标签输入行。
+struct HubFormField<Field: View>: View {
+    @Environment(\.palette) private var p
+    var label: String
+    @ViewBuilder var field: () -> Field
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Text(label)
+                .foregroundStyle(p.text)
+                .frame(width: 96, alignment: .leading)
+            field()
+                .labelsHidden()
+        }
+    }
+}
+
+/// 跨平台胶囊搜索框（支持 macOS `Cmd+K` 聚焦通知）。
+struct HubSearchBar: View {
+    @Environment(\.palette) private var p
+    @Binding var text: String
+    var placeholder: String
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: AppFont.secondary))
+                .foregroundStyle(.secondary)
+            TextField(placeholder, text: $text)
+                .textFieldStyle(.plain)
+                .font(.system(size: AppFont.secondary))
+                .autocorrectionDisabled()
+                .noAutocap()
+                .focused($isFocused)
+            if !text.isEmpty {
+                Button {
+                    text = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: AppFont.secondary))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 32)
+        .background(Color.primary.opacity(p.dark ? 0.12 : 0.07), in: Capsule())
+        .onReceive(NotificationCenter.default.publisher(for: .hubFocusSearch)) { _ in
+            isFocused = true
+        }
+    }
+}
+
+struct HubLabeledContentStyle: LabeledContentStyle {
+    @Environment(\.palette) private var p
+
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            configuration.label
+                .foregroundStyle(p.text)
+            Spacer(minLength: 12)
+            configuration.content
+                .foregroundStyle(p.mute)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+struct HubSwitchToggleStyle: ToggleStyle {
+    @Environment(\.palette) private var p
+
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            configuration.label
+                .foregroundStyle(p.text)
+            Spacer(minLength: 12)
+            Toggle("", isOn: configuration.$isOn)
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .controlSize(platformSwitchControlSize)
+        }
+    }
+}
+
+struct HubRowButtonStyle: ButtonStyle {
+    @Environment(\.palette) private var p
+    @Environment(\.isEnabled) private var isEnabled
+    @State private var hovering = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        let fg: Color = configuration.role == .destructive ? p.danger : (isEnabled ? p.text : p.mute)
+        HStack(spacing: 8) {
+            configuration.label
+            Spacer(minLength: 8)
+        }
+        .foregroundStyle(fg)
+        .padding(.vertical, 2)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(configuration.isPressed ? Color.primary.opacity(0.08) : (hovering ? Color.primary.opacity(0.04) : .clear))
+                .padding(.horizontal, -8)
+                .padding(.vertical, -4)
+        )
+        .contentShape(Rectangle())
+        .onHover { hovering = $0 }
+    }
+}
+
+@available(iOS 18.0, macOS 15.0, *)
+struct HubFormStyle: FormStyle {
+    @Environment(\.palette) private var p
+
+    func makeBody(configuration: Configuration) -> some View {
+        let cardFill = p.dark ? Color(hex: "#1c1c1e") : p.card
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                Group(sections: configuration.content) { sections in
+                    ForEach(sections) { section in
+                        VStack(alignment: .leading, spacing: 6) {
+                            if !section.header.isEmpty {
+                                section.header
+                                    .font(.system(size: AppFont.secondary, weight: .regular))
+                                    .foregroundStyle(p.mute)
+                                    .padding(.horizontal, 16)
+                            }
+                            if !section.content.isEmpty {
+                                Group(subviews: section.content) { subviews in
+                                    VStack(alignment: .leading, spacing: 0) {
+                                        ForEach(Array(subviews.enumerated()), id: \.element.id) { idx, subview in
+                                            if idx > 0 {
+                                                Rectangle()
+                                                    .fill(Color.primary.opacity(p.dark ? 0.10 : 0.08))
+                                                    .frame(height: 0.5)
+                                                    .padding(.leading, 16)
+                                            }
+                                            subview
+                                                .frame(maxWidth: .infinity, alignment: .leading)
+                                                .padding(.horizontal, 16)
+                                                .padding(.vertical, 12)
+                                        }
+                                    }
+                                    .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+                                    .background(cardFill, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                                }
+                            }
+                            if !section.footer.isEmpty {
+                                section.footer
+                                    .font(.system(size: AppFont.caption))
+                                    .foregroundStyle(p.mute)
+                                    .padding(.horizontal, 16)
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 8)
+            .padding(.bottom, 24)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 }
 
@@ -673,63 +893,27 @@ struct HubSurface: ViewModifier {
     var form: Bool
 
     func body(content: Content) -> some View {
-        #if os(macOS)
-        content
-            .formStyle(.grouped)
-            .scrollContentBackground(.hidden)
-            .background(p.page.ignoresSafeArea())
-            .font(.system(size: AppFont.body))
-        #else
-        content
-            .scrollContentBackground(.hidden)
-            .background(p.page)
-            .font(.system(size: AppFont.body))
-        #endif
+        if #available(iOS 18.0, macOS 15.0, *) {
+            content
+                .buttonStyle(HubRowButtonStyle())
+                .labeledContentStyle(HubLabeledContentStyle())
+                .toggleStyle(HubSwitchToggleStyle())
+                .textFieldStyle(.plain)
+                .formStyle(HubFormStyle())
+                .scrollDismissesKeyboard(.interactively)
+                .background(p.page.ignoresSafeArea())
+                .font(.system(size: AppFont.body))
+        } else {
+            content
+                .formStyle(.grouped)
+                .scrollContentBackground(.hidden)
+                .background(p.page.ignoresSafeArea())
+                .font(.system(size: AppFont.body))
+        }
     }
 }
 
 #if os(macOS)
-private struct MacSeamlessTitlebarBridge: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView()
-        DispatchQueue.main.async { apply(to: view.window) }
-        return view
-    }
-
-    func updateNSView(_ nsView: NSView, context: Context) {
-        DispatchQueue.main.async { apply(to: nsView.window) }
-    }
-
-    private func apply(to window: NSWindow?) {
-        guard let window else { return }
-        if !window.titlebarAppearsTransparent {
-            window.titlebarAppearsTransparent = true
-        }
-        if window.titlebarSeparatorStyle != .none {
-            window.titlebarSeparatorStyle = .none
-        }
-    }
-}
-
-struct MacSeamlessWindowToolbarModifier: ViewModifier {
-    func body(content: Content) -> some View {
-        if #available(macOS 15.0, *) {
-            content
-                .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
-                .background(MacSeamlessTitlebarBridge())
-        } else {
-            content
-                .background(MacSeamlessTitlebarBridge())
-        }
-    }
-}
-
-extension View {
-    func macSeamlessWindowToolbar() -> some View {
-        modifier(MacSeamlessWindowToolbarModifier())
-    }
-}
-
 private struct HubMacColumnListModifier: ViewModifier {
     func body(content: Content) -> some View {
         content

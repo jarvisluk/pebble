@@ -89,6 +89,72 @@ func openExternalURL(_ url: URL) {
     #endif
 }
 
+private struct HubCompactKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    var hubCompact: Bool {
+        get { self[HubCompactKey.self] }
+        set { self[HubCompactKey.self] = newValue }
+    }
+}
+
+var platformNotificationSettingsURL: URL? {
+    #if os(iOS)
+    return URL(string: UIApplication.openSettingsURLString)
+    #elseif os(macOS)
+    return URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension")
+    #else
+    return nil
+    #endif
+}
+
+var platformSwitchControlSize: ControlSize {
+    #if os(macOS)
+    return .small
+    #else
+    return .regular
+    #endif
+}
+
+#if os(macOS)
+private struct MacSeamlessTitlebarBridge: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async { apply(to: view.window) }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async { apply(to: nsView.window) }
+    }
+
+    private func apply(to window: NSWindow?) {
+        guard let window else { return }
+        if !window.titlebarAppearsTransparent {
+            window.titlebarAppearsTransparent = true
+        }
+        if window.titlebarSeparatorStyle != .none {
+            window.titlebarSeparatorStyle = .none
+        }
+    }
+}
+
+private struct MacSeamlessWindowToolbarModifier: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(macOS 15.0, *) {
+            content
+                .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+                .background(MacSeamlessTitlebarBridge())
+        } else {
+            content
+                .background(MacSeamlessTitlebarBridge())
+        }
+    }
+}
+#endif
+
 extension ToolbarItemPlacement {
     static var hubLeading: ToolbarItemPlacement {
         #if os(iOS)
@@ -153,6 +219,69 @@ extension View {
             }
         } else {
             self
+        }
+        #else
+        self
+        #endif
+    }
+
+    @ViewBuilder
+    func macSeamlessWindowToolbar() -> some View {
+        #if os(macOS)
+        modifier(MacSeamlessWindowToolbarModifier())
+        #else
+        self
+        #endif
+    }
+
+    @ViewBuilder
+    func hubBorderlessMenu() -> some View {
+        #if os(macOS)
+        self.menuStyle(.borderlessButton)
+        #else
+        self
+        #endif
+    }
+
+    @ViewBuilder
+    func hubSheetFrame(width: CGFloat, height: CGFloat) -> some View {
+        #if os(macOS)
+        self.frame(width: width, height: height)
+        #else
+        self
+        #endif
+    }
+
+    @ViewBuilder
+    func hubDropFileURLs(_ onDrop: @escaping ([URL]) -> Void) -> some View {
+        #if os(macOS)
+        self.onDrop(of: [.fileURL], isTargeted: nil) { providers in
+            for provider in providers {
+                _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                    guard let url else { return }
+                    Task { @MainActor in
+                        onDrop([url])
+                    }
+                }
+            }
+            return !providers.isEmpty
+        }
+        #else
+        self
+        #endif
+    }
+
+    @ViewBuilder
+    func hubSubmitOnReturn(disabled: Bool = false, action: @escaping () -> Void) -> some View {
+        #if os(macOS)
+        self.onKeyPress(.return, phases: .down) { press in
+            if press.modifiers.contains(.shift) {
+                return .ignored
+            }
+            if !disabled {
+                action()
+            }
+            return .handled
         }
         #else
         self

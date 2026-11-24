@@ -8,80 +8,6 @@ struct SettingsSidebarView: View {
     var compact = true
 
     var body: some View {
-        #if os(macOS)
-        List {
-            ForEach(SettingsTab.allCases) { tab in
-                let active = (router.settingsTab ?? .general) == tab
-                Button {
-                    router.settingsTab = tab
-                } label: {
-                    tabLabel(tab)
-                        .font(.system(size: AppFont.body, weight: active ? .semibold : .regular))
-                        .foregroundStyle(active ? p.text : p.text2)
-                        .padding(.vertical, 7)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .listRowInsets(EdgeInsets(top: 2, leading: 6, bottom: 2, trailing: 6))
-                .listRowBackground(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(active ? Color.primary.opacity(p.dark ? 0.14 : 0.08) : Color.clear)
-                        .padding(.horizontal, 11)
-                )
-                .listRowSeparator(.hidden)
-            }
-        }
-        .hubColumnList(compact: false, page: p.page)
-        .contentMargins(.top, 4, for: .scrollContent)
-        .safeAreaInset(edge: .top, spacing: 0) {
-            HStack {
-                Button {
-                    if router.settingsDirty {
-                        router.requestLeaveSettings = true
-                    } else {
-                        router.leaveSettings()
-                    }
-                } label: {
-                    Label(hub.t("backToChat"), systemImage: "chevron.left")
-                        .font(.system(size: AppFont.secondary, weight: .medium))
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.borderless)
-                Spacer()
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-        }
-        .navigationTitle("")
-        #else
-        listContent
-            .hubColumnList(compact: compact, page: p.page)
-            .hubListSectionSpacing(12)
-            .contentMargins(.top, 8, for: .scrollContent)
-            .navigationTitle(hub.t("settings"))
-            .inlineNavTitle()
-            .toolbar {
-                if !compact {
-                    ToolbarItem(placement: .hubLeading) {
-                        Button {
-                            if router.settingsDirty {
-                                router.requestLeaveSettings = true
-                            } else {
-                                router.leaveSettings()
-                            }
-                        } label: {
-                            Label(hub.t("backToChat"), systemImage: "chevron.left")
-                        }
-                    }
-                }
-            }
-        #endif
-    }
-
-    @ViewBuilder
-    private var listContent: some View {
-        @Bindable var r = router
         if compact {
             List(SettingsTab.allCases) { tab in
                 NavigationLink(value: tab) {
@@ -92,13 +18,68 @@ struct SettingsSidebarView: View {
             .navigationDestination(for: SettingsTab.self) { tab in
                 SettingsView(tab: tab)
             }
+            .hubColumnList(compact: true, page: p.page)
+            .hubListSectionSpacing(12)
+            .contentMargins(.top, 8, for: .scrollContent)
+            .navigationTitle(hub.t("settings"))
+            .inlineNavTitle()
         } else {
-            List(SettingsTab.allCases, selection: $r.settingsTab) { tab in
-                NavigationLink(value: tab) {
-                    tabLabel(tab)
+            List {
+                ForEach(SettingsTab.allCases) { tab in
+                    let active = (router.settingsTab ?? .general) == tab
+                    Button {
+                        router.settingsTab = tab
+                    } label: {
+                        tabLabel(tab)
+                            .font(.system(size: AppFont.body, weight: active ? .semibold : .regular))
+                            .foregroundStyle(active ? p.text : p.text2)
+                            .padding(.vertical, 8)
+                            .padding(.horizontal, 10)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .listRowInsets(EdgeInsets(top: 2, leading: 6, bottom: 2, trailing: 6))
+                    .listRowBackground(
+                        Capsule()
+                            .fill(active ? Color.primary.opacity(p.dark ? 0.14 : 0.08) : Color.clear)
+                            .padding(.horizontal, 10)
+                    )
+                    .listRowSeparator(.hidden)
                 }
-                .tag(tab)
             }
+            .hubColumnList(compact: false, page: p.page)
+            .contentMargins(.top, 4, for: .scrollContent)
+            .safeAreaInset(edge: .top, spacing: 0) {
+                HStack {
+                    Button {
+                        if router.settingsDirty {
+                            router.requestLeaveSettings = true
+                        } else {
+                            router.leaveSettings()
+                        }
+                    } label: {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: AppFont.cardTitle, weight: .medium))
+                            .foregroundStyle(p.text)
+                            .frame(width: 28, height: 28)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help(hub.t("backToChat"))
+                    Spacer()
+                    Text(hub.t("settings"))
+                        .font(.system(size: AppFont.cardTitle, weight: .semibold))
+                        .foregroundStyle(p.text)
+                    Spacer()
+                    Color.clear.frame(width: 28, height: 28)
+                }
+                .padding(.horizontal, 12)
+                .padding(.top, 2)
+                .padding(.bottom, 8)
+            }
+            .navigationTitle("")
+            .inlineNavTitle()
         }
     }
 
@@ -640,17 +621,23 @@ struct SettingsView: View {
     private var appearanceSection: some View {
         @Bindable var h = hub
         return Section(hub.t("appearance")) {
-            Picker(hub.t("appearance"), selection: $h.themePref) {
-                Text(hub.t("followSystem")).tag("system")
-                Text(hub.t("themeLight")).tag("light")
-                Text(hub.t("themeDark")).tag("dark")
-            }
-            .pickerStyle(.segmented)
-            Picker(hub.t("language"), selection: $h.langPref) {
-                Text(hub.t("followSystem")).tag("system")
-                Text("简体中文").tag("zh-CN")
-                Text("English").tag("en")
-            }
+            HubSegmentedPicker(
+                selection: $h.themePref,
+                options: [
+                    ("system", hub.t("followSystem")),
+                    ("light", hub.t("themeLight")),
+                    ("dark", hub.t("themeDark")),
+                ]
+            )
+            HubMenuPicker(
+                title: hub.t("language"),
+                selection: $h.langPref,
+                options: [
+                    ("system", hub.t("followSystem")),
+                    ("zh-CN", "简体中文"),
+                    ("en", "English"),
+                ]
+            )
         }
     }
 
@@ -671,11 +658,7 @@ struct SettingsView: View {
                     Text(hub.t("pushGranted")).foregroundStyle(p.sageInk)
                 case .denied:
                     Button(hub.t("pushOpenSettings")) {
-                        #if os(iOS)
-                        if let u = URL(string: UIApplication.openSettingsURLString) { openURL(u) }
-                        #elseif os(macOS)
-                        if let u = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension") { openURL(u) }
-                        #endif
+                        if let u = platformNotificationSettingsURL { openURL(u) }
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
@@ -771,7 +754,9 @@ struct SettingsView: View {
                 .foregroundStyle(p.text2)
             Link(destination: URL(string: "https://github.com/jarvisluk/bot-hub")!) {
                 Label(hub.t("openSourceLinkBtn"), systemImage: "star")
+                    .foregroundStyle(p.text)
             }
+            .foregroundStyle(p.text)
         }
     }
     // MARK: 模型
@@ -808,15 +793,17 @@ struct SettingsView: View {
 
     private var defaultModelSection: some View {
         Section(hub.t("globalDefaultModel")) {
-            Picker(hub.t("defaultHarness"), selection: Binding(
-                get: { defaultHarness },
-                set: {
-                    guard $0 != defaultHarness else { return }
-                    defaultHarness = $0; defaultHarnessTouched = true; saved = ""
-                }
-            )) {
-                ForEach(harnesses) { Text($0.title).tag($0.id) }
-            }
+            HubMenuPicker(
+                title: hub.t("defaultHarness"),
+                selection: Binding(
+                    get: { defaultHarness },
+                    set: {
+                        guard $0 != defaultHarness else { return }
+                        defaultHarness = $0; defaultHarnessTouched = true; saved = ""
+                    }
+                ),
+                options: harnesses.map { ($0.id, $0.title) }
+            )
             HStack {
                 TextField(hub.t("globalDefaultModel"), text: Binding(
                     get: { defaultModel },
@@ -952,30 +939,30 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            Picker("Scope", selection: Binding(
-                get: { memScope },
-                set: { next in
-                    memScope = next
-                    Task { await loadMem(memQuery, scope: next) }
-                }
-            )) {
-                Text(hub.t("memScopeGlobal")).tag("global")
-                Text(hub.t("memScopeAll")).tag("all")
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            Picker(hub.t("memType"), selection: Binding(
-                get: { memFilterKind },
-                set: { next in
-                    memFilterKind = next
-                    Task { await loadMem(memQuery, kind: next) }
-                }
-            )) {
-                Text(hub.t("memKindAll")).tag("")
-                ForEach(["fact", "preference", "rule", "reference", "profile", "procedure", "episode"], id: \.self) {
-                    Text($0).tag($0)
-                }
-            }
+            HubSegmentedPicker(
+                selection: Binding(
+                    get: { memScope },
+                    set: { next in
+                        memScope = next
+                        Task { await loadMem(memQuery, scope: next) }
+                    }
+                ),
+                options: [
+                    ("global", hub.t("memScopeGlobal")),
+                    ("all", hub.t("memScopeAll")),
+                ]
+            )
+            HubMenuPicker(
+                title: hub.t("memType"),
+                selection: Binding(
+                    get: { memFilterKind },
+                    set: { next in
+                        memFilterKind = next
+                        Task { await loadMem(memQuery, kind: next) }
+                    }
+                ),
+                options: [("", hub.t("memKindAll"))] + ["fact", "preference", "rule", "reference", "profile", "procedure", "episode"].map { ($0, $0) }
+            )
             HStack {
                 TextField(
                     hub.t("search"),
@@ -1032,11 +1019,10 @@ struct SettingsView: View {
                 }
             }
             DisclosureGroup(hub.t("addShort"), isExpanded: $memAdd) {
-                Picker("Kind", selection: $memKind) {
-                    ForEach(["fact", "preference", "rule", "reference"], id: \.self) { Text($0).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
+                HubSegmentedPicker(
+                    selection: $memKind,
+                    options: ["fact", "preference", "rule", "reference"].map { ($0, $0) }
+                )
                 TextField(hub.t("magpieGlobalMem"), text: $memText, prompt: Text(hub.t("globalMemPh")), axis: .vertical).lineLimit(2...8)
                 TextField(hub.t("tagsPh"), text: $memTags)
                 Button(hub.t("saveMemory")) {
@@ -1138,10 +1124,11 @@ struct SettingsView: View {
 
     private var remoteSection: some View {
         Section(hub.t("deskWorkerTitle")) {
-            Picker(hub.t("deskWorkerHarnessLabel"), selection: Binding(get: { deskHarness }, set: { deskHarness = $0; deskTouched = true })) {
-                Text(hub.t("deskWorkerFollowBot")).tag("")
-                ForEach(hub.settings?.harnesses ?? []) { Text($0.title).tag($0.id) }
-            }
+            HubMenuPicker(
+                title: hub.t("deskWorkerHarnessLabel"),
+                selection: Binding(get: { deskHarness }, set: { deskHarness = $0; deskTouched = true }),
+                options: [("", hub.t("deskWorkerFollowBot"))] + (hub.settings?.harnesses ?? []).map { ($0.id, $0.title) }
+            )
             HStack {
                 TextField(hub.t("deskWorkerModelLabel"), text: Binding(get: { deskModel }, set: { deskModel = $0; deskTouched = true }),
                           prompt: Text(hub.t("deskWorkerModelPh")))

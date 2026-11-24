@@ -441,17 +441,14 @@ struct RootView: View {
                     }
                     .animation(.easeInOut(duration: 0.2), value: router.selected)
                 }
-                #if os(macOS)
                 .macSeamlessWindowToolbar()
-                #endif
                 .inspector(isPresented: $r.detailOpen) {
                     if r.detailOpen, let id = router.selected, hub.bots.contains(where: { $0.id == id }) {
-                        #if os(iOS)
                         NavigationStack {
                             BotDetailView(botId: id, isPresented: $r.detailOpen)
                         }
                         .id(id)
-                        .inspectorColumnWidth(min: 340, ideal: 380, max: 460)
+                        .inspectorColumnWidth(min: 320, ideal: 360, max: 440)
                         .overlay(alignment: .leading) {
                             Rectangle()
                                 .fill(platformSeparatorColor)
@@ -459,44 +456,31 @@ struct RootView: View {
                                 .ignoresSafeArea()
                         }
                         .environment(\.palette, palette)
+                        .environment(\.hubCompact, compact)
                         .environment(router)
                         .environment(hub)
                         .tint(palette.accent)
                         .buttonBorderShape(.capsule)
                         .font(.system(size: AppFont.body))
                         .preferredColorScheme(scheme0)
-                        #else
-                        BotDetailView(botId: id, isPresented: $r.detailOpen)
-                            .id(id)
-                            .inspectorColumnWidth(min: 280, ideal: 320, max: 400)
-                            .background(palette.page.ignoresSafeArea())
-                            .environment(\.palette, palette)
-                            .environment(router)
-                            .environment(hub)
-                            .tint(palette.accent)
-                            .font(.system(size: AppFont.body))
-                            .preferredColorScheme(scheme0)
-                        #endif
                     }
                 }
             }
         }
         .tint(palette.accent)
-        #if os(iOS)
         .buttonBorderShape(.capsule)
-        #endif
         .font(.system(size: AppFont.body))
         .environment(\.palette, palette)
+        .environment(\.hubCompact, compact)
         .preferredColorScheme(scheme0)
         .sheet(item: $r.sheet) { route in
             SheetHost(route: route)
                 .environment(\.palette, palette)
+                .environment(\.hubCompact, compact)
                 .environment(router)
                 .environment(hub)
                 .tint(palette.accent)
-                #if os(iOS)
                 .buttonBorderShape(.capsule)
-                #endif
                 .font(.system(size: AppFont.body))
                 .preferredColorScheme(scheme0)
         }
@@ -512,6 +496,7 @@ struct RootView: View {
                 initialPath: pres.initialPath
             )
             .environment(\.palette, palette)
+            .environment(\.hubCompact, compact)
             .environment(router)
             .environment(hub)
             .tint(palette.accent)
@@ -590,24 +575,6 @@ struct SheetHost: View {
     var route: SheetRoute
 
     var body: some View {
-        #if os(macOS)
-        switch route {
-        case let .connect(scan):
-            NavigationStack {
-                ConnectView(startScan: scan)
-            }
-            .frame(minWidth: 480, minHeight: 540)
-            .background(p.page)
-        case .createBot:
-            CreateBotView()
-                .frame(width: 520, height: 640)
-                .background(p.page)
-        case .devices:
-            DevicesView()
-                .frame(width: 520, height: 600)
-                .background(p.page)
-        }
-        #else
         NavigationStack {
             switch route {
             case let .connect(scan): ConnectView(startScan: scan)
@@ -615,7 +582,11 @@ struct SheetHost: View {
             case .devices: DevicesView()
             }
         }
-        #endif
+        .hubSheetFrame(
+            width: route == .createBot || route == .devices ? 520 : 480,
+            height: route == .createBot ? 620 : route == .devices ? 600 : 540
+        )
+        .background(p.page)
     }
 }
 

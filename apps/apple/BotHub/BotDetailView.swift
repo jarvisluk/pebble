@@ -81,15 +81,9 @@ struct BotDetailView: View {
                                 .background(.black.opacity(0.55), in: Circle())
                                 .padding(10)
                         }
-                        #if os(macOS)
-                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                        #endif
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     }
                     .buttonStyle(.plain)
-                    #if os(iOS)
-                    .listRowInsets(EdgeInsets())
-                    .listRowBackground(Color.black)
-                    #endif
                 }
                 Section {
                     HStack(spacing: 14) {
@@ -120,9 +114,7 @@ struct BotDetailView: View {
                             + ((active?.privateSessions ?? false) ? hub.t("privateTag") : ""))
                         LabeledContent(hub.t("workspaceDir")) {
                             Button {
-                                #if os(iOS)
                                 isPresented = false
-                                #endif
                                 router.openFiles(botId: botId)
                             } label: {
                                 HStack(spacing: 4) {
@@ -177,13 +169,9 @@ struct BotDetailView: View {
                     }
                 }
             }
-            #if os(iOS)
-            .listRowBackground(p.card)
-            #endif
         }
         .hubForm()
 
-        #if os(iOS)
         formContent
             .navigationTitle(hub.t("botDetails"))
             .inlineNavTitle()
@@ -206,39 +194,6 @@ struct BotDetailView: View {
                 await open()
             }
             .onDisappear { previewStream.stop() }
-        #else
-        VStack(spacing: 0) {
-            HStack(spacing: 10) {
-                Text(hub.t("botDetails"))
-                    .font(.system(size: AppFont.cardTitle, weight: .semibold))
-                    .foregroundStyle(p.text)
-                Spacer()
-                if saving {
-                    ProgressView().controlSize(.small)
-                } else if dirty {
-                    Button(hub.t("save")) { save() }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.small)
-                        .disabled(editName.trimmingCharacters(in: .whitespaces).isEmpty)
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 8)
-            .padding(.bottom, 6)
-            .background(p.page)
-
-            formContent
-        }
-        .background(p.page)
-        .confirmAlert($confirm)
-        .task(id: botId) {
-            if hub.isConnected, let req = hub.makeDesktopWSRequest(target: hub.takeovers.first?.target ?? "local") {
-                previewStream.start(request: req)
-            }
-            await open()
-        }
-        .onDisappear { previewStream.stop() }
-        #endif
     }
 
     private func open() async {
@@ -558,10 +513,10 @@ struct RoutineEditor: View {
             if !err.isEmpty { Section { StatusText(text: err) } }
             Section {
                 TextField(hub.t("rtNamePh"), text: $name)
-                Picker(hub.t("routines"), selection: Binding(get: { mode }, set: { mode = $0; if $0 == .webhook { webhookTrigger = true } })) {
-                    ForEach(Mode.allCases, id: \.self) { Text(modeLabel($0)).tag($0) }
-                }
-                .pickerStyle(.segmented)
+                HubSegmentedPicker(
+                    selection: Binding(get: { mode }, set: { mode = $0; if $0 == .webhook { webhookTrigger = true } }),
+                    options: Mode.allCases.map { ($0, modeLabel($0)) }
+                )
                 switch mode {
                 case .interval: TextField(hub.t("rtEveryPh"), text: $every).monoInput()
                     .numberPadKeyboard()
@@ -582,12 +537,14 @@ struct RoutineEditor: View {
             }
             Section {
                 TextField(hub.t("rtWebhookUrlPh"), text: $webhookUrl).monoInput()
-                Picker(hub.t("rtDeliveryReceipt"), selection: $delivery) {
-                    Text(hub.t("rtDeliveryReceipt")).tag("receipt")
-                    Text(hub.t("rtDeliveryNotify")).tag("notify")
-                    Text(hub.t("rtDeliveryNone")).tag("none")
-                }
-                .pickerStyle(.segmented)
+                HubSegmentedPicker(
+                    selection: $delivery,
+                    options: [
+                        ("receipt", hub.t("rtDeliveryReceipt")),
+                        ("notify", hub.t("rtDeliveryNotify")),
+                        ("none", hub.t("rtDeliveryNone")),
+                    ]
+                )
                 TextField(hub.t("rtPromptPh"), text: $prompt, axis: .vertical).lineLimit(3...12)
                 Toggle(hub.t("rtEnabled"), isOn: $enabled)
             }

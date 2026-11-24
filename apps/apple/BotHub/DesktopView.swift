@@ -5,7 +5,7 @@ struct DesktopView: View {
     @Environment(Router.self) private var router
     @Environment(\.palette) private var p
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.horizontalSizeClass) private var hsc
+    @Environment(\.hubCompact) private var compact
 
     var initialTarget: String
     var initialBotId: String? = nil
@@ -24,11 +24,7 @@ struct DesktopView: View {
     @State private var isDragging = false
     @State private var lastDragSent = Date.distantPast
     @State private var streamCtrl = H264StreamController()
-    #if os(macOS)
-    @State private var showMacChatSidebar = false
-    #else
-    @State private var columnVisibility: NavigationSplitViewVisibility = .detailOnly
-    #endif
+    @State private var showChatSidebar = false
     @State private var showChatSheet = false
     @State private var chatBotId: String
     @State private var showHiddenFiles = false
@@ -66,48 +62,31 @@ struct DesktopView: View {
         return hub.bots.first?.id
     }
 
-    private var isWide: Bool {
-        #if os(macOS)
-        return true
-        #else
-        return hsc != .compact
-        #endif
-    }
+    private var isWide: Bool { !compact }
 
     var body: some View {
         Group {
-            #if os(macOS)
-            HStack(spacing: 0) {
-                if showMacChatSidebar {
-                    sidebarChatView(closable: true)
-                        .frame(width: 340)
-                    Rectangle().fill(p.s2).frame(width: 1)
-                }
-                stageContent
-                    .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
-            }
-            #else
             if isWide {
-                NavigationSplitView(columnVisibility: $columnVisibility) {
-                    sidebarChatView(closable: false)
-                        .navigationSplitViewColumnWidth(min: 320, ideal: 360, max: 420)
-                } detail: {
+                HStack(spacing: 0) {
+                    if showChatSidebar {
+                        sidebarChatView(closable: true)
+                            .frame(width: 340)
+                        Rectangle().fill(p.s2).frame(width: 0.5)
+                    }
                     NavigationStack {
                         stageContent
                     }
+                    .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
                 }
             } else {
                 NavigationStack {
                     stageContent
                 }
                 .sheet(isPresented: $showChatSheet) {
-                    NavigationStack {
-                        sidebarChatView(closable: true)
-                    }
-                    .presentationDetents([.medium, .large])
+                    sidebarChatView(closable: true)
+                        .presentationDetents([.medium, .large])
                 }
             }
-            #endif
         }
         .tint(activeTab == .desktop ? Color(hex: "#f3f1ee") : p.accent)
         .task { _ = try? await hub.refreshDesktopTargets() }
@@ -170,15 +149,11 @@ struct DesktopView: View {
                 refreshTrigger: filesRefreshSeq,
                 onQuotePath: { relPath in
                     hub.insertIntoChat("@\(relPath) ")
-                    #if os(macOS)
-                    showMacChatSidebar = true
-                    #else
                     if isWide {
-                        columnVisibility = .all
+                        showChatSidebar = true
                     } else {
                         showChatSheet = true
                     }
-                    #endif
                 }
             )
             .opacity(activeTab == .files ? 1 : 0)
@@ -197,37 +172,24 @@ struct DesktopView: View {
                 .background(p.page)
             }
         }
-        #if os(macOS)
         .background((activeTab == .desktop ? stage : p.page).ignoresSafeArea())
         .macSeamlessWindowToolbar()
-        #endif
         .navigationTitle("")
         .inlineNavTitle()
         .toolbar {
-            #if os(iOS)
-            ToolbarItemGroup(placement: .topBarLeading) {
-                Button { dismiss() } label: {
-                    Label(hub.t("close"), systemImage: "xmark")
-                }
-                if !isWide {
-                    Button { showChatSheet = true } label: {
-                        Label(hub.t("deskChatSidebar"), systemImage: "bubble.left.and.bubble.right")
-                    }
-                }
-            }
-            #else
-            ToolbarItemGroup(placement: .navigation) {
+            ToolbarItemGroup(placement: .hubLeading) {
                 Button {
                     if let onClose { onClose() } else { dismiss() }
                 } label: {
-                    Label(hub.t("backToChat"), systemImage: "chevron.backward")
+                    Label(isWide ? hub.t("backToChat") : hub.t("close"), systemImage: isWide ? "chevron.backward" : "xmark")
                         .labelStyle(.titleAndIcon)
                 }
-                Button { showMacChatSidebar.toggle() } label: {
+                Button {
+                    if isWide { showChatSidebar.toggle() } else { showChatSheet = true }
+                } label: {
                     Label(hub.t("deskChatSidebar"), systemImage: "bubble.left.and.bubble.right")
                 }
             }
-            #endif
             ToolbarItem(placement: .principal) {
                 stageModePicker
             }
@@ -396,11 +358,11 @@ struct DesktopView: View {
                     chatBotId = nextId
                 },
                 onCloseSidebar: closable ? {
-                    #if os(macOS)
-                    showMacChatSidebar = false
-                    #else
-                    showChatSheet = false
-                    #endif
+                    if isWide {
+                        showChatSidebar = false
+                    } else {
+                        showChatSheet = false
+                    }
                 } : nil
             )
             .id(bid)
@@ -410,11 +372,11 @@ struct DesktopView: View {
                     if closable {
                         ToolbarItem(placement: .cancellationAction) {
                             Button(hub.t("close")) {
-                                #if os(macOS)
-                                showMacChatSidebar = false
-                                #else
-                                showChatSheet = false
-                                #endif
+                                if isWide {
+                                    showChatSidebar = false
+                                } else {
+                                    showChatSheet = false
+                                }
                             }
                         }
                     }
