@@ -154,7 +154,7 @@ func toolDefinitions() []map[string]any {
 				"properties": map[string]any{
 					"text": map[string]any{
 						"type":        "string",
-						"description": "Markdown text to show to the user. Optional if images or files are provided.",
+						"description": "Markdown text to show to the user (supports headings, tables, code blocks, lists, task lists, blockquotes, inline formatting, math, footnotes, and links; send local images via the images parameter rather than Markdown image syntax). Optional if images or files are provided.",
 					},
 					"images": map[string]any{
 						"type":        "array",
