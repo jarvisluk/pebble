@@ -523,7 +523,6 @@ struct SettingsView: View {
         }
     }
 
-<<<<<<< HEAD
     private var pushNotificationsSection: some View {
         let pm = PushManager.shared
         let la = LiveActivityManager.shared
