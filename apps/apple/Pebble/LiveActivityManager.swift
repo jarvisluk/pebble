@@ -13,10 +13,10 @@ final class LiveActivityManager {
         ActivityAuthorizationInfo().areActivitiesEnabled
     }
 
-    @ObservationIgnored private var botActivities: [String: Activity<BotHubActivityAttributes>] = [:]
+    @ObservationIgnored private var botActivities: [String: Activity<PebbleActivityAttributes>] = [:]
     @ObservationIgnored private var botStartedAt: [String: Double] = [:]
     @ObservationIgnored private var botSteps: [String: Int] = [:]
-    @ObservationIgnored private var desktopActivities: [String: Activity<BotHubActivityAttributes>] = [:]
+    @ObservationIgnored private var desktopActivities: [String: Activity<PebbleActivityAttributes>] = [:]
     @ObservationIgnored private var tokenTasks: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private var startTokenTask: Task<Void, Never>?
 
@@ -25,7 +25,7 @@ final class LiveActivityManager {
     func startObservingTokens() {
         if startTokenTask == nil, #available(iOS 17.2, *) {
             startTokenTask = Task {
-                for await tokenData in Activity<BotHubActivityAttributes>.pushToStartTokenUpdates {
+                for await tokenData in Activity<PebbleActivityAttributes>.pushToStartTokenUpdates {
                     let hex = tokenData.map { String(format: "%02x", $0) }.joined()
                     PushManager.shared.setLiveActivityStartToken(hex)
                 }
@@ -40,13 +40,13 @@ final class LiveActivityManager {
             let now = Date().timeIntervalSince1970
             botStartedAt[bot.id] = now
             botSteps[bot.id] = 0
-            let attrs = BotHubActivityAttributes(
+            let attrs = PebbleActivityAttributes(
                 kind: "bot",
                 botId: bot.id,
                 botName: bot.displayName,
                 target: nil
             )
-            let state = BotHubActivityAttributes.ContentState(
+            let state = PebbleActivityAttributes.ContentState(
                 phase: "running",
                 statusText: L.lang == "en" ? "Thinking…" : "正在思考",
                 stepCount: 0,
@@ -65,7 +65,7 @@ final class LiveActivityManager {
         } else if let act = botActivities.removeValue(forKey: bot.id) {
             let started = botStartedAt.removeValue(forKey: bot.id) ?? Date().timeIntervalSince1970
             let steps = botSteps.removeValue(forKey: bot.id) ?? 0
-            let finalState = BotHubActivityAttributes.ContentState(
+            let finalState = PebbleActivityAttributes.ContentState(
                 phase: "completed",
                 statusText: L.lang == "en" ? "Completed" : "已完成",
                 stepCount: steps,
@@ -91,7 +91,7 @@ final class LiveActivityManager {
         let status = tool.isEmpty
             ? (L.lang == "en" ? "Running tool" : "正在运行工具")
             : (L.lang == "en" ? "Running \(tool)" : "正在运行 \(tool)")
-        let state = BotHubActivityAttributes.ContentState(
+        let state = PebbleActivityAttributes.ContentState(
             phase: "running",
             statusText: status,
             stepCount: steps,
@@ -113,7 +113,7 @@ final class LiveActivityManager {
             let reason = (item.reason ?? "").isEmpty
                 ? (L.lang == "en" ? "Manual action required" : "需要人工接管完成操作")
                 : item.reason!
-            let state = BotHubActivityAttributes.ContentState(
+            let state = PebbleActivityAttributes.ContentState(
                 phase: "takeover",
                 statusText: L.lang == "en" ? "Waiting for takeover" : "等待人工接管",
                 stepCount: 0,
@@ -124,7 +124,7 @@ final class LiveActivityManager {
             if let existing = desktopActivities[target] {
                 Task { await existing.update(.init(state: state, staleDate: nil)) }
             } else {
-                let attrs = BotHubActivityAttributes(
+                let attrs = PebbleActivityAttributes(
                     kind: "desktop",
                     botId: nil,
                     botName: nil,
@@ -144,7 +144,7 @@ final class LiveActivityManager {
         for (target, act) in desktopActivities where !activeTargets.contains(target) {
             desktopActivities.removeValue(forKey: target)
             tokenTasks.removeValue(forKey: "desktop:\(target)")?.cancel()
-            let doneState = BotHubActivityAttributes.ContentState(
+            let doneState = PebbleActivityAttributes.ContentState(
                 phase: "completed",
                 statusText: L.lang == "en" ? "Takeover resolved" : "接管已完成",
                 stepCount: 0,
@@ -161,7 +161,7 @@ final class LiveActivityManager {
         }
     }
 
-    private func observeActivityToken(_ activity: Activity<BotHubActivityAttributes>, key: String) {
+    private func observeActivityToken(_ activity: Activity<PebbleActivityAttributes>, key: String) {
         tokenTasks[key]?.cancel()
         tokenTasks[key] = Task {
             for await data in activity.pushTokenUpdates {

@@ -17,17 +17,17 @@
 - **桌面端（macOS 原生 `PebbleMac`）**：`12 / 13 / 14 / 15 / 17 / 20`
 - **移动端（iOS / iPadOS / Android 原生）**：`12 / 13 / 15 / 16 / 17 / 20`（正文 `15`、顶栏/卡片标题 `16`，其余档位与桌面一致）
 - **统一入口**：
-  - Apple 端统一使用 `AppFont`（定义于 `apps/apple/BotHub/Platform.swift`）
+  - Apple 端统一使用 `AppFont`（定义于 `apps/apple/Pebble/Platform.swift`）
   - Android 端统一使用 `PebbleFont`（定义于 `apps/android/app/src/main/java/ai/pebble/android/ui/theme/Theme.kt`）
 
 ## 3. Apple 三端单源与原语白名单
 
-- `apps/apple/BotHub/` 业务视图（`BotListView`、`BotDetailView`、`CreateBotView`、`DevicesView`、`SettingsView`、`ConnectView` 等）**禁止出现 UI 级 `#if os(macOS)` / `#if os(iOS)`**，只允许按 `hubCompact` 分支；操作系统能力差异收口到 `Platform.swift` 与专用能力文件。
+- `apps/apple/Pebble/` 业务视图（`BotListView`、`BotDetailView`、`CreateBotView`、`DevicesView`、`SettingsView`、`ConnectView` 等）**禁止出现 UI 级 `#if os(macOS)` / `#if os(iOS)`**，只允许按 `hubCompact` 分支；操作系统能力差异收口到 `Platform.swift` 与专用能力文件。
 - 禁止在业务视图中裸用跨端渲染分裂的系统容器：
   - 系统默认 `Form`
   - 宽屏 `!compact` 侧栏 `List(.sidebar)`
   - 承载 `.sheet` / `.inspector` 外壳的 `NavigationStack` + `.toolbar`
-- 必须统一复用 `apps/apple/BotHub/Theme.swift` 原语：
+- 必须统一复用 `apps/apple/Pebble/Theme.swift` 原语：
   - `HubFormStyle`
   - `HubSheetScaffold`
   - `HubSegmentedPicker`

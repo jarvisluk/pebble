@@ -2,7 +2,7 @@ import ActivityKit
 import AppIntents
 import Foundation
 
-struct BotHubActivityAttributes: ActivityAttributes {
+struct PebbleActivityAttributes: ActivityAttributes {
     struct ContentState: Codable, Hashable {
         var phase: String            // "running" | "takeover" | "completed" | "error"
         var statusText: String
@@ -22,9 +22,9 @@ struct BotHubActivityAttributes: ActivityAttributes {
     var target: String?
 }
 
-enum BotHubSharedStore {
+enum PebbleSharedStore {
     static var appGroupID: String {
-        let bundleID = Bundle.main.bundleIdentifier ?? "local.bothub.mobile"
+        let bundleID = Bundle.main.bundleIdentifier ?? "local.pebble.mobile"
         if bundleID.hasSuffix(".LiveActivity") {
             let mainID = String(bundleID.dropLast(".LiveActivity".count))
             return "group.\(mainID)"
@@ -66,7 +66,7 @@ struct InterruptBotIntent: LiveActivityIntent {
 
     func perform() async throws -> some IntentResult {
         if !botId.isEmpty {
-            BotHubSharedStore.setPendingInterrupt(botId: botId)
+            PebbleSharedStore.setPendingInterrupt(botId: botId)
         }
         return .result()
     }

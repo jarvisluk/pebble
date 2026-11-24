@@ -3,7 +3,6 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT_BASE="$ROOT/build/mobile/ios"
-MOD_FW="$ROOT/apps/mobile/modules/bothub-tunnel/ios/Frameworks"
 
 CLANG="$(xcrun --find clang)"
 IOS_SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
@@ -21,7 +20,7 @@ BUILD_HASH="$(compute_hash)"
 HASH_FILE="$OUT_BASE/.build-hash"
 
 if [ "${FORCE_TUNNEL_REBUILD:-0}" != "1" ] && [ -f "$HASH_FILE" ] && [ "$(cat "$HASH_FILE")" = "$BUILD_HASH" ] \
-  && [ -f "$OUT_BASE/BotHubTunnel.xcframework/Info.plist" ] && [ -f "$MOD_FW/BotHubTunnel.xcframework/Info.plist" ]; then
+  && [ -f "$OUT_BASE/PebbleTunnel.xcframework/Info.plist" ]; then
   echo "iOS tunnel up-to-date (hash ${BUILD_HASH:0:12}), skipped rebuild."
   exit 0
 fi
@@ -43,7 +42,7 @@ build_slice() {
 write_modulemap() {
   local hdr_dir="$1"
   cat > "$hdr_dir/module.modulemap" <<'EOF'
-module BotHubTunnelC {
+module PebbleTunnelC {
   header "libbothub.h"
   export *
 }
@@ -68,15 +67,12 @@ lipo -create "$WORK/sim-arm64/libbothub.a" "$WORK/sim-amd64/libbothub.a" -output
 mv "$WORK/sim-arm64/libbothub.h" "$WORK/sim/headers/libbothub.h"
 write_modulemap "$WORK/sim/headers"
 
-rm -rf "$OUT_BASE/BotHubTunnel.xcframework"
+rm -rf "$OUT_BASE/BotHubTunnel.xcframework" "$OUT_BASE/PebbleTunnel.xcframework"
 xcodebuild -create-xcframework \
   -library "$WORK/device/libbothub.a" -headers "$WORK/device/headers" \
   -library "$WORK/sim/libbothub.a" -headers "$WORK/sim/headers" \
-  -output "$OUT_BASE/BotHubTunnel.xcframework"
+  -output "$OUT_BASE/PebbleTunnel.xcframework"
 
-rm -rf "$MOD_FW/BotHubTunnel.xcframework"
-mkdir -p "$MOD_FW"
-cp -R "$OUT_BASE/BotHubTunnel.xcframework" "$MOD_FW/BotHubTunnel.xcframework"
 printf '%s\n' "$BUILD_HASH" > "$HASH_FILE"
 
-echo "Built $OUT_BASE/BotHubTunnel.xcframework"
+echo "Built $OUT_BASE/PebbleTunnel.xcframework"

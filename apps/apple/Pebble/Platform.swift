@@ -534,7 +534,7 @@ extension View {
 }
 
 extension Notification.Name {
-    static let hubFocusSearch = Notification.Name("bothub.focusSearch")
-    static let hubOpenSettings = Notification.Name("bothub.openSettings")
-    static let hubNewBot = Notification.Name("bothub.newBot")
+    static let hubFocusSearch = Notification.Name("pebble.focusSearch")
+    static let hubOpenSettings = Notification.Name("pebble.openSettings")
+    static let hubNewBot = Notification.Name("pebble.newBot")
 }
