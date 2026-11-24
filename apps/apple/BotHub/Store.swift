@@ -164,6 +164,7 @@ final class HubStore {
     var tools: [String: String] = [:]
     var settings: SettingsData?
     var models: [String: [String]] = [:]
+    var modelsGeneration = 0
     var nodes: [NodeInfo] = []
     var tailcat: TailcatStatus?
     var mobileTailscale: MobileTailscaleStatus?
@@ -175,13 +176,53 @@ final class HubStore {
     var activeDesktopTarget = ActiveDesktopTarget(target: "local", name: nil, temporary: false, expiresAt: nil)
     var usingStandby = false
     var managedMode = false
+    var serverInfo: ServerInfo?
+    var unsupportedCaps: Set<String> = []
+    var dismissedCompatProto = 0
     var routines: [String: [RoutineItem]] = [:]
     var pendingStageOpen: StageOpenEvent?
     var pendingChatInsert: PendingChatInsert?
 
     @ObservationIgnored private var activeChat: String?
     @ObservationIgnored private var connSeq = 0
+    @ObservationIgnored private var managedIsRemote = false
     @ObservationIgnored private let stream = EventStream()
+    @ObservationIgnored private var modelLoadTasks: [String: (UUID, Task<[String], Error>)] = [:]
+
+    func supports(_ cap: String) -> Bool {
+        if unsupportedCaps.contains(cap) { return false }
+        if let info = serverInfo {
+            return info.capabilities?.contains(cap) ?? false
+        }
+        return true
+    }
+
+    func markUnsupported(_ cap: String) {
+        unsupportedCaps.insert(cap)
+    }
+
+    var isClientOutdated: Bool {
+        (serverInfo?.protocolVersion ?? 0) > ClientProtocol.current
+    }
+
+    var isClientUpgradeRequired: Bool {
+        (serverInfo?.minClientProtocol ?? 1) > ClientProtocol.current
+    }
+
+    var showCompatBanner: Bool {
+        guard let info = serverInfo, info.protocolVersion > ClientProtocol.current else { return false }
+        return isClientUpgradeRequired || dismissedCompatProto != info.protocolVersion
+    }
+
+    func dismissCompatBanner() {
+        if let proto = serverInfo?.protocolVersion {
+            dismissedCompatProto = proto
+        }
+    }
+
+    static func isLocalDesktopTarget(_ target: String) -> Bool {
+        target.isEmpty || target == "local" || target.hasPrefix("virtual:") || target.hasPrefix("local:virtual:")
+    }
 
     init(autoConnect: Bool = true) {
         let d = UserDefaults.standard
@@ -218,6 +259,55 @@ final class HubStore {
     var activeServer: ServerProfile? { servers.first { $0.id == activeServerId } }
     var api: APIClient { APIClient(base: baseURL, token: authToken) }
     var isConnected: Bool { connState == .connected }
+
+    private func normalizeEndpointURL(_ raw: String) -> String {
+        raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "/+$", with: "", options: .regularExpression)
+    }
+
+    private func performAPI<T>(_ op: (APIClient) async throws -> T) async throws -> T {
+        let usedClient = api
+        do {
+            return try await op(usedClient)
+        } catch let err as HubError where err.unauthorized {
+            #if os(macOS)
+            if managedMode {
+                await DesktopHostManager.shared.refreshStatus()
+                let snap = DesktopHostManager.shared.snapshot
+                let snapURL = normalizeEndpointURL(snap.activeUrl)
+                if !snapURL.isEmpty, snapURL == baseURL, snap.activeToken != usedClient.token {
+                    if authToken != snap.activeToken {
+                        authToken = snap.activeToken
+                        PushManager.shared.configureConnection(base: baseURL, token: snap.activeToken)
+                        startStream(baseURL, snap.activeToken)
+                    }
+                    do {
+                        return try await op(api)
+                    } catch let retryErr as HubError where retryErr.unauthorized {
+                        online = false
+                        connState = .unauthorized
+                        connError = L.t("needsToken")
+                        stream.stop()
+                        throw retryErr
+                    }
+                }
+            }
+            #endif
+            online = false
+            connState = .unauthorized
+            connError = L.t("needsToken")
+            stream.stop()
+            throw err
+        }
+    }
+
+    private func callAPI<T: Decodable>(_ path: String, method: String = "GET", body: [String: Any]? = nil, as: T.Type = T.self) async throws -> T {
+        try await performAPI { try await $0.call(path, method: method, body: body, as: T.self) }
+    }
+
+    private func rawAPI(_ path: String, method: String = "GET", body: [String: Any]? = nil) async throws -> Data {
+        try await performAPI { try await $0.raw(path, method: method, body: body) }
+    }
 
     private func persistServers() {
         SecureStore.write("servers", try? JSONEncoder().encode(servers))
@@ -264,7 +354,7 @@ final class HubStore {
                     botId: botId,
                     title: botName,
                     body: preview.isEmpty ? L.t("newMessage") : preview,
-                    deepLink: "bothub://bot/\(botId)"
+                    deepLink: "pebble://bot/\(botId)"
                 )
             }
             #endif
@@ -291,8 +381,34 @@ final class HubStore {
                          if self?.online != ok { self?.online = ok }
                      },
                      onUnauthorized: { [weak self] in
-                         self?.connState = .unauthorized
-                         self?.connError = L.t("needsToken")
+                         guard let self else { return }
+                         #if os(macOS)
+                         if self.managedMode {
+                             Task { @MainActor [weak self] in
+                                 guard let self, self.managedMode, self.baseURL == url else { return }
+                                 await DesktopHostManager.shared.refreshStatus()
+                                 let snap = DesktopHostManager.shared.snapshot
+                                 let snapURL = self.normalizeEndpointURL(snap.activeUrl)
+                                 if !snapURL.isEmpty, snapURL == self.baseURL, snap.activeToken != tok {
+                                     if self.authToken != snap.activeToken {
+                                         self.authToken = snap.activeToken
+                                         PushManager.shared.configureConnection(base: self.baseURL, token: snap.activeToken)
+                                     }
+                                     self.connState = .connected
+                                     self.connError = ""
+                                     self.startStream(self.baseURL, snap.activeToken)
+                                     return
+                                 }
+                                 self.online = false
+                                 self.connState = .unauthorized
+                                 self.connError = L.t("needsToken")
+                             }
+                             return
+                         }
+                         #endif
+                         self.online = false
+                         self.connState = .unauthorized
+                         self.connError = L.t("needsToken")
                      },
                      onEvent: { [weak self] type, p in self?.handleEvent(type, p, url: url, tok: tok) })
     }
@@ -340,7 +456,7 @@ final class HubStore {
                         botId: nil,
                         title: botName,
                         body: reason,
-                        deepLink: "bothub://desktop?target=\(enc(tgt))"
+                        deepLink: "pebble://desktop?target=\(enc(tgt))"
                     )
                 }
                 #endif
@@ -351,9 +467,10 @@ final class HubStore {
             if let arr = p["items"], let list = decodeAny(arr, as: [PendingQuestion].self) { questions = list }
         case "routine_updated", "routine_run":
             if let bid = p["botId"] as? String {
-                Task {
-                    if let r: RoutinesResp = try? await APIClient(base: url, token: tok).call("/api/bots/\(enc(bid))/routines") {
-                        routines[bid] = r.routines ?? []
+                Task { [weak self] in
+                    guard let self else { return }
+                    if let r: RoutinesResp = try? await self.callAPI("/api/bots/\(enc(bid))/routines") {
+                        self.routines[bid] = r.routines ?? []
                     }
                 }
             }
@@ -369,6 +486,9 @@ final class HubStore {
         usingStandby = false
         connState = .connecting
         connError = ""
+        serverInfo = nil
+        unsupportedCaps = []
+        dismissedCompatProto = 0
 
         do {
             try await connectEndpoint(profile: profile, rawAddress: profile.address, rawToken: profile.token, isStandby: false, seq: seq)
@@ -457,9 +577,12 @@ final class HubStore {
             let client = APIClient(base: url, token: tok)
             let data: BotsResp = try await client.call("/api/bots")
             guard seq == connSeq else { return }
+            serverInfo = data.server
+            unsupportedCaps = []
             let list = data.bots ?? []
             bots = list
-            msgs = [:]; last = [:]; unread = [:]; tools = [:]; models = [:]; routines = [:]
+            msgs = [:]; last = [:]; unread = [:]; tools = [:]; routines = [:]
+            resetModelsCache()
             usingStandby = isStandby
             connState = .connected
             connError = ""
@@ -502,6 +625,7 @@ final class HubStore {
         let url = baseURL, tok = authToken
         do {
             let d: BotsResp = try await api.call("/api/bots")
+            serverInfo = d.server
             bots = d.bots ?? []
             startStream(url, tok)
             if let bid = activeChat {
@@ -579,6 +703,7 @@ final class HubStore {
             await Tunnel.stop()
             baseURL = ""; authToken = ""
             bots = []; msgs = [:]; last = [:]
+            serverInfo = nil; unsupportedCaps = []; dismissedCompatProto = 0
             connState = .idle
             connError = ""
         }
@@ -586,15 +711,38 @@ final class HubStore {
 
     /// 由 macOS Sidecar 宿主管理连接时调用，直接接入本地或代理后的 HTTP/SSE 端点。
     func connectManagedEndpoint(url rawURL: String, token: String, isRemote: Bool) async {
-        let cleanURL = rawURL.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "/+$", with: "", options: .regularExpression)
+        let cleanURL = normalizeEndpointURL(rawURL)
         guard !cleanURL.isEmpty else {
             disconnectManagedEndpoint()
+            return
+        }
+        if managedMode && connState == .connected && cleanURL == baseURL && managedIsRemote == isRemote {
+            if token != authToken {
+                let seq = connSeq
+                authToken = token
+                PushManager.shared.configureConnection(base: cleanURL, token: token)
+                startStream(cleanURL, token)
+                Task { try? await self.refreshBots() }
+                Task { if let s: SettingsData = try? await self.callAPI("/api/settings"), seq == self.connSeq { self.settings = s } }
+                Task { if let n: NodesResp = try? await self.callAPI("/api/nodes"), seq == self.connSeq { self.nodes = n.nodes ?? [] } }
+                Task { if let t: TailcatStatus = try? await self.callAPI("/api/tailcat"), seq == self.connSeq { self.tailcat = t } }
+                Task { if let ts: HostTailscaleStatus = try? await self.callAPI("/api/tailscale"), seq == self.connSeq { self.hostTailscale = ts } }
+                Task { if let t: TakeoversResp = try? await self.callAPI("/api/desktop/takeovers"), seq == self.connSeq { self.takeovers = t.items ?? [] } }
+                Task {
+                    if let d: TargetsResp = try? await self.callAPI("/api/desktop/targets"), seq == self.connSeq {
+                        self.desktopTargets = d.targets ?? []
+                        if let at = d.activeTarget { self.activeDesktopTarget = at }
+                    }
+                }
+                Task { if let q: QuestionsResp = try? await self.callAPI("/api/questions"), seq == self.connSeq { self.questions = q.items ?? [] } }
+            }
             return
         }
         connSeq += 1
         let seq = connSeq
         stream.stop()
         managedMode = true
+        managedIsRemote = isRemote
         online = false
         usingStandby = false
         isTailcat = false
@@ -608,9 +756,12 @@ final class HubStore {
             let client = APIClient(base: cleanURL, token: token)
             let data: BotsResp = try await client.call("/api/bots")
             guard seq == connSeq else { return }
+            serverInfo = data.server
+            unsupportedCaps = []
             let list = data.bots ?? []
             bots = list
-            msgs = [:]; last = [:]; unread = [:]; tools = [:]; models = [:]; routines = [:]
+            msgs = [:]; last = [:]; unread = [:]; tools = [:]; routines = [:]
+            resetModelsCache()
             connState = .connected
             connError = ""
 
@@ -645,6 +796,7 @@ final class HubStore {
         connSeq += 1
         stream.stop()
         online = false
+        managedIsRemote = false
         baseURL = ""
         authToken = ""
         bots = []
@@ -657,13 +809,16 @@ final class HubStore {
         takeovers = []
         questions = []
         settings = nil
+        serverInfo = nil
+        unsupportedCaps = []
+        dismissedCompatProto = 0
         connState = .idle
         connError = ""
     }
 
     func reconnect() async {
         if managedMode, !baseURL.isEmpty {
-            await connectManagedEndpoint(url: baseURL, token: authToken, isRemote: false)
+            await connectManagedEndpoint(url: baseURL, token: authToken, isRemote: managedIsRemote)
             return
         }
         if let s = activeServer { await connectProfile(s) }
@@ -673,13 +828,14 @@ final class HubStore {
 
     func refreshBots() async throws {
         guard !baseURL.isEmpty else { return }
-        let d: BotsResp = try await api.call("/api/bots")
+        let d: BotsResp = try await callAPI("/api/bots")
+        serverInfo = d.server
         bots = d.bots ?? []
     }
 
     func loadMessages(_ botId: String) async throws {
         guard !baseURL.isEmpty else { return }
-        let d: MessagesResp = try await api.call("/api/bots/\(enc(botId))/messages?limit=200")
+        let d: MessagesResp = try await callAPI("/api/bots/\(enc(botId))/messages?limit=200")
         let list = d.messages ?? []
         msgs[botId] = list
         if let m = list.last { last[botId] = m }
@@ -687,7 +843,7 @@ final class HubStore {
 
     func loadCollabMessages(_ botId: String, peerId: String, limit: Int = 200) async throws -> [ChatMessage] {
         guard !baseURL.isEmpty else { return [] }
-        let d: MessagesResp = try await api.call("/api/bots/\(enc(botId))/collab/\(enc(peerId))?limit=\(limit)")
+        let d: MessagesResp = try await callAPI("/api/bots/\(enc(botId))/collab/\(enc(peerId))?limit=\(limit)")
         return d.messages ?? []
     }
 
@@ -698,24 +854,24 @@ final class HubStore {
         if let cached = mediaCache.object(forKey: key) {
             return Data(referencing: cached)
         }
-        let data = try await api.raw(path)
+        let data = try await rawAPI(path)
         mediaCache.setObject(data as NSData, forKey: key)
         return data
     }
 
     func fetchCommands(_ botId: String) async throws -> [SlashCommandItem] {
-        let resp: CommandsResp = try await api.call("/api/bots/\(enc(botId))/commands")
+        let resp: CommandsResp = try await callAPI("/api/bots/\(enc(botId))/commands")
         return resp.commands ?? []
     }
 
     func fetchMentions(_ botId: String, query: String) async throws -> [MentionCandidate] {
         let q = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
-        let resp: MentionsResp = try await api.call("/api/bots/\(enc(botId))/mentions?q=\(q)")
+        let resp: MentionsResp = try await callAPI("/api/bots/\(enc(botId))/mentions?q=\(q)")
         return resp.items ?? []
     }
 
     func uploadAttachment(_ botId: String, data: Data, filename: String, mimeType: String) async throws -> InboundAttachmentResponse {
-        try await api.uploadAttachment("/api/bots/\(enc(botId))/attachments", data: data, filename: filename, mimeType: mimeType)
+        try await performAPI { try await $0.uploadAttachment("/api/bots/\(enc(botId))/attachments", data: data, filename: filename, mimeType: mimeType) }
     }
 
     func sendMessage(_ botId: String, _ text: String, mediaIds: [String] = []) async throws {
@@ -723,7 +879,7 @@ final class HubStore {
         if !mediaIds.isEmpty {
             body["mediaIds"] = mediaIds
         }
-        let d: TextResp = try await api.call("/api/bots/\(enc(botId))/message", method: "POST", body: body)
+        let d: TextResp = try await callAPI("/api/bots/\(enc(botId))/message", method: "POST", body: body)
         if ["/bots", "/status", "/reset"].contains(text), let out = d.text, !out.isEmpty {
             pushIncoming(botId, ChatMessage(id: "cmd_\(Int(Date().timeIntervalSince1970 * 1000))", botId: botId,
                                             role: "system", from: "command", text: out,
@@ -733,34 +889,34 @@ final class HubStore {
     }
 
     func interruptBot(_ botId: String) async throws -> Bool {
-        let r: InterruptResp = try await api.call("/api/bots/\(enc(botId))/interrupt", method: "POST")
+        let r: InterruptResp = try await callAPI("/api/bots/\(enc(botId))/interrupt", method: "POST")
         return r.interrupted ?? false
     }
 
     func resetBot(_ botId: String) async throws {
-        _ = try await api.raw("/api/bots/\(enc(botId))/reset", method: "POST")
+        _ = try await rawAPI("/api/bots/\(enc(botId))/reset", method: "POST")
         try await refreshBots()
     }
 
     func botDetail(_ botId: String) async throws -> BotStatus {
-        try await api.call("/api/bots/\(enc(botId))")
+        try await callAPI("/api/bots/\(enc(botId))")
     }
 
     func createBot(_ body: [String: Any]) async throws -> BotStatus {
-        let st: BotStatus = try await api.call("/api/bots", method: "POST", body: body)
+        let st: BotStatus = try await callAPI("/api/bots", method: "POST", body: body)
         if !bots.contains(where: { $0.id == st.id }) { bots.append(st) }
         return st
     }
 
     @discardableResult
     func updateBot(_ botId: String, _ body: [String: Any]) async throws -> BotStatus {
-        let st: BotStatus = try await api.call("/api/bots/\(enc(botId))", method: "PATCH", body: body)
+        let st: BotStatus = try await callAPI("/api/bots/\(enc(botId))", method: "PATCH", body: body)
         if let i = bots.firstIndex(where: { $0.id == st.id }) { bots[i] = st }
         return st
     }
 
     func deleteBot(_ botId: String) async throws {
-        _ = try await api.raw("/api/bots/\(enc(botId))", method: "DELETE")
+        _ = try await rawAPI("/api/bots/\(enc(botId))", method: "DELETE")
         removeBotState(botId)
     }
 
@@ -776,48 +932,48 @@ final class HubStore {
         if !kk.isEmpty { items.append(URLQueryItem(name: "kind", value: kk)) }
         if limit > 0 { items.append(URLQueryItem(name: "limit", value: "\(limit)")) }
         q.queryItems = items
-        return try await api.call("/api/memory?\(q.percentEncodedQuery ?? "")")
+        return try await callAPI("/api/memory?\(q.percentEncodedQuery ?? "")")
     }
 
     func saveMemory(_ body: [String: Any]) async throws {
-        _ = try await api.raw("/api/memory", method: "POST", body: body)
+        _ = try await rawAPI("/api/memory", method: "POST", body: body)
     }
 
     func deleteMemory(_ id: String) async throws {
-        _ = try await api.raw("/api/memory/\(enc(id))", method: "DELETE")
+        _ = try await rawAPI("/api/memory/\(enc(id))", method: "DELETE")
     }
 
     // MARK: 定时任务
 
     @discardableResult
     func fetchRoutines(_ botId: String) async throws -> [RoutineItem] {
-        let r: RoutinesResp = try await api.call("/api/bots/\(enc(botId))/routines")
+        let r: RoutinesResp = try await callAPI("/api/bots/\(enc(botId))/routines")
         routines[botId] = r.routines ?? []
         return routines[botId]!
     }
 
     func createRoutine(_ botId: String, _ body: [String: Any]) async throws {
-        _ = try await api.raw("/api/bots/\(enc(botId))/routines", method: "POST", body: body)
+        _ = try await rawAPI("/api/bots/\(enc(botId))/routines", method: "POST", body: body)
         try await fetchRoutines(botId)
     }
 
     func updateRoutine(_ botId: String, _ rid: String, _ body: [String: Any]) async throws {
-        _ = try await api.raw("/api/bots/\(enc(botId))/routines/\(enc(rid))", method: "PATCH", body: body)
+        _ = try await rawAPI("/api/bots/\(enc(botId))/routines/\(enc(rid))", method: "PATCH", body: body)
         try await fetchRoutines(botId)
     }
 
     func deleteRoutine(_ botId: String, _ rid: String) async throws {
-        _ = try await api.raw("/api/bots/\(enc(botId))/routines/\(enc(rid))", method: "DELETE")
+        _ = try await rawAPI("/api/bots/\(enc(botId))/routines/\(enc(rid))", method: "DELETE")
         try await fetchRoutines(botId)
     }
 
     func runRoutine(_ botId: String, _ rid: String) async throws {
-        _ = try await api.raw("/api/bots/\(enc(botId))/routines/\(enc(rid))/run?async=1", method: "POST")
+        _ = try await rawAPI("/api/bots/\(enc(botId))/routines/\(enc(rid))/run?async=1", method: "POST")
         try await fetchRoutines(botId)
     }
 
     func fetchRoutineRuns(_ botId: String, _ rid: String, limit: Int = 6) async throws -> [RoutineRun] {
-        let r: RunsResp = try await api.call("/api/bots/\(enc(botId))/routine-runs?routineId=\(enc(rid))&limit=\(limit)")
+        let r: RunsResp = try await callAPI("/api/bots/\(enc(botId))/routine-runs?routineId=\(enc(rid))&limit=\(limit)")
         return r.runs ?? []
     }
 
@@ -825,22 +981,52 @@ final class HubStore {
 
     @discardableResult
     func loadSettings() async throws -> SettingsData {
-        let s: SettingsData = try await api.call("/api/settings")
+        let s: SettingsData = try await callAPI("/api/settings")
         settings = s
         return s
     }
 
     @discardableResult
-    func loadModels(_ harness: String) async throws -> [String] {
-        let d: ModelsResp = try await api.call("/api/models?harness=\(enc(harness))")
-        models[harness] = d.models ?? []
-        return models[harness]!
+    func loadModels(_ harness: String, force: Bool = false) async throws -> [String] {
+        guard !harness.isEmpty else { return [] }
+        if !force, let cached = models[harness], !cached.isEmpty {
+            return cached
+        }
+        if force {
+            modelLoadTasks[harness]?.1.cancel()
+            modelLoadTasks.removeValue(forKey: harness)
+        } else if let existing = modelLoadTasks[harness] {
+            return try await existing.1.value
+        }
+        let token = UUID()
+        let task = Task<[String], Error> {
+            let d: ModelsResp = try await self.callAPI("/api/models?harness=\(enc(harness))")
+            return d.models ?? []
+        }
+        modelLoadTasks[harness] = (token, task)
+        defer {
+            if modelLoadTasks[harness]?.0 == token {
+                modelLoadTasks.removeValue(forKey: harness)
+            }
+        }
+        let list = try await task.value
+        if !list.isEmpty || force || models[harness] == nil {
+            models[harness] = list
+        }
+        return models[harness] ?? list
+    }
+
+    private func resetModelsCache() {
+        for (_, entry) in modelLoadTasks { entry.1.cancel() }
+        modelLoadTasks.removeAll()
+        models = [:]
+        modelsGeneration += 1
     }
 
     func saveSettings(changed: Bool, defaultHarness: String, defaultModel: String, defaultModels: [String: String], sharedUserMd: String,
                       botUpdates: [(id: String, harness: String, model: String)]) async throws {
         if changed {
-            settings = try await api.call("/api/settings", method: "PUT",
+            settings = try await callAPI("/api/settings", method: "PUT",
                                           body: ["defaultHarness": defaultHarness, "defaultModel": defaultModel, "defaultModels": defaultModels, "sharedUserMd": sharedUserMd])
         }
         for u in botUpdates { try await updateBot(u.id, ["harness": u.harness, "model": u.model]) }
@@ -849,33 +1035,34 @@ final class HubStore {
     }
 
     func connectMagpie(_ harness: String, model: String) async throws {
-        settings = try await api.call("/api/harnesses/\(enc(harness))/magpie", method: "POST", body: ["action": "connect", "model": model])
-        models = [:]
+        settings = try await callAPI("/api/harnesses/\(enc(harness))/magpie", method: "POST", body: ["action": "connect", "model": model])
+        resetModelsCache()
     }
 
     func disconnectMagpie(_ harness: String) async throws {
-        settings = try await api.call("/api/harnesses/\(enc(harness))/magpie", method: "POST", body: ["action": "disconnect"])
-        models = [:]
+        settings = try await callAPI("/api/harnesses/\(enc(harness))/magpie", method: "POST", body: ["action": "disconnect"])
+        resetModelsCache()
     }
 
     func openMagpie() async throws {
-        let _: OkResp = try await api.call("/api/magpie/open", method: "POST", body: [:])
+        let _: OkResp = try await callAPI("/api/magpie/open", method: "POST", body: [:])
     }
 
     func installMagpie() async throws {
-        var st: SetupTaskStatus = try await api.call("/api/magpie/install", method: "POST", body: [:])
+        var st: SetupTaskStatus = try await callAPI("/api/magpie/install", method: "POST", body: [:])
         while st.state == "running" {
             try await Task.sleep(nanoseconds: 1_200_000_000)
-            st = try await api.call("/api/magpie/install")
+            st = try await callAPI("/api/magpie/install")
         }
         if st.state == "error" {
             throw NSError(domain: "BotHub", code: 400, userInfo: [NSLocalizedDescriptionKey: st.error ?? "Magpie install failed"])
         }
         _ = try await loadSettings()
+        resetModelsCache()
     }
 
     func setDesktopWorker(harness: String, model: String) async throws {
-        settings = try await api.call("/api/settings", method: "PUT",
+        settings = try await callAPI("/api/settings", method: "PUT",
                                       body: ["desktopHarness": harness.trimmingCharacters(in: .whitespaces),
                                              "desktopModel": model.trimmingCharacters(in: .whitespaces)])
     }
@@ -884,7 +1071,7 @@ final class HubStore {
 
     func refreshNodes() async throws {
         guard !baseURL.isEmpty else { return }
-        let d: NodesResp = try await api.call("/api/nodes")
+        let d: NodesResp = try await callAPI("/api/nodes")
         nodes = d.nodes ?? []
     }
 
@@ -899,41 +1086,46 @@ final class HubStore {
         if !baseURL.isEmpty {
             startStream(baseURL, tok)
         }
+        #if os(macOS)
+        if managedMode {
+            Task { await DesktopHostManager.shared.refreshStatus() }
+        }
+        #endif
     }
 
     func refreshTailcat() async throws {
-        tailcat = try await api.call("/api/tailcat")
+        tailcat = try await callAPI("/api/tailcat")
     }
 
     func revealTailcatToken() async throws -> String {
-        let d: TailcatStatus = try await api.call("/api/tailcat?reveal=1")
+        let d: TailcatStatus = try await callAPI("/api/tailcat?reveal=1")
         return d.apiToken ?? ""
     }
 
     func setTailcat(_ body: [String: Any]) async throws -> TailcatStatus {
-        let res: TailcatStatus = try await api.call("/api/tailcat", method: "POST", body: body)
+        let res: TailcatStatus = try await callAPI("/api/tailcat", method: "POST", body: body)
         tailcat = res
         applyRotatedAPIToken(res.apiToken)
         return res
     }
 
     func fetchTailcatQR() async throws -> Data {
-        try await api.raw("/api/tailcat/qr.png")
+        try await rawAPI("/api/tailcat/qr.png")
     }
 
     func refreshHostTailscale() async throws {
-        hostTailscale = try await api.call("/api/tailscale")
+        hostTailscale = try await callAPI("/api/tailscale")
     }
 
     func setHostTailscale(_ body: [String: Any]) async throws -> HostTailscaleStatus {
-        let res: HostTailscaleStatus = try await api.call("/api/tailscale", method: "POST", body: body)
+        let res: HostTailscaleStatus = try await callAPI("/api/tailscale", method: "POST", body: body)
         hostTailscale = res
         applyRotatedAPIToken(res.apiToken)
         return res
     }
 
     func fetchHostTailscaleQR() async throws -> Data {
-        try await api.raw("/api/tailscale/qr.png")
+        try await rawAPI("/api/tailscale/qr.png")
     }
 
     func refreshMobileTailscale(includePeers: Bool = true) async {
@@ -984,7 +1176,7 @@ final class HubStore {
 
     @discardableResult
     func refreshDesktopTargets() async throws -> [DesktopTarget] {
-        let d: TargetsResp = try await api.call("/api/desktop/targets")
+        let d: TargetsResp = try await callAPI("/api/desktop/targets")
         desktopTargets = d.targets ?? []
         if let at = d.activeTarget {
             activeDesktopTarget = at
@@ -994,38 +1186,38 @@ final class HubStore {
     }
 
     func setActiveDesktopTarget(_ target: String) async throws {
-        let res: ActiveTargetResp = try await api.call("/api/desktop/target", method: "PUT", body: ["target": target])
+        let res: ActiveTargetResp = try await callAPI("/api/desktop/target", method: "PUT", body: ["target": target])
         if let at = res.activeTarget {
             activeDesktopTarget = at
         }
     }
 
     func fetchDesktopState(_ target: String) async throws -> DesktopState {
-        let d: DesktopState = try await api.call("/api/desktop/state?target=\(enc(target))")
+        let d: DesktopState = try await callAPI("/api/desktop/state?target=\(enc(target))")
         takeovers = d.takeovers ?? []
         return d
     }
 
     func fetchDesktopPermissions(_ target: String) async throws -> DesktopPermissionsResp {
-        try await api.call("/api/desktop/permissions?target=\(enc(target))")
+        try await callAPI("/api/desktop/permissions?target=\(enc(target))")
     }
 
     func requestDesktopPermission(target: String, permission: String, openSettings: Bool = false) async throws -> DesktopPermissionRequestResp {
-        try await api.call("/api/desktop/permissions/request", method: "POST",
+        try await callAPI("/api/desktop/permissions/request", method: "POST",
                            body: ["target": target, "permission": permission, "openSettings": openSettings])
     }
 
     func fetchDesktopFrame(_ target: String) async throws -> DesktopFrame {
-        try await api.call("/api/desktop/frame?target=\(enc(target))&windowId=&maxDim=1280&quality=72")
+        try await callAPI("/api/desktop/frame?target=\(enc(target))&windowId=&maxDim=1280&quality=72")
     }
 
-    func makeDesktopWSRequest(target: String, preset: String? = nil) -> URLRequest? {
+    func makeDesktopWSRequest(target: String, preset: String? = nil, codec: String = "hevc") -> URLRequest? {
         guard !baseURL.isEmpty, var comps = URLComponents(string: baseURL) else { return nil }
         comps.scheme = (comps.scheme?.lowercased() == "https") ? "wss" : "ws"
         comps.path = "/api/desktop/stream/ws"
         var q = [
             URLQueryItem(name: "target", value: target),
-            URLQueryItem(name: "codec", value: "hevc"),
+            URLQueryItem(name: "codec", value: codec.isEmpty ? "hevc" : codec),
         ]
         if let preset, !preset.isEmpty {
             q.append(URLQueryItem(name: "preset", value: preset))
@@ -1033,6 +1225,7 @@ final class HubStore {
         comps.queryItems = q
         guard let url = comps.url else { return nil }
         var req = URLRequest(url: url)
+        APIClient.attachClientHeaders(&req)
         if !authToken.isEmpty {
             req.setValue("Bearer \(authToken)", forHTTPHeaderField: "Authorization")
         }
@@ -1040,36 +1233,36 @@ final class HubStore {
     }
 
     func sendDesktopInput(_ body: [String: Any]) async throws {
-        _ = try await api.raw("/api/desktop/input", method: "POST", body: body)
+        _ = try await rawAPI("/api/desktop/input", method: "POST", body: body)
     }
 
     func resolveTakeover(_ id: String) async throws {
-        let r: TakeoversResp = try await api.call("/api/desktop/takeover/resolve", method: "POST",
+        let r: TakeoversResp = try await callAPI("/api/desktop/takeover/resolve", method: "POST",
                                                   body: ["id": id, "note": L.t("takeoverResolvedNote")])
         takeovers = r.items ?? []
     }
 
     func replyQuestion(id: String, answers: [String: Any], cancelled: Bool) async throws {
-        let r: QuestionsResp = try await api.call("/api/questions/\(enc(id))/reply", method: "POST",
+        let r: QuestionsResp = try await callAPI("/api/questions/\(enc(id))/reply", method: "POST",
                                                   body: ["answers": answers, "cancelled": cancelled])
         questions = r.items ?? []
     }
 
     func listWorkspaceFiles(botId: String, path: String = "", showHidden: Bool = false) async throws -> WorkspaceListResult {
-        try await api.listWorkspaceFiles(botId: botId, path: path, showHidden: showHidden)
+        try await performAPI { try await $0.listWorkspaceFiles(botId: botId, path: path, showHidden: showHidden) }
     }
 
     func readWorkspaceFile(botId: String, path: String) async throws -> WorkspaceFileContent {
-        try await api.readWorkspaceFile(botId: botId, path: path)
+        try await performAPI { try await $0.readWorkspaceFile(botId: botId, path: path) }
     }
 
     func workspaceFileImageURL(botId: String, path: String) async throws -> URL? {
-        let tk = try await api.issueWorkspaceFileTicket(botId: botId, path: path)
+        let tk = try await performAPI { try await $0.issueWorkspaceFileTicket(botId: botId, path: path) }
         return api.workspaceFileRawURL(botId: botId, path: path, ticket: tk.ticket, download: false)
     }
 
     func downloadWorkspaceFileToTemp(botId: String, path: String, fileName: String) async throws -> URL {
-        try await api.downloadWorkspaceFileToTemp(botId: botId, path: path, fileName: fileName)
+        try await performAPI { try await $0.downloadWorkspaceFileToTemp(botId: botId, path: path, fileName: fileName) }
     }
 
     func insertIntoChat(_ text: String) {

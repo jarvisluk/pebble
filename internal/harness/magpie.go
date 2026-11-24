@@ -123,10 +123,14 @@ var (
 	statusCaches   = make(map[string]*ttlCache[MagpieStatus])
 
 	runMagpieOutput = func(ctx context.Context, args ...string) ([]byte, error) {
-		return exec.CommandContext(ctx, magpieBin(), args...).Output()
+		cmd := exec.CommandContext(ctx, magpieBin(), args...)
+		cmd.Env = augmentedEnv(nil)
+		return cmd.Output()
 	}
 	runMagpieCombined = func(ctx context.Context, args ...string) ([]byte, error) {
-		return exec.CommandContext(ctx, magpieBin(), args...).CombinedOutput()
+		cmd := exec.CommandContext(ctx, magpieBin(), args...)
+		cmd.Env = augmentedEnv(nil)
+		return cmd.CombinedOutput()
 	}
 )
 
@@ -164,7 +168,7 @@ func magpieBin() string {
 	if p := strings.TrimSpace(os.Getenv("MAGPIE_BIN")); p != "" {
 		return p
 	}
-	if p, err := exec.LookPath("magpie"); err == nil {
+	if p, ok := findBinary("magpie"); ok {
 		return p
 	}
 	if runtime.GOOS == "darwin" {
@@ -258,16 +262,21 @@ func magpieCatalog(ctx context.Context) []string {
 		if err != nil {
 			return nil, false
 		}
-		var parsed []string
-		for _, line := range strings.Split(string(out), "\n") {
-			f := strings.Fields(line)
-			if len(f) > 0 && strings.Contains(f[0], "/") && !strings.Contains(f[0], "://") {
-				parsed = append(parsed, f[0])
-			}
-		}
-		return parsed, true
+		parsed := parseSlashModelLines(string(out))
+		return parsed, len(parsed) > 0
 	})
 	return append([]string(nil), ids...)
+}
+
+func parseSlashModelLines(raw string) []string {
+	var parsed []string
+	for _, line := range strings.Split(raw, "\n") {
+		f := strings.Fields(line)
+		if len(f) > 0 && strings.Contains(f[0], "/") && !strings.Contains(f[0], "://") {
+			parsed = append(parsed, f[0])
+		}
+	}
+	return parsed
 }
 
 // MagpieModels returns magpie's catalog as model IDs for the given harness.

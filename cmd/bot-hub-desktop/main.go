@@ -50,6 +50,7 @@ func main() {
 	})
 	d.host.Load()
 	channel.DesktopResetFunc = func() { go d.host.Reset() }
+	channel.OnAPITokenChanged = func(tok string) { d.host.SetLocalToken(tok) }
 	d.run()
 }
 

@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -201,7 +202,7 @@ fun SettingsDetailScreen(
     val harnesses = remember(store.settings?.harnesses) {
         val list = store.settings?.harnesses.orEmpty()
         list.ifEmpty {
-            listOf("opencode", "codebuddy", "qoder", "codex", "claude", "grok", "pi").map { HarnessInfo(id = it, label = it) }
+            listOf("opencode", "codebuddy", "qoder", "codex", "claude", "grok", "trae", "pi", "dsh", "agy").map { HarnessInfo(id = it, label = it) }
         }
     }
     val primaryHarness = harnesses.firstOrNull()?.id ?: "opencode"
@@ -377,17 +378,35 @@ fun SettingsDetailScreen(
         }
     }
 
-    fun loadCands(harnessId: String) {
-        if (harnessId.isEmpty() || harnessId in loadingModelsFor) return
+    fun loadCands(harnessId: String, force: Boolean = false) {
+        if (harnessId.isEmpty()) return
+        if (!force && !store.models[harnessId].isNullOrEmpty()) return
+        if (!force && harnessId in loadingModelsFor) return
         loadingModelsFor = loadingModelsFor + harnessId
         scope.launch {
             try {
-                store.loadModels(harnessId)
+                store.loadModels(harnessId, force = force)
             } catch (e: Throwable) {
-                error = errText(e, store.t("loadModelsFailed"))
+                if (force) error = errText(e, store.t("loadModelsFailed"))
             } finally {
                 loadingModelsFor = loadingModelsFor - harnessId
             }
+        }
+    }
+
+    fun preloadAllModels(force: Boolean = false) {
+        harnesses.forEach { h -> loadCands(h.id, force = force) }
+    }
+
+    fun harnessFieldLabel(h: HarnessInfo): String = when {
+        h.magpie?.connected == true -> "${h.title} · Magpie"
+        store.settings?.magpie?.installed == true -> "${h.title} · ${store.t("mpNative")}"
+        else -> h.title
+    }
+
+    LaunchedEffect(tab, store.isConnected, store.modelsGeneration, harnesses.map { it.id }) {
+        if (tab == SettingsTab.MODELS && store.isConnected) {
+            preloadAllModels()
         }
     }
 
@@ -733,9 +752,6 @@ fun SettingsDetailScreen(
                                         if (idx > 0) CardDivider()
                                         val cands = store.models[h.id].orEmpty()
                                         val key = "magpie:${h.id}"
-                                        LaunchedEffect(h.id, store.isConnected) {
-                                            if (cands.isEmpty() && store.isConnected) loadCands(h.id)
-                                        }
                                         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                                                 Column(modifier = Modifier.weight(1f)) {
@@ -759,6 +775,7 @@ fun SettingsDetailScreen(
                                                 candidates = cands,
                                                 loading = h.id in loadingModelsFor,
                                                 onLoadCandidates = { loadCands(h.id) },
+                                                onRefreshCandidates = { loadCands(h.id, force = true) },
                                                 onValueChange = { next ->
                                                     if (next != perHarness[h.id].orEmpty()) {
                                                         perHarness[h.id] = next
@@ -776,6 +793,22 @@ fun SettingsDetailScreen(
                         }
 
                         // Global default model
+                        val orderedGlobalHarnesses = buildList {
+                            val seen = mutableSetOf<String>()
+                            val anyInstalled = harnesses.any { it.installed == true }
+                            fun addUnique(h: HarnessInfo) {
+                                if (seen.add(h.id)) add(h)
+                            }
+                            harnesses.firstOrNull { it.id == defaultHarness }?.let(::addUnique)
+                            harnesses.filter { it.installed == true && it.magpie?.connected != true }.forEach(::addUnique)
+                            harnesses.filter { it.installed == true && it.magpie?.connected == true }.forEach(::addUnique)
+                            if (!anyInstalled) {
+                                harnesses.forEach(::addUnique)
+                            } else {
+                                harnesses.filter { !store.models[it.id].isNullOrEmpty() }.forEach(::addUnique)
+                            }
+                        }
+
                         SectionHeader(store.t("globalDefaultModel"))
                         SectionCard {
                             Column(
@@ -805,6 +838,9 @@ fun SettingsDetailScreen(
                                                         defaultHarness = h.id
                                                         defaultHarnessTouched = true
                                                         saved = ""
+                                                        if (store.models[h.id].isNullOrEmpty() && store.isConnected) {
+                                                            loadCands(h.id)
+                                                        }
                                                     }
                                                     defHarnessOpen = false
                                                 },
@@ -812,15 +848,17 @@ fun SettingsDetailScreen(
                                         }
                                     }
                                 }
-                                LaunchedEffect(primaryHarness, store.isConnected) {
-                                    if (store.models[primaryHarness].isNullOrEmpty() && store.isConnected) loadCands(primaryHarness)
-                                }
-                                ModelInputWithMenu(
+                                GlobalModelInputWithMenu(
                                     value = defaultModel,
                                     placeholder = "magpie/claude-sonnet-4",
-                                    candidates = store.models[primaryHarness].orEmpty(),
-                                    loading = primaryHarness in loadingModelsFor,
-                                    onLoadCandidates = { loadCands(primaryHarness) },
+                                    harnesses = orderedGlobalHarnesses,
+                                    defaultHarness = defaultHarness,
+                                    harnessLabel = ::harnessFieldLabel,
+                                    modelsByHarness = store.models,
+                                    loadingHarnesses = loadingModelsFor,
+                                    onLoadHarness = { hid -> loadCands(hid) },
+                                    onRefreshHarness = { hid -> loadCands(hid, force = true) },
+                                    onRefreshAll = { preloadAllModels(force = true) },
                                     onValueChange = { next ->
                                         if (next != defaultModel) {
                                             defaultModel = next
@@ -845,13 +883,14 @@ fun SettingsDetailScreen(
                                 AnimatedVisibility(visible = perOpen) {
                                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                         harnesses.forEach { h ->
-                                            Text(h.title, color = p.text2, fontSize = PebbleFont.secondary)
+                                            Text(harnessFieldLabel(h), color = p.text2, fontSize = PebbleFont.secondary)
                                             ModelInputWithMenu(
                                                 value = perHarness[h.id].orEmpty(),
                                                 placeholder = store.t("followGlobalPh"),
                                                 candidates = store.models[h.id].orEmpty(),
                                                 loading = h.id in loadingModelsFor,
                                                 onLoadCandidates = { loadCands(h.id) },
+                                                onRefreshCandidates = { loadCands(h.id, force = true) },
                                                 onValueChange = { next ->
                                                     if (next != perHarness[h.id].orEmpty()) {
                                                         perHarness[h.id] = next
@@ -920,6 +959,7 @@ fun SettingsDetailScreen(
                                                 candidates = store.models[d.harness].orEmpty(),
                                                 loading = d.harness in loadingModelsFor,
                                                 onLoadCandidates = { loadCands(d.harness) },
+                                                onRefreshCandidates = { loadCands(d.harness, force = true) },
                                                 onValueChange = { next ->
                                                     if (next != d.model) {
                                                         drafts[b.id] = d.copy(model = next)
@@ -1439,11 +1479,13 @@ private fun ModelInputWithMenu(
     candidates: List<String>,
     loading: Boolean,
     onLoadCandidates: () -> Unit,
+    onRefreshCandidates: () -> Unit = onLoadCandidates,
     onValueChange: (String) -> Unit,
     store: PebbleStore,
 ) {
     val p = LocalPalette.current
     var menuOpen by remember { mutableStateOf(false) }
+    val trimmedValue = value.trim()
 
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -1461,11 +1503,19 @@ private fun ModelInputWithMenu(
             modifier = Modifier.weight(1f),
         )
         Box {
-            IconButton(onClick = { menuOpen = true }) {
+            IconButton(onClick = {
+                menuOpen = true
+                if (candidates.isEmpty() && !loading) onLoadCandidates()
+            }) {
                 Icon(painterResource(PebbleIcons.List), contentDescription = store.t("optionalModels"), tint = p.accent)
             }
-            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }, containerColor = p.card) {
-                if (value.trim().isNotEmpty()) {
+            DropdownMenu(
+                expanded = menuOpen,
+                onDismissRequest = { menuOpen = false },
+                containerColor = p.card,
+                modifier = Modifier.heightIn(max = 360.dp),
+            ) {
+                if (trimmedValue.isNotEmpty()) {
                     DropdownMenuItem(
                         text = { Text(store.t("clear"), color = p.danger) },
                         onClick = { onValueChange(""); menuOpen = false },
@@ -1474,15 +1524,192 @@ private fun ModelInputWithMenu(
                 }
                 if (candidates.isEmpty()) {
                     DropdownMenuItem(
-                        text = { Text(if (loading) store.t("loading") else store.t("optionalModels"), color = p.text) },
-                        enabled = !loading,
-                        onClick = onLoadCandidates,
+                        text = { Text(if (loading) store.t("loading") else store.t("noModels"), color = p.mute, fontSize = PebbleFont.secondary) },
+                        enabled = false,
+                        onClick = {},
+                    )
+                    if (!loading) {
+                        DropdownMenuItem(
+                            text = { Text(store.t("refresh"), color = p.accent, fontSize = PebbleFont.secondary) },
+                            leadingIcon = { Icon(painterResource(PebbleIcons.Refresh), contentDescription = null, tint = p.accent, modifier = Modifier.size(18.dp)) },
+                            onClick = onRefreshCandidates,
+                        )
+                    }
+                } else {
+                    candidates.forEach { m ->
+                        val selected = m == trimmedValue
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    text = m,
+                                    fontFamily = MonoFont,
+                                    fontSize = PebbleFont.secondary,
+                                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                                    color = if (selected) p.accent else p.text,
+                                )
+                            },
+                            trailingIcon = if (selected) {
+                                { Icon(painterResource(PebbleIcons.Check), contentDescription = null, tint = p.accent, modifier = Modifier.size(16.dp)) }
+                            } else {
+                                null
+                            },
+                            onClick = { onValueChange(m); menuOpen = false },
+                        )
+                    }
+                    HorizontalDivider(color = p.s2)
+                    DropdownMenuItem(
+                        text = { Text(store.t("refresh"), color = p.accent, fontSize = PebbleFont.secondary) },
+                        leadingIcon = { Icon(painterResource(PebbleIcons.Refresh), contentDescription = null, tint = p.accent, modifier = Modifier.size(18.dp)) },
+                        onClick = onRefreshCandidates,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun GlobalModelInputWithMenu(
+    value: String,
+    placeholder: String,
+    harnesses: List<HarnessInfo>,
+    defaultHarness: String,
+    harnessLabel: (HarnessInfo) -> String,
+    modelsByHarness: Map<String, List<String>>,
+    loadingHarnesses: Set<String>,
+    onLoadHarness: (String) -> Unit,
+    onRefreshHarness: (String) -> Unit,
+    onRefreshAll: () -> Unit,
+    onValueChange: (String) -> Unit,
+    store: PebbleStore,
+) {
+    val p = LocalPalette.current
+    var menuOpen by remember { mutableStateOf(false) }
+    var activeHarnessId by remember { mutableStateOf<String?>(null) }
+    val trimmedValue = value.trim()
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        OutlinedTextField(
+            value = value,
+            onValueChange = onValueChange,
+            placeholder = { Text(placeholder, fontFamily = MonoFont, fontSize = PebbleFont.secondary) },
+            singleLine = true,
+            textStyle = TextStyle(fontFamily = MonoFont, fontSize = PebbleFont.secondary),
+            shape = PebbleDimens.rowShape,
+            colors = pebbleFieldColors(),
+            modifier = Modifier.weight(1f),
+        )
+        Box {
+            IconButton(onClick = {
+                val singleId = if (harnesses.size == 1) harnesses.first().id else null
+                activeHarnessId = singleId
+                menuOpen = true
+                if (singleId != null && modelsByHarness[singleId].isNullOrEmpty() && singleId !in loadingHarnesses) {
+                    onLoadHarness(singleId)
+                }
+            }) {
+                Icon(painterResource(PebbleIcons.List), contentDescription = store.t("optionalModels"), tint = p.accent)
+            }
+            DropdownMenu(
+                expanded = menuOpen,
+                onDismissRequest = { menuOpen = false; activeHarnessId = null },
+                containerColor = p.card,
+                modifier = Modifier.heightIn(max = 360.dp),
+            ) {
+                if (trimmedValue.isNotEmpty()) {
+                    DropdownMenuItem(
+                        text = { Text(store.t("clear"), color = p.danger) },
+                        onClick = { onValueChange(""); menuOpen = false; activeHarnessId = null },
+                    )
+                    HorizontalDivider(color = p.s2)
+                }
+                val selectedId = activeHarnessId
+                if (selectedId == null) {
+                    harnesses.forEach { h ->
+                        val count = modelsByHarness[h.id]?.size ?: 0
+                        val isLoading = h.id in loadingHarnesses
+                        val lbl = if (h.id == defaultHarness) "${harnessLabel(h)} (${store.t("defaultTag")})" else harnessLabel(h)
+                        DropdownMenuItem(
+                            text = { Text(lbl, color = p.text, fontSize = PebbleFont.secondary) },
+                            trailingIcon = {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Text(
+                                        text = if (isLoading && count == 0) store.t("loading") else "$count",
+                                        color = p.mute,
+                                        fontSize = PebbleFont.caption,
+                                    )
+                                    Icon(painterResource(PebbleIcons.ChevronRight), contentDescription = null, tint = p.mute, modifier = Modifier.size(16.dp))
+                                }
+                            },
+                            onClick = {
+                                activeHarnessId = h.id
+                                if (modelsByHarness[h.id].isNullOrEmpty() && h.id !in loadingHarnesses) {
+                                    onLoadHarness(h.id)
+                                }
+                            },
+                        )
+                    }
+                    HorizontalDivider(color = p.s2)
+                    DropdownMenuItem(
+                        text = { Text(store.t("refresh"), color = p.accent, fontSize = PebbleFont.secondary) },
+                        leadingIcon = { Icon(painterResource(PebbleIcons.Refresh), contentDescription = null, tint = p.accent, modifier = Modifier.size(18.dp)) },
+                        onClick = onRefreshAll,
                     )
                 } else {
-                    candidates.take(40).forEach { m ->
+                    val activeInfo = harnesses.firstOrNull { it.id == selectedId }
+                    if (harnesses.size > 1) {
                         DropdownMenuItem(
-                            text = { Text(m, fontFamily = MonoFont, fontSize = PebbleFont.secondary, color = p.text) },
-                            onClick = { onValueChange(m); menuOpen = false },
+                            text = { Text(activeInfo?.let(harnessLabel) ?: selectedId, color = p.text, fontWeight = FontWeight.SemiBold, fontSize = PebbleFont.secondary) },
+                            leadingIcon = { Icon(painterResource(PebbleIcons.ArrowBack), contentDescription = null, tint = p.text, modifier = Modifier.size(18.dp)) },
+                            onClick = { activeHarnessId = null },
+                        )
+                        HorizontalDivider(color = p.s2)
+                    }
+                    val cands = modelsByHarness[selectedId].orEmpty()
+                    val isLoading = selectedId in loadingHarnesses
+                    if (cands.isEmpty()) {
+                        DropdownMenuItem(
+                            text = { Text(if (isLoading) store.t("loading") else store.t("noModels"), color = p.mute, fontSize = PebbleFont.secondary) },
+                            enabled = false,
+                            onClick = {},
+                        )
+                        if (!isLoading) {
+                            DropdownMenuItem(
+                                text = { Text(store.t("refresh"), color = p.accent, fontSize = PebbleFont.secondary) },
+                                leadingIcon = { Icon(painterResource(PebbleIcons.Refresh), contentDescription = null, tint = p.accent, modifier = Modifier.size(18.dp)) },
+                                onClick = { onRefreshHarness(selectedId) },
+                            )
+                        }
+                    } else {
+                        cands.forEach { m ->
+                            val selected = m == trimmedValue
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        text = m,
+                                        fontFamily = MonoFont,
+                                        fontSize = PebbleFont.secondary,
+                                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                                        color = if (selected) p.accent else p.text,
+                                    )
+                                },
+                                trailingIcon = if (selected) {
+                                    { Icon(painterResource(PebbleIcons.Check), contentDescription = null, tint = p.accent, modifier = Modifier.size(16.dp)) }
+                                } else {
+                                    null
+                                },
+                                onClick = { onValueChange(m); menuOpen = false; activeHarnessId = null },
+                            )
+                        }
+                        HorizontalDivider(color = p.s2)
+                        DropdownMenuItem(
+                            text = { Text(store.t("refresh"), color = p.accent, fontSize = PebbleFont.secondary) },
+                            leadingIcon = { Icon(painterResource(PebbleIcons.Refresh), contentDescription = null, tint = p.accent, modifier = Modifier.size(18.dp)) },
+                            onClick = { onRefreshHarness(selectedId) },
                         )
                     }
                 }

@@ -112,3 +112,45 @@ func TestTailscaleStatusAndConfigRedaction(t *testing.T) {
 		t.Fatalf("expected env ref preserved in config: %s", string(rawCfg))
 	}
 }
+
+func TestTailscaleTokenChangeCallback(t *testing.T) {
+	srv, h := newTestServer(t, `{"http":{"apiToken":"initial-tok"},"bots":[{"id":"a","name":"A"}]}`)
+
+	var got []string
+	OnAPITokenChanged = func(tok string) {
+		got = append(got, tok)
+	}
+	t.Cleanup(func() { OnAPITokenChanged = nil })
+
+	// Explicitly setting a new apiToken via /api/tailscale notifies OnAPITokenChanged.
+	req := httptest.NewRequest("POST", "/api/tailscale", strings.NewReader(`{"apiToken":"custom-ts-tok"}`))
+	req.Host = "127.0.0.1:3789"
+	req.Header.Set("Authorization", "Bearer initial-tok")
+	rec := httptest.NewRecorder()
+	srv.srv.Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /api/tailscale custom apiToken status %d: %s", rec.Code, rec.Body.String())
+	}
+	if len(got) != 1 || got[0] != "custom-ts-tok" {
+		t.Fatalf("expected callback [custom-ts-tok], got %v", got)
+	}
+
+	// Resetting token via /api/tailscale also generates a token and notifies callback.
+	req = httptest.NewRequest("POST", "/api/tailscale", strings.NewReader(`{"resetToken":true}`))
+	req.Host = "127.0.0.1:3789"
+	req.Header.Set("Authorization", "Bearer custom-ts-tok")
+	rec = httptest.NewRecorder()
+	srv.srv.Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /api/tailscale resetToken status %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &resp)
+	rotated, _ := resp["apiToken"].(string)
+	if rotated == "" || rotated == "custom-ts-tok" || len(got) != 2 || got[1] != rotated {
+		t.Fatalf("expected rotated token callback (%q), got %v", rotated, got)
+	}
+	if h.Config().HTTP.APIToken != rotated {
+		t.Fatalf("hub APIToken = %q, want %q", h.Config().HTTP.APIToken, rotated)
+	}
+}

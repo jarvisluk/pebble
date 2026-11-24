@@ -198,6 +198,13 @@ fun DevicesSheet(
                                         fg = if (store.online) p.sageInk else p.text2,
                                     )
                                 }
+                                if (store.isClientOutdated) {
+                                    Text(
+                                        text = store.t(if (store.isClientUpgradeRequired) "clientUpgradeRequired" else "clientUpdateHint"),
+                                        color = if (store.isClientUpgradeRequired) p.pinkInk else p.text2,
+                                        fontSize = PebbleFont.secondary,
+                                    )
+                                }
                             } else {
                                 Text(store.t("notConnectedHost"), color = p.mute, fontSize = PebbleFont.body)
                             }
@@ -291,10 +298,22 @@ fun DevicesSheet(
                                 store.nodes.forEachIndexed { idx, node ->
                                     if (idx > 0) CardDivider()
                                     val on = node.connected == true
+                                    val outdated = store.serverInfo != null && node.isOutdated
                                     val perms = node.permissions.orEmpty()
                                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        ) {
                                             Text(node.name ?: node.id, color = p.text, fontSize = PebbleFont.cardTitle, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                                            if (outdated) {
+                                                TagPill(
+                                                    text = store.t("nodeOutdatedTag"),
+                                                    bg = p.pink,
+                                                    fg = p.pinkInk,
+                                                )
+                                            }
                                             TagPill(
                                                 text = store.t(if (on) "online" else "offline"),
                                                 bg = if (on) p.sage else p.s2,
@@ -303,6 +322,9 @@ fun DevicesSheet(
                                         }
                                         val host = node.hostname?.takeIf { it.isNotEmpty() }?.let { " · $it" }.orEmpty()
                                         Text("${node.os.orEmpty()}/${node.arch.orEmpty()}$host", color = p.text2, fontSize = PebbleFont.secondary, fontFamily = MonoFont)
+                                        if (outdated) {
+                                            Text(store.t("nodeOutdatedHint"), color = p.mute, fontSize = PebbleFont.caption)
+                                        }
                                         if (perms.isNotEmpty()) {
                                             Row(
                                                 modifier = Modifier.fillMaxWidth(),

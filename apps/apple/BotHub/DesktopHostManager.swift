@@ -23,12 +23,16 @@ struct DesktopHostSnapshot: Codable, Equatable {
     var canFailback: Bool = false
     var tailscaleBound: Bool = false
     var tailscaleControlUrl: String = ""
+    var daemonProtocol: Int? = nil
 }
 
 private struct DaemonHandshake: Codable {
     var url: String
     var token: String
     var dataDir: String
+    var protocolVersion: Int?
+    var capabilities: [String]?
+    var version: String?
 }
 
 @MainActor
@@ -41,6 +45,12 @@ final class DesktopHostManager {
     var ready = false
     var daemonError = ""
     var tsBinding = false
+    var daemonProtocol: Int = 0
+
+    var daemonOutdated: Bool {
+        let p = snapshot.daemonProtocol ?? daemonProtocol
+        return ready && p > 0 && p < ClientProtocol.current
+    }
 
     @ObservationIgnored private var process: Process?
     @ObservationIgnored private var stdinPipe: Pipe?
@@ -58,7 +68,7 @@ final class DesktopHostManager {
 
         guard let binPath = resolveBinaryPath() else {
             starting = false
-            daemonError = "未找到 bot-hub 可执行文件"
+            daemonError = "未找到 pebble 可执行文件"
             return
         }
 
@@ -84,6 +94,7 @@ final class DesktopHostManager {
                     self.sseTask = nil
                     self.ready = false
                     self.starting = false
+                    self.daemonProtocol = 0
                     if p.terminationStatus != 0 {
                         self.daemonError = "host-daemon 异常退出（code \(p.terminationStatus)）"
                     }
@@ -127,6 +138,7 @@ final class DesktopHostManager {
         controlURL = hs.url
         controlToken = hs.token
         snapshot.dataDir = hs.dataDir
+        daemonProtocol = hs.protocolVersion ?? 1
         ready = true
         starting = false
         startControlStream()
@@ -151,18 +163,23 @@ final class DesktopHostManager {
         process = nil
         ready = false
         starting = false
+        daemonProtocol = 0
     }
 
     private func resolveBinaryPath() -> String? {
         let env = ProcessInfo.processInfo.environment
-        if let custom = env["BOT_HUB_DAEMON_BIN"], !custom.isEmpty, FileManager.default.isExecutableFile(atPath: custom) {
-            return custom
+        for key in ["PEBBLE_DAEMON_BIN", "BOT_HUB_DAEMON_BIN"] {
+            if let custom = env[key], !custom.isEmpty, FileManager.default.isExecutableFile(atPath: custom) {
+                return custom
+            }
         }
-        if let bundled = Bundle.main.resourceURL?.appendingPathComponent("bin/bot-hub").path,
-           FileManager.default.isExecutableFile(atPath: bundled) {
-            return bundled
+        for rel in ["bin/pebble", "bin/bot-hub"] {
+            if let bundled = Bundle.main.resourceURL?.appendingPathComponent(rel).path,
+               FileManager.default.isExecutableFile(atPath: bundled) {
+                return bundled
+            }
         }
-        for cand in ["/opt/homebrew/bin/bot-hub", "/usr/local/bin/bot-hub"] {
+        for cand in ["/opt/homebrew/bin/pebble", "/usr/local/bin/pebble", "/opt/homebrew/bin/bot-hub", "/usr/local/bin/bot-hub"] {
             if FileManager.default.isExecutableFile(atPath: cand) {
                 return cand
             }
@@ -182,7 +199,7 @@ final class DesktopHostManager {
             req.setValue("application/json", forHTTPHeaderField: "Content-Type")
             req.httpBody = try JSONSerialization.data(withJSONObject: body)
         }
-        let (data, resp) = try await URLSession.shared.data(for: req)
+        let (data, resp) = try await hubAPISession.data(for: req)
         let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
         guard (200..<300).contains(code) else {
             let msg = String(data: data, encoding: .utf8) ?? "HTTP \(code)"
@@ -301,7 +318,7 @@ final class DesktopHostManager {
                     req.timeoutInterval = 70
                     req.setValue("text/event-stream", forHTTPHeaderField: "Accept")
                     req.setValue("Bearer \(tok)", forHTTPHeaderField: "Authorization")
-                    let (bytes, resp) = try await URLSession.shared.bytes(for: req)
+                    let (bytes, resp) = try await hubAPISession.bytes(for: req)
                     let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
                     if code != 200 { throw HubError(message: "HTTP \(code)") }
                     var buf: [UInt8] = []

@@ -8,6 +8,10 @@ struct HubError: LocalizedError {
     var message: String
     var unauthorized = false
     var status = 0
+    var code = ""
+    var isUnsupportedCapability: Bool {
+        status == 404 || status == 405 || status == 501 || code == "capability_unsupported"
+    }
     var errorDescription: String? { message }
 }
 
@@ -73,26 +77,50 @@ func normalizeAddress(_ raw: String) -> NormalizedAddress {
     return NormalizedAddress(cleanAddress: withProto, token: token, isTailcat: false, isTailscale: false)
 }
 
+/// 独立于系统共享 Cookie 存储的 HTTP 会话，避免本机多端口或模式切换时残留的 `bot_hub_token` Cookie 污染请求。
+let hubAPISession: URLSession = {
+    let cfg = URLSessionConfiguration.default
+    cfg.httpShouldSetCookies = false
+    cfg.httpCookieAcceptPolicy = .never
+    cfg.httpCookieStorage = nil
+    return URLSession(configuration: cfg)
+}()
+
 struct APIClient {
     var base: String
     var token: String
+
+    private static var appVersion: String {
+        (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "0.1.0"
+    }
+
+    static func attachClientHeaders(_ req: inout URLRequest) {
+        req.setValue("\(ClientProtocol.current)", forHTTPHeaderField: "X-Pebble-Protocol")
+        req.setValue("apple", forHTTPHeaderField: "X-Pebble-Client")
+        req.setValue(appVersion, forHTTPHeaderField: "X-Pebble-Version")
+    }
 
     func raw(_ path: String, method: String = "GET", body: [String: Any]? = nil) async throws -> Data {
         guard let url = URL(string: base + path) else { throw HubError(message: L.t("enterValidAddr")) }
         var req = URLRequest(url: url)
         req.httpMethod = method
         req.timeoutInterval = 30
+        Self.attachClientHeaders(&req)
         if let body {
             req.setValue("application/json", forHTTPHeaderField: "Content-Type")
             req.httpBody = try JSONSerialization.data(withJSONObject: body)
         }
         if !token.isEmpty { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
-        let (data, resp) = try await URLSession.shared.data(for: req)
+        let (data, resp) = try await hubAPISession.data(for: req)
         let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
         if code == 401 { throw HubError(message: L.t("invalidTokenErr"), unauthorized: true, status: 401) }
         if !(200..<300).contains(code) {
             let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-            throw HubError(message: (obj?["error"] as? String) ?? "HTTP \(code)", status: code)
+            throw HubError(
+                message: (obj?["error"] as? String) ?? "HTTP \(code)",
+                status: code,
+                code: (obj?["code"] as? String) ?? ""
+            )
         }
         return data
     }
@@ -108,6 +136,7 @@ struct APIClient {
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.timeoutInterval = 60
+        Self.attachClientHeaders(&req)
         req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         if !token.isEmpty { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
 
@@ -120,12 +149,16 @@ struct APIClient {
         body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
         req.httpBody = body
 
-        let (respData, resp) = try await URLSession.shared.data(for: req)
+        let (respData, resp) = try await hubAPISession.data(for: req)
         let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
         if code == 401 { throw HubError(message: L.t("invalidTokenErr"), unauthorized: true, status: 401) }
         if !(200..<300).contains(code) {
             let obj = try? JSONSerialization.jsonObject(with: respData) as? [String: Any]
-            throw HubError(message: (obj?["error"] as? String) ?? "HTTP \(code)", status: code)
+            throw HubError(
+                message: (obj?["error"] as? String) ?? "HTTP \(code)",
+                status: code,
+                code: (obj?["code"] as? String) ?? ""
+            )
         }
         return try JSONDecoder().decode(InboundAttachmentResponse.self, from: respData)
     }
@@ -157,12 +190,12 @@ struct APIClient {
         guard let url = workspaceFileRawURL(botId: botId, path: path, ticket: tk.ticket, download: true) else {
             throw HubError(message: L.t("downloadFailed"))
         }
-        let (tmpURL, resp) = try await URLSession.shared.download(from: url)
+        let (tmpURL, resp) = try await hubAPISession.download(from: url)
         let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
         if !(200..<300).contains(code) {
             throw HubError(message: "HTTP \(code)", status: code)
         }
-        let destDir = FileManager.default.temporaryDirectory.appendingPathComponent("bothub-files", isDirectory: true)
+        let destDir = FileManager.default.temporaryDirectory.appendingPathComponent("pebble-files", isDirectory: true)
         try FileManager.default.createDirectory(at: destDir, withIntermediateDirectories: true)
         let safeName = fileName.replacingOccurrences(of: "/", with: "_")
         let dest = destDir.appendingPathComponent(safeName)
@@ -190,9 +223,10 @@ final class EventStream {
                     guard let url = URL(string: base + "/api/events") else { return }
                     var req = URLRequest(url: url)
                     req.timeoutInterval = 70
+                    APIClient.attachClientHeaders(&req)
                     req.setValue("text/event-stream", forHTTPHeaderField: "Accept")
                     if !token.isEmpty { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
-                    let (bytes, resp) = try await URLSession.shared.bytes(for: req)
+                    let (bytes, resp) = try await hubAPISession.bytes(for: req)
                     let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
                     if code == 401 {
                         await onStatus(false)
@@ -359,7 +393,17 @@ enum SecureStore {
         guard let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
             return nil
         }
-        let dir = base.appendingPathComponent("bot-hub", isDirectory: true)
+        let pebbleDir = base.appendingPathComponent("pebble", isDirectory: true)
+        let legacyDir = base.appendingPathComponent("bot-hub", isDirectory: true)
+        var isDir: ObjCBool = false
+        let dir: URL
+        if FileManager.default.fileExists(atPath: pebbleDir.path, isDirectory: &isDir), isDir.boolValue {
+            dir = pebbleDir
+        } else if FileManager.default.fileExists(atPath: legacyDir.path, isDirectory: &isDir), isDir.boolValue {
+            dir = legacyDir
+        } else {
+            dir = pebbleDir
+        }
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         let safeKey = key.replacingOccurrences(of: "[^a-zA-Z0-9._-]", with: "_", options: .regularExpression)
         return dir.appendingPathComponent("apple-\(safeKey).json")

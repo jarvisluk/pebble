@@ -175,6 +175,16 @@ struct BotListView: View {
     @ViewBuilder
     private var wideRows: some View {
         let canReorder = sortMode == .manual && query.isEmpty
+        if hub.showCompatBanner {
+            compatBanner
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    hub.isClientUpgradeRequired ? p.pink : p.s1,
+                    in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                )
+                .padding(.bottom, 4)
+        }
         if let to = hub.takeovers.first {
             takeoverCard(to)
                 .padding(12)
@@ -228,6 +238,13 @@ struct BotListView: View {
             .listRowBackground(Color.clear)
             .listRowSeparator(.hidden)
             .selectionDisabled()
+        if hub.showCompatBanner {
+            Section {
+                compatBanner
+                    .listRowBackground(hub.isClientUpgradeRequired ? p.pink : p.s1)
+            }
+            .selectionDisabled()
+        }
         if let to = hub.takeovers.first {
             Section { takeoverCard(to) }.selectionDisabled()
         }
@@ -293,6 +310,24 @@ struct BotListView: View {
         ToolbarItemGroup(placement: .hubTrailing) {
             Button { router.openSettings(compact: compact) } label: { Label(hub.t("settings"), systemImage: "gearshape") }
         }
+    }
+
+    private var compatBanner: some View {
+        HStack(alignment: .center, spacing: 8) {
+            Text(hub.t(hub.isClientUpgradeRequired ? "clientUpgradeRequired" : "clientUpdateHint"))
+                .font(.system(size: AppFont.secondary))
+                .foregroundStyle(hub.isClientUpgradeRequired ? p.pinkInk : p.text2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if !hub.isClientUpgradeRequired {
+                Button(hub.t("dismiss")) {
+                    hub.dismissCompatBanner()
+                }
+                .font(.system(size: AppFont.caption, weight: .medium))
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+        }
+        .padding(.vertical, 2)
     }
 
     private func takeoverCard(_ to: TakeoverRequest) -> some View {

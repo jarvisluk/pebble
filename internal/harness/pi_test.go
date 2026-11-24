@@ -20,14 +20,14 @@ func TestWritePiMCPConfigPreservesExistingServers(t *testing.T) {
 		t.Fatal(err)
 	}
 	mcpPath := filepath.Join(piDir, "mcp.json")
-	if err := os.WriteFile(mcpPath, []byte(`{"mcpServers":{"keep":{"command":"echo","args":["hi"]}}}`), 0o644); err != nil {
+	if err := os.WriteFile(mcpPath, []byte(`{"mcpServers":{"keep":{"command":"echo","args":["hi"]},"bot-hub":{"command":"/old/bot-hub"}}}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	h := &PiHarness{}
 	err := h.writePiMCPConfig(ws, RunOptions{
-		MCPCommand: []string{"/usr/local/bin/bot-hub", "mcp", "--bot-id", "pi-bot"},
-		MCPEnv:     map[string]string{"BOT_HUB_API_TOKEN": "tok-pi"},
+		MCPCommand: []string{"/usr/local/bin/pebble", "mcp", "--bot-id", "pi-bot"},
+		MCPEnv:     map[string]string{"PEBBLE_API_TOKEN": "tok-pi"},
 	})
 	if err != nil {
 		t.Fatalf("writePiMCPConfig failed: %v", err)
@@ -47,8 +47,8 @@ func TestWritePiMCPConfigPreservesExistingServers(t *testing.T) {
 	if err := json.Unmarshal(raw, &doc); err != nil {
 		t.Fatal(err)
 	}
-	if doc.MCPServers["keep"] == nil || doc.MCPServers["bot-hub"] == nil {
-		t.Fatalf("expected both keep and bot-hub in .pi/mcp.json: %s", raw)
+	if doc.MCPServers["keep"] == nil || doc.MCPServers["pebble"] == nil || doc.MCPServers["bot-hub"] != nil {
+		t.Fatalf("expected keep and pebble (and no legacy bot-hub) in .pi/mcp.json: %s", raw)
 	}
 }
 

@@ -138,10 +138,6 @@ body.resizing-side, body.resizing-side * { cursor: col-resize !important; user-s
   .bubble { max-width: 92%; }
   .msg.me .bubble { max-width: 85%; }
   .composer-wrap { padding: 0; }
-  .two { grid-template-columns: minmax(0, 1fr); }
-  .brow { grid-template-columns: 28px minmax(0, 1fr) 132px; }
-  .brow input { grid-column: 2 / -1; }
-  .mp-hrow { grid-template-columns: 1fr; }
 }
 
 /* macOS desktop: traffic lights sit in the sidebar's top bar (12px from its top-left corner) */

@@ -186,7 +186,6 @@ struct ChatView: View {
             base
                 .navigationTitle("")
                 .inlineNavTitle()
-                .macSeamlessWindowToolbar()
                 .toolbar {
                     ToolbarItem(placement: .principal) {
                         Button {
