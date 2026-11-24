@@ -10,7 +10,15 @@ struct SettingsSidebarView: View {
     var body: some View {
         @Bindable var r = router
         #if os(macOS)
-        VStack(spacing: 0) {
+        List(SettingsTab.allCases, selection: $r.settingsTab) { tab in
+            NavigationLink(value: tab) {
+                tabLabel(tab)
+            }
+            .tag(tab)
+        }
+        .hubColumnList(compact: false, page: p.page)
+        .contentMargins(.top, 4, for: .scrollContent)
+        .safeAreaInset(edge: .top, spacing: 0) {
             HStack {
                 Button {
                     if router.settingsDirty {
@@ -21,26 +29,13 @@ struct SettingsSidebarView: View {
                 } label: {
                     Label(hub.t("backToChat"), systemImage: "chevron.left")
                         .font(.system(size: AppFont.secondary, weight: .medium))
-                        .foregroundStyle(p.text2)
+                        .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.borderless)
                 Spacer()
             }
             .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background(p.card)
-            .overlay(alignment: .bottom) {
-                Rectangle().fill(p.s2).frame(height: 1)
-            }
-
-            List(SettingsTab.allCases, selection: $r.settingsTab) { tab in
-                NavigationLink(value: tab) {
-                    tabLabel(tab)
-                }
-                .tag(tab)
-            }
-            .hubColumnList(compact: false, page: p.page)
-            .contentMargins(.top, 6, for: .scrollContent)
+            .padding(.vertical, 8)
         }
         .navigationTitle("")
         #else

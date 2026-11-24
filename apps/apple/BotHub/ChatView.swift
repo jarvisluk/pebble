@@ -186,7 +186,7 @@ struct ChatView: View {
                 return !providers.isEmpty
             }
             #endif
-            .background(p.page)
+            .background(p.page.ignoresSafeArea())
             .sheet(item: $collabPeer) { target in
                 NavigationStack {
                     CollabSheetView(botId: botId, peerId: target.id)
@@ -1347,6 +1347,7 @@ private struct MacChatToolbarModifier<TitleView: View>: ViewModifier {
         } else {
             content
                 .navigationTitle("")
+                .macSeamlessWindowToolbar()
                 .toolbar {
                     ToolbarItem(placement: .principal) {
                         titleView

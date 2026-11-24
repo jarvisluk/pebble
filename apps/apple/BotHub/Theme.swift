@@ -673,13 +673,13 @@ struct HubSurface: ViewModifier {
                 .toggleStyle(HubMacSwitchToggleStyle())
                 .textFieldStyle(HubMacTextFieldStyle())
                 .formStyle(HubMacFormStyle())
-                .background(p.page)
+                .background(p.page.ignoresSafeArea())
                 .font(.system(size: AppFont.body))
         } else {
             content
                 .formStyle(.grouped)
                 .scrollContentBackground(.hidden)
-                .background(p.page)
+                .background(p.page.ignoresSafeArea())
                 .font(.system(size: AppFont.body))
         }
         #else
@@ -692,17 +692,51 @@ struct HubSurface: ViewModifier {
 }
 
 #if os(macOS)
-private struct HubMacColumnListModifier: ViewModifier {
-    @Environment(\.palette) private var p
+private struct MacSeamlessTitlebarBridge: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async { apply(to: view.window) }
+        return view
+    }
 
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async { apply(to: nsView.window) }
+    }
+
+    private func apply(to window: NSWindow?) {
+        guard let window else { return }
+        if !window.titlebarAppearsTransparent {
+            window.titlebarAppearsTransparent = true
+        }
+        if window.titlebarSeparatorStyle != .none {
+            window.titlebarSeparatorStyle = .none
+        }
+    }
+}
+
+struct MacSeamlessWindowToolbarModifier: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(macOS 15.0, *) {
+            content
+                .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+                .background(MacSeamlessTitlebarBridge())
+        } else {
+            content
+                .background(MacSeamlessTitlebarBridge())
+        }
+    }
+}
+
+extension View {
+    func macSeamlessWindowToolbar() -> some View {
+        modifier(MacSeamlessWindowToolbarModifier())
+    }
+}
+
+private struct HubMacColumnListModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             .listStyle(.sidebar)
-            .scrollContentBackground(.hidden)
-            .background(p.card)
-            .overlay(alignment: .trailing) {
-                Rectangle().fill(p.s2).frame(width: 1).ignoresSafeArea()
-            }
     }
 }
 

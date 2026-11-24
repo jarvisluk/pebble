@@ -246,8 +246,8 @@ struct WorkspaceFilesView: View {
                                 .font(.system(size: 11, weight: .semibold))
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 1)
-                                .background(p.lilac, in: Capsule())
-                                .foregroundStyle(p.lilacInk)
+                                .background(p.s1, in: Capsule())
+                                .foregroundStyle(p.text2)
                         }
                         if !ent.isDir {
                             Text(formatByteSize(ent.size))
@@ -277,7 +277,7 @@ struct WorkspaceFilesView: View {
     private func fileSymbol(for ent: WorkspaceFileEntry) -> (symbol: String, color: Color) {
         if ent.isDir {
             if ent.isShared == true {
-                return ("folder.fill.badge.person.crop", p.lilacInk)
+                return ("folder.fill.badge.person.crop", p.accent)
             }
             return ("folder.fill", p.accent)
         }

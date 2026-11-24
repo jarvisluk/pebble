@@ -76,66 +76,58 @@ struct BotListView: View {
     var body: some View {
         @Bindable var r = router
         #if os(macOS)
-        VStack(spacing: 0) {
-            HStack(spacing: 6) {
-                NativeSearchBar(text: $query, placeholder: hub.t("searchBot"))
-                    .frame(minWidth: 0, maxWidth: .infinity)
-                    .frame(height: 28)
-                Menu {
-                    Picker(hub.t("sortBots"), selection: $sortModeRaw) {
-                        Text(hub.t("sortByRecent")).tag(BotSortMode.recent.rawValue)
-                        Text(hub.t("sortManual")).tag(BotSortMode.manual.rawValue)
+        List(selection: $r.selected) { rows }
+            .hubColumnList(compact: compact, page: p.page)
+            .contentMargins(.top, 4, for: .scrollContent)
+            .refreshable {
+                if hub.isConnected { try? await hub.refreshBots() } else { await hub.reconnect() }
+            }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                HStack(spacing: 6) {
+                    NativeSearchBar(text: $query, placeholder: hub.t("searchBot"))
+                        .frame(minWidth: 0, maxWidth: .infinity)
+                        .frame(height: 28)
+                    Menu {
+                        Picker(hub.t("sortBots"), selection: $sortModeRaw) {
+                            Text(hub.t("sortByRecent")).tag(BotSortMode.recent.rawValue)
+                            Text(hub.t("sortManual")).tag(BotSortMode.manual.rawValue)
+                        }
+                    } label: {
+                        Label(hub.t("sortBots"), systemImage: "arrow.up.arrow.down")
+                            .labelStyle(.iconOnly)
+                            .foregroundStyle(.secondary)
+                            .frame(width: 26, height: 26)
                     }
-                } label: {
-                    Label(hub.t("sortBots"), systemImage: "arrow.up.arrow.down")
-                        .labelStyle(.iconOnly)
-                        .foregroundStyle(p.text2)
-                        .frame(width: 26, height: 26)
+                    .menuIndicator(.hidden)
+                    .buttonStyle(.borderless)
+                    .help(hub.t("sortBots"))
                 }
-                .menuIndicator(.hidden)
-                .buttonStyle(.borderless)
-                .help(hub.t("sortBots"))
+                .padding(.horizontal, 12)
+                .padding(.top, 4)
+                .padding(.bottom, 6)
             }
-            .padding(.horizontal, 12)
-            .padding(.top, 6)
-            .padding(.bottom, 8)
-            .background(p.card)
-            .overlay(alignment: .bottom) {
-                Rectangle().fill(p.s2).frame(height: 1)
-            }
-
-            List(selection: $r.selected) { rows }
-                .hubColumnList(compact: compact, page: p.page)
-                .contentMargins(.top, 6, for: .scrollContent)
-                .refreshable {
-                    if hub.isConnected { try? await hub.refreshBots() } else { await hub.reconnect() }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                HStack {
+                    Button { go(.createBot) } label: {
+                        Label(hub.t("newBot"), systemImage: "plus")
+                            .font(.system(size: AppFont.secondary, weight: .medium))
+                            .foregroundStyle(.primary)
+                    }
+                    .buttonStyle(.borderless)
+                    Spacer()
+                    Button { router.openSettings(compact: compact) } label: {
+                        Label(hub.t("settings"), systemImage: "gearshape")
+                            .font(.system(size: AppFont.secondary, weight: .medium))
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.borderless)
                 }
-
-            HStack {
-                Button { go(.createBot) } label: {
-                    Label(hub.t("newBot"), systemImage: "plus")
-                        .font(.system(size: AppFont.secondary, weight: .medium))
-                        .foregroundStyle(p.text)
-                }
-                .buttonStyle(.borderless)
-                Spacer()
-                Button { router.openSettings(compact: compact) } label: {
-                    Label(hub.t("settings"), systemImage: "gearshape")
-                        .font(.system(size: AppFont.secondary, weight: .medium))
-                        .foregroundStyle(p.text2)
-                }
-                .buttonStyle(.borderless)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background(p.card)
-            .overlay(alignment: .top) {
-                Rectangle().fill(p.s2).frame(height: 1)
-            }
-        }
-        .frame(minWidth: 0, maxWidth: .infinity)
-        .navigationTitle("")
-        .confirmAlert($confirm)
+            .frame(minWidth: 0, maxWidth: .infinity)
+            .navigationTitle("")
+            .confirmAlert($confirm)
         #else
         List(selection: $r.selected) { rows }
             .hubColumnList(compact: compact, page: p.page)

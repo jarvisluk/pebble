@@ -134,6 +134,7 @@ private struct MacWindowRootView: View {
         .tint(activePalette.accent)
         .font(.system(size: AppFont.body))
         .preferredColorScheme(scheme0)
+        .macSeamlessWindowToolbar()
         .onAppear {
             router.onOpenDesktopWindow = { req in
                 openWindow(id: "desktop", value: req)
@@ -209,6 +210,7 @@ private struct MacDesktopWindowRootView: View {
         .tint(effectivePalette.accent)
         .font(.system(size: AppFont.body))
         .preferredColorScheme(isDesktop ? .dark : scheme0)
+        .macSeamlessWindowToolbar()
         .onChange(of: request.initialTab) { _, next in
             currentTab = next
         }
@@ -468,11 +470,18 @@ struct RootView: View {
                         SettingsView(tab: router.settingsTab ?? .general)
                     }
                 }
+                #if os(macOS)
+                .macSeamlessWindowToolbar()
+                #endif
                 .transition(.opacity)
             } else {
                 NavigationSplitView(preferredCompactColumn: $r.preferredColumn) {
                     BotListView(compact: compact)
+                        #if os(macOS)
+                        .navigationSplitViewColumnWidth(min: 220, ideal: 250, max: 310)
+                        #else
                         .navigationSplitViewColumnWidth(min: 210, ideal: 240, max: 300)
+                        #endif
                 } detail: {
                     NavigationStack {
                         if let id = router.selected, hub.bots.contains(where: { $0.id == id }) {
@@ -483,11 +492,14 @@ struct RootView: View {
                             ContentUnavailableView(hub.isConnected ? hub.t("selectBotHint") : hub.t("connectHost"),
                                                    systemImage: "bubble.left.and.bubble.right")
                                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                .background(palette.page)
+                                .background(palette.page.ignoresSafeArea())
                         }
                     }
                     .animation(.easeInOut(duration: 0.2), value: router.selected)
                 }
+                #if os(macOS)
+                .macSeamlessWindowToolbar()
+                #endif
                 .transition(.opacity)
                 .inspector(isPresented: $r.detailOpen) {
                     if r.detailOpen, let id = router.selected, hub.bots.contains(where: { $0.id == id }) {
@@ -514,7 +526,7 @@ struct RootView: View {
                         BotDetailView(botId: id, isPresented: $r.detailOpen)
                             .id(id)
                             .inspectorColumnWidth(min: 280, ideal: 320, max: 400)
-                            .background(palette.page)
+                            .background(palette.page.ignoresSafeArea())
                             .environment(\.palette, palette)
                             .environment(router)
                             .environment(hub)

@@ -195,6 +195,10 @@ struct DesktopView: View {
                 .background(p.page)
             }
         }
+        #if os(macOS)
+        .background((activeTab == .desktop ? stage : p.page).ignoresSafeArea())
+        .macSeamlessWindowToolbar()
+        #endif
         .navigationTitle("")
         .inlineNavTitle()
         .toolbar {
