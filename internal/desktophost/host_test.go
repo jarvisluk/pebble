@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -194,5 +195,47 @@ func TestSyncRemoteTokenFromResponse(t *testing.T) {
 	})
 	if got := host.Prefs().RemoteToken; got != "login-token" {
 		t.Fatalf("RemoteToken from /api/login = %q, want %q", got, "login-token")
+	}
+}
+
+func TestDataDirResolutionAndLegacyFallback(t *testing.T) {
+	// 1. Fresh install -> <base>/pebble.
+	freshBase := t.TempDir()
+	if got, want := resolveDefaultDataDir(freshBase), filepath.Join(freshBase, "pebble"); got != want {
+		t.Fatalf("fresh resolveDefaultDataDir = %q, want %q", got, want)
+	}
+
+	// 2. Existing legacy <base>/bot-hub without <base>/pebble -> keeps <base>/bot-hub.
+	legacyBase := t.TempDir()
+	legacyDir := filepath.Join(legacyBase, "bot-hub")
+	if err := os.MkdirAll(legacyDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if got := resolveDefaultDataDir(legacyBase); got != legacyDir {
+		t.Fatalf("legacy resolveDefaultDataDir = %q, want %q", got, legacyDir)
+	}
+
+	// 3. When both exist, prefers <base>/pebble.
+	pebbleDir := filepath.Join(legacyBase, "pebble")
+	if err := os.MkdirAll(pebbleDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if got := resolveDefaultDataDir(legacyBase); got != pebbleDir {
+		t.Fatalf("both-exist resolveDefaultDataDir = %q, want %q", got, pebbleDir)
+	}
+
+	// 4. Env overrides: PEBBLE_DATA_DIR beats BOT_HUB_DATA_DIR, and BOT_HUB_DATA_DIR works as fallback.
+	customLegacy := filepath.Join(t.TempDir(), "custom-legacy")
+	customPebble := filepath.Join(t.TempDir(), "custom-pebble")
+	t.Setenv("PEBBLE_DATA_DIR", "")
+	t.Setenv("BOT_HUB_DATA_DIR", customLegacy)
+	got, err := DataDir()
+	if err != nil || got != customLegacy {
+		t.Fatalf("DataDir fallback = (%q, %v), want %q", got, err, customLegacy)
+	}
+	t.Setenv("PEBBLE_DATA_DIR", customPebble)
+	got, err = DataDir()
+	if err != nil || got != customPebble {
+		t.Fatalf("DataDir primary = (%q, %v), want %q", got, err, customPebble)
 	}
 }

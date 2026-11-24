@@ -231,7 +231,7 @@ func (h *AgyHarness) startProc(opts RunOptions, viaMagpie, ephemeral bool) (*agy
 }
 
 // writeAgyWorkspaceFiles configures workspace-local .agents/mcp_config.json and
-// .agents/rules/bot-hub.md for Antigravity CLI without touching global configs.
+// .agents/rules/pebble.md for Antigravity CLI without touching global configs.
 func writeAgyWorkspaceFiles(workspace string, opts RunOptions) error {
 	agentsDir := filepath.Join(workspace, ".agents")
 	if err := upsertMCPConfig(filepath.Join(agentsDir, "mcp_config.json"), opts); err != nil {
@@ -245,14 +245,15 @@ func writeAgyWorkspaceFiles(workspace string, opts RunOptions) error {
 			if err := os.MkdirAll(rulesDir, 0o755); err != nil {
 				return err
 			}
-			const header = "---\ntrigger: always_on\ndescription: \"Bot Hub workspace, MCP, and session management guide\"\n---\n\n"
+			const header = "---\ntrigger: always_on\ndescription: \"Pebble workspace, MCP, and session management guide\"\n---\n\n"
 			content := header + strings.TrimSpace(string(raw)) + "\n"
-			rulePath := filepath.Join(rulesDir, "bot-hub.md")
+			rulePath := filepath.Join(rulesDir, "pebble.md")
 			if cur, err := os.ReadFile(rulePath); err != nil || string(cur) != content {
 				if err := os.WriteFile(rulePath, []byte(content), 0o644); err != nil {
 					return err
 				}
 			}
+			_ = os.Remove(filepath.Join(rulesDir, "bot-hub.md"))
 		}
 	}
 	return nil

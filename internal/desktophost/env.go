@@ -16,15 +16,27 @@ import (
 
 // DataDir returns the root directory where the desktop host keeps config/, state/, and workspaces/.
 func DataDir() (string, error) {
-	if custom := strings.TrimSpace(os.Getenv("BOT_HUB_DATA_DIR")); custom != "" {
+	if custom := config.LookupEnv("PEBBLE_DATA_DIR", "BOT_HUB_DATA_DIR"); custom != "" {
 		return custom, os.MkdirAll(custom, 0o700)
 	}
 	base, err := os.UserConfigDir()
 	if err != nil {
 		return "", err
 	}
-	dir := filepath.Join(base, "bot-hub")
+	dir := resolveDefaultDataDir(base)
 	return dir, os.MkdirAll(dir, 0o700)
+}
+
+func resolveDefaultDataDir(base string) string {
+	pebbleDir := filepath.Join(base, "pebble")
+	if info, err := os.Stat(pebbleDir); err == nil && info.IsDir() {
+		return pebbleDir
+	}
+	legacyDir := filepath.Join(base, "bot-hub")
+	if info, err := os.Stat(legacyDir); err == nil && info.IsDir() {
+		return legacyDir
+	}
+	return pebbleDir
 }
 
 // EnsureConfig writes a starter config/bots.json on first local run.

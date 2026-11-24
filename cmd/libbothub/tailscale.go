@@ -40,7 +40,7 @@ func tailscaleStartJSON(stateDir, hostname, controlURL, authKey string) string {
 		return marshalTSError(errors.New("tailscale stateDir is required"))
 	}
 	if hostname == "" {
-		hostname = tunnel.DefaultTailscaleHostname("bothub-mobile")
+		hostname = tunnel.DefaultTailscaleHostname("pebble-mobile")
 	}
 
 	tsMu.Lock()
