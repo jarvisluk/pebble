@@ -172,21 +172,18 @@ struct BotDetailView: View {
         }
         .hubForm()
 
-        formContent
-            .navigationTitle(hub.t("botDetails"))
-            .inlineNavTitle()
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button(hub.t("close")) { isPresented = false }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    if saving { ProgressView().controlSize(.small) } else {
-                        Button(hub.t("save")) { save() }
-                            .disabled(!dirty || editName.trimmingCharacters(in: .whitespaces).isEmpty)
-                    }
-                }
-            }
-            .confirmAlert($confirm)
+        HubSheetScaffold(
+            title: hub.t("botDetails"),
+            onClose: { isPresented = false },
+            enableCancelShortcut: false,
+            actionTitle: hub.t("save"),
+            actionDisabled: !dirty || editName.trimmingCharacters(in: .whitespaces).isEmpty,
+            loading: saving,
+            onAction: { save() }
+        ) {
+            formContent
+        }
+        .confirmAlert($confirm)
             .task(id: botId) {
                 if hub.isConnected, let req = hub.makeDesktopWSRequest(target: hub.takeovers.first?.target ?? "local") {
                     previewStream.start(request: req)
@@ -373,10 +370,12 @@ struct RoutinesSection: View {
         }
         .confirmAlert($confirm)
         .sheet(isPresented: $creating) {
-            NavigationStack { RoutineEditor(botId: botId, routine: nil) }
+            RoutineEditor(botId: botId, routine: nil)
+                .hubSheetFrame(width: 480, height: 560)
         }
         .sheet(item: $editing) { rt in
-            NavigationStack { RoutineEditor(botId: botId, routine: rt) }
+            RoutineEditor(botId: botId, routine: rt)
+                .hubSheetFrame(width: 480, height: 560)
         }
     }
 
@@ -509,54 +508,55 @@ struct RoutineEditor: View {
     }
 
     var body: some View {
-        Form {
-            if !err.isEmpty { Section { StatusText(text: err) } }
-            Section {
-                TextField(hub.t("rtNamePh"), text: $name)
-                HubSegmentedPicker(
-                    selection: Binding(get: { mode }, set: { mode = $0; if $0 == .webhook { webhookTrigger = true } }),
-                    options: Mode.allCases.map { ($0, modeLabel($0)) }
-                )
-                switch mode {
-                case .interval: TextField(hub.t("rtEveryPh"), text: $every).monoInput()
-                    .numberPadKeyboard()
-                case .daily: TextField(hub.t("rtDailyPh"), text: $daily).monoInput()
-                case .cron: TextField(hub.t("rtCronPh"), text: $cron).monoInput()
-                case .webhook: EmptyView()
+        HubSheetScaffold(
+            title: routine == nil ? hub.t("routines") : (routine?.name ?? hub.t("routines")),
+            closeTitle: hub.t("cancel"),
+            onClose: { dismiss() },
+            actionTitle: hub.t("rtSaveBtn"),
+            loading: saving,
+            onAction: { save() }
+        ) {
+            Form {
+                if !err.isEmpty { Section { StatusText(text: err) } }
+                Section {
+                    TextField(hub.t("rtNamePh"), text: $name)
+                    HubSegmentedPicker(
+                        selection: Binding(get: { mode }, set: { mode = $0; if $0 == .webhook { webhookTrigger = true } }),
+                        options: Mode.allCases.map { ($0, modeLabel($0)) }
+                    )
+                    switch mode {
+                    case .interval: TextField(hub.t("rtEveryPh"), text: $every).monoInput()
+                        .numberPadKeyboard()
+                    case .daily: TextField(hub.t("rtDailyPh"), text: $daily).monoInput()
+                    case .cron: TextField(hub.t("rtCronPh"), text: $cron).monoInput()
+                    case .webhook: EmptyView()
+                    }
+                    if mode != .webhook { Toggle(hub.t("rtAllowWebhook"), isOn: $webhookTrigger) }
                 }
-                if mode != .webhook { Toggle(hub.t("rtAllowWebhook"), isOn: $webhookTrigger) }
-            }
-            if mode == .webhook || webhookTrigger {
-                Section("Webhook") {
-                    SecureField(secretSet && !clearSecret ? hub.t("rtWebhookSecretSetPh") : hub.t("rtWebhookSecretPh"), text: $secret)
-                        .disabled(clearSecret)
-                    if secretSet {
-                        Toggle(hub.t("rtWebhookClearSecret"), isOn: Binding(get: { clearSecret }, set: { clearSecret = $0; if $0 { secret = "" } }))
+                if mode == .webhook || webhookTrigger {
+                    Section("Webhook") {
+                        SecureField(secretSet && !clearSecret ? hub.t("rtWebhookSecretSetPh") : hub.t("rtWebhookSecretPh"), text: $secret)
+                            .disabled(clearSecret)
+                        if secretSet {
+                            Toggle(hub.t("rtWebhookClearSecret"), isOn: Binding(get: { clearSecret }, set: { clearSecret = $0; if $0 { secret = "" } }))
+                        }
                     }
                 }
+                Section {
+                    TextField(hub.t("rtWebhookUrlPh"), text: $webhookUrl).monoInput()
+                    HubSegmentedPicker(
+                        selection: $delivery,
+                        options: [
+                            ("receipt", hub.t("rtDeliveryReceipt")),
+                            ("notify", hub.t("rtDeliveryNotify")),
+                            ("none", hub.t("rtDeliveryNone")),
+                        ]
+                    )
+                    TextField(hub.t("rtPromptPh"), text: $prompt, axis: .vertical).lineLimit(3...12)
+                    Toggle(hub.t("rtEnabled"), isOn: $enabled)
+                }
             }
-            Section {
-                TextField(hub.t("rtWebhookUrlPh"), text: $webhookUrl).monoInput()
-                HubSegmentedPicker(
-                    selection: $delivery,
-                    options: [
-                        ("receipt", hub.t("rtDeliveryReceipt")),
-                        ("notify", hub.t("rtDeliveryNotify")),
-                        ("none", hub.t("rtDeliveryNone")),
-                    ]
-                )
-                TextField(hub.t("rtPromptPh"), text: $prompt, axis: .vertical).lineLimit(3...12)
-                Toggle(hub.t("rtEnabled"), isOn: $enabled)
-            }
-        }
-        .hubForm()
-        .navigationTitle(routine == nil ? hub.t("routines") : (routine?.name ?? hub.t("routines")))
-        .inlineNavTitle()
-        .toolbar {
-            ToolbarItem(placement: .cancellationAction) { Button(hub.t("cancel")) { dismiss() } }
-            ToolbarItem(placement: .confirmationAction) {
-                if saving { ProgressView().controlSize(.small) } else { Button(hub.t("rtSaveBtn")) { save() } }
-            }
+            .hubForm()
         }
         .onAppear(perform: load)
     }

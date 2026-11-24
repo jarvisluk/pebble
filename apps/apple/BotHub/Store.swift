@@ -852,12 +852,52 @@ final class HubStore {
         nodes = d.nodes ?? []
     }
 
+    private func applyRotatedAPIToken(_ newTok: String?) {
+        guard let tok = newTok, !tok.isEmpty, tok != authToken else { return }
+        authToken = tok
+        if !managedMode, let id = activeServerId, let i = servers.firstIndex(where: { $0.id == id }) {
+            servers[i].token = tok
+            persistServers()
+        }
+        PushManager.shared.configureConnection(base: baseURL, token: tok)
+        if !baseURL.isEmpty {
+            startStream(baseURL, tok)
+        }
+    }
+
     func refreshTailcat() async throws {
         tailcat = try await api.call("/api/tailcat")
     }
 
+    func revealTailcatToken() async throws -> String {
+        let d: TailcatStatus = try await api.call("/api/tailcat?reveal=1")
+        return d.apiToken ?? ""
+    }
+
+    func setTailcat(_ body: [String: Any]) async throws -> TailcatStatus {
+        let res: TailcatStatus = try await api.call("/api/tailcat", method: "POST", body: body)
+        tailcat = res
+        applyRotatedAPIToken(res.apiToken)
+        return res
+    }
+
+    func fetchTailcatQR() async throws -> Data {
+        try await api.raw("/api/tailcat/qr.png")
+    }
+
     func refreshHostTailscale() async throws {
         hostTailscale = try await api.call("/api/tailscale")
+    }
+
+    func setHostTailscale(_ body: [String: Any]) async throws -> HostTailscaleStatus {
+        let res: HostTailscaleStatus = try await api.call("/api/tailscale", method: "POST", body: body)
+        hostTailscale = res
+        applyRotatedAPIToken(res.apiToken)
+        return res
+    }
+
+    func fetchHostTailscaleQR() async throws -> Data {
+        try await api.raw("/api/tailscale/qr.png")
     }
 
     func refreshMobileTailscale(includePeers: Bool = true) async {
