@@ -238,9 +238,10 @@ func (s *HTTPServer) Start() error {
 	if s.hub != nil {
 		kinds := s.hub.HarnessKinds()
 		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 			harness.WarmMagpieCache(ctx, kinds)
+			s.hub.WarmModelsCache(ctx)
 		}()
 	}
 	log.Printf("[http] Web UI & API listening on http://%s", s.srv.Addr)
@@ -1247,7 +1248,7 @@ func (s *HTTPServer) handleMagpieProvider(w http.ResponseWriter, r *http.Request
 }
 
 func (s *HTTPServer) handleModels(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 	q := r.URL.Query()
 	models, err := s.hub.ModelsWithSource(ctx, q.Get("harness"), q.Get("source"))

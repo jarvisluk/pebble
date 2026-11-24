@@ -1464,3 +1464,95 @@ func TestSlashPassthroughCommandsMentionsAndAttachments(t *testing.T) {
 	}
 }
 
+func TestModelsWithSourceMagpieVsNative(t *testing.T) {
+	tmp := t.TempDir()
+	fakeMagpie := filepath.Join(tmp, "magpie")
+	script := `#!/bin/sh
+case "$1" in
+  models)
+    printf '  acer/auto/claude-opus-5-5   Claude Opus 5.5\n'
+    printf '  acer/deepseek/v4            DeepSeek V4\n'
+    ;;
+  opencode)
+    printf '  OpenCode  magpie/acer/auto/claude-opus-5-5  ·  small\n'
+    ;;
+  codex)
+    printf '  Codex  codex/gpt-6-luna  ·  effort\n'
+    ;;
+  claude)
+    printf '  Claude Code  sonnet  ·  effort\n'
+    ;;
+  *)
+    printf '  Other  status  ·  effort\n'
+    ;;
+esac
+`
+	if err := os.WriteFile(fakeMagpie, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MAGPIE_BIN", fakeMagpie)
+	harness.InvalidateMagpieCache()
+	t.Cleanup(harness.InvalidateMagpieCache)
+
+	store, _ := state.NewStore(filepath.Join(tmp, "sessions.json"))
+	msgStore, _ := state.NewMessageStore(filepath.Join(tmp, "messages"))
+	defer store.Close()
+
+	reg := harness.NewRegistry()
+	reg.Register(harness.NewOpenCodeHarness(""))
+	reg.Register(harness.NewCodexHarness())
+	reg.Register(harness.NewClaudeHarness())
+
+	h := New(&config.HubConfig{
+		SharedDir:   filepath.Join(tmp, "_shared"),
+		StateFile:   filepath.Join(tmp, "sessions.json"),
+		MessagesDir: filepath.Join(tmp, "messages"),
+		Bots:        []config.BotConfig{{ID: "b1", Name: "B1", Workspace: filepath.Join(tmp, "ws"), Harness: "codex"}},
+	}, store, msgStore, reg)
+	defer h.Close()
+
+	ctx := context.Background()
+
+	// Connected harness returns Magpie models with its prefix.
+	ocModels, err := h.ModelsWithSource(ctx, "opencode", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ocModels) != 2 || ocModels[0] != "magpie/acer/auto/claude-opus-5-5" {
+		t.Fatalf("unexpected connected opencode models: %#v", ocModels)
+	}
+
+	// Non-Magpie harness prepends its active NativeModel ahead of stock CLI models.
+	codexModels, err := h.ModelsWithSource(ctx, "codex", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(codexModels) < 2 || codexModels[0] != "codex/gpt-6-luna" || codexModels[1] != "gpt-5.4" {
+		t.Fatalf("unexpected native codex models: %#v", codexModels)
+	}
+
+	// NativeModel already present in stock list should not be duplicated.
+	claudeModels, err := h.ModelsWithSource(ctx, "claude", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sonnetCount := 0
+	for _, m := range claudeModels {
+		if m == "sonnet" {
+			sonnetCount++
+		}
+	}
+	if sonnetCount != 1 {
+		t.Fatalf("expected sonnet exactly once in native claude models, got %#v", claudeModels)
+	}
+
+	// source=magpie returns Magpie catalog even for non-connected harness.
+	codexMagpie, err := h.ModelsWithSource(ctx, "codex", "magpie")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(codexMagpie) != 2 || codexMagpie[0] != "acer/auto/claude-opus-5-5" {
+		t.Fatalf("unexpected codex source=magpie models: %#v", codexMagpie)
+	}
+}
+

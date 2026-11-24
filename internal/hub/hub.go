@@ -2083,12 +2083,57 @@ func (h *Hub) ModelsWithSource(ctx context.Context, kind, source string) ([]stri
 		}
 		return harness.MagpieModels(ctx, kind), nil
 	}
-	if harness.MagpieInstalled() && harness.GetMagpieStatus(ctx, kind).Connected {
-		if models := harness.MagpieModels(ctx, kind); len(models) > 0 {
-			return models, nil
+	var nativeModel string
+	if harness.MagpieInstalled() {
+		st := harness.GetMagpieStatus(ctx, kind)
+		if st.Connected {
+			if models := harness.MagpieModels(ctx, kind); len(models) > 0 {
+				return models, nil
+			}
+		}
+		nativeModel = strings.TrimSpace(st.NativeModel)
+	}
+	models, err := r.Models(ctx)
+	if err != nil {
+		if nativeModel != "" {
+			return []string{nativeModel}, nil
+		}
+		return nil, err
+	}
+	if nativeModel != "" {
+		found := false
+		for _, m := range models {
+			if m == nativeModel {
+				found = true
+				break
+			}
+		}
+		if !found {
+			out := make([]string, 0, len(models)+1)
+			out = append(out, nativeModel)
+			out = append(out, models...)
+			models = out
 		}
 	}
-	return r.Models(ctx)
+	return models, nil
+}
+
+// WarmModelsCache pre-populates model lists for installed harnesses in parallel
+// so slow CLIs are ready before Settings opens.
+func (h *Hub) WarmModelsCache(ctx context.Context) {
+	var wg sync.WaitGroup
+	for _, r := range h.registry.All() {
+		kind := r.Kind()
+		if installed, _ := harness.DetectHarness(kind); !installed {
+			continue
+		}
+		wg.Add(1)
+		go func(k string) {
+			defer wg.Done()
+			_, _ = h.Models(ctx, k)
+		}(kind)
+	}
+	wg.Wait()
 }
 
 // MagpieConnect asks magpie to point a harness's CLI at its gateway, using
