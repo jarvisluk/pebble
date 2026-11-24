@@ -127,6 +127,49 @@ struct APIClient {
         }
         return try JSONDecoder().decode(InboundAttachmentResponse.self, from: respData)
     }
+
+    func listWorkspaceFiles(botId: String, path: String = "", showHidden: Bool = false) async throws -> WorkspaceListResult {
+        var comps = [String]()
+        if !path.isEmpty { comps.append("path=\(enc(path))") }
+        if showHidden { comps.append("showHidden=1") }
+        let qs = comps.isEmpty ? "" : "?" + comps.joined(separator: "&")
+        return try await call("/api/bots/\(enc(botId))/files\(qs)")
+    }
+
+    func readWorkspaceFile(botId: String, path: String) async throws -> WorkspaceFileContent {
+        return try await call("/api/bots/\(enc(botId))/files/content?path=\(enc(path))")
+    }
+
+    func issueWorkspaceFileTicket(botId: String, path: String) async throws -> WorkspaceFileTicketResp {
+        return try await call("/api/bots/\(enc(botId))/files/ticket", method: "POST", body: ["path": path])
+    }
+
+    func workspaceFileRawURL(botId: String, path: String, ticket: String, download: Bool = false) -> URL? {
+        var qs = "path=\(enc(path))&ticket=\(enc(ticket))"
+        if download { qs += "&download=1" }
+        return URL(string: "\(base)/api/bots/\(enc(botId))/files/raw?\(qs)")
+    }
+
+    func downloadWorkspaceFileToTemp(botId: String, path: String, fileName: String) async throws -> URL {
+        let tk = try await issueWorkspaceFileTicket(botId: botId, path: path)
+        guard let url = workspaceFileRawURL(botId: botId, path: path, ticket: tk.ticket, download: true) else {
+            throw HubError(message: L.t("downloadFailed"))
+        }
+        let (tmpURL, resp) = try await URLSession.shared.download(from: url)
+        let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        if !(200..<300).contains(code) {
+            throw HubError(message: "HTTP \(code)", status: code)
+        }
+        let destDir = FileManager.default.temporaryDirectory.appendingPathComponent("bothub-files", isDirectory: true)
+        try FileManager.default.createDirectory(at: destDir, withIntermediateDirectories: true)
+        let safeName = fileName.replacingOccurrences(of: "/", with: "_")
+        let dest = destDir.appendingPathComponent(safeName)
+        if FileManager.default.fileExists(atPath: dest.path) {
+            try? FileManager.default.removeItem(at: dest)
+        }
+        try FileManager.default.moveItem(at: tmpURL, to: dest)
+        return dest
+    }
 }
 
 /// `/api/events` SSE：ready 事件表示在线，断开后按 1s 起、×1.8、上限 12s 重连，401 停止。

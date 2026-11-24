@@ -108,7 +108,20 @@ struct BotDetailView: View {
                     LabeledContent(hub.t("statArchived"), value: hub.t("archivedCount", ["n": active?.archivedSessions ?? 0])
                         + ((active?.privateSessions ?? false) ? hub.t("privateTag") : ""))
                     LabeledContent(hub.t("workspaceDir")) {
-                        Text(active?.workspace ?? "-").font(.system(size: 13, design: .monospaced)).textSelection(.enabled)
+                        Button {
+                            isPresented = false
+                            router.openFiles(botId: botId)
+                        } label: {
+                            HStack(spacing: 4) {
+                                Text(active?.workspace ?? "-")
+                                    .font(.system(size: 13, design: .monospaced))
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                                Image(systemName: "folder")
+                                    .font(.system(size: 12))
+                            }
+                        }
+                        .buttonStyle(.plain)
                     }
                     Toggle(hub.t("privateSessions"), isOn: $editPrivate).tint(pal.accent)
                     VStack(alignment: .leading, spacing: 6) {

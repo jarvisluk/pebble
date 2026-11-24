@@ -392,3 +392,58 @@ export interface PendingQuestion {
   fields: QuestionField[];
   createdAt: string;
 }
+
+export interface WorkspaceFileEntry {
+  name: string;
+  path: string;
+  isDir: boolean;
+  isSymlink?: boolean;
+  isShared?: boolean;
+  size: number;
+  modTime: string;
+  mimeType?: string;
+}
+
+export interface WorkspaceListResult {
+  botId: string;
+  path: string;
+  parent: string;
+  entries: WorkspaceFileEntry[];
+  truncated?: boolean;
+}
+
+export interface WorkspaceFileContent {
+  botId: string;
+  path: string;
+  name: string;
+  size: number;
+  modTime: string;
+  mimeType: string;
+  kind: 'text' | 'markdown' | 'image' | 'binary';
+  content?: string;
+  truncated?: boolean;
+}
+
+export type StageKind = 'files' | 'desktop' | 'browser' | 'artifact' | 'mcp-app';
+
+export interface StageTab {
+  id: string;
+  kind: StageKind;
+  title: string;
+  botId?: string;
+  path?: string;
+  url?: string;
+  resourceUri?: string;
+  closable?: boolean;
+}
+
+export interface StageOpenEvent {
+  id?: string;
+  kind: StageKind;
+  title?: string;
+  botId?: string;
+  path?: string;
+  url?: string;
+  resourceUri?: string;
+  closable?: boolean;
+}

@@ -153,3 +153,11 @@ export function MemoryIcon({ size = 19, color }: IconProps) {
     </Svg>
   );
 }
+
+export function FolderIcon({ size = 19, color }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round">
+      <Path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+    </Svg>
+  );
+}

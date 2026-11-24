@@ -290,3 +290,59 @@ export function connectSSE(baseURL: string, token: string, handlers: SSEHandlers
     }
   };
 }
+
+export async function fetchWorkspaceFiles(
+  baseURL: string,
+  token: string,
+  botId: string,
+  path = '',
+  showHidden = false
+): Promise<import('./types').WorkspaceListResult> {
+  const qs = new URLSearchParams();
+  if (path) qs.set('path', path);
+  if (showHidden) qs.set('showHidden', '1');
+  const q = qs.toString();
+  return apiRequest(
+    baseURL,
+    token,
+    `/api/bots/${encodeURIComponent(botId)}/files${q ? `?${q}` : ''}`
+  );
+}
+
+export async function fetchWorkspaceFileContent(
+  baseURL: string,
+  token: string,
+  botId: string,
+  path: string
+): Promise<import('./types').WorkspaceFileContent> {
+  const qs = new URLSearchParams({ path });
+  return apiRequest(
+    baseURL,
+    token,
+    `/api/bots/${encodeURIComponent(botId)}/files/content?${qs.toString()}`
+  );
+}
+
+export async function requestWorkspaceFileTicket(
+  baseURL: string,
+  token: string,
+  botId: string,
+  path: string
+): Promise<{ ticket: string; path: string; expiresIn: number }> {
+  return apiRequest(baseURL, token, `/api/bots/${encodeURIComponent(botId)}/files/ticket`, {
+    method: 'POST',
+    body: { path },
+  });
+}
+
+export function workspaceFileRawURL(
+  baseURL: string,
+  botId: string,
+  path: string,
+  ticket: string,
+  download = false
+): string {
+  const qs = new URLSearchParams({ path, ticket });
+  if (download) qs.set('download', '1');
+  return `${baseURL.replace(/\/+$/, '')}/api/bots/${encodeURIComponent(botId)}/files/raw?${qs.toString()}`;
+}
