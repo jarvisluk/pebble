@@ -509,7 +509,8 @@ struct QRScanner: UIViewRepresentable {
         let v = PreviewView()
         v.backgroundColor = .black
         let session = AVCaptureSession()
-        if let dev = AVCaptureDevice.default(for: .video), let input = try? AVCaptureDeviceInput(device: dev), session.canAddInput(input) {
+        let captureDevice = AVCaptureDevice.default(for: .video)
+        if let dev = captureDevice, let input = try? AVCaptureDeviceInput(device: dev), session.canAddInput(input) {
             session.addInput(input)
             let out = AVCaptureMetadataOutput()
             if session.canAddOutput(out) {
@@ -520,6 +521,21 @@ struct QRScanner: UIViewRepresentable {
         }
         v.previewLayer.session = session
         v.previewLayer.videoGravity = .resizeAspectFill
+        if let dev = captureDevice {
+            let rc = AVCaptureDevice.RotationCoordinator(device: dev, previewLayer: v.previewLayer)
+            context.coordinator.rotationCoordinator = rc
+            context.coordinator.rotationObs = rc.observe(
+                \.videoRotationAngleForHorizonLevelPreview,
+                options: [.initial, .new]
+            ) { [weak layer = v.previewLayer] _, change in
+                guard let angle = change.newValue else { return }
+                DispatchQueue.main.async {
+                    if let conn = layer?.connection, conn.isVideoRotationAngleSupported(angle) {
+                        conn.videoRotationAngle = angle
+                    }
+                }
+            }
+        }
         context.coordinator.session = session
         DispatchQueue.global(qos: .userInitiated).async { session.startRunning() }
         return v
@@ -528,6 +544,9 @@ struct QRScanner: UIViewRepresentable {
     func updateUIView(_ uiView: PreviewView, context: Context) {}
 
     static func dismantleUIView(_ uiView: PreviewView, coordinator: Coordinator) {
+        coordinator.rotationObs?.invalidate()
+        coordinator.rotationObs = nil
+        coordinator.rotationCoordinator = nil
         let s = coordinator.session
         DispatchQueue.global(qos: .userInitiated).async { s?.stopRunning() }
     }
@@ -540,6 +559,8 @@ struct QRScanner: UIViewRepresentable {
     final class Coordinator: NSObject, AVCaptureMetadataOutputObjectsDelegate {
         var onCode: (String) -> Void
         var session: AVCaptureSession?
+        var rotationCoordinator: AVCaptureDevice.RotationCoordinator?
+        var rotationObs: NSKeyValueObservation?
         var locked = false
         init(onCode: @escaping (String) -> Void) { self.onCode = onCode }
 
