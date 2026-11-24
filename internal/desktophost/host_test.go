@@ -148,3 +148,46 @@ func TestControlServerEndpointsAndAuth(t *testing.T) {
 		t.Fatalf("POST /control/reset = %d, want 200", recReset.Code)
 	}
 }
+
+func TestSyncRemoteTokenFromResponse(t *testing.T) {
+	dir := t.TempDir()
+	host := New(dir, Hooks{})
+	host.Load()
+	host.setRemoteToken("remote-token")
+
+	// 1. Explicit Authorization header must ignore a stale 127.0.0.1 cookie.
+	reqBearer := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:3790/api/bots", nil)
+	reqBearer.Header.Set("Authorization", "Bearer remote-token")
+	reqBearer.AddCookie(&http.Cookie{Name: "bot_hub_token", Value: "stale-local-token"})
+	host.syncRemoteTokenFromResponse(&http.Response{
+		StatusCode: http.StatusOK,
+		Request:    reqBearer,
+	})
+	if got := host.Prefs().RemoteToken; got != "remote-token" {
+		t.Fatalf("RemoteToken overwritten with Bearer present: got %q, want %q", got, "remote-token")
+	}
+
+	// 2. Cookie-only API call adopts the cookie token.
+	reqCookie := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:3790/api/bots", nil)
+	reqCookie.AddCookie(&http.Cookie{Name: "bot_hub_token", Value: "cookie-token"})
+	host.syncRemoteTokenFromResponse(&http.Response{
+		StatusCode: http.StatusOK,
+		Request:    reqCookie,
+	})
+	if got := host.Prefs().RemoteToken; got != "cookie-token" {
+		t.Fatalf("RemoteToken from cookie = %q, want %q", got, "cookie-token")
+	}
+
+	// 3. /api/login Set-Cookie adopts the new login token even if Authorization was absent.
+	reqLogin := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:3790/api/login", nil)
+	host.syncRemoteTokenFromResponse(&http.Response{
+		StatusCode: http.StatusOK,
+		Request:    reqLogin,
+		Header: http.Header{
+			"Set-Cookie": []string{(&http.Cookie{Name: "bot_hub_token", Value: "login-token"}).String()},
+		},
+	})
+	if got := host.Prefs().RemoteToken; got != "login-token" {
+		t.Fatalf("RemoteToken from /api/login = %q, want %q", got, "login-token")
+	}
+}

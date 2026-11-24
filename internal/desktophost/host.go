@@ -510,20 +510,7 @@ func (h *Host) startRemote(ctx context.Context, rawLink, overrideToken string, d
 			pr.Out.Host = pr.In.Host
 		},
 		ModifyResponse: func(resp *http.Response) error {
-			if resp.StatusCode == http.StatusOK && resp.Request != nil {
-				if resp.Request.URL.Path == "/api/login" {
-					for _, c := range resp.Cookies() {
-						if c.Name == "bot_hub_token" && c.Value != "" {
-							h.setRemoteToken(c.Value)
-							break
-						}
-					}
-				} else if strings.HasPrefix(resp.Request.URL.Path, "/api/") {
-					if c, err := resp.Request.Cookie("bot_hub_token"); err == nil && c.Value != "" {
-						h.setRemoteToken(c.Value)
-					}
-				}
-			}
+			h.syncRemoteTokenFromResponse(resp)
 			return nil
 		},
 	}
@@ -562,6 +549,29 @@ func (h *Host) startRemote(ctx context.Context, rawLink, overrideToken string, d
 		}
 	}()
 	return localURL + "/", tok, nil
+}
+
+// syncRemoteTokenFromResponse adopts a browser login or cookie-authenticated token
+// without letting a stale host cookie overwrite an explicit Authorization Bearer token.
+func (h *Host) syncRemoteTokenFromResponse(resp *http.Response) {
+	if resp == nil || resp.StatusCode != http.StatusOK || resp.Request == nil {
+		return
+	}
+	if resp.Request.URL.Path == "/api/login" {
+		for _, c := range resp.Cookies() {
+			if c.Name == "bot_hub_token" && c.Value != "" {
+				h.setRemoteToken(c.Value)
+				break
+			}
+		}
+		return
+	}
+	if strings.HasPrefix(resp.Request.URL.Path, "/api/") &&
+		strings.TrimSpace(resp.Request.Header.Get("Authorization")) == "" {
+		if c, err := resp.Request.Cookie("bot_hub_token"); err == nil && c.Value != "" {
+			h.setRemoteToken(c.Value)
+		}
+	}
 }
 
 func (h *Host) peerHTTPClient(ctx context.Context, rawLink, fallbackToken string) (*http.Client, string, string, func(), error) {
