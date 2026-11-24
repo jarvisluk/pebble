@@ -312,7 +312,7 @@ export function ConnectContent({ standalone = false }: { standalone?: boolean })
       <View style={styles.heroInner}>
         <View style={styles.heroSpacer} />
         <View style={styles.heroTop}>
-          <BotAvatar id="assistant" size={136} color={PEBBLE_COLOR} busy={submitting} />
+          <BotAvatar id="assistant" size={104} color={PEBBLE_COLOR} busy={submitting} />
           <Text style={[styles.heroTitle, { color: theme.text }]}>Pebble</Text>
           <Text style={[styles.heroSub, { color: theme.text2 }]}>{t('onboardHeroSub')}</Text>
         </View>

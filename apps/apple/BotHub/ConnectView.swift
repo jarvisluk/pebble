@@ -132,7 +132,7 @@ struct ConnectView: View {
                     Spacer(minLength: 24)
 
                     VStack(spacing: 16) {
-                        BotAvatar(id: "assistant", size: 136, color: pebbleColor, busy: submitting)
+                        BotAvatar(id: "assistant", size: 104, color: pebbleColor, busy: submitting)
                         Text("Pebble")
                             .font(.system(size: 22, weight: .bold))
                             .foregroundStyle(p.text)
