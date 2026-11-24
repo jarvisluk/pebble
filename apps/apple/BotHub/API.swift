@@ -39,7 +39,9 @@ struct NormalizedAddress {
 
 /// 拆出 `#token=`，tailcat:// 与 tailscale:// 原样保留，其余补 http:// 并去掉末尾斜杠。
 func normalizeAddress(_ raw: String) -> NormalizedAddress {
-    let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    let trimmed = raw
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+        .replacingOccurrences(of: "[\\r\\n]+", with: "", options: .regularExpression)
     var base = trimmed
     var token = ""
     if let hash = trimmed.firstIndex(of: "#") {
