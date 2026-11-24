@@ -110,7 +110,7 @@ final class PushManager {
         #else
         let env = "production"
         #endif
-        let bundleId = Bundle.main.bundleIdentifier ?? "local.bothub.mobile"
+        let bundleId = Bundle.main.bundleIdentifier ?? "local.pebble.mobile"
         let body: [String: Any] = [
             "deviceId": deviceId,
             "platform": "ios",

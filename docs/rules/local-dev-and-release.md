@@ -11,7 +11,7 @@
 | Go 后端 / CLI / 协议（`cmd/`、`internal/`） | `make build && make test` |
 | Web 前端（`web/`） | 先 `make web`（产出 `internal/web/dist`），再按需 `make build`（或仅改 legacy 壳层时 `make app-wails`） |
 | macOS 原生应用（`apps/apple`） | `make app`（本地快速验证可用 `make app-fast`） |
-| iOS / iPadOS 原生应用（`apps/apple`） | 若改动隧道层先执行 `make ios-tunnel`；工程编译 `xcodebuild -project apps/apple/BotHub.xcodeproj -scheme BotHub -destination 'generic/platform=iOS Simulator' build` |
+| iOS / iPadOS 原生应用（`apps/apple`） | 若改动隧道层先执行 `make ios-tunnel`；工程编译 `xcodebuild -project apps/apple/Pebble.xcodeproj -scheme Pebble -destination 'generic/platform=iOS Simulator' build` |
 | Android 原生应用（`apps/android`） | `make android-native`（含 `make android-tunnel` + `:app:assembleRelease`）；单测与 Release 打包：`cd apps/android && ./gradlew :app:testDebugUnitTest :app:assembleRelease` |
 
 ## 2. 隔离运行实例（联调 / 性能基准 / 回归）

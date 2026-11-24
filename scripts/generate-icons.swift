@@ -364,12 +364,12 @@ func renderBackgroundOnly(size: Int, dark: Bool) -> NSBitmapImageRep {
 
 // MARK: - Paths
 let root = FileManager.default.currentDirectoryPath
-let appleIconDir = "\(root)/apps/apple/BotHub/Assets.xcassets/AppIcon.appiconset"
+let appleIconDir = "\(root)/apps/apple/Pebble/Assets.xcassets/AppIcon.appiconset"
 let mobileAssetsDir = "\(root)/apps/mobile/assets"
 let androidResDir = "\(root)/apps/mobile/android/app/src/main/res"
 let webPublicDir = "\(root)/web/public"
-let macIconsetDir = "/tmp/bothub-AppIcon.iconset"
-let androidTmpDir = "/tmp/bothub-android-icons"
+let macIconsetDir = "/tmp/pebble-AppIcon.iconset"
+let androidTmpDir = "/tmp/pebble-android-icons"
 
 // 1. Apple AppIcon.appiconset
 try savePNG(renderFullBleedIcon(size: 1024, variant: .light), to: "\(appleIconDir)/icon.png")

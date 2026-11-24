@@ -1111,7 +1111,7 @@ func TestHTTPPushEndpoints(t *testing.T) {
 		return rec
 	}
 
-	if rec := doReq(http.MethodPost, "/api/push/register", `{"deviceId":"ios-1","platform":"ios","env":"sandbox","bundleId":"local.bothub.mobile","pushToken":"pt-1","liveActivityStartToken":"st-1"}`); rec.Code != http.StatusOK {
+	if rec := doReq(http.MethodPost, "/api/push/register", `{"deviceId":"ios-1","platform":"ios","env":"sandbox","bundleId":"local.pebble.mobile","pushToken":"pt-1","liveActivityStartToken":"st-1"}`); rec.Code != http.StatusOK {
 		t.Fatalf("POST /api/push/register status = %d, body = %s", rec.Code, rec.Body.String())
 	}
 

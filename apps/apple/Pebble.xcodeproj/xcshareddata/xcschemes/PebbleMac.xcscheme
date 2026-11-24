@@ -18,7 +18,7 @@
                BlueprintIdentifier = "B0A000000000000000000310"
                BuildableName = "Pebble.app"
                BlueprintName = "PebbleMac"
-               ReferencedContainer = "container:BotHub.xcodeproj">
+               ReferencedContainer = "container:Pebble.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
       </BuildActionEntries>
@@ -47,7 +47,7 @@
             BlueprintIdentifier = "B0A000000000000000000310"
             BuildableName = "Pebble.app"
             BlueprintName = "PebbleMac"
-            ReferencedContainer = "container:BotHub.xcodeproj">
+            ReferencedContainer = "container:Pebble.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </LaunchAction>
@@ -64,7 +64,7 @@
             BlueprintIdentifier = "B0A000000000000000000310"
             BuildableName = "Pebble.app"
             BlueprintName = "PebbleMac"
-            ReferencedContainer = "container:BotHub.xcodeproj">
+            ReferencedContainer = "container:Pebble.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </ProfileAction>

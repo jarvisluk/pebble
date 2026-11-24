@@ -43,7 +43,7 @@ type Status struct {
 	DeviceCount int    `json:"deviceCount"`
 }
 
-// LiveActivityContentState mirrors BotHubActivityAttributes.ContentState on iOS.
+// LiveActivityContentState mirrors PebbleActivityAttributes.ContentState on iOS.
 type LiveActivityContentState struct {
 	Phase          string  `json:"phase"`                    // "running" | "takeover" | "completed" | "error"
 	StatusText     string  `json:"statusText"`               // e.g. "正在运行 bash"
@@ -53,7 +53,7 @@ type LiveActivityContentState struct {
 	TakeoverReason string  `json:"takeoverReason,omitempty"` // reason when phase == "takeover"
 }
 
-// LiveActivityAttributes mirrors static fields of BotHubActivityAttributes on iOS.
+// LiveActivityAttributes mirrors static fields of PebbleActivityAttributes on iOS.
 type LiveActivityAttributes struct {
 	Kind    string `json:"kind"` // "bot" | "desktop"
 	BotID   string `json:"botId,omitempty"`
@@ -72,7 +72,7 @@ type APSBody struct {
 	Sound             string                    `json:"sound,omitempty"`
 	InterruptionLevel string                    `json:"interruption-level,omitempty"` // "passive" | "active" | "time-sensitive"
 	Event             string                    `json:"event,omitempty"`              // "start" | "update" | "end"
-	AttributesType    string                    `json:"attributes-type,omitempty"`    // "BotHubActivityAttributes"
+	AttributesType    string                    `json:"attributes-type,omitempty"`    // "PebbleActivityAttributes"
 	Attributes        *LiveActivityAttributes   `json:"attributes,omitempty"`
 	ContentState      *LiveActivityContentState `json:"content-state,omitempty"`
 	Timestamp         int64                     `json:"timestamp,omitempty"`

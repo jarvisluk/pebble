@@ -1,7 +1,7 @@
 import SwiftUI
 
 @main
-struct BotHubApp: App {
+struct PebbleApp: App {
     #if os(iOS)
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var hub = HubStore()
@@ -545,7 +545,7 @@ struct RootView: View {
             if new == .active {
                 if old == .background { Task { await hub.resume() } }
                 #if os(iOS)
-                if let pendingBotId = BotHubSharedStore.consumePendingInterrupt() {
+                if let pendingBotId = PebbleSharedStore.consumePendingInterrupt() {
                     Task { _ = try? await hub.interruptBot(pendingBotId) }
                 }
                 #endif

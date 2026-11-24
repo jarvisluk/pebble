@@ -3,9 +3,9 @@ import AppIntents
 import SwiftUI
 import WidgetKit
 
-struct BotHubLiveActivityWidget: Widget {
+struct PebbleLiveActivityWidget: Widget {
     var body: some WidgetConfiguration {
-        ActivityConfiguration(for: BotHubActivityAttributes.self) { context in
+        ActivityConfiguration(for: PebbleActivityAttributes.self) { context in
             LockScreenView(context: context)
                 .widgetURL(deepLinkURL(for: context))
                 .activityBackgroundTint(backgroundColor(for: context.state.phase))
@@ -95,7 +95,7 @@ struct BotHubLiveActivityWidget: Widget {
         }
     }
 
-    private func displayTitle(for context: ActivityViewContext<BotHubActivityAttributes>) -> String {
+    private func displayTitle(for context: ActivityViewContext<PebbleActivityAttributes>) -> String {
         if context.attributes.kind == "desktop" {
             let target = context.attributes.target ?? "local"
             return target == "local" ? "远程桌面" : "远程桌面 · \(target)"
@@ -103,7 +103,7 @@ struct BotHubLiveActivityWidget: Widget {
         return context.attributes.botName ?? context.attributes.botId ?? "Pebble"
     }
 
-    private func subtitleText(for context: ActivityViewContext<BotHubActivityAttributes>) -> String {
+    private func subtitleText(for context: ActivityViewContext<PebbleActivityAttributes>) -> String {
         if context.state.phase == "takeover", let reason = context.state.takeoverReason, !reason.isEmpty {
             return reason
         }
@@ -116,7 +116,7 @@ struct BotHubLiveActivityWidget: Widget {
         return context.state.statusText
     }
 
-    private func iconName(for context: ActivityViewContext<BotHubActivityAttributes>) -> String {
+    private func iconName(for context: ActivityViewContext<PebbleActivityAttributes>) -> String {
         if context.state.phase == "takeover" || context.attributes.kind == "desktop" {
             return "display"
         }
@@ -144,21 +144,21 @@ struct BotHubLiveActivityWidget: Widget {
         }
     }
 
-    private func deepLinkURL(for context: ActivityViewContext<BotHubActivityAttributes>) -> URL? {
+    private func deepLinkURL(for context: ActivityViewContext<PebbleActivityAttributes>) -> URL? {
         if context.attributes.kind == "desktop" {
             let target = (context.attributes.target ?? "local").addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "local"
-            return URL(string: "bothub://desktop?target=\(target)")
+            return URL(string: "pebble://desktop?target=\(target)")
         }
         if let botId = context.attributes.botId, !botId.isEmpty {
             let encId = botId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? botId
-            return URL(string: "bothub://bot/\(encId)")
+            return URL(string: "pebble://bot/\(encId)")
         }
         return nil
     }
 }
 
 private struct LockScreenView: View {
-    let context: ActivityViewContext<BotHubActivityAttributes>
+    let context: ActivityViewContext<PebbleActivityAttributes>
 
     private var accent: Color {
         switch context.state.phase {

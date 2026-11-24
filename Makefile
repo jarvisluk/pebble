@@ -36,7 +36,7 @@ app:
 	mkdir -p bin; \
 	(go build -ldflags="$(GO_LDFLAGS)" -o bin/pebble ./cmd/pebble && ln -sf pebble bin/bot-hub) & \
 	go_pid=$$!; \
-	xcodebuild -project apps/apple/BotHub.xcodeproj -scheme PebbleMac -configuration "$(APP_CONFIG)" -derivedDataPath build/apple-mac \
+	xcodebuild -project apps/apple/Pebble.xcodeproj -scheme PebbleMac -configuration "$(APP_CONFIG)" -derivedDataPath build/apple-mac \
 		$$dest_args $$arch_args $$dsym_args \
 		COMPILATION_CACHE_ENABLE_CACHING=YES \
 		CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO build & \
@@ -96,7 +96,7 @@ app:
 	for f in "$(RES_BIN)"/*; do \
 		[ -f "$$f" ] && [ ! -L "$$f" ] && codesign --force --sign "$$IDENTITY" "$$f"; \
 	done; \
-	codesign --force --sign "$$IDENTITY" --entitlements apps/apple/BotHub/BotHubMac.entitlements "$(APP)"
+	codesign --force --sign "$$IDENTITY" --entitlements apps/apple/Pebble/PebbleMac.entitlements "$(APP)"
 	codesign --verify --deep --strict "$(APP)"
 
 app-fast:
