@@ -1,6 +1,5 @@
 import Foundation
 import Observation
-import UIKit
 import UserNotifications
 
 struct PushStatusInfo: Codable, Equatable {
@@ -8,6 +7,9 @@ struct PushStatusInfo: Codable, Equatable {
     var mode: String = "disabled"
     var deviceCount: Int = 0
 }
+
+#if os(iOS)
+import UIKit
 
 @MainActor
 @Observable
@@ -171,3 +173,117 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         }
     }
 }
+
+#elseif os(macOS)
+import AppKit
+
+@MainActor
+@Observable
+final class PushManager {
+    static let shared = PushManager()
+
+    var authStatus: UNAuthorizationStatus = .notDetermined
+    var serverStatus = PushStatusInfo()
+    var lastError = ""
+
+    @ObservationIgnored var onDeepLink: ((URL) -> Void)?
+    @ObservationIgnored var activeChatBotId: (() -> String?)?
+
+    private init() {
+        Task { await refreshAuthorizationStatus() }
+    }
+
+    func refreshAuthorizationStatus() async {
+        let settings = await UNUserNotificationCenter.current().notificationSettings()
+        authStatus = settings.authorizationStatus
+    }
+
+    func requestPermissionAndRegister() async {
+        do {
+            _ = try await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])
+            await refreshAuthorizationStatus()
+        } catch {
+            lastError = error.localizedDescription
+        }
+    }
+
+    func configureConnection(base: String, token: String) {
+        Task { await refreshAuthorizationStatus() }
+    }
+
+    func postLocalNotification(id: String, botId: String?, title: String, body: String, deepLink: String) {
+        guard authStatus == .authorized || authStatus == .provisional else { return }
+        if NSApp.isActive, let botId, !botId.isEmpty, activeChatBotId?() == botId {
+            return
+        }
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = .default
+        var userInfo: [String: Any] = ["deepLink": deepLink]
+        if let botId, !botId.isEmpty { userInfo["botId"] = botId }
+        content.userInfo = userInfo
+        let req = UNNotificationRequest(identifier: id, content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(req)
+    }
+}
+
+final class MacAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
+    @MainActor var onReopenWindow: (() -> Void)?
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        UNUserNotificationCenter.current().delegate = self
+        Task { @MainActor in
+            DesktopHostManager.shared.startDaemonIfNeeded()
+        }
+    }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        false
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag {
+            Task { @MainActor in
+                onReopenWindow?()
+            }
+        }
+        return true
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        Task { @MainActor in
+            DesktopHostManager.shared.shutdown()
+        }
+    }
+
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification
+    ) async -> UNNotificationPresentationOptions {
+        let userInfo = notification.request.content.userInfo
+        let botId = userInfo["botId"] as? String
+        let suppress = await MainActor.run {
+            if NSApp.isActive, let botId, !botId.isEmpty, PushManager.shared.activeChatBotId?() == botId {
+                return true
+            }
+            return false
+        }
+        return suppress ? [] : [.banner, .sound, .list]
+    }
+
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse
+    ) async {
+        let userInfo = response.notification.request.content.userInfo
+        if let raw = userInfo["deepLink"] as? String, let url = URL(string: raw) {
+            await MainActor.run {
+                NSApp.activate(ignoringOtherApps: true)
+                onReopenWindow?()
+                PushManager.shared.onDeepLink?(url)
+            }
+        }
+    }
+}
+#endif

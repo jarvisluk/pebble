@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>zh-Hans</string>
+		<string>en</string>
+	</array>
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>bothub</string>
+			</array>
+		</dict>
+	</array>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Pebble needs Automation permission to control apps on this Mac when remote computer control is enabled.</string>
+	<key>NSDesktopFolderUsageDescription</key>
+	<string>Pebble needs access to your Desktop folder to read and write files when remote computer control is enabled.</string>
+	<key>NSDocumentsFolderUsageDescription</key>
+	<string>Pebble needs access to your Documents folder to read and write files when remote computer control is enabled.</string>
+	<key>NSDownloadsFolderUsageDescription</key>
+	<string>Pebble needs access to your Downloads folder to read and write files when remote computer control is enabled.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>连接同一局域网内的 Pebble 主电脑</string>
+</dict>
+</plist>

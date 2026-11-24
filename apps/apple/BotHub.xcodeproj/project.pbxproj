@@ -42,6 +42,8 @@
 
 /* Begin PBXFileReference section */
 		B0A000000000000000000001 /* BotHub.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = BotHub.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B0A000000000000000000301 /* Pebble.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Pebble.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B0A000000000000000000302 /* Info-macOS.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "Info-macOS.plist"; sourceTree = "<group>"; };
 		B0A000000000000000000002 /* BotHubTunnel.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = BotHubTunnel.xcframework; path = ../../build/mobile/ios/BotHubTunnel.xcframework; sourceTree = "<group>"; };
 		B0A000000000000000000015 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B0A000000000000000000090 /* Signing.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = Signing.xcconfig; path = Config/Signing.xcconfig; sourceTree = "<group>"; };
@@ -60,10 +62,32 @@
 			);
 			target = B0A000000000000000000210 /* BotHubLiveActivity */;
 		};
+		B0A000000000000000000330 /* Exceptions for "BotHub" folder on PebbleMac */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				BotHub.entitlements,
+			);
+			target = B0A000000000000000000310 /* PebbleMac */;
+		};
+		B0A000000000000000000331 /* Exceptions for "BotHub" folder on BotHub */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				BotHubMac.entitlements,
+			);
+			target = B0A00000000000000000000B /* BotHub */;
+		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		B0A000000000000000000003 /* BotHub */ = {isa = PBXFileSystemSynchronizedRootGroup; path = BotHub; sourceTree = "<group>"; };
+		B0A000000000000000000003 /* BotHub */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				B0A000000000000000000331 /* Exceptions for "BotHub" folder on BotHub */,
+				B0A000000000000000000330 /* Exceptions for "BotHub" folder on PebbleMac */,
+			);
+			path = BotHub;
+			sourceTree = "<group>";
+		};
 		B0A000000000000000000200 /* BotHubLiveActivity */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
@@ -93,6 +117,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		B0A000000000000000000311 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -104,6 +135,7 @@
 				B0A000000000000000000003 /* BotHub */,
 				B0A000000000000000000200 /* BotHubLiveActivity */,
 				B0A000000000000000000015 /* Info.plist */,
+				B0A000000000000000000302 /* Info-macOS.plist */,
 				B0A00000000000000000000A /* Frameworks */,
 				B0A000000000000000000009 /* Products */,
 			);
@@ -113,6 +145,7 @@
 			isa = PBXGroup;
 			children = (
 				B0A000000000000000000001 /* BotHub.app */,
+				B0A000000000000000000301 /* Pebble.app */,
 				B0A000000000000000000201 /* BotHubLiveActivity.appex */,
 			);
 			name = Products;
@@ -174,6 +207,26 @@
 			productReference = B0A000000000000000000201 /* BotHubLiveActivity.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
+		B0A000000000000000000310 /* PebbleMac */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B0A000000000000000000315 /* Build configuration list for PBXNativeTarget "PebbleMac" */;
+			buildPhases = (
+				B0A000000000000000000312 /* Sources */,
+				B0A000000000000000000311 /* Frameworks */,
+				B0A000000000000000000313 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				B0A000000000000000000003 /* BotHub */,
+			);
+			name = PebbleMac;
+			productName = Pebble;
+			productReference = B0A000000000000000000301 /* Pebble.app */;
+			productType = "com.apple.product-type.application";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -200,6 +253,7 @@
 			projectRoot = "";
 			targets = (
 				B0A00000000000000000000B /* BotHub */,
+				B0A000000000000000000310 /* PebbleMac */,
 				B0A000000000000000000210 /* BotHubLiveActivity */,
 			);
 		};
@@ -214,6 +268,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		B0A000000000000000000213 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B0A000000000000000000313 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -236,6 +297,13 @@
 			buildActionMask = 2147483647;
 			files = (
 				B0A000000000000000000102 /* BotHubActivityAttributes.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B0A000000000000000000312 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -412,6 +480,60 @@
 			};
 			name = Release;
 		};
+		B0A000000000000000000316 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = BotHub/BotHubMac.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Info-macOS.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = Pebble;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = local.bothub.desktop;
+				PRODUCT_NAME = Pebble;
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		B0A000000000000000000317 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = BotHub/BotHubMac.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Info-macOS.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = Pebble;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = local.bothub.desktop;
+				PRODUCT_NAME = Pebble;
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -438,6 +560,15 @@
 			buildConfigurations = (
 				B0A000000000000000000216 /* Debug */,
 				B0A000000000000000000217 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		B0A000000000000000000315 /* Build configuration list for PBXNativeTarget "PebbleMac" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B0A000000000000000000316 /* Debug */,
+				B0A000000000000000000317 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

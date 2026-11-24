@@ -1,8 +1,5 @@
 import SwiftUI
 
-typealias PlatformImage = UIImage
-extension Image { init(platform img: UIImage) { self.init(uiImage: img) } }
-
 struct DesktopView: View {
     @Environment(HubStore.self) private var hub
     @Environment(Router.self) private var router
@@ -22,7 +19,11 @@ struct DesktopView: View {
     @State private var isDragging = false
     @State private var lastDragSent = Date.distantPast
     @State private var streamCtrl = H264StreamController()
+    #if os(macOS)
+    @State private var showMacChatSidebar = false
+    #else
     @State private var columnVisibility: NavigationSplitViewVisibility = .detailOnly
+    #endif
     @State private var showChatSheet = false
     @State private var chatBotId: String
     @FocusState private var draftFocused: Bool
@@ -53,10 +54,26 @@ struct DesktopView: View {
         return hub.bots.first?.id
     }
 
-    private var isWide: Bool { hsc != .compact }
+    private var isWide: Bool {
+        #if os(macOS)
+        return true
+        #else
+        return hsc != .compact
+        #endif
+    }
 
     var body: some View {
         Group {
+            #if os(macOS)
+            HStack(spacing: 0) {
+                if showMacChatSidebar {
+                    sidebarChatView(closable: true)
+                        .frame(width: 340)
+                    Rectangle().fill(p.s2).frame(width: 1)
+                }
+                desktopStage
+            }
+            #else
             if isWide {
                 NavigationSplitView(columnVisibility: $columnVisibility) {
                     sidebarChatView(closable: false)
@@ -77,6 +94,7 @@ struct DesktopView: View {
                     .presentationDetents([.medium, .large])
                 }
             }
+            #endif
         }
         .tint(Color(hex: "#f3f1ee"))
         .preferredColorScheme(.dark)
@@ -96,7 +114,7 @@ struct DesktopView: View {
         .task(id: "\(target)-\(streaming)") {
             await pollState()
         }
-        .task(id: "\(target)-\(streaming)-ws") {
+        .task(id: "\(target)-\(streaming)-\(hub.baseURL)") {
             if streaming, let req = hub.makeDesktopWSRequest(target: target) {
                 streamCtrl.start(request: req)
             } else {
@@ -156,19 +174,27 @@ struct DesktopView: View {
         }
         .background(stage.ignoresSafeArea())
         .navigationTitle(target == "local" ? hub.t("localDesktopName") : (targets.first(where: { $0.id == target })?.name ?? hub.t("remoteDesktop")))
-        .navigationBarTitleDisplayMode(.inline)
+        .inlineNavTitle()
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
+            #if os(iOS)
+            ToolbarItem(placement: .hubLeading) {
                 Button { dismiss() } label: {
                     Label(hub.t("close"), systemImage: "chevron.backward")
                 }
             }
-            ToolbarItemGroup(placement: .topBarTrailing) {
+            #endif
+            ToolbarItemGroup(placement: .hubTrailing) {
+                #if os(macOS)
+                Button { showMacChatSidebar.toggle() } label: {
+                    Label(hub.t("deskChatSidebar"), systemImage: "bubble.left.and.bubble.right")
+                }
+                #else
                 if !isWide {
                     Button { showChatSheet = true } label: {
                         Label(hub.t("deskChatSidebar"), systemImage: "bubble.left.and.bubble.right")
                     }
                 }
+                #endif
 
                 Button { streaming.toggle() } label: {
                     Label(streaming ? hub.t("collapse") : hub.t("connect"), systemImage: streaming ? "pause.fill" : "play.fill")
@@ -193,8 +219,9 @@ struct DesktopView: View {
                     Button(hub.t("keyScrollUp")) { send(["kind": "scroll", "deltaY": 8]) }
                     Button(hub.t("keyScrollDown")) { send(["kind": "scroll", "deltaY": -8]) }
                 } label: {
-                    Label(hub.t("aaInput"), systemImage: "keyboard")
+                    Label(hub.t("aaInput"), systemImage: "keyboard").labelStyle(.iconOnly)
                 }
+                .menuIndicator(.hidden)
 
                 Menu {
                     if streamCtrl.connected {
@@ -210,8 +237,9 @@ struct DesktopView: View {
                         }
                     }
                 } label: {
-                    Label(hub.t("settings"), systemImage: "slider.horizontal.3")
+                    Label(hub.t("settings"), systemImage: "slider.horizontal.3").labelStyle(.iconOnly)
                 }
+                .menuIndicator(.hidden)
             }
         }
     }
@@ -248,11 +276,7 @@ struct DesktopView: View {
             .disabled(draft.isEmpty)
         }
 
-        if #available(iOS 26.0, *) {
-            GlassEffectContainer(spacing: 10) { row }
-        } else {
-            row
-        }
+        row.glassRowContainer(spacing: 10)
     }
 
     @ViewBuilder
@@ -264,7 +288,13 @@ struct DesktopView: View {
                 onSelectBot: { nextId in
                     chatBotId = nextId
                 },
-                onCloseSidebar: closable ? { showChatSheet = false } : nil
+                onCloseSidebar: closable ? {
+                    #if os(macOS)
+                    showMacChatSidebar = false
+                    #else
+                    showChatSheet = false
+                    #endif
+                } : nil
             )
             .id(bid)
         } else {
@@ -272,7 +302,13 @@ struct DesktopView: View {
                 .toolbar {
                     if closable {
                         ToolbarItem(placement: .cancellationAction) {
-                            Button(hub.t("close")) { showChatSheet = false }
+                            Button(hub.t("close")) {
+                                #if os(macOS)
+                                showMacChatSidebar = false
+                                #else
+                                showChatSheet = false
+                                #endif
+                            }
                         }
                     }
                 }
@@ -284,14 +320,22 @@ struct DesktopView: View {
             let displayErr = !error.isEmpty ? error : streamCtrl.error
             ZStack {
                 stage
+                #if os(macOS)
+                H264DisplayView(
+                    controller: streamCtrl,
+                    mapPoint: { pt, size in map(pt, in: size) },
+                    onInput: { send($0) }
+                )
+                #else
                 H264DisplayView(controller: streamCtrl)
+                #endif
                 if !streamCtrl.connected {
                     VStack(spacing: 10) {
                         ProgressView().tint(p.accent)
                         Text(displayErr.isEmpty ? hub.t("deskH264Connecting") : displayErr)
                             .font(.system(size: 15)).foregroundStyle(pillMute).multilineTextAlignment(.center)
                         if !displayErr.isEmpty {
-                            Button(hub.t("retryConnect")) {
+                            Button(hub.t("retry")) {
                                 error = ""
                                 if let req = hub.makeDesktopWSRequest(target: target) {
                                     streaming = true
@@ -315,6 +359,7 @@ struct DesktopView: View {
                 }
             }
             .contentShape(Rectangle())
+            #if os(iOS)
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { v in
@@ -345,6 +390,7 @@ struct DesktopView: View {
                         if let pt = map(v.location, in: geo.size) { send(["kind": kind, "x": pt.x, "y": pt.y]) }
                     }
             )
+            #endif
         }
     }
 

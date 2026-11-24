@@ -1,6 +1,8 @@
 import Foundation
 import Security
+#if os(iOS)
 import BotHubTunnelC
+#endif
 
 struct HubError: LocalizedError {
     var message: String
@@ -198,8 +200,9 @@ final class EventStream {
     }
 }
 
-/// Go Tailcat 隧道（cmd/libbothub c-archive）。
+/// Go Tailcat 隧道（iOS 链接 cmd/libbothub c-archive；macOS 由 sidecar 管理）。
 enum Tunnel {
+    #if os(iOS)
     static func start(link: String, token: String) async throws -> (url: String, token: String) {
         // 先发一个普通请求触发 iOS「无线数据」授权弹窗，否则 Go 侧直连会被系统静默拦截。
         var probe = URLRequest(url: URL(string: "https://captive.apple.com/hotspot-detect.html")!)
@@ -265,10 +268,30 @@ enum Tunnel {
         return (try? JSONDecoder().decode(MobileTailscaleStatus.self, from: Data(json.utf8)))
             ?? MobileTailscaleStatus(state: "disabled")
     }
+    #else
+    static func start(link: String, token: String) async throws -> (url: String, token: String) {
+        throw HubError(message: L.t("connFailed"))
+    }
+
+    static func stop() async {}
+
+    static func tailscaleStart(hostname: String = "", controlUrl: String = "", authKey: String = "") async -> MobileTailscaleStatus {
+        MobileTailscaleStatus(state: "disabled")
+    }
+
+    static func tailscaleStatus(includePeers: Bool = false) async -> MobileTailscaleStatus {
+        MobileTailscaleStatus(state: "disabled")
+    }
+
+    static func tailscaleLogout() async -> MobileTailscaleStatus {
+        MobileTailscaleStatus(state: "disabled")
+    }
+    #endif
 }
 
-/// 主机列表含访问口令：iOS 存 Keychain；macOS 为免去 ad-hoc 签名重建后的钥匙串弹窗，存用户目录下 0600 文件。
+/// 主机列表含访问口令：iOS 存 Keychain；macOS 存用户支持目录下 0600 文件，避免 ad-hoc 重建后钥匙串反复弹窗。
 enum SecureStore {
+    #if os(iOS)
     private static let service = "local.bothub.apple"
 
     static func read(_ key: String) -> Data? {
@@ -288,4 +311,30 @@ enum SecureStore {
         add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
         SecItemAdd(add as CFDictionary, nil)
     }
+    #else
+    private static func fileURL(_ key: String) -> URL? {
+        guard let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+            return nil
+        }
+        let dir = base.appendingPathComponent("bot-hub", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        let safeKey = key.replacingOccurrences(of: "[^a-zA-Z0-9._-]", with: "_", options: .regularExpression)
+        return dir.appendingPathComponent("apple-\(safeKey).json")
+    }
+
+    static func read(_ key: String) -> Data? {
+        guard let url = fileURL(key) else { return nil }
+        return try? Data(contentsOf: url)
+    }
+
+    static func write(_ key: String, _ data: Data?) {
+        guard let url = fileURL(key) else { return }
+        if let data {
+            try? data.write(to: url, options: .atomic)
+            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        } else {
+            try? FileManager.default.removeItem(at: url)
+        }
+    }
+    #endif
 }

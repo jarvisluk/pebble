@@ -84,12 +84,7 @@ func normalizeBotHex(_ s: String?) -> String? {
 }
 
 func colorToHex(_ c: Color) -> String? {
-    var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
-    guard UIColor(c).getRed(&r, green: &g, blue: &b, alpha: &a) else { return nil }
-    let ri = max(0, min(255, Int((r * 255).rounded())))
-    let gi = max(0, min(255, Int((g * 255).rounded())))
-    let bi = max(0, min(255, Int((b * 255).rounded())))
-    return String(format: "#%02x%02x%02x", ri, gi, bi)
+    platformColorToHex(c)
 }
 
 func botColorHex(_ id: String, _ index: Int = -1, custom: String? = nil) -> String {
@@ -469,50 +464,66 @@ extension View {
     /// 原生 Form 套 DESIGN 页面底色与卡片圆角。
     func hubForm() -> some View { modifier(HubSurface(form: true)) }
 
-    /// 窄宽度：insetGrouped + page 底；宽屏：系统悬浮侧栏。
+    /// 窄宽度：insetGrouped + page 底；宽屏：系统悬浮侧栏；macOS：实色侧栏卡片 + 1px 细分隔。
     @ViewBuilder
     func hubColumnList(compact: Bool, page: Color) -> some View {
+        #if os(iOS)
         if compact {
             self.listStyle(.insetGrouped).scrollContentBackground(.hidden).background(page)
         } else {
             self.listStyle(.sidebar)
         }
+        #else
+        self.modifier(HubMacColumnListModifier())
+        #endif
     }
 
     func monoInput() -> some View {
-        self.font(.system(size: 15, design: .monospaced))
+        self.font(.system(size: AppFont.secondary, design: .monospaced))
             .autocorrectionDisabled()
-            .textInputAutocapitalization(.never)
+            .noAutocap()
     }
 
     @ViewBuilder
     func composerGlassButton() -> some View {
+        #if os(iOS)
         let base = self.buttonBorderShape(.circle)
         if #available(iOS 26.0, *) {
             base.buttonStyle(.glass)
         } else {
             base.buttonStyle(.bordered)
         }
+        #else
+        self.buttonStyle(MacComposerCircleButtonStyle())
+        #endif
     }
 
     @ViewBuilder
     func composerGlassField() -> some View {
+        #if os(iOS)
         let shape = RoundedRectangle(cornerRadius: 22, style: .continuous)
         if #available(iOS 26.0, *) {
             self.glassEffect(.regular.interactive(), in: shape)
         } else {
             self.background(.regularMaterial, in: shape)
         }
+        #else
+        self.modifier(MacComposerFieldModifier())
+        #endif
     }
 
     @ViewBuilder
     func composerSendButton(accent: Color) -> some View {
+        #if os(iOS)
         let base = self.buttonBorderShape(.circle).tint(accent)
         if #available(iOS 26.0, *) {
             base.buttonStyle(.glassProminent)
         } else {
             base.buttonStyle(.borderedProminent)
         }
+        #else
+        self.buttonStyle(MacComposerSendButtonStyle(accent: accent))
+        #endif
     }
 }
 
@@ -543,10 +554,6 @@ struct FlowLayout: Layout {
             rowH = max(rowH, s.height)
         }
     }
-}
-
-func copyToClipboard(_ s: String) {
-    UIPasteboard.general.string = s
 }
 
 struct BotAppearancePicker: View {
@@ -591,19 +598,42 @@ struct BotAppearancePicker: View {
                     Button {
                         avatar = kind == "blob" ? "" : kind
                     } label: {
-                        BotAvatar(id: botId, size: 32, index: index, avatar: kind, color: effectiveHex)
+                        BotAvatar(id: botId, size: 36, index: index, avatar: kind, color: effectiveHex)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 6)
-                            .background(p.s1, in: RoundedRectangle(cornerRadius: 10))
+                            .background(p.s1, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                             .overlay(
-                                RoundedRectangle(cornerRadius: 10)
-                                    .stroke(active ? ring : .clear, lineWidth: 2)
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .stroke(active ? ring : .clear, lineWidth: 1.5)
                             )
                     }
                     .buttonStyle(.plain)
                 }
             }
             Text(hub.t("botColorLabel")).font(.system(size: 13)).foregroundStyle(.secondary)
+            #if os(macOS)
+            HStack(spacing: 6) {
+                ForEach(botColors, id: \.self) { hex in
+                    let active = normalizeBotHex(color) == hex
+                    Button { color = hex } label: {
+                        Circle().fill(Color(hex: hex)).frame(width: 24, height: 24)
+                            .overlay {
+                                if active {
+                                    Image(systemName: "checkmark").font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
+                                }
+                            }
+                    }
+                    .buttonStyle(.plain)
+                }
+                Spacer(minLength: 4)
+                ColorPicker("", selection: Binding(
+                    get: { Color(hex: effectiveHex) },
+                    set: { if let h = colorToHex($0) { color = h } }
+                ), supportsOpacity: false)
+                .labelsHidden()
+                .controlSize(.small)
+            }
+            #else
             HStack(spacing: 10) {
                 ForEach(botColors, id: \.self) { hex in
                     let active = normalizeBotHex(color) == hex
@@ -624,6 +654,7 @@ struct BotAppearancePicker: View {
                 ), supportsOpacity: false)
                 .labelsHidden()
             }
+            #endif
         }
         .padding(.vertical, 4)
     }
@@ -634,10 +665,216 @@ struct HubSurface: ViewModifier {
     var form: Bool
 
     func body(content: Content) -> some View {
+        #if os(macOS)
+        if #available(macOS 15.0, *) {
+            content
+                .buttonStyle(HubMacRowButtonStyle())
+                .labeledContentStyle(HubMacLabeledContentStyle())
+                .toggleStyle(HubMacSwitchToggleStyle())
+                .textFieldStyle(HubMacTextFieldStyle())
+                .formStyle(HubMacFormStyle())
+                .background(p.page)
+                .font(.system(size: AppFont.body))
+        } else {
+            content
+                .formStyle(.grouped)
+                .scrollContentBackground(.hidden)
+                .background(p.page)
+                .font(.system(size: AppFont.body))
+        }
+        #else
         content
             .scrollContentBackground(.hidden)
             .background(p.page)
-            .font(.system(size: 16))
+            .font(.system(size: AppFont.body))
+        #endif
     }
 }
+
+#if os(macOS)
+private struct HubMacColumnListModifier: ViewModifier {
+    @Environment(\.palette) private var p
+
+    func body(content: Content) -> some View {
+        content
+            .listStyle(.sidebar)
+            .scrollContentBackground(.hidden)
+            .background(p.card)
+            .overlay(alignment: .trailing) {
+                Rectangle().fill(p.s2).frame(width: 1).ignoresSafeArea()
+            }
+    }
+}
+
+private struct MacComposerCircleButtonStyle: ButtonStyle {
+    @Environment(\.palette) private var p
+    @Environment(\.isEnabled) private var isEnabled
+    @State private var hovering = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .frame(width: 34, height: 34)
+            .foregroundStyle(isEnabled ? p.text : p.mute)
+            .background(
+                Circle().fill(configuration.isPressed ? p.s2 : (hovering ? p.s1 : p.card))
+            )
+            .overlay(Circle().stroke(p.s2, lineWidth: 1))
+            .contentShape(Circle())
+            .onHover { hovering = $0 }
+    }
+}
+
+private struct MacComposerFieldModifier: ViewModifier {
+    @Environment(\.palette) private var p
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
+        content
+            .background(p.card, in: shape)
+            .overlay(shape.stroke(p.s2, lineWidth: 1))
+    }
+}
+
+private struct MacComposerSendButtonStyle: ButtonStyle {
+    @Environment(\.palette) private var p
+    @Environment(\.isEnabled) private var isEnabled
+    var accent: Color
+
+    func makeBody(configuration: Configuration) -> some View {
+        let fg: Color = isEnabled ? contrastText(colorToHex(accent) ?? "#1d1b19") : p.mute
+        let bg: Color = isEnabled ? (configuration.isPressed ? accent.opacity(0.82) : accent) : p.s2
+        configuration.label
+            .frame(width: 34, height: 34)
+            .foregroundStyle(fg)
+            .background(Circle().fill(bg))
+            .contentShape(Circle())
+    }
+}
+
+struct HubMacTextFieldStyle: TextFieldStyle {
+    @Environment(\.palette) private var p
+
+    func _body(configuration: TextField<Self._Label>) -> some View {
+        configuration
+            .textFieldStyle(.plain)
+            .font(.system(size: AppFont.body))
+            .foregroundStyle(p.text)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(p.s1, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(p.s2, lineWidth: 1))
+    }
+}
+
+struct HubMacLabeledContentStyle: LabeledContentStyle {
+    @Environment(\.palette) private var p
+
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            configuration.label
+                .foregroundStyle(p.text)
+            Spacer(minLength: 12)
+            configuration.content
+                .foregroundStyle(p.text2)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+struct HubMacSwitchToggleStyle: ToggleStyle {
+    @Environment(\.palette) private var p
+
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            configuration.label
+                .foregroundStyle(p.text)
+            Spacer(minLength: 12)
+            Toggle("", isOn: configuration.$isOn)
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .controlSize(.small)
+        }
+    }
+}
+
+struct HubMacRowButtonStyle: ButtonStyle {
+    @Environment(\.palette) private var p
+    @Environment(\.isEnabled) private var isEnabled
+    @State private var hovering = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        let fg: Color = configuration.role == .destructive ? p.danger : (isEnabled ? p.text : p.mute)
+        HStack(spacing: 8) {
+            configuration.label
+            Spacer(minLength: 8)
+        }
+        .foregroundStyle(fg)
+        .padding(.vertical, 2)
+        .padding(.horizontal, 4)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(configuration.isPressed ? p.s2 : (hovering ? p.s1 : .clear))
+        )
+        .contentShape(Rectangle())
+        .onHover { hovering = $0 }
+    }
+}
+
+@available(macOS 15.0, *)
+struct HubMacFormStyle: FormStyle {
+    @Environment(\.palette) private var p
+
+    func makeBody(configuration: Configuration) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                Group(sections: configuration.content) { sections in
+                    ForEach(sections) { section in
+                        VStack(alignment: .leading, spacing: 6) {
+                            if !section.header.isEmpty {
+                                section.header
+                                    .font(.system(size: AppFont.caption, weight: .semibold))
+                                    .foregroundStyle(p.text2)
+                                    .padding(.horizontal, 4)
+                            }
+                            if !section.content.isEmpty {
+                                Group(subviews: section.content) { subviews in
+                                    VStack(alignment: .leading, spacing: 0) {
+                                        ForEach(Array(subviews.enumerated()), id: \.element.id) { idx, subview in
+                                            if idx > 0 {
+                                                Rectangle()
+                                                    .fill(p.s2)
+                                                    .frame(height: 1)
+                                                    .padding(.leading, 14)
+                                            }
+                                            subview
+                                                .frame(maxWidth: .infinity, alignment: .leading)
+                                                .padding(.horizontal, 14)
+                                                .padding(.vertical, 10)
+                                        }
+                                    }
+                                    .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+                                    .background(p.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                            .stroke(p.s2.opacity(0.8), lineWidth: 1)
+                                    )
+                                }
+                            }
+                            if !section.footer.isEmpty {
+                                section.footer
+                                    .font(.system(size: AppFont.caption))
+                                    .foregroundStyle(p.mute)
+                                    .padding(.horizontal, 4)
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(16)
+            .frame(minWidth: 0, maxWidth: 760, alignment: .leading)
+            .frame(maxWidth: .infinity)
+        }
+    }
+}
+#endif
 

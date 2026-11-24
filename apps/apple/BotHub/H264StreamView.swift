@@ -3,7 +3,11 @@ import CoreMedia
 import Foundation
 import Observation
 import SwiftUI
+#if os(iOS)
 import UIKit
+#elseif os(macOS)
+import AppKit
+#endif
 
 struct H264StreamMeta {
     var imageWidth: Double = 0
@@ -18,6 +22,7 @@ struct H264StreamMeta {
     var bitrateKbps: Int = 0
 }
 
+#if os(iOS)
 final class SampleBufferCanvasView: UIView {
     override class var layerClass: AnyClass { AVSampleBufferDisplayLayer.self }
     var displayLayer: AVSampleBufferDisplayLayer { layer as! AVSampleBufferDisplayLayer }
@@ -44,6 +49,142 @@ struct H264DisplayView: UIViewRepresentable {
         controller.attach(layer: uiView.displayLayer)
     }
 }
+#elseif os(macOS)
+final class SampleBufferCanvasNSView: NSView {
+    let displayLayer = AVSampleBufferDisplayLayer()
+    var mapPoint: ((CGPoint, CGSize) -> CGPoint?)?
+    var onInput: (([String: Any]) -> Void)?
+    private var trackingAreaRef: NSTrackingArea?
+    private var lastMoveSent = Date.distantPast
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.black.cgColor
+        displayLayer.videoGravity = .resizeAspect
+        layer?.addSublayer(displayLayer)
+        setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        setContentCompressionResistancePriority(.defaultLow, for: .vertical)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override var isFlipped: Bool { true }
+    override var acceptsFirstResponder: Bool { true }
+
+    override func layout() {
+        super.layout()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        displayLayer.frame = bounds
+        CATransaction.commit()
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingAreaRef { removeTrackingArea(trackingAreaRef) }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.activeInKeyWindow, .mouseMoved, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        trackingAreaRef = area
+    }
+
+    private func mapped(_ event: NSEvent) -> CGPoint? {
+        let pt = convert(event.locationInWindow, from: nil)
+        return mapPoint?(pt, bounds.size)
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        guard Date().timeIntervalSince(lastMoveSent) >= 0.016, let pt = mapped(event) else { return }
+        lastMoveSent = Date()
+        onInput?(["kind": "move", "x": pt.x, "y": pt.y])
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(self)
+        guard let pt = mapped(event) else { return }
+        onInput?(["kind": "down", "x": pt.x, "y": pt.y, "button": "left"])
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard Date().timeIntervalSince(lastMoveSent) >= 0.016, let pt = mapped(event) else { return }
+        lastMoveSent = Date()
+        onInput?(["kind": "move", "x": pt.x, "y": pt.y])
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard let pt = mapped(event) else { return }
+        onInput?(["kind": "up", "x": pt.x, "y": pt.y, "button": "left"])
+    }
+
+    override func rightMouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(self)
+        guard let pt = mapped(event) else { return }
+        onInput?(["kind": "down", "x": pt.x, "y": pt.y, "button": "right"])
+    }
+
+    override func rightMouseUp(with event: NSEvent) {
+        guard let pt = mapped(event) else { return }
+        onInput?(["kind": "up", "x": pt.x, "y": pt.y, "button": "right"])
+    }
+
+    override func scrollWheel(with event: NSEvent) {
+        let dy = Int(event.scrollingDeltaY.rounded())
+        let dx = Int(event.scrollingDeltaX.rounded())
+        guard dy != 0 || dx != 0 else { return }
+        onInput?(["kind": "scroll", "deltaX": dx, "deltaY": dy])
+    }
+
+    override func keyDown(with event: NSEvent) {
+        let keyName: String? = switch event.keyCode {
+        case 36, 76: "Return"
+        case 51, 117: "Backspace"
+        case 53: "Escape"
+        case 48: "Tab"
+        case 123: "Left"
+        case 124: "Right"
+        case 125: "Down"
+        case 126: "Up"
+        default: nil
+        }
+        if let keyName {
+            onInput?(["kind": "key", "key": keyName])
+            return
+        }
+        if let chars = event.characters, !chars.isEmpty, !event.modifierFlags.contains(.command) {
+            onInput?(["kind": "type", "text": chars])
+        }
+    }
+}
+
+struct H264DisplayView: NSViewRepresentable {
+    let controller: H264StreamController
+    var mapPoint: ((CGPoint, CGSize) -> CGPoint?)? = nil
+    var onInput: (([String: Any]) -> Void)? = nil
+
+    func makeNSView(context: Context) -> SampleBufferCanvasNSView {
+        let v = SampleBufferCanvasNSView()
+        v.mapPoint = mapPoint
+        v.onInput = onInput
+        controller.attach(layer: v.displayLayer)
+        return v
+    }
+
+    func updateNSView(_ nsView: SampleBufferCanvasNSView, context: Context) {
+        nsView.mapPoint = mapPoint
+        nsView.onInput = onInput
+        controller.attach(layer: nsView.displayLayer)
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: SampleBufferCanvasNSView, context: Context) -> CGSize? {
+        CGSize(width: proposal.width ?? 240, height: proposal.height ?? 150)
+    }
+}
+#endif
 
 @MainActor
 @Observable

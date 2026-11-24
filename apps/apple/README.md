@@ -1,13 +1,29 @@
-# Bot Hub Apple 客户端（iOS / iPadOS）
+# Bot Hub Apple 客户端（iOS / iPadOS / macOS）
 
-原生 SwiftUI 客户端，一个 Xcode 工程同时出 iPhone 与 iPad 两端（macOS 使用桌面端 `Bot Hub.app`），功能与 `apps/mobile` 对齐：多主机连接（HTTP / Tailcat 隧道）、扫码配对、Bot 列表与对话（SSE 实时流）、Bot 详情与记忆、定时任务、设置（Magpie 接管、模型、USER.md、全局记忆）、设备与远程桌面接管。
+原生 SwiftUI 客户端，同一个 Xcode 工程 `apps/apple/BotHub.xcodeproj` 同时提供 iOS / iPadOS（Target：`BotHub`）与 macOS 原生桌面端（Target：`PebbleMac`）：
 
-- 结构与控件用系统原生组件（`NavigationSplitView` / `NavigationStack`、`Form`、`List`、`Picker`、`Toggle`、系统工具栏与 sheet），视觉沿用 `DESIGN.md` Token，详见 `DESIGN.md` 第 9 节。
-- iPhone 为单栏导航；iPad 为侧栏 + 会话 + 详情 inspector 三栏。
-- 连接凭据存 Keychain。
-- 支持 `bothub://connect?link=<地址>` 链接一键连接，地址可带 `#token=...`。
+- **iPhone / iPad（`BotHub`）**：支持多主机连接（HTTP / Tailcat / Tailscale）、扫码配对、Bot 列表与对话（SSE 实时流）、Bot 详情与记忆、定时任务、设置、设备与远程桌面接管；iPhone 为单栏导航，iPad 为侧栏 + 会话 + 详情 inspector 三栏。
+- **macOS 原生端（`PebbleMac`）**：直接复用同一套 SwiftUI 界面与模型层，并通过内置 `bot-hub host-daemon` sidecar 子进程承接本机运行、远程连接（Tailcat / Tailscale / HTTP）、本机节点授权、容灾接管与增量回传、菜单栏常驻与远程桌面独立原生窗口（支持鼠标、滚轮与原生键盘输入透传）。
+- 视觉规范沿用 `DESIGN.md`（macOS 桌面基准正文 `14px`，iOS/iPadOS 移动端 `16px`）。
 
 ## 构建
+
+### macOS 原生应用（`Pebble.app`）
+
+在仓库根目录一键构建原生 macOS App 并打包 `bot-hub`、`agent-desktop`、`agent-browser`：
+
+```bash
+make app
+```
+
+或仅在 Xcode 中选择 Scheme **PebbleMac**（Destination 选 **My Mac**）编译运行；如使用命令行单独构建：
+
+```bash
+cd apps/apple
+xcodebuild -project BotHub.xcodeproj -scheme PebbleMac -destination 'platform=macOS' build
+```
+
+### iOS / iPadOS 客户端（`BotHub.app`）
 
 先在仓库根目录构建 Tailcat 隧道 XCFramework（含 iOS 真机与模拟器切片）：
 

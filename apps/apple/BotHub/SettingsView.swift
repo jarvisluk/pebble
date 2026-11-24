@@ -9,15 +9,50 @@ struct SettingsSidebarView: View {
 
     var body: some View {
         @Bindable var r = router
+        #if os(macOS)
+        VStack(spacing: 0) {
+            HStack {
+                Button {
+                    if router.settingsDirty {
+                        router.requestLeaveSettings = true
+                    } else {
+                        router.leaveSettings()
+                    }
+                } label: {
+                    Label(hub.t("backToChat"), systemImage: "chevron.left")
+                        .font(.system(size: AppFont.secondary, weight: .medium))
+                        .foregroundStyle(p.text2)
+                }
+                .buttonStyle(.borderless)
+                Spacer()
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(p.card)
+            .overlay(alignment: .bottom) {
+                Rectangle().fill(p.s2).frame(height: 1)
+            }
+
+            List(SettingsTab.allCases, selection: $r.settingsTab) { tab in
+                NavigationLink(value: tab) {
+                    tabLabel(tab)
+                }
+                .tag(tab)
+            }
+            .hubColumnList(compact: false, page: p.page)
+            .contentMargins(.top, 6, for: .scrollContent)
+        }
+        .navigationTitle("")
+        #else
         listContent
             .hubColumnList(compact: compact, page: p.page)
-            .listSectionSpacing(12)
+            .hubListSectionSpacing(12)
             .contentMargins(.top, 8, for: .scrollContent)
             .navigationTitle(hub.t("settings"))
-            .navigationBarTitleDisplayMode(.inline)
+            .inlineNavTitle()
             .toolbar {
                 if !compact {
-                    ToolbarItem(placement: .topBarLeading) {
+                    ToolbarItem(placement: .hubLeading) {
                         Button {
                             if router.settingsDirty {
                                 router.requestLeaveSettings = true
@@ -30,6 +65,7 @@ struct SettingsSidebarView: View {
                     }
                 }
             }
+        #endif
     }
 
     @ViewBuilder
@@ -153,6 +189,9 @@ struct SettingsView: View {
             if !saved.isEmpty { Section { StatusText(text: saved, error: false) } }
             switch tab {
             case .general:
+                #if os(macOS)
+                macDesktopHostSection
+                #endif
                 appearanceSection
                 pushNotificationsSection
                 openSourceSection
@@ -188,8 +227,9 @@ struct SettingsView: View {
         }
         .hubForm()
         .navigationTitle(hub.t(tab.titleKey))
-        .navigationBarTitleDisplayMode(.inline)
+        .inlineNavTitle()
         .toolbar {
+            #if os(iOS)
             ToolbarItem(placement: .confirmationAction) {
                 if saving {
                     ProgressView().controlSize(.small)
@@ -197,6 +237,24 @@ struct SettingsView: View {
                     Button(hub.t("save")) { save() }.disabled(!dirty)
                 }
             }
+            #else
+            if tab == .models || tab == .memory || dirty || saving {
+                ToolbarItem(placement: .confirmationAction) {
+                    if saving {
+                        ProgressView().controlSize(.small)
+                    } else if dirty {
+                        Button(hub.t("save")) { save() }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.small)
+                    } else {
+                        Button(hub.t("save")) { save() }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .disabled(true)
+                    }
+                }
+            }
+            #endif
         }
         .alert(hub.t("unsavedTitle"), isPresented: $showUnsavedAlert) {
             Button(hub.t("saveAndLeave")) { save(closeAfter: true) }
@@ -213,11 +271,17 @@ struct SettingsView: View {
                 showUnsavedAlert = true
             }
         }
-        .task {
+        .task(id: tab) {
             _ = try? await hub.loadSettings()
             try? await hub.refreshBots()
-            await loadMem("")
-            await loadPerms()
+            if tab == .memory { await loadMem("") }
+            if tab == .desktop { await loadPerms() }
+            if tab == .remote {
+                async let n: Void? = try? hub.refreshNodes()
+                async let tc: Void? = try? hub.refreshTailcat()
+                async let ht: Void? = try? hub.refreshHostTailscale()
+                _ = await (n, tc, ht)
+            }
         }
         .onAppear {
             sync()
@@ -296,6 +360,20 @@ struct SettingsView: View {
     }
 
     private var hostText: String {
+        #if os(macOS)
+        if hub.managedMode {
+            let label = DesktopHostManager.shared.snapshot.mode == "remote"
+                ? hub.t("macModeRemoteTag")
+                : hub.t("macModeLocalTag")
+            switch hub.connState {
+            case .connecting: return "\(label) · \(hub.t("connectingShort"))"
+            case .unauthorized: return "\(label) · \(hub.t("needsToken"))"
+            case .error: return "\(label) · \(hub.t("connLost"))"
+            case .connected: return hub.online ? label : "\(label) · \(hub.t("reconnecting"))"
+            case .idle: return hub.t("disconnected")
+            }
+        }
+        #endif
         guard let s = hub.activeServer else { return hub.t("disconnected") }
         switch hub.connState {
         case .connecting: return "\(s.label) · \(hub.t("connectingShort"))"
@@ -306,9 +384,69 @@ struct SettingsView: View {
         }
     }
 
+    private var tailcatStatusView: (text: String, color: Color) {
+        guard let t = hub.tailcat else { return (hub.t("tailcatUnknown"), .secondary) }
+        switch t.state {
+        case "ready": return (hub.t("tailcatReady"), p.sageInk)
+        case "connecting": return (hub.t("tailcatConnecting"), p.busy)
+        case "disabled": return (hub.t("tailcatDisabled"), .secondary)
+        default: return ((t.error ?? "").isEmpty ? hub.t("tailcatErr") : t.error!, p.danger)
+        }
+    }
+
+    private var hostTailscaleStatusView: (text: String, color: Color) {
+        guard let t = hub.hostTailscale else { return (hub.t("tailcatUnknown"), .secondary) }
+        switch t.state {
+        case "running": return (t.tailnet ?? hub.t("tailcatReady"), p.sageInk)
+        case "starting": return (hub.t("tsBinding"), p.busy)
+        case "needs_login": return (hub.t("tsNeedsLogin"), p.busy)
+        case "disabled": return (hub.t("tailcatDisabled"), .secondary)
+        default: return ((t.error ?? "").isEmpty ? hub.t("tailcatErr") : t.error!, p.danger)
+        }
+    }
+
+    @ViewBuilder
     private var hostSection: some View {
+        #if os(macOS)
+        let tc = tailcatStatusView
+        let ts = hostTailscaleStatusView
+        Section(hub.t("hostRemoteAccess")) {
+            LabeledContent(hub.t("tunnelState")) {
+                Text(tc.text).foregroundStyle(tc.color)
+            }
+            LabeledContent(hub.t("tsHostStatus")) {
+                Text(ts.text).foregroundStyle(ts.color)
+            }
+            LabeledContent(hub.t("tokenProtect"), value: hub.tailcat?.hasToken == true ? hub.t("tokenEnabled") : hub.t("tokenUnset"))
+            Button { router.sheet = .devices } label: {
+                let n = hub.nodes.filter { $0.connected == true }.count
+                Label(n > 0 ? "\(hub.t("devicesTunnel")) (\(n))" : hub.t("devicesTunnel"), systemImage: "globe")
+            }
+        }
+        Section(hub.t("connectedNodes")) {
+            if hub.nodes.isEmpty {
+                Text(hub.t("noRemoteNodes")).foregroundStyle(.secondary)
+            } else {
+                ForEach(hub.nodes) { node in
+                    let on = node.connected ?? false
+                    HStack(spacing: 10) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(node.name ?? node.id).font(.system(size: AppFont.body, weight: .semibold))
+                            Text("\(node.os ?? "")/\(node.arch ?? "")\((node.hostname ?? "").isEmpty ? "" : " · \(node.hostname!)")")
+                                .font(.system(size: AppFont.caption, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Tag(text: on ? hub.t("online") : hub.t("offline"), bg: on ? p.sage : p.s2, fg: on ? p.sageInk : .secondary)
+                    }
+                }
+            }
+        }
+        #else
         Section(hub.t("hostSection")) {
-            Button { router.sheet = .connect(scan: false) } label: {
+            Button {
+                router.sheet = .connect(scan: false)
+            } label: {
                 HStack(spacing: 8) {
                     Circle().fill(hostColor).frame(width: 8, height: 8)
                     Text(hostText).foregroundStyle(p.text).lineLimit(1)
@@ -324,6 +462,7 @@ struct SettingsView: View {
                 Label(n > 0 ? "\(hub.t("devicesTunnel")) (\(n))" : hub.t("devicesTunnel"), systemImage: "globe")
             }
         }
+        #endif
     }
 
     // MARK: Magpie
@@ -378,7 +517,7 @@ struct SettingsView: View {
             }
             if installed {
                 Section {
-                    let addr = hub.activeServer?.address ?? ""
+                    let addr = hub.activeServer?.address ?? hub.baseURL
                     let local = ["localhost", "127.0.0.1", "[::1]"].contains { addr.contains($0) }
                     if let web = mp?.webUrl, !web.isEmpty, !local, let url = URL(string: web) {
                         Button(hub.t("mpOpenWeb")) { openURL(url) }
@@ -400,10 +539,10 @@ struct SettingsView: View {
         return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(h.title).font(.system(size: 16, weight: .semibold))
+                    Text(h.title).font(.system(size: AppFont.body, weight: .semibold))
                     Text(connected ? "Magpie · \((h.magpie?.model ?? "").isEmpty ? hub.t("mpConnected") : h.magpie!.model!)"
                          : hub.t("mpNative") + ((h.magpie?.nativeModel ?? "").isEmpty ? "" : " · \(h.magpie!.nativeModel!)"))
-                        .font(.system(size: 13)).foregroundStyle(connected ? p.sageInk : .secondary).lineLimit(1)
+                        .font(.system(size: AppFont.secondary)).foregroundStyle(connected ? p.sageInk : .secondary).lineLimit(1)
                 }
                 Spacer()
                 if busy == key { ProgressView().controlSize(.small) }
@@ -457,9 +596,9 @@ struct SettingsView: View {
         return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(h.title).font(.system(size: 16, weight: .semibold))
+                    Text(h.title).font(.system(size: AppFont.body, weight: .semibold))
                     Text(hub.t("mpNative") + ((h.magpie?.nativeModel ?? "").isEmpty ? "" : " · \(h.magpie!.nativeModel!)"))
-                        .font(.system(size: 13)).foregroundStyle(.secondary).lineLimit(1)
+                        .font(.system(size: AppFont.secondary)).foregroundStyle(.secondary).lineLimit(1)
                 }
                 Spacer()
                 if busy == key { ProgressView().controlSize(.small) }
@@ -509,6 +648,27 @@ struct SettingsView: View {
     private var appearanceSection: some View {
         @Bindable var h = hub
         return Section(hub.t("appearance")) {
+            #if os(macOS)
+            LabeledContent(hub.t("appearance")) {
+                Picker("", selection: $h.themePref) {
+                    Text(hub.t("followSystem")).tag("system")
+                    Text(hub.t("themeLight")).tag("light")
+                    Text(hub.t("themeDark")).tag("dark")
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
+            }
+            LabeledContent(hub.t("language")) {
+                Picker("", selection: $h.langPref) {
+                    Text(hub.t("followSystem")).tag("system")
+                    Text("简体中文").tag("zh-CN")
+                    Text("English").tag("en")
+                }
+                .labelsHidden()
+                .fixedSize()
+            }
+            #else
             Picker(hub.t("appearance"), selection: $h.themePref) {
                 Text(hub.t("followSystem")).tag("system")
                 Text(hub.t("themeLight")).tag("light")
@@ -520,31 +680,44 @@ struct SettingsView: View {
                 Text("简体中文").tag("zh-CN")
                 Text("English").tag("en")
             }
+            #endif
         }
     }
 
     private var pushNotificationsSection: some View {
         let pm = PushManager.shared
+        #if os(iOS)
         let la = LiveActivityManager.shared
-        return Section(hub.t("pushSection")) {
+        let title = hub.t("pushSection")
+        #else
+        let title = hub.t("pushSectionMac")
+        #endif
+        return Section(title) {
             HStack {
                 Text(hub.t("pushSystemPerm"))
                 Spacer()
                 switch pm.authStatus {
                 case .authorized, .provisional, .ephemeral:
-                    Text(hub.t("pushGranted")).foregroundStyle(.green)
+                    Text(hub.t("pushGranted")).foregroundStyle(p.sageInk)
                 case .denied:
                     Button(hub.t("pushOpenSettings")) {
+                        #if os(iOS)
                         if let u = URL(string: UIApplication.openSettingsURLString) { openURL(u) }
+                        #elseif os(macOS)
+                        if let u = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension") { openURL(u) }
+                        #endif
                     }
-                    .font(.footnote)
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
                 default:
                     Button(hub.t("pushEnable")) {
                         Task { await pm.requestPermissionAndRegister() }
                     }
-                    .font(.footnote)
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
                 }
             }
+            #if os(iOS)
             HStack {
                 Text(hub.t("pushLiveActivity"))
                 Spacer()
@@ -557,8 +730,61 @@ struct SettingsView: View {
                 Text(pushModeLabel(pm.serverStatus.mode))
                     .foregroundStyle(pm.serverStatus.configured ? Color.green : .secondary)
             }
+            #endif
         }
     }
+
+    #if os(macOS)
+    private var macDesktopHostSection: some View {
+        let host = DesktopHostManager.shared
+        let snap = host.snapshot
+        return Section(hub.t("macHostSection")) {
+            LabeledContent(hub.t("macCurrentMode")) {
+                Text(snap.mode == "remote" ? hub.t("macModeRemoteTag") : hub.t("macModeLocalTag"))
+                    .foregroundStyle(.secondary)
+            }
+            if !snap.dataDir.isEmpty {
+                LabeledContent(hub.t("macDataDir")) {
+                    Text(snap.dataDir)
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
+            if snap.mode == "remote" {
+                Toggle(hub.t("macAllowNode"), isOn: Binding(
+                    get: { snap.allowNode },
+                    set: { next in Task { await host.setLocalNode(enabled: next) } }
+                ))
+                if snap.allowNode {
+                    LabeledContent(hub.t("macNodeStatus")) {
+                        let statusText = snap.nodeConnected ? hub.t("macNodeConnected")
+                            : snap.nodeStatus == "waiting_auth" ? hub.t("macNodeWaiting")
+                            : hub.t("macNodeDisconnected")
+                        Text(statusText)
+                            .foregroundStyle(snap.nodeConnected ? p.sageInk : .secondary)
+                    }
+                }
+                if snap.canFailover {
+                    Button(hub.t("macFailover")) {
+                        Task { await host.failoverToLocal() }
+                    }
+                }
+            } else if snap.canFailback {
+                Button(hub.t("macFailback")) {
+                    Task { await host.failbackToRemote() }
+                }
+            }
+            Button(hub.t("macOpenDataDir")) {
+                host.openDataDir()
+            }
+            Button(hub.t("macSwitchMode")) {
+                Task { await host.resetMode() }
+            }
+        }
+    }
+    #endif
 
     private func pushModeLabel(_ mode: String) -> String {
         switch mode {
@@ -612,6 +838,21 @@ struct SettingsView: View {
 
     private var defaultModelSection: some View {
         Section(hub.t("globalDefaultModel")) {
+            #if os(macOS)
+            LabeledContent(hub.t("defaultHarness")) {
+                Picker("", selection: Binding(
+                    get: { defaultHarness },
+                    set: {
+                        guard $0 != defaultHarness else { return }
+                        defaultHarness = $0; defaultHarnessTouched = true; saved = ""
+                    }
+                )) {
+                    ForEach(harnesses) { Text($0.title).tag($0.id) }
+                }
+                .labelsHidden()
+                .fixedSize()
+            }
+            #else
             Picker(hub.t("defaultHarness"), selection: Binding(
                 get: { defaultHarness },
                 set: {
@@ -621,6 +862,7 @@ struct SettingsView: View {
             )) {
                 ForEach(harnesses) { Text($0.title).tag($0.id) }
             }
+            #endif
             HStack {
                 TextField(hub.t("globalDefaultModel"), text: Binding(
                     get: { defaultModel },
@@ -682,8 +924,8 @@ struct SettingsView: View {
                     HStack(spacing: 10) {
                         BotAvatar(id: b.id, size: 28, index: i, avatar: b.avatar, color: b.color)
                         VStack(alignment: .leading, spacing: 0) {
-                            Text(b.displayName).font(.system(size: 16, weight: .semibold))
-                            Text("@\(b.id)").font(.system(size: 13, design: .monospaced)).foregroundStyle(.secondary)
+                            Text(b.displayName).font(.system(size: AppFont.body, weight: .semibold))
+                            Text("@\(b.id)").font(.system(size: AppFont.caption, design: .monospaced)).foregroundStyle(.secondary)
                         }
                         Spacer()
                         Picker(hub.t("statHarness"), selection: Binding(get: { d.harness }, set: {
@@ -746,12 +988,13 @@ struct SettingsView: View {
                         Button(hub.t("openMagpie")) {
                             run("magpie:open", "opFailed") { try await hub.openMagpie(); return nil }
                         }
-                        .font(.system(size: 13, weight: .medium))
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
                     }
                 }
                 if sem.active != true {
                     Text(hub.t("memSemanticHintOff"))
-                        .font(.system(size: 13))
+                        .font(.system(size: AppFont.secondary))
                         .foregroundStyle(.secondary)
                 }
             }
@@ -767,6 +1010,24 @@ struct SettingsView: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
+            #if os(macOS)
+            LabeledContent(hub.t("memType")) {
+                Picker("", selection: Binding(
+                    get: { memFilterKind },
+                    set: { next in
+                        memFilterKind = next
+                        Task { await loadMem(memQuery, kind: next) }
+                    }
+                )) {
+                    Text(hub.t("memKindAll")).tag("")
+                    ForEach(["fact", "preference", "rule", "reference", "profile", "procedure", "episode"], id: \.self) {
+                        Text($0).tag($0)
+                    }
+                }
+                .labelsHidden()
+                .fixedSize()
+            }
+            #else
             Picker(hub.t("memType"), selection: Binding(
                 get: { memFilterKind },
                 set: { next in
@@ -779,6 +1040,7 @@ struct SettingsView: View {
                     Text($0).tag($0)
                 }
             }
+            #endif
             HStack {
                 TextField(
                     hub.t("search"),
@@ -898,11 +1160,11 @@ struct SettingsView: View {
                     let fg: Color = item.status == "granted" ? p.sageInk : item.status == "denied" ? p.danger : .secondary
                     VStack(alignment: .leading, spacing: 6) {
                         HStack(spacing: 8) {
-                            Text(permText("deskPermName_\(item.id)", item.name)).font(.system(size: 16, weight: .semibold))
+                            Text(permText("deskPermName_\(item.id)", item.name)).font(.system(size: AppFont.body, weight: .semibold))
                             Spacer()
                             Tag(text: stLabel, bg: bg, fg: fg)
                         }
-                        Text(permText("deskPermDesc_\(item.id)", item.description)).font(.system(size: 13)).foregroundStyle(.secondary)
+                        Text(permText("deskPermDesc_\(item.id)", item.description)).font(.system(size: AppFont.secondary)).foregroundStyle(.secondary)
                         if (item.canPrompt == true && item.status != "granted") || item.canOpenSettings == true {
                             HStack(spacing: 8) {
                                 if item.canPrompt == true && item.status != "granted" {
@@ -931,6 +1193,7 @@ struct SettingsView: View {
                 Button { Task { await loadPerms() } } label: {
                     Image(systemName: "arrow.clockwise")
                 }
+                .buttonStyle(.borderless)
                 .disabled(deskPermsLoading)
             }
         } footer: {
@@ -940,14 +1203,26 @@ struct SettingsView: View {
 
     private var remoteSection: some View {
         Section(hub.t("deskWorkerTitle")) {
+            #if os(macOS)
+            LabeledContent(hub.t("deskWorkerHarnessLabel")) {
+                Picker("", selection: Binding(get: { deskHarness }, set: { deskHarness = $0; deskTouched = true })) {
+                    Text(hub.t("deskWorkerFollowBot")).tag("")
+                    ForEach(hub.settings?.harnesses ?? []) { Text($0.title).tag($0.id) }
+                }
+                .labelsHidden()
+                .fixedSize()
+            }
+            #else
             Picker(hub.t("deskWorkerHarnessLabel"), selection: Binding(get: { deskHarness }, set: { deskHarness = $0; deskTouched = true })) {
                 Text(hub.t("deskWorkerFollowBot")).tag("")
                 ForEach(hub.settings?.harnesses ?? []) { Text($0.title).tag($0.id) }
             }
+            #endif
             HStack {
                 TextField(hub.t("deskWorkerModelLabel"), text: Binding(get: { deskModel }, set: { deskModel = $0; deskTouched = true }),
                           prompt: Text(hub.t("deskWorkerModelPh")))
                     .monoInput()
+                    .labelsHidden()
                 Button(hub.t("save")) {
                     run("desk", "saveFailed") {
                         try await hub.setDesktopWorker(harness: deskHarness, model: deskModel)
