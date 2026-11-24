@@ -49,45 +49,25 @@ struct BotHubApp: App {
             }
         }
 
-        WindowGroup(hub.t("remoteDesktop"), id: "desktop", for: DesktopWindowRequest.self) { $req in
-            MacDesktopWindowRootView(request: req ?? DesktopWindowRequest(target: "local"))
-                .frame(minWidth: 720, minHeight: 480)
-                .environment(hub)
-                .environment(router)
-        }
-        .defaultSize(width: 1180, height: 760)
-
         MenuBarExtra {
             MacMenuBarContent()
                 .environment(hub)
                 .environment(host)
         } label: {
             MacMenuBarLabel(appDelegate: appDelegate)
-                .environment(router)
         }
     }
     #endif
 }
 
 #if os(macOS)
-struct DesktopWindowRequest: Codable, Hashable {
-    var target: String
-    var initialTab: StageKind = .desktop
-    var botId: String? = nil
-    var initialPath: String? = nil
-}
-
 private struct MacMenuBarLabel: View {
-    @Environment(Router.self) private var router
-    @Environment(\.openWindow) private var openWindow
     var appDelegate: MacAppDelegate
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         Label("Pebble", systemImage: "bubble.left.and.bubble.right.fill")
             .onAppear {
-                router.onOpenDesktopWindow = { req in
-                    openWindow(id: "desktop", value: req)
-                }
                 appDelegate.onReopenWindow = {
                     openWindow(id: "main")
                 }
@@ -123,6 +103,8 @@ private struct MacWindowRootView: View {
     }
 
     var body: some View {
+        let isMacDesktopStage = router.desktop != nil && router.stageTab == .desktop
+        let effectivePalette = isMacDesktopStage ? Palette(dark: true) : activePalette
         Group {
             if showSetup {
                 MacSetupView()
@@ -130,15 +112,12 @@ private struct MacWindowRootView: View {
                 RootView()
             }
         }
-        .environment(\.palette, activePalette)
-        .tint(activePalette.accent)
+        .environment(\.palette, effectivePalette)
+        .tint(effectivePalette.accent)
         .font(.system(size: AppFont.body))
-        .preferredColorScheme(scheme0)
+        .preferredColorScheme(isMacDesktopStage ? .dark : scheme0)
         .macSeamlessWindowToolbar()
         .onAppear {
-            router.onOpenDesktopWindow = { req in
-                openWindow(id: "desktop", value: req)
-            }
             appDelegate.onReopenWindow = {
                 openWindow(id: "main")
             }
@@ -155,6 +134,7 @@ private struct MacWindowRootView: View {
             } else {
                 hub.disconnectManagedEndpoint()
                 router.closeBot()
+                router.desktop = nil
                 router.sheet = nil
             }
         }
@@ -167,52 +147,6 @@ private struct MacWindowRootView: View {
             if !showSetup && hub.isConnected {
                 router.sheet = .createBot
             }
-        }
-    }
-}
-
-private struct MacDesktopWindowRootView: View {
-    var request: DesktopWindowRequest
-    @Environment(HubStore.self) private var hub
-    @Environment(Router.self) private var router
-    @Environment(\.colorScheme) private var scheme
-    @State private var currentTab: StageKind
-
-    init(request: DesktopWindowRequest) {
-        self.request = request
-        _currentTab = State(initialValue: request.initialTab)
-    }
-
-    private var scheme0: ColorScheme? {
-        hub.themePref == "light" ? .light : hub.themePref == "dark" ? .dark : nil
-    }
-
-    private var activePalette: Palette {
-        let dark = hub.themePref == "dark" || (hub.themePref == "system" && scheme == .dark)
-        return Palette(dark: dark)
-    }
-
-    var body: some View {
-        let isDesktop = currentTab == .desktop
-        let effectivePalette = isDesktop ? Palette(dark: true) : activePalette
-        DesktopView(
-            initialTarget: request.target,
-            initialBotId: request.botId ?? router.selected,
-            initialTab: request.initialTab,
-            initialPath: request.initialPath,
-            onTabChange: { next in
-                if currentTab != next {
-                    currentTab = next
-                }
-            }
-        )
-        .environment(\.palette, effectivePalette)
-        .tint(effectivePalette.accent)
-        .font(.system(size: AppFont.body))
-        .preferredColorScheme(isDesktop ? .dark : scheme0)
-        .macSeamlessWindowToolbar()
-        .onChange(of: request.initialTab) { _, next in
-            currentTab = next
         }
     }
 }
@@ -325,13 +259,11 @@ final class Router {
     var sheet: SheetRoute?
     var detailOpen = false
     var desktop: DesktopPresentation?
+    var stageTab: StageKind = .files
     var inSettings = false
     var settingsTab: SettingsTab? = nil
     var settingsDirty = false
     var requestLeaveSettings = false
-    #if os(macOS)
-    @ObservationIgnored var onOpenDesktopWindow: ((DesktopWindowRequest) -> Void)?
-    #endif
 
     func openBot(_ id: String) {
         inSettings = false
@@ -346,50 +278,43 @@ final class Router {
     }
 
     func openSettings(compact: Bool) {
+        desktop = nil
         if compact {
             detailOpen = false
             inSettings = true
             settingsTab = nil
         } else {
-            withAnimation(.easeInOut(duration: 0.3)) {
-                detailOpen = false
-                inSettings = true
+            detailOpen = false
+            inSettings = true
+            if settingsTab == nil {
                 settingsTab = .general
-                preferredColumn = .sidebar
             }
+            preferredColumn = .sidebar
         }
     }
 
     func leaveSettings() {
-        withAnimation(.easeInOut(duration: 0.3)) {
-            inSettings = false
-            settingsDirty = false
-            requestLeaveSettings = false
-            preferredColumn = selected == nil ? .sidebar : .detail
-        }
+        inSettings = false
+        settingsDirty = false
+        requestLeaveSettings = false
+        preferredColumn = selected == nil ? .sidebar : .detail
     }
 
     func openDesktop(_ target: String = "local") {
         let resolved = target.trimmingCharacters(in: .whitespacesAndNewlines)
         let dest = resolved.isEmpty ? "local" : resolved
         sheet = nil
-        #if os(macOS)
-        if let onOpenDesktopWindow {
-            onOpenDesktopWindow(DesktopWindowRequest(target: dest, initialTab: .desktop, botId: selected))
-            return
-        }
-        #endif
+        inSettings = false
+        detailOpen = false
+        stageTab = .desktop
         desktop = DesktopPresentation(target: dest, initialTab: .desktop, botId: selected)
     }
 
     func openFiles(botId: String, path: String? = nil) {
         sheet = nil
-        #if os(macOS)
-        if let onOpenDesktopWindow {
-            onOpenDesktopWindow(DesktopWindowRequest(target: "local", initialTab: .files, botId: botId, initialPath: path))
-            return
-        }
-        #endif
+        inSettings = false
+        detailOpen = false
+        stageTab = .files
         desktop = DesktopPresentation(target: "local", initialTab: .files, botId: botId, initialPath: path)
     }
 
@@ -400,13 +325,16 @@ final class Router {
         }
         let kind = StageKind(rawValue: ev.kind) ?? .files
         sheet = nil
-        #if os(macOS)
-        if let onOpenDesktopWindow {
-            onOpenDesktopWindow(DesktopWindowRequest(target: "local", initialTab: kind, botId: targetBot, initialPath: ev.path))
-            return
-        }
-        #endif
+        inSettings = false
+        detailOpen = false
+        stageTab = kind
         desktop = DesktopPresentation(target: "local", initialTab: kind, botId: targetBot, initialPath: ev.path)
+    }
+
+    func closeStage() {
+        withAnimation(.easeInOut(duration: 0.22)) {
+            desktop = nil
+        }
     }
 }
 
@@ -434,8 +362,10 @@ struct RootView: View {
         let palette = Palette(dark: dark)
         #if os(macOS)
         let compact = false
+        let macStage = true
         #else
         let compact = hsc == .compact
+        let macStage = false
         #endif
         @Bindable var r = router
         Group {
@@ -461,38 +391,52 @@ struct RootView: View {
                     ConnectView(startScan: false, isGate: true)
                 }
                 #endif
-            } else if router.inSettings && !compact {
-                NavigationSplitView(preferredCompactColumn: $r.preferredColumn) {
-                    SettingsSidebarView(compact: compact)
-                        .navigationSplitViewColumnWidth(min: 280, ideal: 320, max: 380)
-                } detail: {
-                    NavigationStack {
-                        SettingsView(tab: router.settingsTab ?? .general)
-                    }
-                }
-                #if os(macOS)
-                .macSeamlessWindowToolbar()
-                #endif
+            } else if macStage, let pres = router.desktop {
+                DesktopView(
+                    initialTarget: pres.target,
+                    initialBotId: pres.botId ?? router.selected,
+                    initialTab: pres.initialTab,
+                    initialPath: pres.initialPath,
+                    onTabChange: { next in
+                        if router.stageTab != next { router.stageTab = next }
+                    },
+                    onClose: { router.closeStage() }
+                )
+                .id(pres.id)
                 .transition(.opacity)
             } else {
                 NavigationSplitView(preferredCompactColumn: $r.preferredColumn) {
-                    BotListView(compact: compact)
-                        #if os(macOS)
-                        .navigationSplitViewColumnWidth(min: 220, ideal: 250, max: 310)
-                        #else
-                        .navigationSplitViewColumnWidth(min: 210, ideal: 240, max: 300)
-                        #endif
+                    Group {
+                        if router.inSettings && !compact {
+                            SettingsSidebarView(compact: compact)
+                        } else {
+                            BotListView(compact: compact)
+                        }
+                    }
+                    .navigationSplitViewColumnWidth(min: 260, ideal: 300, max: 400)
                 } detail: {
                     NavigationStack {
-                        if let id = router.selected, hub.bots.contains(where: { $0.id == id }) {
+                        if router.inSettings && !compact {
+                            SettingsView(tab: router.settingsTab ?? .general)
+                        } else if let id = router.selected, hub.bots.contains(where: { $0.id == id }) {
                             ChatView(botId: id)
                                 .id(id)
                                 .transition(.opacity)
                         } else {
-                            ContentUnavailableView(hub.isConnected ? hub.t("selectBotHint") : hub.t("connectHost"),
-                                                   systemImage: "bubble.left.and.bubble.right")
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                .background(palette.page.ignoresSafeArea())
+                            VStack(spacing: 8) {
+                                Image(systemName: "bubble.left.and.bubble.right")
+                                    .font(.system(size: 28))
+                                    .foregroundStyle(palette.mute)
+                                Text(hub.isConnected ? hub.t("selectBotHint") : hub.t("connectHost"))
+                                    .font(.system(size: AppFont.title, weight: .semibold))
+                                    .foregroundStyle(palette.text)
+                                    .multilineTextAlignment(.center)
+                            }
+                            .padding(24)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .background(palette.page.ignoresSafeArea())
+                            .navigationTitle("")
+                            .inlineNavTitle()
                         }
                     }
                     .animation(.easeInOut(duration: 0.2), value: router.selected)
@@ -500,7 +444,6 @@ struct RootView: View {
                 #if os(macOS)
                 .macSeamlessWindowToolbar()
                 #endif
-                .transition(.opacity)
                 .inspector(isPresented: $r.detailOpen) {
                     if r.detailOpen, let id = router.selected, hub.bots.contains(where: { $0.id == id }) {
                         #if os(iOS)

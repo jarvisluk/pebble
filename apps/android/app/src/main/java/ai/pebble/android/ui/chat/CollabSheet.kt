@@ -36,6 +36,7 @@ import ai.pebble.android.data.ChatMessage
 import ai.pebble.android.data.MessageMedia
 import ai.pebble.android.data.PebbleStore
 import ai.pebble.android.ui.theme.BotAvatar
+import ai.pebble.android.ui.theme.PebbleFont
 import ai.pebble.android.ui.theme.LocalPalette
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -107,7 +108,7 @@ fun CollabSheetView(
                         )
                         Text(
                             text = store.t("collabTitle", mapOf("bot" to botName, "peer" to peerName)),
-                            fontSize = 17.sp,
+                            fontSize = PebbleFont.title,
                             fontWeight = FontWeight.Bold,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -133,7 +134,7 @@ fun CollabSheetView(
                     Text(
                         text = store.t("collabEmpty"),
                         color = p.mute,
-                        fontSize = 15.sp,
+                        fontSize = PebbleFont.body,
                         modifier = Modifier.align(Alignment.Center),
                     )
                 }
@@ -171,7 +172,7 @@ fun CollabSheetView(
                                         text = if (isOut) store.t("delegateTo", mapOf("peer" to peerName))
                                         else store.t("fromPeer", mapOf("peer" to peerName)),
                                         color = pal.collabInk,
-                                        fontSize = 12.sp,
+                                        fontSize = PebbleFont.caption,
                                         fontWeight = FontWeight.SemiBold,
                                     )
                                     if (isOut) {

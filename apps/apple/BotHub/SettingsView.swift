@@ -226,7 +226,7 @@ struct SettingsView: View {
                 } header: {
                     Text(hub.t("globalSharedMem"))
                 } footer: {
-                    Text("_shared/USER.md").font(.system(size: 13, design: .monospaced))
+                    Text("_shared/USER.md").font(.system(size: AppFont.secondary, design: .monospaced))
                 }
                 memorySection
             case .desktop:
@@ -240,7 +240,6 @@ struct SettingsView: View {
         .navigationTitle(hub.t(tab.titleKey))
         .inlineNavTitle()
         .toolbar {
-            #if os(iOS)
             ToolbarItem(placement: .confirmationAction) {
                 if saving {
                     ProgressView().controlSize(.small)
@@ -248,24 +247,6 @@ struct SettingsView: View {
                     Button(hub.t("save")) { save() }.disabled(!dirty)
                 }
             }
-            #else
-            if tab == .models || tab == .memory || dirty || saving {
-                ToolbarItem(placement: .confirmationAction) {
-                    if saving {
-                        ProgressView().controlSize(.small)
-                    } else if dirty {
-                        Button(hub.t("save")) { save() }
-                            .buttonStyle(.borderedProminent)
-                            .controlSize(.small)
-                    } else {
-                        Button(hub.t("save")) { save() }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                            .disabled(true)
-                    }
-                }
-            }
-            #endif
         }
         .alert(hub.t("unsavedTitle"), isPresented: $showUnsavedAlert) {
             Button(hub.t("saveAndLeave")) { save(closeAfter: true) }
@@ -659,27 +640,6 @@ struct SettingsView: View {
     private var appearanceSection: some View {
         @Bindable var h = hub
         return Section(hub.t("appearance")) {
-            #if os(macOS)
-            LabeledContent(hub.t("appearance")) {
-                Picker("", selection: $h.themePref) {
-                    Text(hub.t("followSystem")).tag("system")
-                    Text(hub.t("themeLight")).tag("light")
-                    Text(hub.t("themeDark")).tag("dark")
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .fixedSize()
-            }
-            LabeledContent(hub.t("language")) {
-                Picker("", selection: $h.langPref) {
-                    Text(hub.t("followSystem")).tag("system")
-                    Text("简体中文").tag("zh-CN")
-                    Text("English").tag("en")
-                }
-                .labelsHidden()
-                .fixedSize()
-            }
-            #else
             Picker(hub.t("appearance"), selection: $h.themePref) {
                 Text(hub.t("followSystem")).tag("system")
                 Text(hub.t("themeLight")).tag("light")
@@ -691,7 +651,6 @@ struct SettingsView: View {
                 Text("简体中文").tag("zh-CN")
                 Text("English").tag("en")
             }
-            #endif
         }
     }
 
@@ -757,7 +716,7 @@ struct SettingsView: View {
             if !snap.dataDir.isEmpty {
                 LabeledContent(hub.t("macDataDir")) {
                     Text(snap.dataDir)
-                        .font(.system(size: 12, design: .monospaced))
+                        .font(.system(size: AppFont.caption, design: .monospaced))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.middle)
@@ -808,7 +767,7 @@ struct SettingsView: View {
     private var openSourceSection: some View {
         Section(hub.t("openSourceTitle")) {
             Text(hub.t("openSourceDesc"))
-                .font(.system(size: 14))
+                .font(.system(size: AppFont.secondary))
                 .foregroundStyle(p.text2)
             Link(destination: URL(string: "https://github.com/jarvisluk/bot-hub")!) {
                 Label(hub.t("openSourceLinkBtn"), systemImage: "star")
@@ -849,21 +808,6 @@ struct SettingsView: View {
 
     private var defaultModelSection: some View {
         Section(hub.t("globalDefaultModel")) {
-            #if os(macOS)
-            LabeledContent(hub.t("defaultHarness")) {
-                Picker("", selection: Binding(
-                    get: { defaultHarness },
-                    set: {
-                        guard $0 != defaultHarness else { return }
-                        defaultHarness = $0; defaultHarnessTouched = true; saved = ""
-                    }
-                )) {
-                    ForEach(harnesses) { Text($0.title).tag($0.id) }
-                }
-                .labelsHidden()
-                .fixedSize()
-            }
-            #else
             Picker(hub.t("defaultHarness"), selection: Binding(
                 get: { defaultHarness },
                 set: {
@@ -873,7 +817,6 @@ struct SettingsView: View {
             )) {
                 ForEach(harnesses) { Text($0.title).tag($0.id) }
             }
-            #endif
             HStack {
                 TextField(hub.t("globalDefaultModel"), text: Binding(
                     get: { defaultModel },
@@ -1021,24 +964,6 @@ struct SettingsView: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            #if os(macOS)
-            LabeledContent(hub.t("memType")) {
-                Picker("", selection: Binding(
-                    get: { memFilterKind },
-                    set: { next in
-                        memFilterKind = next
-                        Task { await loadMem(memQuery, kind: next) }
-                    }
-                )) {
-                    Text(hub.t("memKindAll")).tag("")
-                    ForEach(["fact", "preference", "rule", "reference", "profile", "procedure", "episode"], id: \.self) {
-                        Text($0).tag($0)
-                    }
-                }
-                .labelsHidden()
-                .fixedSize()
-            }
-            #else
             Picker(hub.t("memType"), selection: Binding(
                 get: { memFilterKind },
                 set: { next in
@@ -1051,7 +976,6 @@ struct SettingsView: View {
                     Text($0).tag($0)
                 }
             }
-            #endif
             HStack {
                 TextField(
                     hub.t("search"),
@@ -1214,21 +1138,10 @@ struct SettingsView: View {
 
     private var remoteSection: some View {
         Section(hub.t("deskWorkerTitle")) {
-            #if os(macOS)
-            LabeledContent(hub.t("deskWorkerHarnessLabel")) {
-                Picker("", selection: Binding(get: { deskHarness }, set: { deskHarness = $0; deskTouched = true })) {
-                    Text(hub.t("deskWorkerFollowBot")).tag("")
-                    ForEach(hub.settings?.harnesses ?? []) { Text($0.title).tag($0.id) }
-                }
-                .labelsHidden()
-                .fixedSize()
-            }
-            #else
             Picker(hub.t("deskWorkerHarnessLabel"), selection: Binding(get: { deskHarness }, set: { deskHarness = $0; deskTouched = true })) {
                 Text(hub.t("deskWorkerFollowBot")).tag("")
                 ForEach(hub.settings?.harnesses ?? []) { Text($0.title).tag($0.id) }
             }
-            #endif
             HStack {
                 TextField(hub.t("deskWorkerModelLabel"), text: Binding(get: { deskModel }, set: { deskModel = $0; deskTouched = true }),
                           prompt: Text(hub.t("deskWorkerModelPh")))

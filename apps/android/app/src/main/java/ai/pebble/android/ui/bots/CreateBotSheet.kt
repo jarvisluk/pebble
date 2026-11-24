@@ -51,6 +51,7 @@ import ai.pebble.android.data.PebbleStore
 import ai.pebble.android.data.errText
 import ai.pebble.android.data.resolveDefaultModel
 import ai.pebble.android.ui.theme.BotAppearancePicker
+import ai.pebble.android.ui.theme.PebbleFont
 import ai.pebble.android.ui.theme.BotAvatar
 import ai.pebble.android.ui.theme.LocalPalette
 import ai.pebble.android.ui.theme.MonoFont
@@ -174,14 +175,14 @@ fun CreateBotSheet(
                     }
                 },
                 title = {
-                    Text(store.t("newBot"), fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                    Text(store.t("newBot"), fontSize = PebbleFont.title, fontWeight = FontWeight.Bold)
                 },
                 actions = {
                     if (submitting) {
                         CircularProgressIndicator(modifier = Modifier.padding(end = 16.dp).size(20.dp), strokeWidth = 2.dp, color = p.accent)
                     } else {
                         TextButton(onClick = { create() }) {
-                            Text(store.t("create"), color = p.accent, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                            Text(store.t("create"), color = p.accent, fontSize = PebbleFont.body, fontWeight = FontWeight.SemiBold)
                         }
                     }
                 },
@@ -223,7 +224,7 @@ fun CreateBotSheet(
                                 name = it
                                 if (!idTouched) botId = slug(it)
                             },
-                            label = { Text(store.t("botName"), fontSize = 13.sp) },
+                            label = { Text(store.t("botName"), fontSize = PebbleFont.secondary) },
                             placeholder = { Text(store.t("botNameExamplePh")) },
                             singleLine = true,
                             shape = PebbleDimens.rowShape,
@@ -236,10 +237,10 @@ fun CreateBotSheet(
                                 idTouched = true
                                 botId = it
                             },
-                            label = { Text("ID", fontSize = 13.sp) },
+                            label = { Text("ID", fontSize = PebbleFont.secondary) },
                             placeholder = { Text(store.t("botIdPh"), fontFamily = MonoFont) },
                             singleLine = true,
-                            textStyle = TextStyle(fontFamily = MonoFont, fontSize = 15.sp),
+                            textStyle = TextStyle(fontFamily = MonoFont, fontSize = PebbleFont.body),
                             shape = PebbleDimens.rowShape,
                             colors = pebbleFieldColors(),
                             modifier = Modifier.fillMaxWidth(),
@@ -247,7 +248,7 @@ fun CreateBotSheet(
                         OutlinedTextField(
                             value = desc,
                             onValueChange = { desc = it },
-                            label = { Text(store.t("descOptional"), fontSize = 13.sp) },
+                            label = { Text(store.t("descOptional"), fontSize = PebbleFont.secondary) },
                             placeholder = { Text(store.t("botDescCreatePh")) },
                             singleLine = true,
                             shape = PebbleDimens.rowShape,
@@ -284,11 +285,11 @@ fun CreateBotSheet(
                                     .padding(horizontal = 4.dp, vertical = 10.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Text(store.t("harnessBackend"), color = p.text2, fontSize = 15.sp, modifier = Modifier.weight(1f))
+                                Text(store.t("harnessBackend"), color = p.text2, fontSize = PebbleFont.body, modifier = Modifier.weight(1f))
                                 Text(
                                     text = harnesses.firstOrNull { it.id == harness }?.title ?: harness,
                                     color = p.text,
-                                    fontSize = 15.sp,
+                                    fontSize = PebbleFont.body,
                                     fontWeight = FontWeight.Medium,
                                 )
                                 Icon(Icons.Rounded.ArrowDropDown, contentDescription = null, tint = p.mute)
@@ -319,10 +320,10 @@ fun CreateBotSheet(
                             OutlinedTextField(
                                 value = model,
                                 onValueChange = { model = it },
-                                label = { Text(store.t("modelOptional"), fontSize = 13.sp) },
+                                label = { Text(store.t("modelOptional"), fontSize = PebbleFont.secondary) },
                                 placeholder = { Text(ph.ifEmpty { store.t("inheritDefaultPh") }, fontFamily = MonoFont) },
                                 singleLine = true,
-                                textStyle = TextStyle(fontFamily = MonoFont, fontSize = 15.sp),
+                                textStyle = TextStyle(fontFamily = MonoFont, fontSize = PebbleFont.body),
                                 shape = PebbleDimens.rowShape,
                                 colors = pebbleFieldColors(),
                                 modifier = Modifier.weight(1f),
@@ -355,7 +356,7 @@ fun CreateBotSheet(
                                     } else {
                                         cands.take(40).forEach { m ->
                                             DropdownMenuItem(
-                                                text = { Text(m, fontFamily = MonoFont, fontSize = 13.sp, color = p.text) },
+                                                text = { Text(m, fontFamily = MonoFont, fontSize = PebbleFont.secondary, color = p.text) },
                                                 onClick = {
                                                     model = m
                                                     modelMenuOpen = false

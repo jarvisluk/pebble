@@ -38,6 +38,7 @@ import ai.pebble.android.data.asBoolValue
 import ai.pebble.android.data.asDisplayString
 import ai.pebble.android.data.asStringList
 import ai.pebble.android.ui.theme.BotAccent
+import ai.pebble.android.ui.theme.PebbleFont
 import ai.pebble.android.ui.theme.LocalPalette
 import ai.pebble.android.ui.theme.PebbleDimens
 import ai.pebble.android.ui.theme.TagPill
@@ -140,7 +141,7 @@ fun QuestionCardView(
                 Text(
                     text = question.title?.takeIf { it.isNotEmpty() } ?: store.t("questionTitle"),
                     color = p.text,
-                    fontSize = 16.sp,
+                    fontSize = PebbleFont.cardTitle,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.weight(1f),
                 )
@@ -226,18 +227,18 @@ private fun QuestionFieldItem(
                     Text(
                         text = field.title,
                         color = p.text,
-                        fontSize = 15.sp,
+                        fontSize = PebbleFont.body,
                         fontWeight = FontWeight.SemiBold,
                     )
                 }
                 Spacer(Modifier.weight(1f))
                 if (isMulti) {
-                    Text(store.t("questionMultiHint"), color = p.mute, fontSize = 12.sp)
+                    Text(store.t("questionMultiHint"), color = p.mute, fontSize = PebbleFont.caption)
                 }
             }
         }
         if (!field.description.isNullOrEmpty()) {
-            Text(field.description, color = p.text2, fontSize = 14.sp)
+            Text(field.description, color = p.text2, fontSize = PebbleFont.secondary)
         }
 
         when {
@@ -262,7 +263,7 @@ private fun QuestionFieldItem(
                                 .padding(vertical = 10.dp),
                             horizontalAlignment = Alignment.CenterHorizontally,
                         ) {
-                            Text(label, color = p.text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                            Text(label, color = p.text, fontSize = PebbleFont.body, fontWeight = FontWeight.SemiBold)
                         }
                     }
                 }
@@ -301,11 +302,11 @@ private fun QuestionFieldItem(
                             Text(
                                 text = opt.label?.takeIf { it.isNotEmpty() } ?: opt.value,
                                 color = p.text,
-                                fontSize = 15.sp,
+                                fontSize = PebbleFont.body,
                                 fontWeight = FontWeight.SemiBold,
                             )
                             if (!opt.description.isNullOrEmpty()) {
-                                Text(opt.description, color = p.text2, fontSize = 12.sp)
+                                Text(opt.description, color = p.text2, fontSize = PebbleFont.caption)
                             }
                         }
                     }

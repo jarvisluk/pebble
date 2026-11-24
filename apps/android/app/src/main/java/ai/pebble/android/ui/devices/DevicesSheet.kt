@@ -41,6 +41,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ai.pebble.android.data.PebbleStore
 import ai.pebble.android.ui.theme.CardDivider
+import ai.pebble.android.ui.theme.PebbleFont
 import ai.pebble.android.ui.theme.LocalPalette
 import ai.pebble.android.ui.theme.MonoFont
 import ai.pebble.android.ui.theme.SectionCard
@@ -121,7 +122,7 @@ fun DevicesSheet(
                     }
                 },
                 title = {
-                    Text(store.t("devicesTunnel"), fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                    Text(store.t("devicesTunnel"), fontSize = PebbleFont.title, fontWeight = FontWeight.Bold)
                 },
             )
         },
@@ -164,7 +165,7 @@ fun DevicesSheet(
                                     Text(
                                         text = active.label,
                                         color = p.text,
-                                        fontSize = 15.sp,
+                                        fontSize = PebbleFont.body,
                                         fontWeight = FontWeight.Medium,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
@@ -173,7 +174,7 @@ fun DevicesSheet(
                                     Text(
                                         text = active.address,
                                         color = p.text2,
-                                        fontSize = 13.sp,
+                                        fontSize = PebbleFont.secondary,
                                         fontFamily = MonoFont,
                                         maxLines = 1,
                                         overflow = TextOverflow.MiddleEllipsis,
@@ -198,22 +199,22 @@ fun DevicesSheet(
                                     )
                                 }
                             } else {
-                                Text(store.t("notConnectedHost"), color = p.mute, fontSize = 15.sp)
+                                Text(store.t("notConnectedHost"), color = p.mute, fontSize = PebbleFont.body)
                             }
                             CardDivider()
                             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                Text(store.t("tsMobileStatus"), color = p.text2, fontSize = 15.sp, modifier = Modifier.weight(1f))
+                                Text(store.t("tsMobileStatus"), color = p.text2, fontSize = PebbleFont.body, modifier = Modifier.weight(1f))
                                 Text(
                                     text = mobileTsText,
                                     color = if (store.mobileTailscale?.state == "running") p.sageInk else p.text2,
-                                    fontSize = 15.sp,
+                                    fontSize = PebbleFont.body,
                                 )
                             }
                             CardDivider()
                             Text(
                                 text = store.t("manageConn"),
                                 color = p.accent,
-                                fontSize = 15.sp,
+                                fontSize = PebbleFont.body,
                                 fontWeight = FontWeight.Medium,
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -225,7 +226,7 @@ fun DevicesSheet(
                                 Text(
                                     text = store.t("openHostDesktop"),
                                     color = p.accent,
-                                    fontSize = 15.sp,
+                                    fontSize = PebbleFont.body,
                                     fontWeight = FontWeight.Medium,
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -243,31 +244,31 @@ fun DevicesSheet(
                             verticalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
                             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                Text(store.t("tunnelState"), color = p.text2, fontSize = 15.sp, modifier = Modifier.weight(1f))
+                                Text(store.t("tunnelState"), color = p.text2, fontSize = PebbleFont.body, modifier = Modifier.weight(1f))
                                 val tcColor = when (store.tailcat?.state) {
                                     "ready" -> p.sageInk
                                     "error" -> p.danger
                                     else -> p.text2
                                 }
-                                Text(tailcatText, color = tcColor, fontSize = 15.sp)
+                                Text(tailcatText, color = tcColor, fontSize = PebbleFont.body)
                             }
                             CardDivider()
                             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                Text(store.t("tsHostStatus"), color = p.text2, fontSize = 15.sp, modifier = Modifier.weight(1f))
+                                Text(store.t("tsHostStatus"), color = p.text2, fontSize = PebbleFont.body, modifier = Modifier.weight(1f))
                                 val hColor = when (store.hostTailscale?.state) {
                                     "running" -> p.sageInk
                                     "error" -> p.danger
                                     else -> p.text2
                                 }
-                                Text(hostTsText, color = hColor, fontSize = 15.sp)
+                                Text(hostTsText, color = hColor, fontSize = PebbleFont.body)
                             }
                             CardDivider()
                             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                Text(store.t("tokenProtect"), color = p.text2, fontSize = 15.sp, modifier = Modifier.weight(1f))
+                                Text(store.t("tokenProtect"), color = p.text2, fontSize = PebbleFont.body, modifier = Modifier.weight(1f))
                                 Text(
                                     text = if (store.tailcat?.hasToken == true) store.t("tokenEnabled") else store.t("tokenUnset"),
                                     color = p.text,
-                                    fontSize = 15.sp,
+                                    fontSize = PebbleFont.body,
                                 )
                             }
                         }
@@ -280,7 +281,7 @@ fun DevicesSheet(
                             verticalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
                             if (store.nodes.isEmpty()) {
-                                Text(store.t("noRemoteNodes"), color = p.text2, fontSize = 14.sp)
+                                Text(store.t("noRemoteNodes"), color = p.text2, fontSize = PebbleFont.secondary)
                             } else {
                                 val labels = mapOf(
                                     "files" to store.t("permFiles"),
@@ -293,7 +294,7 @@ fun DevicesSheet(
                                     val perms = node.permissions.orEmpty()
                                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                            Text(node.name ?: node.id, color = p.text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                                            Text(node.name ?: node.id, color = p.text, fontSize = PebbleFont.cardTitle, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                                             TagPill(
                                                 text = store.t(if (on) "online" else "offline"),
                                                 bg = if (on) p.sage else p.s2,
@@ -301,7 +302,7 @@ fun DevicesSheet(
                                             )
                                         }
                                         val host = node.hostname?.takeIf { it.isNotEmpty() }?.let { " · $it" }.orEmpty()
-                                        Text("${node.os.orEmpty()}/${node.arch.orEmpty()}$host", color = p.text2, fontSize = 13.sp, fontFamily = MonoFont)
+                                        Text("${node.os.orEmpty()}/${node.arch.orEmpty()}$host", color = p.text2, fontSize = PebbleFont.secondary, fontFamily = MonoFont)
                                         if (perms.isNotEmpty()) {
                                             Row(
                                                 modifier = Modifier.fillMaxWidth(),
@@ -317,7 +318,7 @@ fun DevicesSheet(
                                                         onClick = { onOpenDesktop(node.id) },
                                                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
                                                     ) {
-                                                        Text(store.t("openDesktop"), fontSize = 13.sp, color = p.text)
+                                                        Text(store.t("openDesktop"), fontSize = PebbleFont.secondary, color = p.text)
                                                     }
                                                 }
                                             }

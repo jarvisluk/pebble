@@ -71,6 +71,7 @@ import ai.pebble.android.data.PebbleStore
 import ai.pebble.android.data.formatShortTime
 import ai.pebble.android.data.plainPreview
 import ai.pebble.android.ui.theme.BotAvatar
+import ai.pebble.android.ui.theme.PebbleFont
 import ai.pebble.android.ui.theme.ConfirmAlertDialog
 import ai.pebble.android.ui.theme.ConfirmItem
 import ai.pebble.android.ui.theme.LocalPalette
@@ -228,13 +229,13 @@ fun BotListScreen(
                         Icon(Icons.Rounded.Search, contentDescription = null, tint = p.mute, modifier = Modifier.size(17.dp))
                         Box(modifier = Modifier.weight(1f)) {
                             if (query.isEmpty()) {
-                                Text(store.t("searchBot"), color = p.mute, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(store.t("searchBot"), color = p.mute, fontSize = PebbleFont.secondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
                             BasicTextField(
                                 value = query,
                                 onValueChange = { query = it },
                                 singleLine = true,
-                                textStyle = TextStyle(color = p.text, fontSize = 14.sp),
+                                textStyle = TextStyle(color = p.text, fontSize = PebbleFont.secondary),
                                 cursorBrush = SolidColor(p.accent),
                                 modifier = Modifier.fillMaxWidth(),
                             )
@@ -332,13 +333,13 @@ fun BotListScreen(
                                 Icon(Icons.Rounded.Search, contentDescription = null, tint = p.mute, modifier = Modifier.size(18.dp))
                                 Box(modifier = Modifier.weight(1f)) {
                                     if (query.isEmpty()) {
-                                        Text(store.t("searchBot"), color = p.mute, fontSize = 15.sp)
+                                        Text(store.t("searchBot"), color = p.mute, fontSize = PebbleFont.body)
                                     }
                                     BasicTextField(
                                         value = query,
                                         onValueChange = { query = it },
                                         singleLine = true,
-                                        textStyle = TextStyle(color = p.text, fontSize = 15.sp),
+                                        textStyle = TextStyle(color = p.text, fontSize = PebbleFont.body),
                                         cursorBrush = SolidColor(p.accent),
                                         modifier = Modifier.fillMaxWidth(),
                                     )
@@ -382,7 +383,7 @@ fun BotListScreen(
                                         mapOf("bot" to (to.botName ?: to.botId ?: "Bot"), "reason" to to.reason.orEmpty()),
                                     ),
                                     color = p.pinkInk,
-                                    fontSize = 14.sp,
+                                    fontSize = PebbleFont.secondary,
                                     fontWeight = FontWeight.Medium,
                                     maxLines = 2,
                                     overflow = TextOverflow.Ellipsis,
@@ -392,7 +393,7 @@ fun BotListScreen(
                                     onClick = { onOpenDesktop(to.target ?: "local") },
                                     contentPadding = PaddingValues(horizontal = 8.dp),
                                 ) {
-                                    Text(store.t("handleAction"), color = p.pinkInk, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                                    Text(store.t("handleAction"), color = p.pinkInk, fontSize = PebbleFont.secondary, fontWeight = FontWeight.SemiBold)
                                 }
                             }
                         }
@@ -405,7 +406,7 @@ fun BotListScreen(
                         Text(
                             text = if (query.isEmpty()) store.t("noBotsYet") else store.t("noMatchedBots"),
                             color = p.mute,
-                            fontSize = 15.sp,
+                            fontSize = PebbleFont.body,
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 20.dp),
                         )
                     }
@@ -487,7 +488,7 @@ fun BotListScreen(
                     horizontalArrangement = Arrangement.spacedBy(5.dp),
                 ) {
                     Icon(Icons.Rounded.Add, contentDescription = null, tint = p.text, modifier = Modifier.size(17.dp))
-                    Text(store.t("newBot"), color = p.text, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                    Text(store.t("newBot"), color = p.text, fontSize = PebbleFont.secondary, fontWeight = FontWeight.Medium)
                 }
                 Spacer(Modifier.weight(1f))
                 Row(
@@ -499,7 +500,7 @@ fun BotListScreen(
                     horizontalArrangement = Arrangement.spacedBy(5.dp),
                 ) {
                     Icon(Icons.Rounded.Settings, contentDescription = null, tint = p.text2, modifier = Modifier.size(17.dp))
-                    Text(store.t("settings"), color = p.text2, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                    Text(store.t("settings"), color = p.text2, fontSize = PebbleFont.secondary, fontWeight = FontWeight.Medium)
                 }
             }
         }
@@ -581,7 +582,7 @@ private fun BotListRow(
                         Text(
                             text = bot.displayName,
                             color = p.text,
-                            fontSize = 16.sp,
+                            fontSize = PebbleFont.body,
                             fontWeight = FontWeight.SemiBold,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -599,7 +600,7 @@ private fun BotListRow(
                     Text(
                         text = formatShortTime(lastMsg?.createdAt),
                         color = p.mute,
-                        fontSize = 12.sp,
+                        fontSize = PebbleFont.caption,
                         maxLines = 1,
                     )
                 }
@@ -612,7 +613,7 @@ private fun BotListRow(
                     Text(
                         text = preview,
                         color = if (bot.isBusy) p.busy else p.text2,
-                        fontSize = 14.sp,
+                        fontSize = PebbleFont.secondary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f),
@@ -628,7 +629,7 @@ private fun BotListRow(
                             Text(
                                 text = "$unreadCount",
                                 color = p.lilacInk,
-                                fontSize = 12.sp,
+                                fontSize = PebbleFont.caption,
                                 fontWeight = FontWeight.Bold,
                             )
                         }

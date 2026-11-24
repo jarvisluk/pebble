@@ -123,7 +123,7 @@ struct BotListView: View {
                 #if os(macOS)
                 .frame(height: 28)
                 #else
-                .frame(height: 36)
+                .frame(height: 34)
                 #endif
             Menu {
                 Picker(hub.t("sortBots"), selection: $sortModeRaw) {
@@ -247,8 +247,7 @@ struct BotListView: View {
         #if os(iOS)
         if compact {
             NativeSearchBar(text: $query, placeholder: hub.t("searchBot"))
-                .frame(height: 36)
-                .padding(.horizontal, -8)
+                .frame(height: 34)
                 .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
@@ -325,7 +324,7 @@ struct BotListView: View {
         Section {
             VStack(alignment: .leading, spacing: 8) {
                 Label(hub.t("takeoverBanner", ["bot": to.botName ?? to.botId ?? "Bot", "reason": to.reason ?? ""]), systemImage: "hand.raised.fill")
-                    .font(.system(size: 15)).foregroundStyle(p.pinkInk)
+                    .font(.system(size: AppFont.body)).foregroundStyle(p.pinkInk)
                 HStack {
                     Button(hub.t("desktopShort")) { router.openDesktop(to.target ?? "local") }
                         .buttonStyle(.bordered)
@@ -381,7 +380,7 @@ struct BotRow: View {
                 HStack(spacing: 4) {
                     if pinned {
                         Image(systemName: "pin.fill")
-                            .font(.system(size: 11))
+                            .font(.system(size: AppFont.caption))
                             .foregroundStyle(.secondary)
                     }
                     Text(bot.displayName).font(.system(size: AppFont.body, weight: .semibold)).foregroundStyle(p.text).lineLimit(1)
@@ -408,52 +407,36 @@ struct BotRow: View {
 }
 
 #if os(iOS)
-private struct NativeSearchBar: UIViewRepresentable {
+private struct NativeSearchBar: View {
+    @Environment(\.palette) private var p
     @Binding var text: String
     var placeholder: String
 
-    func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
-
-    func makeUIView(context: Context) -> UISearchBar {
-        let bar = UISearchBar()
-        bar.searchBarStyle = .minimal
-        bar.placeholder = placeholder
-        bar.autocapitalizationType = .none
-        bar.autocorrectionType = .no
-        bar.delegate = context.coordinator
-        return bar
-    }
-
-    func updateUIView(_ uiView: UISearchBar, context: Context) {
-        if uiView.text != text { uiView.text = text }
-        if uiView.placeholder != placeholder { uiView.placeholder = placeholder }
-    }
-
-    final class Coordinator: NSObject, UISearchBarDelegate {
-        @Binding var text: String
-        init(text: Binding<String>) { _text = text }
-
-        func searchBar(_ searchBar: UISearchBar, textDidChange searchText: String) {
-            text = searchText
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: AppFont.secondary))
+                .foregroundStyle(.secondary)
+            TextField(placeholder, text: $text)
+                .textFieldStyle(.plain)
+                .font(.system(size: AppFont.secondary))
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+                .submitLabel(.search)
+            if !text.isEmpty {
+                Button {
+                    text = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: AppFont.secondary))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
         }
-
-        func searchBarTextDidBeginEditing(_ searchBar: UISearchBar) {
-            searchBar.setShowsCancelButton(true, animated: true)
-        }
-
-        func searchBarTextDidEndEditing(_ searchBar: UISearchBar) {
-            searchBar.setShowsCancelButton(false, animated: true)
-        }
-
-        func searchBarSearchButtonClicked(_ searchBar: UISearchBar) {
-            searchBar.resignFirstResponder()
-        }
-
-        func searchBarCancelButtonClicked(_ searchBar: UISearchBar) {
-            text = ""
-            searchBar.text = ""
-            searchBar.resignFirstResponder()
-        }
+        .padding(.horizontal, 10)
+        .frame(height: 34)
+        .background(Color.primary.opacity(p.dark ? 0.12 : 0.07), in: Capsule())
     }
 }
 #elseif os(macOS)

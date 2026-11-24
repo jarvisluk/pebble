@@ -72,7 +72,7 @@ struct MarkdownText: View {
                 }
             }
         case let .heading(level, t):
-            let sz: CGFloat = level == 1 ? 20 : level == 2 ? 18 : level == 3 ? 17 : 16
+            let sz: CGFloat = level == 1 ? AppFont.hero : level == 2 ? AppFont.title : level == 3 ? AppFont.cardTitle : AppFont.body
             inline(t, baseColor: level >= 5 ? p.text2 : fg)
                 .font(.system(size: sz, weight: .bold))
                 .foregroundStyle(level >= 5 ? p.text2 : fg)
@@ -84,7 +84,7 @@ struct MarkdownText: View {
                     RoundedRectangle(cornerRadius: 2).fill(p.s3).frame(width: 3)
                 }
                 inline(t, baseColor: p.text2)
-                    .font(.system(size: 16))
+                    .font(.system(size: AppFont.body))
                     .foregroundStyle(p.text2)
                     .lineSpacing(4)
             }
@@ -92,7 +92,7 @@ struct MarkdownText: View {
         case let .table(headers, aligns, rows):
             TableBlockView(headers: headers, aligns: aligns, rows: rows, inlineBuilder: { cellText, bold in
                 inline(cellText, baseColor: fg)
-                    .font(.system(size: 14, weight: bold ? .semibold : .regular))
+                    .font(.system(size: AppFont.secondary, weight: bold ? .semibold : .regular))
                     .foregroundStyle(fg)
             })
         case let .list(items):
@@ -101,7 +101,7 @@ struct MarkdownText: View {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         if item.task {
                             Image(systemName: item.checked ? "checkmark.square.fill" : "square")
-                                .font(.system(size: 14))
+                                .font(.system(size: AppFont.secondary))
                                 .foregroundStyle(item.checked ? p.accent : p.mute)
                         } else {
                             Text(item.marker)
@@ -112,24 +112,24 @@ struct MarkdownText: View {
                             .foregroundStyle(item.task && item.checked ? p.text2 : fg)
                             .strikethrough(item.task && item.checked)
                     }
-                    .font(.system(size: 16))
+                    .font(.system(size: AppFont.body))
                     .padding(.leading, CGFloat(item.indent) * 16)
                 }
             }
         case let .footnote(id, t):
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text("[\(id)]")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(size: AppFont.caption, weight: .semibold))
                     .foregroundStyle(p.mute)
                 inline(t, baseColor: p.text2)
-                    .font(.system(size: 13))
+                    .font(.system(size: AppFont.caption))
                     .foregroundStyle(p.text2)
             }
         case let .image(alt, urlStr):
             MarkdownImageView(alt: alt, urlString: urlStr)
         case let .para(t):
             inline(t, baseColor: fg)
-                .font(.system(size: 16))
+                .font(.system(size: AppFont.body))
                 .foregroundStyle(fg)
                 .lineSpacing(4)
         }
@@ -1274,10 +1274,10 @@ private struct DetailsBlockView<Content: View>: View {
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: expanded ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(.system(size: AppFont.caption, weight: .semibold))
                         .foregroundStyle(p.mute)
                     Text(summary)
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.system(size: AppFont.body, weight: .semibold))
                         .foregroundStyle(p.text)
                     Spacer(minLength: 0)
                 }
@@ -1386,14 +1386,14 @@ private struct MarkdownImageView: View {
         let label = alt.isEmpty ? "[图片]" : "[图片: \(alt)]"
         if let link {
             Link(label, destination: link)
-                .font(.system(size: 14))
+                .font(.system(size: AppFont.secondary))
                 .foregroundStyle(p.accent)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
                 .background(p.s1, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         } else {
             Text(label)
-                .font(.system(size: 14))
+                .font(.system(size: AppFont.secondary))
                 .foregroundStyle(p.text2)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
@@ -1411,14 +1411,14 @@ struct CodeCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text(lang.isEmpty ? "code" : lang).font(.system(size: 13)).foregroundStyle(p.mute)
+                Text(lang.isEmpty ? "code" : lang).font(.system(size: AppFont.caption)).foregroundStyle(p.mute)
                 Spacer()
                 Button(copied ? L.t("copied") : L.t("copy")) {
                     copyToClipboard(code)
                     copied = true
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { copied = false }
                 }
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: AppFont.caption, weight: .semibold))
                 .foregroundStyle(p.text2)
                 .buttonStyle(.plain)
             }
@@ -1426,7 +1426,7 @@ struct CodeCard: View {
             .padding(.top, 8)
             ScrollView(.horizontal, showsIndicators: false) {
                 Text(code)
-                    .font(.system(size: 15, design: .monospaced))
+                    .font(.system(size: AppFont.secondary, design: .monospaced))
                     .foregroundStyle(p.text)
                     .padding(12)
             }

@@ -448,7 +448,7 @@ struct Tag: View {
     var fg: Color
     var body: some View {
         Text(text)
-            .font(.system(size: 13, weight: .semibold))
+            .font(.system(size: AppFont.secondary, weight: .semibold))
             .foregroundStyle(fg)
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
@@ -463,7 +463,7 @@ struct StatusText: View {
     var error = true
     var body: some View {
         Label(text, systemImage: error ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
-            .font(.system(size: 15))
+            .font(.system(size: AppFont.body))
             .foregroundStyle(error ? p.danger : p.sageInk)
     }
 }
@@ -589,14 +589,14 @@ struct BotAppearancePicker: View {
         let ring = accent ?? p.accent
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text(hub.t("avatarShape")).font(.system(size: 13)).foregroundStyle(.secondary)
+                Text(hub.t("avatarShape")).font(.system(size: AppFont.secondary)).foregroundStyle(.secondary)
                 Spacer()
                 if hasCustom {
                     Button(hub.t("resetDefault")) {
                         avatar = ""
                         color = ""
                     }
-                    .font(.system(size: 13))
+                    .font(.system(size: AppFont.secondary))
                     .buttonStyle(.borderless)
                 }
             }
@@ -618,7 +618,7 @@ struct BotAppearancePicker: View {
                     .buttonStyle(.plain)
                 }
             }
-            Text(hub.t("botColorLabel")).font(.system(size: 13)).foregroundStyle(.secondary)
+            Text(hub.t("botColorLabel")).font(.system(size: AppFont.secondary)).foregroundStyle(.secondary)
             #if os(macOS)
             HStack(spacing: 6) {
                 ForEach(botColors, id: \.self) { hex in
@@ -627,7 +627,7 @@ struct BotAppearancePicker: View {
                         Circle().fill(Color(hex: hex)).frame(width: 24, height: 24)
                             .overlay {
                                 if active {
-                                    Image(systemName: "checkmark").font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
+                                    Image(systemName: "checkmark").font(.system(size: AppFont.caption, weight: .bold)).foregroundStyle(.white)
                                 }
                             }
                     }
@@ -649,7 +649,7 @@ struct BotAppearancePicker: View {
                         Circle().fill(Color(hex: hex)).frame(width: 26, height: 26)
                             .overlay {
                                 if active {
-                                    Image(systemName: "checkmark").font(.system(size: 12, weight: .bold)).foregroundStyle(.white)
+                                    Image(systemName: "checkmark").font(.system(size: AppFont.caption, weight: .bold)).foregroundStyle(.white)
                                 }
                             }
                     }
@@ -674,22 +674,11 @@ struct HubSurface: ViewModifier {
 
     func body(content: Content) -> some View {
         #if os(macOS)
-        if #available(macOS 15.0, *) {
-            content
-                .buttonStyle(HubMacRowButtonStyle())
-                .labeledContentStyle(HubMacLabeledContentStyle())
-                .toggleStyle(HubMacSwitchToggleStyle())
-                .textFieldStyle(HubMacTextFieldStyle())
-                .formStyle(HubMacFormStyle())
-                .background(p.page.ignoresSafeArea())
-                .font(.system(size: AppFont.body))
-        } else {
-            content
-                .formStyle(.grouped)
-                .scrollContentBackground(.hidden)
-                .background(p.page.ignoresSafeArea())
-                .font(.system(size: AppFont.body))
-        }
+        content
+            .formStyle(.grouped)
+            .scrollContentBackground(.hidden)
+            .background(p.page.ignoresSafeArea())
+            .font(.system(size: AppFont.body))
         #else
         content
             .scrollContentBackground(.hidden)
@@ -805,117 +794,6 @@ struct HubMacTextFieldStyle: TextFieldStyle {
             .padding(.vertical, 6)
             .background(p.s1, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(p.s2, lineWidth: 1))
-    }
-}
-
-struct HubMacLabeledContentStyle: LabeledContentStyle {
-    @Environment(\.palette) private var p
-
-    func makeBody(configuration: Configuration) -> some View {
-        HStack(alignment: .center, spacing: 12) {
-            configuration.label
-                .foregroundStyle(p.text)
-            Spacer(minLength: 12)
-            configuration.content
-                .foregroundStyle(p.text2)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-struct HubMacSwitchToggleStyle: ToggleStyle {
-    @Environment(\.palette) private var p
-
-    func makeBody(configuration: Configuration) -> some View {
-        HStack(alignment: .center, spacing: 12) {
-            configuration.label
-                .foregroundStyle(p.text)
-            Spacer(minLength: 12)
-            Toggle("", isOn: configuration.$isOn)
-                .labelsHidden()
-                .toggleStyle(.switch)
-                .controlSize(.small)
-        }
-    }
-}
-
-struct HubMacRowButtonStyle: ButtonStyle {
-    @Environment(\.palette) private var p
-    @Environment(\.isEnabled) private var isEnabled
-    @State private var hovering = false
-
-    func makeBody(configuration: Configuration) -> some View {
-        let fg: Color = configuration.role == .destructive ? p.danger : (isEnabled ? p.text : p.mute)
-        HStack(spacing: 8) {
-            configuration.label
-            Spacer(minLength: 8)
-        }
-        .foregroundStyle(fg)
-        .padding(.vertical, 2)
-        .padding(.horizontal, 4)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(configuration.isPressed ? p.s2 : (hovering ? p.s1 : .clear))
-        )
-        .contentShape(Rectangle())
-        .onHover { hovering = $0 }
-    }
-}
-
-@available(macOS 15.0, *)
-struct HubMacFormStyle: FormStyle {
-    @Environment(\.palette) private var p
-
-    func makeBody(configuration: Configuration) -> some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                Group(sections: configuration.content) { sections in
-                    ForEach(sections) { section in
-                        VStack(alignment: .leading, spacing: 6) {
-                            if !section.header.isEmpty {
-                                section.header
-                                    .font(.system(size: AppFont.caption, weight: .semibold))
-                                    .foregroundStyle(p.text2)
-                                    .padding(.horizontal, 4)
-                            }
-                            if !section.content.isEmpty {
-                                Group(subviews: section.content) { subviews in
-                                    VStack(alignment: .leading, spacing: 0) {
-                                        ForEach(Array(subviews.enumerated()), id: \.element.id) { idx, subview in
-                                            if idx > 0 {
-                                                Rectangle()
-                                                    .fill(p.s2)
-                                                    .frame(height: 1)
-                                                    .padding(.leading, 14)
-                                            }
-                                            subview
-                                                .frame(maxWidth: .infinity, alignment: .leading)
-                                                .padding(.horizontal, 14)
-                                                .padding(.vertical, 10)
-                                        }
-                                    }
-                                    .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-                                    .background(p.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                            .stroke(p.s2.opacity(0.8), lineWidth: 1)
-                                    )
-                                }
-                            }
-                            if !section.footer.isEmpty {
-                                section.footer
-                                    .font(.system(size: AppFont.caption))
-                                    .foregroundStyle(p.mute)
-                                    .padding(.horizontal, 4)
-                            }
-                        }
-                    }
-                }
-            }
-            .padding(16)
-            .frame(minWidth: 0, maxWidth: 760, alignment: .leading)
-            .frame(maxWidth: .infinity)
-        }
     }
 }
 #endif
