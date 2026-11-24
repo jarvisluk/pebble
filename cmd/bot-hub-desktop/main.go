@@ -226,17 +226,104 @@ func (d *desktop) startLocal(ctx context.Context, done chan struct{}) (string, e
 	return "", errors.New("本机服务没有响应")
 }
 
-func (d *desktop) startRemote(ctx context.Context, rawLink string, done chan struct{}) (string, error) {
-	link, linkTok := tunnel.ExtractTokenFromLink(rawLink)
-	if _, _, err := tunnel.ParseLink(link); err != nil {
-		close(done)
-		return "", err
+type remoteTarget struct {
+	kind    string // "tailcat" | "http"
+	link    string // cleaned link without #token=
+	token   string
+	baseURL string // for kind == "http" (including tailscale:// converted to http://)
+}
+
+func parseRemoteTarget(rawLink string) (remoteTarget, error) {
+	link, tok := tunnel.ExtractTokenFromLink(rawLink)
+	trimmed := strings.TrimSpace(link)
+	if trimmed == "" {
+		return remoteTarget{}, errors.New("请输入远程连接地址")
 	}
-	dial, closeClient, err := tunnel.Connect(ctx, link)
+	if strings.HasPrefix(trimmed, "tailcat://") {
+		if _, _, err := tunnel.ParseLink(trimmed); err != nil {
+			return remoteTarget{}, err
+		}
+		return remoteTarget{kind: "tailcat", link: trimmed, token: tok}, nil
+	}
+	if strings.HasPrefix(trimmed, "tailscale://") {
+		rest := strings.TrimPrefix(trimmed, "tailscale://")
+		rest = strings.TrimRight(rest, "/")
+		if rest == "" {
+			return remoteTarget{}, errors.New("tailscale:// 地址不能为空")
+		}
+		if !strings.Contains(rest, ":") {
+			rest += ":3789"
+		}
+		u, err := url.Parse("http://" + rest)
+		if err != nil || u.Host == "" {
+			return remoteTarget{}, fmt.Errorf("无效的 Tailscale 地址: %s", trimmed)
+		}
+		return remoteTarget{
+			kind:    "http",
+			link:    trimmed,
+			token:   tok,
+			baseURL: "http://" + u.Host,
+		}, nil
+	}
+	if strings.HasPrefix(trimmed, "http://") || strings.HasPrefix(trimmed, "https://") {
+		u, err := url.Parse(trimmed)
+		if err != nil || u.Host == "" {
+			return remoteTarget{}, fmt.Errorf("无效的远程地址: %s", trimmed)
+		}
+		return remoteTarget{
+			kind:    "http",
+			link:    trimmed,
+			token:   tok,
+			baseURL: u.Scheme + "://" + u.Host,
+		}, nil
+	}
+	return remoteTarget{}, errors.New("请填写 tailcat://、tailscale:// 或 http(s):// 地址")
+}
+
+func (d *desktop) startRemote(ctx context.Context, rawLink string, done chan struct{}) (string, error) {
+	target, err := parseRemoteTarget(rawLink)
 	if err != nil {
 		close(done)
 		return "", err
 	}
+
+	var (
+		tr          *http.Transport
+		closeClient func() error
+		upstream    *url.URL
+	)
+	if target.kind == "tailcat" {
+		dial, cfn, err := tunnel.Connect(ctx, target.link)
+		if err != nil {
+			close(done)
+			return "", err
+		}
+		closeClient = cfn
+		tr = &http.Transport{
+			DialContext: func(dctx context.Context, _, _ string) (net.Conn, error) { return dial(dctx) },
+		}
+	} else {
+		u, err := url.Parse(target.baseURL)
+		if err != nil {
+			close(done)
+			return "", err
+		}
+		upstream = u
+		closeClient = func() error { return nil }
+		tr = &http.Transport{}
+		probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		req, _ := http.NewRequestWithContext(probeCtx, http.MethodGet, target.baseURL+"/healthz", nil)
+		resp, err := (&http.Client{Transport: tr}).Do(req)
+		cancel()
+		if err != nil {
+			tr.CloseIdleConnections()
+			close(done)
+			return "", fmt.Errorf("无法连接到 %s：%w", target.baseURL, err)
+		}
+		resp.Body.Close()
+	}
+	link := target.link
+	linkTok := target.token
 
 	// A fixed local port keeps the login cookie across restarts.
 	ln, err := net.Listen("tcp", "127.0.0.1:3790")
@@ -250,8 +337,8 @@ func (d *desktop) startRemote(ctx context.Context, rawLink string, done chan str
 	}
 
 	localURL := "http://" + ln.Addr().String()
-	tr := &http.Transport{
-		DialContext: func(dctx context.Context, _, _ string) (net.Conn, error) { return dial(dctx) },
+	if tr == nil {
+		tr = &http.Transport{}
 	}
 
 	d.mu.Lock()
@@ -280,6 +367,12 @@ func (d *desktop) startRemote(ctx context.Context, rawLink string, done chan str
 		Transport:     tr,
 		FlushInterval: -1,
 		Rewrite: func(pr *httputil.ProxyRequest) {
+			if upstream != nil {
+				pr.Out.URL.Scheme = upstream.Scheme
+				pr.Out.URL.Host = upstream.Host
+				pr.Out.Host = upstream.Host
+				return
+			}
 			pr.Out.URL.Scheme = "http"
 			pr.Out.URL.Host = pr.In.Host
 			pr.Out.Host = pr.In.Host

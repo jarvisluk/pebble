@@ -91,3 +91,25 @@ func TestServeSetupAssetsAndAPI(t *testing.T) {
 		t.Fatalf("dataDir = %v, want %q", body["dataDir"], d.dir)
 	}
 }
+
+func TestParseRemoteTarget(t *testing.T) {
+	ts, err := parseRemoteTarget("tailscale://mac-mini.ts.net#token=sec123")
+	if err != nil {
+		t.Fatalf("tailscale parse error: %v", err)
+	}
+	if ts.kind != "http" || ts.baseURL != "http://mac-mini.ts.net:3789" || ts.token != "sec123" {
+		t.Fatalf("unexpected tailscale target: %+v", ts)
+	}
+
+	httpTarget, err := parseRemoteTarget("https://100.64.0.2:8443#token=abc")
+	if err != nil {
+		t.Fatalf("https parse error: %v", err)
+	}
+	if httpTarget.kind != "http" || httpTarget.baseURL != "https://100.64.0.2:8443" || httpTarget.token != "abc" {
+		t.Fatalf("unexpected https target: %+v", httpTarget)
+	}
+
+	if _, err := parseRemoteTarget("invalid-link"); err == nil {
+		t.Fatal("expected error for invalid remote link")
+	}
+}

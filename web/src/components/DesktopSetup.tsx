@@ -33,6 +33,7 @@ export default function DesktopSetup() {
 
   const [dataDir, setDataDir] = useState('');
   const [harnesses, setHarnesses] = useState<DesktopHarnessItem[] | null>(null);
+  const [remoteKind, setRemoteKind] = useState<'tailcat' | 'tailscale'>('tailcat');
   const [link, setLink] = useState('');
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
@@ -175,12 +176,6 @@ export default function DesktopSetup() {
             <span>{t('desktopSetupLocalDesc')}</span>
             <code className="dsetup-code">{dataDir}</code>
           </p>
-          <div className="dsetup-meta">
-            <span className={`dsetup-meta-lbl${installed.length > 0 ? ' ok' : ''}`}>{harnessSummary}</span>
-            <button type="button" className="mp" onClick={() => refresh().catch(() => {})}>
-              {t('desktopSetupRecheck')}
-            </button>
-          </div>
           <div className="dsetup-actions">
             <button
               type="button"
@@ -196,8 +191,30 @@ export default function DesktopSetup() {
         <section className="dsetup-card">
           <div className="dsetup-card-hd">
             <h2>{t('desktopSetupRemoteTitle')}</h2>
+            <div className="dsetup-tabs" role="tablist">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={remoteKind === 'tailcat'}
+                className={`mp${remoteKind === 'tailcat' ? ' go' : ''}`}
+                onClick={() => setRemoteKind('tailcat')}
+              >
+                {t('desktopSetupTabTailcat')}
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={remoteKind === 'tailscale'}
+                className={`mp${remoteKind === 'tailscale' ? ' go' : ''}`}
+                onClick={() => setRemoteKind('tailscale')}
+              >
+                {t('desktopSetupTabTailscale')}
+              </button>
+            </div>
           </div>
-          <p className="dsetup-desc">{t('desktopSetupRemoteDesc')}</p>
+          <p className="dsetup-desc">
+            {remoteKind === 'tailscale' ? t('desktopSetupTailscaleDesc') : t('desktopSetupRemoteDesc')}
+          </p>
           <textarea
             className="dsetup-textarea"
             value={link}
@@ -205,7 +222,11 @@ export default function DesktopSetup() {
               linkTouchedRef.current = true;
               setLink(e.target.value);
             }}
-            placeholder="tailcat://connect/tc…?port=3789"
+            placeholder={
+              remoteKind === 'tailscale'
+                ? 'tailscale://mac-mini.ts.net:3789#token=...'
+                : 'tailcat://connect/tc…?port=3789'
+            }
             spellCheck={false}
           />
           <p className={`dsetup-hint${hasToken ? ' ok' : ''}`}>

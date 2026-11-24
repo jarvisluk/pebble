@@ -3,6 +3,7 @@ import type { BotStatus, HarnessInfo, ResolvedLang, SettingsData, SetupTaskStatu
 import { api } from '../lib/api';
 import { DOWNLOAD_LINKS } from '../lib/downloads';
 import { translate } from '../lib/i18n';
+import { HarnessIcon } from './HarnessIcon';
 import { MagpieInstallBanner } from './MagpieInstallBanner';
 
 interface UnboxModalProps {
@@ -126,7 +127,11 @@ export const UnboxModal: React.FC<UnboxModalProps> = ({
 
   useEffect(() => {
     if (!open) return;
-    if (step === 2) {
+    if (step === 1) {
+      if (selectedHarness) {
+        void onLoadModels(selectedHarness);
+      }
+    } else if (step === 2) {
       void onLoadModels(selectedHarness);
       const presets = settings?.magpie?.presets || [];
       if (presets[0] && (!apPreset || !presets.some((p) => p.id === apPreset))) {
@@ -279,7 +284,9 @@ export const UnboxModal: React.FC<UnboxModalProps> = ({
   const persistModelAndComplete = async (markCompleted: boolean) => {
     const dm = defaultModel.trim();
     const prevDm = settings?.defaultModel || '';
+    const prevDh = settings?.defaultHarness || '';
     const body: Record<string, unknown> = {};
+    if (selectedHarness && selectedHarness !== prevDh) body.defaultHarness = selectedHarness;
     if (dm !== prevDm) body.defaultModel = dm;
     if (markCompleted) body.onboardingCompleted = true;
     if (Object.keys(body).length) {
@@ -311,6 +318,7 @@ export const UnboxModal: React.FC<UnboxModalProps> = ({
     try {
       if (step === 1) {
         await persistHarness();
+        await persistModelAndComplete(false);
         setStep(2);
         return;
       }
@@ -391,7 +399,7 @@ export const UnboxModal: React.FC<UnboxModalProps> = ({
         <div className="unbox-item-hd">
           <button
             type="button"
-            className="unbox-item-main"
+            className="unbox-item-main unbox-item-main-row"
             onClick={() => {
               if (h.installed) {
                 setSelectedHarness(h.id);
@@ -401,8 +409,11 @@ export const UnboxModal: React.FC<UnboxModalProps> = ({
               }
             }}
           >
-            <span className="unbox-item-name">{h.label}</span>
-            <span className="unbox-item-path">{lastLog || sub}</span>
+            <HarnessIcon id={h.id} />
+            <span className="unbox-item-text">
+              <span className="unbox-item-name">{h.label}</span>
+              <span className="unbox-item-path">{lastLog || sub}</span>
+            </span>
           </button>
           <div className="unbox-item-acts">
             {h.installed ? (
@@ -417,7 +428,7 @@ export const UnboxModal: React.FC<UnboxModalProps> = ({
                     disabled={loggingIn}
                     onClick={() => void startHarnessLogin(h.id)}
                   >
-                    {loggingIn ? t('ubLoggingIn') : t('ubLoginBtn')}
+                    {loggingIn ? t('ubLoggingIn') : t('ubConfigBtn')}
                   </button>
                 )}
               </>
@@ -548,6 +559,34 @@ export const UnboxModal: React.FC<UnboxModalProps> = ({
                       )}
                     </>
                   )}
+
+                  <div className="note unbox-defaults">
+                    <div className="row-between row-wrap">
+                      <span className="set-card-desc">
+                        {t('ubDefaultHarnessLbl')}
+                        <strong>{hLabel}</strong>
+                      </span>
+                    </div>
+                    <div className="fld">
+                      <label>
+                        {t('ubDefaultModelLbl')} <em>{t('ubDefaultModelHint')}</em>
+                      </label>
+                      <input
+                        id="ubStep1DefaultModel"
+                        className="mono"
+                        spellCheck={false}
+                        list="ubStep1ModelList"
+                        placeholder={t('ubDefaultModelPh')}
+                        value={defaultModel}
+                        onChange={(e) => setDefaultModel(e.target.value)}
+                      />
+                      <datalist id="ubStep1ModelList">
+                        {(models[selectedHarness] || []).map((m) => (
+                          <option key={m} value={m} />
+                        ))}
+                      </datalist>
+                    </div>
+                  </div>
                 </>
               )}
             </div>
