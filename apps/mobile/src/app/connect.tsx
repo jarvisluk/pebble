@@ -66,6 +66,7 @@ export function ConnectContent({ standalone = false }: { standalone?: boolean })
   const [tsAuthKey, setTsAuthKey] = useState('');
   const [tsControlUrl, setTsControlUrl] = useState('');
   const [manualOpen, setManualOpen] = useState(false);
+  const [manualAdvOpen, setManualAdvOpen] = useState(false);
   const isFreshOnboarding = standalone && servers.length === 0 && !activeServer;
   const showFreshHero = isFreshOnboarding && !manualOpen;
 
@@ -242,6 +243,17 @@ export function ConnectContent({ standalone = false }: { standalone?: boolean })
     });
   };
 
+  const onPasteLink = async () => {
+    const raw = ((await Clipboard.getStringAsync()) || '').trim().replace(/[\r\n]+/g, '');
+    if (!raw) {
+      setInfoHint(t('clipboardEmpty'));
+      return;
+    }
+    setLocalError('');
+    setInfoHint('');
+    setAddress(raw);
+  };
+
   const onSubmit = async () => {
     setLocalError('');
     if (!address.trim()) {
@@ -301,6 +313,7 @@ export function ConnectContent({ standalone = false }: { standalone?: boolean })
       }
       return;
     }
+    setManualAdvOpen(true);
     setInfoHint(t('tsPeerSelectedHint'));
   };
 
@@ -480,75 +493,31 @@ export function ConnectContent({ standalone = false }: { standalone?: boolean })
           )}
 
           <View style={[styles.card, { backgroundColor: theme.card }]}>
-            <Text style={[styles.cardTitle, { color: theme.text }]}>{t('manualAddrTitle')}</Text>
-
-            <View style={styles.field}>
-              <Text style={[styles.fieldLbl, { color: theme.text2 }]}>{t('labelOptional')}</Text>
-              <TextInput
-                value={label}
-                onChangeText={setLabel}
-                placeholder={t('labelExamplePh')}
-                placeholderTextColor={theme.mute}
-                style={[styles.input, { backgroundColor: theme.s1, color: theme.text }]}
-              />
+            <View style={styles.rowBetween}>
+              <Text style={[styles.cardTitle, { color: theme.text }]}>{t('manualPairingBtn')}</Text>
+              <Pressable
+                onPress={() => void onPasteLink()}
+                style={[styles.qrBtn, { backgroundColor: theme.s1 }]}
+              >
+                <Text style={[styles.qrBtnTxt, { color: theme.text }]}>{t('pasteLinkBtn')}</Text>
+              </Pressable>
             </View>
 
-            <View style={styles.field}>
-              <Text style={[styles.fieldLbl, { color: theme.text2 }]}>{t('connAddr')}</Text>
-              <TextInput
-                value={address}
-                onChangeText={setAddress}
-                placeholder="tailcat://… / tailscale://… / 192.168.1.x:3789"
-                placeholderTextColor={theme.mute}
-                autoCapitalize="none"
-                autoCorrect={false}
-                style={[styles.input, { backgroundColor: theme.s1, color: theme.text, fontFamily: MONO_FONT }]}
-              />
-              <Text style={[styles.fieldHint, { color: infoHint || parsedPreview?.token ? theme.sageInk : theme.mute }]}>
-                {infoHint || (parsedPreview?.token ? t('tokenRecognized') : t('tokenAutoHint'))}
-              </Text>
-            </View>
-
-            <View style={styles.field}>
-              <Text style={[styles.fieldLbl, { color: theme.text2 }]}>{t('tokenOptionalLbl')}</Text>
-              <TextInput
-                value={token}
-                onChangeText={setToken}
-                placeholder={t('tokenFillHint')}
-                placeholderTextColor={theme.mute}
-                secureTextEntry
-                autoCapitalize="none"
-                autoCorrect={false}
-                style={[styles.input, { backgroundColor: theme.s1, color: theme.text, fontFamily: MONO_FONT }]}
-              />
-            </View>
-
-            <View style={styles.field}>
-              <Text style={[styles.fieldLbl, { color: theme.text2 }]}>{t('standbyAddress')}</Text>
-              <TextInput
-                value={standbyAddress}
-                onChangeText={setStandbyAddress}
-                placeholder="tailcat://… / 192.168.x.x:3789"
-                placeholderTextColor={theme.mute}
-                autoCapitalize="none"
-                autoCorrect={false}
-                style={[styles.input, { backgroundColor: theme.s1, color: theme.text, fontFamily: MONO_FONT }]}
-              />
-            </View>
-
-            <View style={styles.field}>
-              <Text style={[styles.fieldLbl, { color: theme.text2 }]}>{t('standbyToken')}</Text>
-              <TextInput
-                value={standbyToken}
-                onChangeText={setStandbyToken}
-                placeholder={t('tokenFillHint')}
-                placeholderTextColor={theme.mute}
-                secureTextEntry
-                autoCapitalize="none"
-                autoCorrect={false}
-                style={[styles.input, { backgroundColor: theme.s1, color: theme.text, fontFamily: MONO_FONT }]}
-              />
-            </View>
+            <TextInput
+              value={address}
+              onChangeText={setAddress}
+              placeholder={t('pairingLinkPh')}
+              placeholderTextColor={theme.mute}
+              multiline
+              numberOfLines={3}
+              textAlignVertical="top"
+              autoCapitalize="none"
+              autoCorrect={false}
+              style={[styles.pasteInput, { backgroundColor: theme.s1, color: theme.text, fontFamily: MONO_FONT }]}
+            />
+            <Text style={[styles.fieldHint, { color: infoHint || parsedPreview?.token ? theme.sageInk : theme.mute }]}>
+              {infoHint || (parsedPreview?.token ? t('tokenRecognized') : t('pasteLinkHint'))}
+            </Text>
 
             {localError ? (
               <Text style={[styles.errTxt, { color: theme.danger }]}>{localError}</Text>
@@ -565,6 +534,68 @@ export function ConnectContent({ standalone = false }: { standalone?: boolean })
                 <Text style={[styles.submitTxt, { color: theme.accentText }]}>{t('connect')}</Text>
               )}
             </Pressable>
+
+            <Pressable onPress={() => setManualAdvOpen((v) => !v)}>
+              <Text style={[styles.fieldHint, { color: theme.text2 }]}>
+                {`${manualAdvOpen ? '▾' : '▸'} ${t('moreOptions')}`}
+              </Text>
+            </Pressable>
+
+            {manualAdvOpen && (
+              <View style={styles.advFields}>
+                <View style={styles.field}>
+                  <Text style={[styles.fieldLbl, { color: theme.text2 }]}>{t('labelOptional')}</Text>
+                  <TextInput
+                    value={label}
+                    onChangeText={setLabel}
+                    placeholder={t('labelExamplePh')}
+                    placeholderTextColor={theme.mute}
+                    style={[styles.input, { backgroundColor: theme.s1, color: theme.text }]}
+                  />
+                </View>
+
+                <View style={styles.field}>
+                  <Text style={[styles.fieldLbl, { color: theme.text2 }]}>{t('tokenOptionalLbl')}</Text>
+                  <TextInput
+                    value={token}
+                    onChangeText={setToken}
+                    placeholder={t('tokenFillHint')}
+                    placeholderTextColor={theme.mute}
+                    secureTextEntry
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    style={[styles.input, { backgroundColor: theme.s1, color: theme.text, fontFamily: MONO_FONT }]}
+                  />
+                </View>
+
+                <View style={styles.field}>
+                  <Text style={[styles.fieldLbl, { color: theme.text2 }]}>{t('standbyAddress')}</Text>
+                  <TextInput
+                    value={standbyAddress}
+                    onChangeText={setStandbyAddress}
+                    placeholder="tailcat://… / 192.168.x.x:3789"
+                    placeholderTextColor={theme.mute}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    style={[styles.input, { backgroundColor: theme.s1, color: theme.text, fontFamily: MONO_FONT }]}
+                  />
+                </View>
+
+                <View style={styles.field}>
+                  <Text style={[styles.fieldLbl, { color: theme.text2 }]}>{t('standbyToken')}</Text>
+                  <TextInput
+                    value={standbyToken}
+                    onChangeText={setStandbyToken}
+                    placeholder={t('tokenFillHint')}
+                    placeholderTextColor={theme.mute}
+                    secureTextEntry
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    style={[styles.input, { backgroundColor: theme.s1, color: theme.text, fontFamily: MONO_FONT }]}
+                  />
+                </View>
+              </View>
+            )}
           </View>
 
           {tunnelAvailable && (
@@ -1001,6 +1032,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 13,
     paddingVertical: 11,
     fontSize: 17,
+  },
+  pasteInput: {
+    borderRadius: 14,
+    paddingHorizontal: 13,
+    paddingVertical: 11,
+    minHeight: 88,
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  advFields: {
+    gap: 10,
   },
   errTxt: {
     fontSize: 15,

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import AVFoundation
 
 private let desktopDownloadURL = URL(string: "https://github.com/pebble-ai/bot-hub/releases/latest")!
@@ -26,6 +27,7 @@ struct ConnectView: View {
     @State private var tsAuthKey = ""
     @State private var tsControlUrl = ""
     @State private var manualOpen = false
+    @State private var manualAdvOpen = false
 
     private var isFreshOnboarding: Bool {
         isGate && hub.servers.isEmpty && hub.activeServer == nil
@@ -258,15 +260,25 @@ struct ConnectView: View {
                 Text(hub.t("scanPairDesc"))
             }
             Section {
-                TextField(hub.t("labelOptional"), text: $label, prompt: Text(hub.t("labelExamplePh")))
-                TextField(hub.t("connAddr"), text: $address, prompt: Text("tailcat://… / tailscale://… / 192.168.1.10:3789")).monoInput()
-                SecureField(hub.t("tokenOptionalLbl"), text: $token, prompt: Text(hub.t("tokenFillHint")))
-                TextField(hub.t("standbyAddress"), text: $standbyAddress, prompt: Text("tailcat://… / 192.168.x.x:3789")).monoInput()
-                SecureField(hub.t("standbyToken"), text: $standbyToken, prompt: Text(hub.t("tokenFillHint")))
+                TextField("", text: $address, prompt: Text(hub.t("pairingLinkPh")), axis: .vertical)
+                    .monoInput()
+                    .lineLimit(3...6)
+                    .accessibilityLabel(hub.t("manualPairingBtn"))
+                Button {
+                    pastePairingLink()
+                } label: {
+                    Label(hub.t("pasteLinkBtn"), systemImage: "doc.on.clipboard")
+                }
+                DisclosureGroup(hub.t("moreOptions"), isExpanded: $manualAdvOpen) {
+                    TextField(hub.t("labelOptional"), text: $label, prompt: Text(hub.t("labelExamplePh")))
+                    SecureField(hub.t("tokenOptionalLbl"), text: $token, prompt: Text(hub.t("tokenFillHint")))
+                    TextField(hub.t("standbyAddress"), text: $standbyAddress, prompt: Text("tailcat://… / 192.168.x.x:3789")).monoInput()
+                    SecureField(hub.t("standbyToken"), text: $standbyToken, prompt: Text(hub.t("tokenFillHint")))
+                }
             } header: {
-                Text(hub.t("manualAddrTitle"))
+                Text(hub.t("manualPairingBtn"))
             } footer: {
-                Text(!infoHint.isEmpty ? infoHint : !norm.token.isEmpty ? hub.t("tokenRecognized") : hub.t("tokenAutoHint"))
+                Text(!infoHint.isEmpty ? infoHint : !norm.token.isEmpty ? hub.t("tokenRecognized") : hub.t("pasteLinkHint"))
                     .foregroundStyle((!infoHint.isEmpty || !norm.token.isEmpty) ? p.sageInk : .secondary)
             }
             if !err.isEmpty { Section { StatusText(text: err) } }
@@ -337,6 +349,19 @@ struct ConnectView: View {
         address = norm.cleanAddress
         if !norm.token.isEmpty { token = norm.token }
         connect(address: s, token: norm.token.isEmpty ? token : norm.token)
+    }
+
+    private func pastePairingLink() {
+        err = ""
+        let raw = (UIPasteboard.general.string ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "[\\r\\n]+", with: "", options: .regularExpression)
+        guard !raw.isEmpty else {
+            infoHint = hub.t("clipboardEmpty")
+            return
+        }
+        infoHint = ""
+        address = raw
     }
 
     private func submit() {
@@ -468,6 +493,7 @@ struct ConnectView: View {
             connect(address: peer.address, token: token)
             return
         }
+        manualAdvOpen = true
         infoHint = hub.t("tsPeerSelectedHint")
     }
 

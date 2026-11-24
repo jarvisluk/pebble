@@ -9,7 +9,7 @@ export class UnauthorizedError extends Error {
 }
 
 export function extractTokenFromLink(raw: string): { cleanAddress: string; token: string } {
-  const trimmed = raw.trim();
+  const trimmed = raw.trim().replace(/[\r\n]+/g, '');
   const hashIdx = trimmed.indexOf('#');
   if (hashIdx === -1) {
     return { cleanAddress: trimmed, token: '' };
