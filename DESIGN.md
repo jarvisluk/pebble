@@ -98,7 +98,7 @@ Web 样式按 `tokens.css` → `primitives.css` → `layout.css` → `features.c
 
 - **布局分支**：只按 `horizontalSizeClass` / 视口宽度分支，不按设备类型分支；列表样式、底色与边距显式声明。
 - **启动门禁**：未连接可用主机或未选定桌面运行模式时停留在全屏连接/模式选择页，就绪后进入主界面。
-- **导航与弹层**：`NavigationSplitView`（窄屏折叠为栈）；设置、新建、配对等用 `Form` / `List` + 系统 sheet；文件与远程桌面工作台（Stage）在移动端以全屏模态展示、在 macOS 原生端于主窗口内全窗切换展示（左上角提供返回会话按钮，远程桌面支持鼠标、滚轮与原生键盘事件透传），同时保留菜单栏 `MenuBarExtra`。
+- **导航与弹层**：`NavigationSplitView`（窄屏折叠为栈）；设置、新建、配对等使用统一跨端表单与 Sheet 原语（Apple 端遵循 `Theme.swift` 原语白名单，避免裸用跨端渲染分裂的系统默认 `Form` 与宽屏 `List(.sidebar)`，详见 `docs/rules/native-clients.md`）；文件与远程桌面工作台（Stage）在移动端以全屏模态展示、在 macOS 原生端于主窗口内全窗切换展示（左上角提供返回会话按钮，远程桌面支持鼠标、滚轮与原生键盘事件透传），同时保留菜单栏 `MenuBarExtra`。
 - **控件与颜色**：使用系统胶囊按钮、`Picker`、`Toggle`、`alert` 与 `ContentUnavailableView`；页面底 `--page`、卡片 `--card`，全局 `tint` 保持中性，Bot 局部强调取头像色。
 - **保留自绘**：仅 Bot 头像、消息气泡（含附件）、协作提示条、输入附件与 `/` / `@` 联想条、远程桌面舞台。
 - **字号**：全端统一清晰 6 档常量（对应 `caption / secondary / body / cardTitle / title / hero`，禁止在业务视图中散落硬编码字号）：桌面端（Web / macOS 原生）遵循第 3 节 `12 / 13 / 14 / 15 / 17 / 20`；移动端（iOS / iPadOS / Android 原生）采用 `12 / 13 / 15 / 16 / 17 / 20`（正文 `15`、顶栏/卡片标题 `16`，其余档位与桌面一致）。

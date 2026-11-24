@@ -30,23 +30,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.automirrored.rounded.List
-import androidx.compose.material.icons.rounded.Add
-import androidx.compose.material.icons.rounded.ArrowDropDown
-import androidx.compose.material.icons.rounded.ChevronRight
-import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.DesktopWindows
-import androidx.compose.material.icons.rounded.Devices
-import androidx.compose.material.icons.rounded.ExpandLess
-import androidx.compose.material.icons.rounded.ExpandMore
-import androidx.compose.material.icons.rounded.Memory
-import androidx.compose.material.icons.rounded.Psychology
-import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material.icons.rounded.Search
-import androidx.compose.material.icons.rounded.Settings
-import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -80,7 +63,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.annotation.DrawableRes
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -112,13 +95,15 @@ import ai.pebble.android.ui.theme.StatusTextBanner
 import ai.pebble.android.ui.theme.TagPill
 import ai.pebble.android.ui.theme.pebbleFieldColors
 import kotlinx.coroutines.launch
+import androidx.compose.ui.res.painterResource
+import ai.pebble.android.ui.theme.PebbleIcons
 
-enum class SettingsTab(val titleKey: String, val icon: ImageVector) {
-    GENERAL("tabGeneral", Icons.Rounded.Settings),
-    MODELS("tabModels", Icons.Rounded.Memory),
-    MEMORY("tabMemory", Icons.Rounded.Psychology),
-    DESKTOP("tabDesktop", Icons.Rounded.DesktopWindows),
-    REMOTE("tabRemote", Icons.Rounded.Devices),
+enum class SettingsTab(val titleKey: String, @DrawableRes val icon: Int) {
+    GENERAL("tabGeneral", PebbleIcons.Settings),
+    MODELS("tabModels", PebbleIcons.Memory),
+    MEMORY("tabMemory", PebbleIcons.Psychology),
+    DESKTOP("tabDesktop", PebbleIcons.DesktopWindows),
+    REMOTE("tabRemote", PebbleIcons.Devices),
 }
 
 private data class BotDraft(val harness: String, val model: String)
@@ -146,7 +131,7 @@ fun SettingsSidebar(
             ),
             navigationIcon = {
                 IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = store.t("backToChat"), tint = p.text)
+                    Icon(painterResource(PebbleIcons.ArrowBack), contentDescription = store.t("backToChat"), tint = p.text)
                 }
             },
             title = {
@@ -174,7 +159,7 @@ fun SettingsSidebar(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
-                        Icon(tab.icon, contentDescription = null, tint = p.text, modifier = Modifier.size(20.dp))
+                        Icon(painterResource(tab.icon), contentDescription = null, tint = p.text, modifier = Modifier.size(20.dp))
                         Text(
                             text = store.t(tab.titleKey),
                             color = p.text,
@@ -183,7 +168,7 @@ fun SettingsSidebar(
                             modifier = Modifier.weight(1f),
                         )
                         if (compact) {
-                            Icon(Icons.Rounded.ChevronRight, contentDescription = null, tint = p.mute, modifier = Modifier.size(18.dp))
+                            Icon(painterResource(PebbleIcons.ChevronRight), contentDescription = null, tint = p.mute, modifier = Modifier.size(18.dp))
                         }
                     }
                 }
@@ -458,7 +443,7 @@ fun SettingsDetailScreen(
                 navigationIcon = {
                     if (compact) {
                         IconButton(onClick = onBack) {
-                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = store.t("back"), tint = p.text)
+                            Icon(painterResource(PebbleIcons.ArrowBack), contentDescription = store.t("back"), tint = p.text)
                         }
                     }
                 },
@@ -614,7 +599,7 @@ fun SettingsDetailScreen(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 ) {
-                                    Icon(Icons.Rounded.Star, contentDescription = null, tint = p.accent, modifier = Modifier.size(18.dp))
+                                    Icon(painterResource(PebbleIcons.Star), contentDescription = null, tint = p.accent, modifier = Modifier.size(18.dp))
                                     Text(store.t("openSourceLinkBtn"), color = p.accent, fontSize = PebbleFont.body, fontWeight = FontWeight.Medium)
                                 }
                             }
@@ -805,7 +790,7 @@ fun SettingsDetailScreen(
                                     ) {
                                         Text(store.t("defaultHarness"), color = p.text2, fontSize = PebbleFont.body, modifier = Modifier.weight(1f))
                                         Text(harnesses.firstOrNull { it.id == defaultHarness }?.title ?: defaultHarness, color = p.text, fontSize = PebbleFont.body, fontWeight = FontWeight.Medium)
-                                        Icon(Icons.Rounded.ArrowDropDown, contentDescription = null, tint = p.mute)
+                                        Icon(painterResource(PebbleIcons.ArrowDropDown), contentDescription = null, tint = p.mute)
                                     }
                                     DropdownMenu(expanded = defHarnessOpen, onDismissRequest = { defHarnessOpen = false }, containerColor = p.card) {
                                         harnesses.forEach { h ->
@@ -851,7 +836,7 @@ fun SettingsDetailScreen(
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
                                     Text(store.t("perHarnessTitle"), color = p.text2, fontSize = PebbleFont.secondary, modifier = Modifier.weight(1f))
-                                    Icon(if (perOpen) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore, contentDescription = null, tint = p.mute)
+                                    Icon(painterResource(if (perOpen) PebbleIcons.ExpandLess else PebbleIcons.ExpandMore), contentDescription = null, tint = p.mute)
                                 }
                                 AnimatedVisibility(visible = perOpen) {
                                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -905,7 +890,7 @@ fun SettingsDetailScreen(
                                                 Box {
                                                     TextButton(onClick = { botHarnessMenu = true }) {
                                                         Text(d.harness.ifEmpty { "-" }, color = p.accent, fontSize = PebbleFont.secondary)
-                                                        Icon(Icons.Rounded.ArrowDropDown, contentDescription = null, tint = p.accent, modifier = Modifier.size(18.dp))
+                                                        Icon(painterResource(PebbleIcons.ArrowDropDown), contentDescription = null, tint = p.accent, modifier = Modifier.size(18.dp))
                                                     }
                                                     DropdownMenu(expanded = botHarnessMenu, onDismissRequest = { botHarnessMenu = false }, containerColor = p.card) {
                                                         harnesses.forEach { h ->
@@ -953,7 +938,7 @@ fun SettingsDetailScreen(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 ) {
-                                    Icon(Icons.Rounded.Add, contentDescription = null, tint = p.accent, modifier = Modifier.size(18.dp))
+                                    Icon(painterResource(PebbleIcons.Add), contentDescription = null, tint = p.accent, modifier = Modifier.size(18.dp))
                                     Text(store.t("newBot"), color = p.accent, fontSize = PebbleFont.body, fontWeight = FontWeight.Medium)
                                 }
                             }
@@ -1037,7 +1022,7 @@ fun SettingsDetailScreen(
                                     ) {
                                         Text(store.t("memType"), color = p.text2, fontSize = PebbleFont.secondary, modifier = Modifier.weight(1f))
                                         Text(memFilterKind.ifEmpty { store.t("memKindAll") }, color = p.text, fontSize = PebbleFont.secondary)
-                                        Icon(Icons.Rounded.ArrowDropDown, contentDescription = null, tint = p.mute)
+                                        Icon(painterResource(PebbleIcons.ArrowDropDown), contentDescription = null, tint = p.mute)
                                     }
                                     DropdownMenu(expanded = kindMenuOpen, onDismissRequest = { kindMenuOpen = false }, containerColor = p.card) {
                                         (listOf("") + listOf("fact", "preference", "rule", "reference", "profile", "procedure", "episode")).forEach { k ->
@@ -1071,11 +1056,11 @@ fun SettingsDetailScreen(
                                     )
                                     if (memQuery.isNotEmpty()) {
                                         IconButton(onClick = { memQuery = ""; scope.launch { loadMem("") } }) {
-                                            Icon(Icons.Rounded.Close, contentDescription = store.t("clear"), tint = p.mute)
+                                            Icon(painterResource(PebbleIcons.Close), contentDescription = store.t("clear"), tint = p.mute)
                                         }
                                     }
                                     IconButton(onClick = { scope.launch { loadMem(memQuery) } }) {
-                                        Icon(Icons.Rounded.Search, contentDescription = store.t("search"), tint = p.accent)
+                                        Icon(painterResource(PebbleIcons.Search), contentDescription = store.t("search"), tint = p.accent)
                                     }
                                 }
 
@@ -1139,7 +1124,7 @@ fun SettingsDetailScreen(
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
                                     Text(store.t("addShort"), color = p.accent, fontSize = PebbleFont.body, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
-                                    Icon(if (memAdd) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore, contentDescription = null, tint = p.mute)
+                                    Icon(painterResource(if (memAdd) PebbleIcons.ExpandLess else PebbleIcons.ExpandMore), contentDescription = null, tint = p.mute)
                                 }
                                 AnimatedVisibility(visible = memAdd) {
                                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1204,7 +1189,7 @@ fun SettingsDetailScreen(
                             title = store.t("deskPermsTitle"),
                             trailing = {
                                 IconButton(onClick = { scope.launch { loadPerms() } }, enabled = !deskPermsLoading, modifier = Modifier.size(28.dp)) {
-                                    Icon(Icons.Rounded.Refresh, contentDescription = store.t("refresh"), tint = p.accent, modifier = Modifier.size(18.dp))
+                                    Icon(painterResource(PebbleIcons.Refresh), contentDescription = store.t("refresh"), tint = p.accent, modifier = Modifier.size(18.dp))
                                 }
                             },
                         )
@@ -1295,7 +1280,7 @@ fun SettingsDetailScreen(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 ) {
-                                    Icon(Icons.Rounded.DesktopWindows, contentDescription = null, tint = p.accent, modifier = Modifier.size(18.dp))
+                                    Icon(painterResource(PebbleIcons.DesktopWindows), contentDescription = null, tint = p.accent, modifier = Modifier.size(18.dp))
                                     Text(store.t("openDesktop"), color = p.accent, fontSize = PebbleFont.body, fontWeight = FontWeight.Medium)
                                 }
                             }
@@ -1325,7 +1310,7 @@ fun SettingsDetailScreen(
                                             fontSize = PebbleFont.secondary,
                                             fontWeight = FontWeight.Medium,
                                         )
-                                        Icon(Icons.Rounded.ArrowDropDown, contentDescription = null, tint = p.mute)
+                                        Icon(painterResource(PebbleIcons.ArrowDropDown), contentDescription = null, tint = p.mute)
                                     }
                                     DropdownMenu(expanded = dwHarnessMenu, onDismissRequest = { dwHarnessMenu = false }, containerColor = p.card) {
                                         DropdownMenuItem(
@@ -1414,7 +1399,7 @@ fun SettingsDetailScreen(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                                 ) {
-                                    Icon(Icons.Rounded.DesktopWindows, contentDescription = null, tint = p.accent, modifier = Modifier.size(18.dp))
+                                    Icon(painterResource(PebbleIcons.DesktopWindows), contentDescription = null, tint = p.accent, modifier = Modifier.size(18.dp))
                                     val lbl = if (store.takeovers.isEmpty()) store.t("remoteDesktop") else "${store.t("remoteDesktop")} (${store.takeovers.size})"
                                     Text(lbl, color = p.text, fontSize = PebbleFont.body)
                                 }
@@ -1427,7 +1412,7 @@ fun SettingsDetailScreen(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                                 ) {
-                                    Icon(Icons.Rounded.Devices, contentDescription = null, tint = p.accent, modifier = Modifier.size(18.dp))
+                                    Icon(painterResource(PebbleIcons.Devices), contentDescription = null, tint = p.accent, modifier = Modifier.size(18.dp))
                                     val n = store.nodes.count { it.connected == true }
                                     val lbl = if (n > 0) "${store.t("devicesTunnel")} ($n)" else store.t("devicesTunnel")
                                     Text(lbl, color = p.text, fontSize = PebbleFont.body)
@@ -1473,7 +1458,7 @@ private fun ModelInputWithMenu(
         )
         Box {
             IconButton(onClick = { menuOpen = true }) {
-                Icon(Icons.AutoMirrored.Rounded.List, contentDescription = store.t("optionalModels"), tint = p.accent)
+                Icon(painterResource(PebbleIcons.List), contentDescription = store.t("optionalModels"), tint = p.accent)
             }
             DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }, containerColor = p.card) {
                 if (value.trim().isNotEmpty()) {

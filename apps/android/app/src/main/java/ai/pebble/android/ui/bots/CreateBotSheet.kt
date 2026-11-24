@@ -15,10 +15,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.List
-import androidx.compose.material.icons.rounded.ArrowDropDown
-import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -61,6 +57,8 @@ import ai.pebble.android.ui.theme.SectionHeader
 import ai.pebble.android.ui.theme.StatusTextBanner
 import ai.pebble.android.ui.theme.pebbleFieldColors
 import kotlinx.coroutines.launch
+import androidx.compose.ui.res.painterResource
+import ai.pebble.android.ui.theme.PebbleIcons
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -171,7 +169,7 @@ fun CreateBotSheet(
                 ),
                 navigationIcon = {
                     IconButton(onClick = onClose) {
-                        Icon(Icons.Rounded.Close, contentDescription = store.t("close"), tint = p.text)
+                        Icon(painterResource(PebbleIcons.Close), contentDescription = store.t("close"), tint = p.text)
                     }
                 },
                 title = {
@@ -292,7 +290,7 @@ fun CreateBotSheet(
                                     fontSize = PebbleFont.body,
                                     fontWeight = FontWeight.Medium,
                                 )
-                                Icon(Icons.Rounded.ArrowDropDown, contentDescription = null, tint = p.mute)
+                                Icon(painterResource(PebbleIcons.ArrowDropDown), contentDescription = null, tint = p.mute)
                             }
                             DropdownMenu(
                                 expanded = harnessMenuOpen,
@@ -330,7 +328,7 @@ fun CreateBotSheet(
                             )
                             Box {
                                 IconButton(onClick = { modelMenuOpen = true }) {
-                                    Icon(Icons.AutoMirrored.Rounded.List, contentDescription = store.t("optionalModels"), tint = p.accent)
+                                    Icon(painterResource(PebbleIcons.List), contentDescription = store.t("optionalModels"), tint = p.accent)
                                 }
                                 DropdownMenu(
                                     expanded = modelMenuOpen,

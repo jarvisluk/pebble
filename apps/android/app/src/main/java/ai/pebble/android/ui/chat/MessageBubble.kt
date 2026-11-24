@@ -18,10 +18,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.ArrowCircleDown
-import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -74,6 +70,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.Locale
+import androidx.compose.ui.res.painterResource
+import ai.pebble.android.ui.theme.PebbleIcons
 
 @Composable
 fun MessageBubble(
@@ -383,7 +381,7 @@ private fun FileAttachmentRow(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Icon(Icons.Rounded.Description, contentDescription = null, tint = p.text2, modifier = Modifier.size(18.dp))
+            Icon(painterResource(PebbleIcons.Description), contentDescription = null, tint = p.text2, modifier = Modifier.size(18.dp))
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
                 Text(
                     text = displayName,
@@ -400,7 +398,7 @@ private fun FileAttachmentRow(
             if (loading) {
                 CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = p.mute)
             } else {
-                Icon(Icons.Rounded.ArrowCircleDown, contentDescription = null, tint = p.mute, modifier = Modifier.size(20.dp))
+                Icon(painterResource(PebbleIcons.ArrowCircleDown), contentDescription = null, tint = p.mute, modifier = Modifier.size(20.dp))
             }
         }
         if (errMsg.isNotEmpty()) {
@@ -441,7 +439,7 @@ fun MediaPreviewDialog(
                     },
                     navigationIcon = {
                         IconButton(onClick = onDismiss) {
-                            Icon(Icons.Rounded.Close, contentDescription = store.t("close"), tint = Color.White)
+                            Icon(painterResource(PebbleIcons.Close), contentDescription = store.t("close"), tint = Color.White)
                         }
                     },
                 )

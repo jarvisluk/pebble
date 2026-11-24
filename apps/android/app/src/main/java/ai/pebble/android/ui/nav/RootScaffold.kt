@@ -12,8 +12,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Forum
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
@@ -47,6 +45,8 @@ import ai.pebble.android.ui.settings.SettingsSidebar
 import ai.pebble.android.ui.settings.SettingsTab
 import ai.pebble.android.ui.theme.LocalPalette
 import ai.pebble.android.ui.theme.PebbleFont
+import androidx.compose.ui.res.painterResource
+import ai.pebble.android.ui.theme.PebbleIcons
 
 sealed interface SheetRoute {
     data class Connect(val scan: Boolean = false) : SheetRoute
@@ -337,8 +337,7 @@ fun RootScaffold(
                                     horizontalAlignment = Alignment.CenterHorizontally,
                                     verticalArrangement = Arrangement.spacedBy(10.dp),
                                 ) {
-                                    Icon(
-                                        Icons.Rounded.Forum,
+                                    Icon(painterResource( PebbleIcons.Forum),
                                         contentDescription = null,
                                         tint = p.mute,
                                         modifier = Modifier.size(44.dp),

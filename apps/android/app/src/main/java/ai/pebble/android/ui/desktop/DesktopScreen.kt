@@ -35,20 +35,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.Chat
-import androidx.compose.material.icons.rounded.ArrowBackIosNew
-import androidx.compose.material.icons.rounded.ArrowUpward
-import androidx.compose.material.icons.rounded.Check
-import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.Keyboard
-import androidx.compose.material.icons.rounded.PanTool
-import androidx.compose.material.icons.rounded.Pause
-import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material.icons.rounded.Tune
-import androidx.compose.material.icons.rounded.Visibility
-import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -107,6 +93,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlin.math.hypot
+import androidx.compose.ui.res.painterResource
+import ai.pebble.android.ui.theme.PebbleIcons
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -290,7 +278,7 @@ fun DesktopScreen(
                                 horizontalArrangement = Arrangement.spacedBy(4.dp),
                             ) {
                                 IconButton(onClick = onClose, modifier = Modifier.size(40.dp)) {
-                                    Icon(Icons.Rounded.ArrowBackIosNew, contentDescription = store.t("close"), tint = barFg, modifier = Modifier.size(20.dp))
+                                    Icon(painterResource(PebbleIcons.ArrowBackIosNew), contentDescription = store.t("close"), tint = barFg, modifier = Modifier.size(20.dp))
                                 }
                                 IconButton(
                                     onClick = { showChatSidebar = !showChatSidebar },
@@ -305,7 +293,7 @@ fun DesktopScreen(
                                             },
                                         ),
                                 ) {
-                                    Icon(Icons.AutoMirrored.Rounded.Chat, contentDescription = store.t("deskChatSidebar"), tint = barFg, modifier = Modifier.size(20.dp))
+                                    Icon(painterResource(PebbleIcons.Chat), contentDescription = store.t("deskChatSidebar"), tint = barFg, modifier = Modifier.size(20.dp))
                                 }
                             }
                         },
@@ -322,19 +310,19 @@ fun DesktopScreen(
                             if (activeTab == StageKind.FILES) {
                                 IconButton(onClick = { showHiddenFiles = !showHiddenFiles }, modifier = Modifier.size(36.dp)) {
                                     Icon(
-                                        imageVector = if (showHiddenFiles) Icons.Rounded.Visibility else Icons.Rounded.VisibilityOff,
+                                        painter = painterResource(if (showHiddenFiles) PebbleIcons.Visibility else PebbleIcons.VisibilityOff),
                                         contentDescription = store.t("showHiddenFiles"),
                                         tint = barFg,
                                         modifier = Modifier.size(20.dp),
                                     )
                                 }
                                 IconButton(onClick = { filesRefreshSeq += 1 }, modifier = Modifier.size(36.dp)) {
-                                    Icon(Icons.Rounded.Refresh, contentDescription = store.t("refreshFiles"), tint = barFg, modifier = Modifier.size(20.dp))
+                                    Icon(painterResource(PebbleIcons.Refresh), contentDescription = store.t("refreshFiles"), tint = barFg, modifier = Modifier.size(20.dp))
                                 }
                             } else {
                                 IconButton(onClick = { streaming = !streaming }, modifier = Modifier.size(36.dp)) {
                                     Icon(
-                                        imageVector = if (streaming) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                                        painter = painterResource(if (streaming) PebbleIcons.Pause else PebbleIcons.PlayArrow),
                                         contentDescription = store.t(if (streaming) "pause" else "resume"),
                                         tint = barFg,
                                         modifier = Modifier.size(20.dp),
@@ -342,7 +330,7 @@ fun DesktopScreen(
                                 }
                                 Box {
                                     IconButton(onClick = { keyMenuOpen = true }, modifier = Modifier.size(36.dp)) {
-                                        Icon(Icons.Rounded.Keyboard, contentDescription = store.t("aaInput"), tint = barFg, modifier = Modifier.size(20.dp))
+                                        Icon(painterResource(PebbleIcons.Keyboard), contentDescription = store.t("aaInput"), tint = barFg, modifier = Modifier.size(20.dp))
                                     }
                                     DropdownMenu(
                                         expanded = keyMenuOpen,
@@ -352,7 +340,7 @@ fun DesktopScreen(
                                         DropdownMenuItem(
                                             text = { Text(store.t("aaInput"), color = pillText) },
                                             trailingIcon = {
-                                                if (showText) Icon(Icons.Rounded.Check, contentDescription = null, tint = pillText, modifier = Modifier.size(16.dp))
+                                                if (showText) Icon(painterResource(PebbleIcons.Check), contentDescription = null, tint = pillText, modifier = Modifier.size(16.dp))
                                             },
                                             onClick = {
                                                 showText = !showText
@@ -389,7 +377,7 @@ fun DesktopScreen(
                                 }
                                 Box {
                                     IconButton(onClick = { settingsMenuOpen = true }, modifier = Modifier.size(36.dp)) {
-                                        Icon(Icons.Rounded.Tune, contentDescription = store.t("settings"), tint = barFg, modifier = Modifier.size(20.dp))
+                                        Icon(painterResource(PebbleIcons.Tune), contentDescription = store.t("settings"), tint = barFg, modifier = Modifier.size(20.dp))
                                     }
                                     DropdownMenu(
                                         expanded = settingsMenuOpen,
@@ -415,7 +403,7 @@ fun DesktopScreen(
                                             DropdownMenuItem(
                                                 text = { Text(lbl, color = pillText) },
                                                 trailingIcon = {
-                                                    if (preset == id) Icon(Icons.Rounded.Check, contentDescription = null, tint = pillText, modifier = Modifier.size(16.dp))
+                                                    if (preset == id) Icon(painterResource(PebbleIcons.Check), contentDescription = null, tint = pillText, modifier = Modifier.size(16.dp))
                                                 },
                                                 onClick = {
                                                     preset = id
@@ -429,7 +417,7 @@ fun DesktopScreen(
                                                 DropdownMenuItem(
                                                     text = { Text(tr.name ?: tr.id, color = pillText) },
                                                     trailingIcon = {
-                                                        if (target == tr.id) Icon(Icons.Rounded.Check, contentDescription = null, tint = pillText, modifier = Modifier.size(16.dp))
+                                                        if (target == tr.id) Icon(painterResource(PebbleIcons.Check), contentDescription = null, tint = pillText, modifier = Modifier.size(16.dp))
                                                     },
                                                     onClick = {
                                                         target = tr.id
@@ -551,7 +539,7 @@ fun DesktopScreen(
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                                     ) {
-                                        Icon(Icons.Rounded.PanTool, contentDescription = null, tint = Color(0xFFFF6961), modifier = Modifier.size(16.dp))
+                                        Icon(painterResource(PebbleIcons.PanTool), contentDescription = null, tint = Color(0xFFFF6961), modifier = Modifier.size(16.dp))
                                         Text(
                                             text = store.t(
                                                 "takeoverBanner",
@@ -742,7 +730,7 @@ fun DesktopScreen(
                                                 .clip(CircleShape),
                                         ) {
                                             IconButton(onClick = { showText = false }) {
-                                                Icon(Icons.Rounded.Close, contentDescription = store.t("close"), tint = pillText, modifier = Modifier.size(18.dp))
+                                                Icon(painterResource(PebbleIcons.Close), contentDescription = store.t("close"), tint = pillText, modifier = Modifier.size(18.dp))
                                             }
                                         }
                                         Surface(
@@ -772,8 +760,7 @@ fun DesktopScreen(
                                             modifier = Modifier.size(40.dp),
                                         ) {
                                             IconButton(onClick = { sendText() }, enabled = draft.isNotEmpty()) {
-                                                Icon(
-                                                    Icons.Rounded.ArrowUpward,
+                                                Icon(painterResource( PebbleIcons.ArrowUpward),
                                                     contentDescription = store.t("send"),
                                                     tint = if (draft.isNotEmpty()) stageBg else pillMute,
                                                     modifier = Modifier.size(18.dp),
