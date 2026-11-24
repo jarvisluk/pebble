@@ -175,6 +175,12 @@ private struct MacDesktopWindowRootView: View {
     @Environment(HubStore.self) private var hub
     @Environment(Router.self) private var router
     @Environment(\.colorScheme) private var scheme
+    @State private var currentTab: StageKind
+
+    init(request: DesktopWindowRequest) {
+        self.request = request
+        _currentTab = State(initialValue: request.initialTab)
+    }
 
     private var scheme0: ColorScheme? {
         hub.themePref == "light" ? .light : hub.themePref == "dark" ? .dark : nil
@@ -186,16 +192,26 @@ private struct MacDesktopWindowRootView: View {
     }
 
     var body: some View {
+        let isDesktop = currentTab == .desktop
+        let effectivePalette = isDesktop ? Palette(dark: true) : activePalette
         DesktopView(
             initialTarget: request.target,
             initialBotId: request.botId ?? router.selected,
             initialTab: request.initialTab,
-            initialPath: request.initialPath
+            initialPath: request.initialPath,
+            onTabChange: { next in
+                if currentTab != next {
+                    currentTab = next
+                }
+            }
         )
-        .environment(\.palette, activePalette)
-        .tint(activePalette.accent)
+        .environment(\.palette, effectivePalette)
+        .tint(effectivePalette.accent)
         .font(.system(size: AppFont.body))
-        .preferredColorScheme(scheme0)
+        .preferredColorScheme(isDesktop ? .dark : scheme0)
+        .onChange(of: request.initialTab) { _, next in
+            currentTab = next
+        }
     }
 }
 

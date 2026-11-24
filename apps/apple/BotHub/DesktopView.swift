@@ -11,6 +11,7 @@ struct DesktopView: View {
     var initialBotId: String? = nil
     var initialTab: StageKind = .desktop
     var initialPath: String? = nil
+    var onTabChange: ((StageKind) -> Void)? = nil
 
     @State private var activeTab: StageKind
     @State private var target: String
@@ -38,11 +39,12 @@ struct DesktopView: View {
     private let pillText = Color(hex: "#f3f1ee")
     private let pillMute = Color(hex: "#a6a09a")
 
-    init(initialTarget: String, initialBotId: String? = nil, initialTab: StageKind = .desktop, initialPath: String? = nil) {
+    init(initialTarget: String, initialBotId: String? = nil, initialTab: StageKind = .desktop, initialPath: String? = nil, onTabChange: ((StageKind) -> Void)? = nil) {
         self.initialTarget = initialTarget
         self.initialBotId = initialBotId
         self.initialTab = initialTab
         self.initialPath = initialPath
+        self.onTabChange = onTabChange
         _activeTab = State(initialValue: initialTab)
         _target = State(initialValue: initialTarget.isEmpty ? "local" : initialTarget)
         _chatBotId = State(initialValue: initialBotId ?? "")
@@ -107,6 +109,12 @@ struct DesktopView: View {
         }
         .tint(activeTab == .desktop ? Color(hex: "#f3f1ee") : p.accent)
         .task { _ = try? await hub.refreshDesktopTargets() }
+        .onAppear {
+            onTabChange?(activeTab)
+        }
+        .onChange(of: activeTab) { _, next in
+            onTabChange?(next)
+        }
         .onChange(of: initialTab) { _, next in
             activeTab = next
         }
