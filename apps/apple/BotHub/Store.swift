@@ -1,9 +1,7 @@
 import Foundation
 import Observation
 import SwiftUI
-#if canImport(UIKit)
-import UIKit
-#elseif canImport(AppKit)
+#if os(macOS)
 import AppKit
 #endif
 
@@ -142,6 +140,7 @@ final class HubStore {
     var desktopTargets: [DesktopTarget] = []
     var activeDesktopTarget = ActiveDesktopTarget(target: "local", name: nil, temporary: false, expiresAt: nil)
     var usingStandby = false
+    var managedMode = false
     var routines: [String: [RoutineItem]] = [:]
     var pendingStageOpen: StageOpenEvent?
     var pendingChatInsert: PendingChatInsert?
@@ -150,26 +149,28 @@ final class HubStore {
     @ObservationIgnored private var connSeq = 0
     @ObservationIgnored private let stream = EventStream()
 
-    init() {
+    init(autoConnect: Bool = true) {
         let d = UserDefaults.standard
         themePref = d.string(forKey: "bothub.theme") ?? "system"
         langPref = d.string(forKey: "bothub.lang") ?? "system"
         tsBound = d.bool(forKey: "bothub.tsBound")
         tsControlUrl = d.string(forKey: "bothub.tsControlUrl") ?? ""
         L.lang = lang
-        if let data = SecureStore.read("servers"), let list = try? JSONDecoder().decode([ServerProfile].self, from: data) {
-            servers = list
-        }
-        let savedActive = UserDefaults.standard.string(forKey: "bothub.active")
-        let target = servers.first { $0.id == savedActive } ?? servers.first
-        activeServerId = target?.id
-        if tsBound {
-            Task {
-                _ = await Tunnel.tailscaleStart(controlUrl: tsControlUrl)
-                await refreshMobileTailscale(includePeers: true)
+        if autoConnect {
+            if let data = SecureStore.read("servers"), let list = try? JSONDecoder().decode([ServerProfile].self, from: data) {
+                servers = list
             }
+            let savedActive = UserDefaults.standard.string(forKey: "bothub.active")
+            let target = servers.first { $0.id == savedActive } ?? servers.first
+            activeServerId = target?.id
+            if tsBound {
+                Task {
+                    _ = await Tunnel.tailscaleStart(controlUrl: tsControlUrl)
+                    await refreshMobileTailscale(includePeers: true)
+                }
+            }
+            if let target { Task { await connectProfile(target) } }
         }
-        if let target { Task { await connectProfile(target) } }
     }
 
     var lang: String { langPref == "zh-CN" || langPref == "en" ? langPref : L.systemLang }
@@ -220,6 +221,19 @@ final class HubStore {
         if msg.role != "system" {
             last[botId] = msg
             if activeChat != botId { unread[botId, default: 0] += 1 }
+            #if os(macOS)
+            if msg.role != "user" {
+                let botName = bots.first(where: { $0.id == botId })?.displayName ?? botId
+                let preview = plainPreview(msg.body)
+                PushManager.shared.postLocalNotification(
+                    id: "msg-\(msg.id)",
+                    botId: botId,
+                    title: botName,
+                    body: preview.isEmpty ? L.t("newMessage") : preview,
+                    deepLink: "bothub://bot/\(botId)"
+                )
+            }
+            #endif
         }
     }
 
@@ -279,6 +293,21 @@ final class HubStore {
             }
         case "takeover":
             if let arr = p["items"], let list = decodeAny(arr, as: [TakeoverRequest].self) {
+                #if os(macOS)
+                let oldIDs = Set(takeovers.map(\.id))
+                for item in list where !oldIDs.contains(item.id) {
+                    let botName = item.botName ?? item.botId ?? "Pebble"
+                    let reason = (item.reason ?? "").isEmpty ? L.t("remoteDesktop") : (item.reason ?? "")
+                    let tgt = (item.target ?? "").isEmpty ? "local" : (item.target ?? "local")
+                    PushManager.shared.postLocalNotification(
+                        id: "takeover-\(item.id)",
+                        botId: nil,
+                        title: botName,
+                        body: reason,
+                        deepLink: "bothub://desktop?target=\(enc(tgt))"
+                    )
+                }
+                #endif
                 takeovers = list
                 LiveActivityManager.shared.handleTakeovers(list)
             }
@@ -519,7 +548,88 @@ final class HubStore {
         }
     }
 
+    /// 由 macOS Sidecar 宿主管理连接时调用，直接接入本地或代理后的 HTTP/SSE 端点。
+    func connectManagedEndpoint(url rawURL: String, token: String, isRemote: Bool) async {
+        let cleanURL = rawURL.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "/+$", with: "", options: .regularExpression)
+        guard !cleanURL.isEmpty else {
+            disconnectManagedEndpoint()
+            return
+        }
+        connSeq += 1
+        let seq = connSeq
+        stream.stop()
+        managedMode = true
+        online = false
+        usingStandby = false
+        isTailcat = false
+        isTailscale = false
+        connState = .connecting
+        connError = ""
+        baseURL = cleanURL
+        authToken = token
+
+        do {
+            let client = APIClient(base: cleanURL, token: token)
+            let data: BotsResp = try await client.call("/api/bots")
+            guard seq == connSeq else { return }
+            let list = data.bots ?? []
+            bots = list
+            msgs = [:]; last = [:]; unread = [:]; tools = [:]; models = [:]; routines = [:]
+            connState = .connected
+            connError = ""
+
+            for b in list {
+                Task {
+                    if let r: MessagesResp = try? await client.call("/api/bots/\(enc(b.id))/messages?limit=1"),
+                       let m = r.messages?.last, seq == connSeq { last[b.id] = m }
+                }
+            }
+            Task { if let s: SettingsData = try? await client.call("/api/settings"), seq == connSeq { settings = s } }
+            Task { if let n: NodesResp = try? await client.call("/api/nodes"), seq == connSeq { nodes = n.nodes ?? [] } }
+            Task { if let t: TailcatStatus = try? await client.call("/api/tailcat"), seq == connSeq { tailcat = t } }
+            Task { if let ts: HostTailscaleStatus = try? await client.call("/api/tailscale"), seq == connSeq { hostTailscale = ts } }
+            Task { if let t: TakeoversResp = try? await client.call("/api/desktop/takeovers"), seq == connSeq { takeovers = t.items ?? [] } }
+            Task {
+                if let d: TargetsResp = try? await client.call("/api/desktop/targets"), seq == connSeq {
+                    desktopTargets = d.targets ?? []
+                    if let at = d.activeTarget { activeDesktopTarget = at }
+                }
+            }
+            Task { if let q: QuestionsResp = try? await client.call("/api/questions"), seq == connSeq { questions = q.items ?? [] } }
+            PushManager.shared.activeChatBotId = { [weak self] in self?.activeChat }
+            PushManager.shared.configureConnection(base: cleanURL, token: token)
+            startStream(cleanURL, token)
+        } catch {
+            guard seq == connSeq else { return }
+            handleConnectError(error)
+        }
+    }
+
+    func disconnectManagedEndpoint() {
+        connSeq += 1
+        stream.stop()
+        online = false
+        baseURL = ""
+        authToken = ""
+        bots = []
+        msgs = [:]
+        last = [:]
+        unread = [:]
+        tools = [:]
+        models = [:]
+        routines = [:]
+        takeovers = []
+        questions = []
+        settings = nil
+        connState = .idle
+        connError = ""
+    }
+
     func reconnect() async {
+        if managedMode, !baseURL.isEmpty {
+            await connectManagedEndpoint(url: baseURL, token: authToken, isRemote: false)
+            return
+        }
         if let s = activeServer { await connectProfile(s) }
     }
 
@@ -796,14 +906,6 @@ final class HubStore {
         mobileTailscale = nil
     }
 
-    private func openExternalURL(_ url: URL) {
-        #if canImport(UIKit)
-        UIApplication.shared.open(url)
-        #elseif canImport(AppKit)
-        NSWorkspace.shared.open(url)
-        #endif
-    }
-
     @discardableResult
     func refreshDesktopTargets() async throws -> [DesktopTarget] {
         let d: TargetsResp = try await api.call("/api/desktop/targets")
@@ -842,7 +944,7 @@ final class HubStore {
     }
 
     func makeDesktopWSRequest(target: String) -> URLRequest? {
-        guard var comps = URLComponents(string: baseURL) else { return nil }
+        guard !baseURL.isEmpty, var comps = URLComponents(string: baseURL) else { return nil }
         comps.scheme = (comps.scheme?.lowercased() == "https") ? "wss" : "ws"
         comps.path = "/api/desktop/stream/ws"
         comps.queryItems = [

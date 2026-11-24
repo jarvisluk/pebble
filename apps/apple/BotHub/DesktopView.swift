@@ -1,8 +1,5 @@
 import SwiftUI
 
-typealias PlatformImage = UIImage
-extension Image { init(platform img: UIImage) { self.init(uiImage: img) } }
-
 struct DesktopView: View {
     @Environment(HubStore.self) private var hub
     @Environment(Router.self) private var router
@@ -14,6 +11,7 @@ struct DesktopView: View {
     var initialBotId: String? = nil
     var initialTab: StageKind = .desktop
     var initialPath: String? = nil
+    var onTabChange: ((StageKind) -> Void)? = nil
 
     @State private var activeTab: StageKind
     @State private var target: String
@@ -25,7 +23,11 @@ struct DesktopView: View {
     @State private var isDragging = false
     @State private var lastDragSent = Date.distantPast
     @State private var streamCtrl = H264StreamController()
+    #if os(macOS)
+    @State private var showMacChatSidebar = false
+    #else
     @State private var columnVisibility: NavigationSplitViewVisibility = .detailOnly
+    #endif
     @State private var showChatSheet = false
     @State private var chatBotId: String
     @State private var showHiddenFiles = false
@@ -37,11 +39,12 @@ struct DesktopView: View {
     private let pillText = Color(hex: "#f3f1ee")
     private let pillMute = Color(hex: "#a6a09a")
 
-    init(initialTarget: String, initialBotId: String? = nil, initialTab: StageKind = .desktop, initialPath: String? = nil) {
+    init(initialTarget: String, initialBotId: String? = nil, initialTab: StageKind = .desktop, initialPath: String? = nil, onTabChange: ((StageKind) -> Void)? = nil) {
         self.initialTarget = initialTarget
         self.initialBotId = initialBotId
         self.initialTab = initialTab
         self.initialPath = initialPath
+        self.onTabChange = onTabChange
         _activeTab = State(initialValue: initialTab)
         _target = State(initialValue: initialTarget.isEmpty ? "local" : initialTarget)
         _chatBotId = State(initialValue: initialBotId ?? "")
@@ -61,10 +64,27 @@ struct DesktopView: View {
         return hub.bots.first?.id
     }
 
-    private var isWide: Bool { hsc != .compact }
+    private var isWide: Bool {
+        #if os(macOS)
+        return true
+        #else
+        return hsc != .compact
+        #endif
+    }
 
     var body: some View {
         Group {
+            #if os(macOS)
+            HStack(spacing: 0) {
+                if showMacChatSidebar {
+                    sidebarChatView(closable: true)
+                        .frame(width: 340)
+                    Rectangle().fill(p.s2).frame(width: 1)
+                }
+                stageContent
+                    .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
+            }
+            #else
             if isWide {
                 NavigationSplitView(columnVisibility: $columnVisibility) {
                     sidebarChatView(closable: false)
@@ -85,9 +105,16 @@ struct DesktopView: View {
                     .presentationDetents([.medium, .large])
                 }
             }
+            #endif
         }
         .tint(activeTab == .desktop ? Color(hex: "#f3f1ee") : p.accent)
         .task { _ = try? await hub.refreshDesktopTargets() }
+        .onAppear {
+            onTabChange?(activeTab)
+        }
+        .onChange(of: activeTab) { _, next in
+            onTabChange?(next)
+        }
         .onChange(of: initialTab) { _, next in
             activeTab = next
         }
@@ -141,11 +168,15 @@ struct DesktopView: View {
                 refreshTrigger: filesRefreshSeq,
                 onQuotePath: { relPath in
                     hub.insertIntoChat("@\(relPath) ")
+                    #if os(macOS)
+                    showMacChatSidebar = true
+                    #else
                     if isWide {
                         columnVisibility = .all
                     } else {
                         showChatSheet = true
                     }
+                    #endif
                 }
             )
             .opacity(activeTab == .files ? 1 : 0)
@@ -153,7 +184,8 @@ struct DesktopView: View {
 
             if activeTab == .desktop {
                 desktopStage
-                    .preferredColorScheme(.dark)
+                    .environment(\.palette, Palette(dark: true))
+                    .environment(\.colorScheme, .dark)
             } else if activeTab != .files {
                 ContentUnavailableView(
                     activeTab.rawValue,
@@ -163,23 +195,35 @@ struct DesktopView: View {
                 .background(p.page)
             }
         }
+        #if os(macOS)
+        .background((activeTab == .desktop ? stage : p.page).ignoresSafeArea())
+        .macSeamlessWindowToolbar()
+        #endif
         .navigationTitle("")
-        .navigationBarTitleDisplayMode(.inline)
+        .inlineNavTitle()
         .toolbar {
+            #if os(iOS)
             ToolbarItem(placement: .topBarLeading) {
                 Button { dismiss() } label: {
                     Label(hub.t("close"), systemImage: "xmark")
                 }
             }
+            #endif
             ToolbarItem(placement: .principal) {
                 stageModePicker
             }
-            ToolbarItemGroup(placement: .topBarTrailing) {
+            ToolbarItemGroup(placement: .hubTrailing) {
+                #if os(macOS)
+                Button { showMacChatSidebar.toggle() } label: {
+                    Label(hub.t("deskChatSidebar"), systemImage: "bubble.left.and.bubble.right")
+                }
+                #else
                 if !isWide {
                     Button { showChatSheet = true } label: {
                         Label(hub.t("deskChatSidebar"), systemImage: "bubble.left.and.bubble.right")
                     }
                 }
+                #endif
                 if activeTab == .files {
                     Menu {
                         Toggle(isOn: $showHiddenFiles) {
@@ -191,8 +235,9 @@ struct DesktopView: View {
                             Label(hub.t("refreshFiles"), systemImage: "arrow.clockwise")
                         }
                     } label: {
-                        Label(hub.t("more"), systemImage: "ellipsis.circle")
+                        Label(hub.t("more"), systemImage: "ellipsis.circle").labelStyle(.iconOnly)
                     }
+                    .menuIndicator(.hidden)
                 } else if activeTab == .desktop {
                     Button { streaming.toggle() } label: {
                         Label(streaming ? hub.t("collapse") : hub.t("connect"), systemImage: streaming ? "pause.fill" : "play.fill")
@@ -217,8 +262,9 @@ struct DesktopView: View {
                         Button(hub.t("keyScrollUp")) { send(["kind": "scroll", "deltaY": 8]) }
                         Button(hub.t("keyScrollDown")) { send(["kind": "scroll", "deltaY": -8]) }
                     } label: {
-                        Label(hub.t("aaInput"), systemImage: "keyboard")
+                        Label(hub.t("aaInput"), systemImage: "keyboard").labelStyle(.iconOnly)
                     }
+                    .menuIndicator(.hidden)
 
                     Menu {
                         if streamCtrl.connected {
@@ -234,8 +280,9 @@ struct DesktopView: View {
                             }
                         }
                     } label: {
-                        Label(hub.t("settings"), systemImage: "slider.horizontal.3")
+                        Label(hub.t("settings"), systemImage: "slider.horizontal.3").labelStyle(.iconOnly)
                     }
+                    .menuIndicator(.hidden)
                 }
             }
         }
@@ -247,6 +294,7 @@ struct DesktopView: View {
             Text(hub.t("stageDesktopTab")).tag(StageKind.desktop)
         }
         .pickerStyle(.segmented)
+        .labelsHidden()
         .frame(maxWidth: 200)
     }
 
@@ -327,11 +375,7 @@ struct DesktopView: View {
             .disabled(draft.isEmpty)
         }
 
-        if #available(iOS 26.0, *) {
-            GlassEffectContainer(spacing: 10) { row }
-        } else {
-            row
-        }
+        row.glassRowContainer(spacing: 10)
     }
 
     @ViewBuilder
@@ -343,7 +387,13 @@ struct DesktopView: View {
                 onSelectBot: { nextId in
                     chatBotId = nextId
                 },
-                onCloseSidebar: closable ? { showChatSheet = false } : nil
+                onCloseSidebar: closable ? {
+                    #if os(macOS)
+                    showMacChatSidebar = false
+                    #else
+                    showChatSheet = false
+                    #endif
+                } : nil
             )
             .id(bid)
         } else {
@@ -351,7 +401,13 @@ struct DesktopView: View {
                 .toolbar {
                     if closable {
                         ToolbarItem(placement: .cancellationAction) {
-                            Button(hub.t("close")) { showChatSheet = false }
+                            Button(hub.t("close")) {
+                                #if os(macOS)
+                                showMacChatSidebar = false
+                                #else
+                                showChatSheet = false
+                                #endif
+                            }
                         }
                     }
                 }
@@ -363,14 +419,22 @@ struct DesktopView: View {
             let displayErr = !error.isEmpty ? error : streamCtrl.error
             ZStack {
                 stage
+                #if os(macOS)
+                H264DisplayView(
+                    controller: streamCtrl,
+                    mapPoint: { pt, size in map(pt, in: size) },
+                    onInput: { send($0) }
+                )
+                #else
                 H264DisplayView(controller: streamCtrl)
+                #endif
                 if !streamCtrl.connected {
                     VStack(spacing: 10) {
                         ProgressView().tint(p.accent)
                         Text(displayErr.isEmpty ? hub.t("deskH264Connecting") : displayErr)
                             .font(.system(size: 15)).foregroundStyle(pillMute).multilineTextAlignment(.center)
                         if !displayErr.isEmpty {
-                            Button(hub.t("retryConnect")) {
+                            Button(hub.t("retry")) {
                                 error = ""
                                 if let req = hub.makeDesktopWSRequest(target: target) {
                                     streaming = true
@@ -394,6 +458,7 @@ struct DesktopView: View {
                 }
             }
             .contentShape(Rectangle())
+            #if os(iOS)
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { v in
@@ -424,6 +489,7 @@ struct DesktopView: View {
                         if let pt = map(v.location, in: geo.size) { send(["kind": kind, "x": pt.x, "y": pt.y]) }
                     }
             )
+            #endif
         }
     }
 

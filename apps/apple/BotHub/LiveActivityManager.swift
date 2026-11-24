@@ -1,6 +1,8 @@
-import ActivityKit
 import Foundation
 import Observation
+
+#if os(iOS)
+import ActivityKit
 
 @MainActor
 @Observable
@@ -169,3 +171,19 @@ final class LiveActivityManager {
         }
     }
 }
+
+#else
+
+@MainActor
+@Observable
+final class LiveActivityManager {
+    static let shared = LiveActivityManager()
+    var activitiesEnabled: Bool { false }
+    private init() {}
+    func startObservingTokens() {}
+    func handleBotStatus(_ bot: BotStatus) {}
+    func handleToolUse(botId: String, tool: String) {}
+    func handleTakeovers(_ items: [TakeoverRequest]) {}
+}
+
+#endif

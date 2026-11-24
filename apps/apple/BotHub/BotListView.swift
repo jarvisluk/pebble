@@ -74,16 +74,70 @@ struct BotListView: View {
     }
 
     var body: some View {
+        #if os(macOS)
+        List { macRows }
+            .hubColumnList(compact: compact, page: p.page)
+            .contentMargins(.top, 4, for: .scrollContent)
+            .refreshable {
+                if hub.isConnected { try? await hub.refreshBots() } else { await hub.reconnect() }
+            }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                HStack(spacing: 6) {
+                    NativeSearchBar(text: $query, placeholder: hub.t("searchBot"))
+                        .frame(minWidth: 0, maxWidth: .infinity)
+                        .frame(height: 28)
+                    Menu {
+                        Picker(hub.t("sortBots"), selection: $sortModeRaw) {
+                            Text(hub.t("sortByRecent")).tag(BotSortMode.recent.rawValue)
+                            Text(hub.t("sortManual")).tag(BotSortMode.manual.rawValue)
+                        }
+                    } label: {
+                        Label(hub.t("sortBots"), systemImage: "arrow.up.arrow.down")
+                            .labelStyle(.iconOnly)
+                            .foregroundStyle(.secondary)
+                            .frame(width: 26, height: 26)
+                    }
+                    .menuIndicator(.hidden)
+                    .buttonStyle(.borderless)
+                    .help(hub.t("sortBots"))
+                }
+                .padding(.horizontal, 12)
+                .padding(.top, 4)
+                .padding(.bottom, 6)
+            }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                HStack {
+                    Button { go(.createBot) } label: {
+                        Label(hub.t("newBot"), systemImage: "plus")
+                            .font(.system(size: AppFont.secondary, weight: .medium))
+                            .foregroundStyle(.primary)
+                    }
+                    .buttonStyle(.borderless)
+                    Spacer()
+                    Button { router.openSettings(compact: compact) } label: {
+                        Label(hub.t("settings"), systemImage: "gearshape")
+                            .font(.system(size: AppFont.secondary, weight: .medium))
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.borderless)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+            }
+            .frame(minWidth: 0, maxWidth: .infinity)
+            .navigationTitle("")
+            .confirmAlert($confirm)
+        #else
         @Bindable var r = router
         List(selection: $r.selected) { rows }
             .hubColumnList(compact: compact, page: p.page)
-            .listSectionSpacing(12)
+            .hubListSectionSpacing(12)
             .contentMargins(.top, 8, for: .scrollContent)
             .refreshable {
                 if hub.isConnected { try? await hub.refreshBots() } else { await hub.reconnect() }
             }
             .navigationTitle("")
-            .navigationBarTitleDisplayMode(.inline)
+            .inlineNavTitle()
             .toolbar { toolbar }
             .navigationDestination(isPresented: Binding(
                 get: { compact && router.inSettings },
@@ -92,10 +146,70 @@ struct BotListView: View {
                 SettingsSidebarView(compact: true)
             }
             .confirmAlert($confirm)
+        #endif
     }
+
+    #if os(macOS)
+    @ViewBuilder
+    private var macRows: some View {
+        if let to = hub.takeovers.first { takeoverSection(to) }
+        ForEach(orderedBots, id: \.1.id) { idx, bot in
+            let pinned = pinnedIds.contains(bot.id)
+            let isUnread = (hub.unread[bot.id] ?? 0) > 0
+            Button {
+                router.openBot(bot.id)
+            } label: {
+                BotRow(bot: bot, index: idx, pinned: pinned)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(router.selected == bot.id ? Color.primary.opacity(p.dark ? 0.14 : 0.08) : Color.clear)
+                    )
+                    .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .listRowInsets(EdgeInsets(top: 2, leading: 6, bottom: 2, trailing: 6))
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+            .contextMenu {
+                Button {
+                    togglePin(bot.id)
+                } label: {
+                    Label(hub.t(pinned ? "unpinBot" : "pinBot"), systemImage: pinned ? "pin.slash" : "pin")
+                }
+                Button {
+                    hub.toggleUnread(bot.id)
+                } label: {
+                    Label(hub.t(isUnread ? "markRead" : "markUnread"), systemImage: isUnread ? "envelope.open" : "envelope.badge")
+                }
+                if hub.bots.count > 1 {
+                    Divider()
+                    Button(role: .destructive) {
+                        confirm = ConfirmItem(title: hub.t("deleteBotTitle", ["name": bot.displayName]), message: hub.t("deleteBotDesc")) {
+                            try? await hub.deleteBot(bot.id)
+                            if router.selected == bot.id { router.closeBot() }
+                        }
+                    } label: {
+                        Label(hub.t("delete"), systemImage: "trash")
+                    }
+                }
+            }
+        }
+        .onMove(perform: sortMode == .manual && query.isEmpty ? moveBots : nil)
+        if orderedBots.isEmpty {
+            Text(query.isEmpty ? hub.t("noBotsYet") : hub.t("noMatchedBots"))
+                .foregroundStyle(.secondary)
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+        }
+    }
+    #endif
 
     @ViewBuilder
     private var rows: some View {
+        #if os(iOS)
         NativeSearchBar(text: $query, placeholder: hub.t("searchBot"))
             .frame(height: 36)
             .padding(.horizontal, -8)
@@ -103,6 +217,7 @@ struct BotListView: View {
             .listRowBackground(Color.clear)
             .listRowSeparator(.hidden)
             .selectionDisabled()
+        #endif
         if let to = hub.takeovers.first { takeoverSection(to) }
         Section {
             ForEach(orderedBots, id: \.1.id) { idx, bot in
@@ -148,9 +263,10 @@ struct BotListView: View {
         }
     }
 
+    #if os(iOS)
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
-        ToolbarItem(placement: .topBarLeading) {
+        ToolbarItem(placement: .hubLeading) {
             Menu {
                 Picker(hub.t("sortBots"), selection: $sortModeRaw) {
                     Text(hub.t("sortByRecent")).tag(BotSortMode.recent.rawValue)
@@ -160,10 +276,11 @@ struct BotListView: View {
                 Label(hub.t("sortBots"), systemImage: "arrow.up.arrow.down")
             }
         }
-        ToolbarItem(placement: .topBarTrailing) {
+        ToolbarItemGroup(placement: .hubTrailing) {
             Button { router.openSettings(compact: compact) } label: { Label(hub.t("settings"), systemImage: "gearshape") }
         }
     }
+    #endif
 
     private func takeoverSection(_ to: TakeoverRequest) -> some View {
         Section {
@@ -228,16 +345,16 @@ struct BotRow: View {
                             .font(.system(size: 11))
                             .foregroundStyle(.secondary)
                     }
-                    Text(bot.displayName).font(.system(size: 16, weight: .semibold)).lineLimit(1)
+                    Text(bot.displayName).font(.system(size: AppFont.body, weight: .semibold)).foregroundStyle(p.text).lineLimit(1)
                     Spacer(minLength: 4)
-                    Text(formatShortTime(lastMsg?.createdAt)).font(.system(size: 13)).foregroundStyle(p.mute)
+                    Text(formatShortTime(lastMsg?.createdAt)).font(.system(size: AppFont.caption)).foregroundStyle(p.mute)
                 }
                 HStack {
-                    Text(sub).font(.system(size: 15)).foregroundStyle(subColor).lineLimit(1)
+                    Text(sub).font(.system(size: AppFont.secondary)).foregroundStyle(subColor).lineLimit(1)
                     Spacer(minLength: 4)
                     if unread > 0 {
                         Text(unread > 99 ? "99+" : "\(unread)")
-                            .font(.system(size: 13, weight: .semibold)).foregroundStyle(p.lilacInk)
+                            .font(.system(size: AppFont.caption, weight: .semibold)).foregroundStyle(p.lilacInk)
                             .padding(.horizontal, 6).frame(minWidth: 20, minHeight: 18)
                             .background(p.lilac, in: Capsule())
                     }
@@ -251,6 +368,7 @@ struct BotRow: View {
     }
 }
 
+#if os(iOS)
 private struct NativeSearchBar: UIViewRepresentable {
     @Binding var text: String
     var placeholder: String
@@ -299,3 +417,60 @@ private struct NativeSearchBar: UIViewRepresentable {
         }
     }
 }
+#elseif os(macOS)
+private struct NativeSearchBar: NSViewRepresentable {
+    @Binding var text: String
+    var placeholder: String
+
+    func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
+
+    func makeNSView(context: Context) -> NSSearchField {
+        let field = NSSearchField()
+        field.placeholderString = placeholder
+        field.delegate = context.coordinator
+        field.sendsSearchStringImmediately = true
+        field.sendsWholeSearchString = false
+        field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        field.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        context.coordinator.observeFocus(field: field)
+        return field
+    }
+
+    func updateNSView(_ nsView: NSSearchField, context: Context) {
+        if nsView.stringValue != text { nsView.stringValue = text }
+        if nsView.placeholderString != placeholder { nsView.placeholderString = placeholder }
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSSearchField, context: Context) -> CGSize? {
+        CGSize(width: max(80, proposal.width ?? 160), height: 28)
+    }
+
+    final class Coordinator: NSObject, NSSearchFieldDelegate {
+        @Binding var text: String
+        private var observer: NSObjectProtocol?
+        init(text: Binding<String>) { _text = text }
+
+        deinit {
+            if let observer { NotificationCenter.default.removeObserver(observer) }
+        }
+
+        func observeFocus(field: NSSearchField) {
+            if let observer { NotificationCenter.default.removeObserver(observer) }
+            observer = NotificationCenter.default.addObserver(
+                forName: .hubFocusSearch,
+                object: nil,
+                queue: .main
+            ) { [weak field] _ in
+                guard let field else { return }
+                field.window?.makeFirstResponder(field)
+            }
+        }
+
+        func controlTextDidChange(_ obj: Notification) {
+            if let field = obj.object as? NSSearchField {
+                text = field.stringValue
+            }
+        }
+    }
+}
+#endif

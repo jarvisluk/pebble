@@ -1,5 +1,7 @@
 import SwiftUI
+#if os(iOS)
 import PhotosUI
+#endif
 import UniformTypeIdentifiers
 
 struct ConfirmItem: Identifiable {
@@ -41,7 +43,9 @@ struct ChatView: View {
     @State private var acDismissed = false
     @State private var pendingAttachments: [PendingAttachment] = []
     @State private var showPhotoPicker = false
+    #if os(iOS)
     @State private var selectedPhotoItems: [PhotosPickerItem] = []
+    #endif
     @State private var showFileImporter = false
     @FocusState private var focused: Bool
 
@@ -95,60 +99,50 @@ struct ChatView: View {
     var body: some View {
         let pal = p.bot(botId, index, custom: bot?.color)
         VStack(spacing: 0) {
-            thread(pal)
-                .safeAreaInset(edge: .top, spacing: 0) {
-                    VStack(spacing: 0) {
-                        if !inDesktopSidebar && hub.usingStandby {
-                            HStack(spacing: 8) {
-                                Label(hub.t("standbyActiveBanner"), systemImage: "arrow.triangle.2.circlepath")
-                                    .font(.system(size: 14, weight: .medium)).foregroundStyle(p.text).lineLimit(1)
-                                Spacer(minLength: 4)
-                                Button(hub.t("retryPrimary")) {
-                                    Task { await hub.reconnect() }
+            #if os(macOS)
+            if inDesktopSidebar {
+                HStack(spacing: 8) {
+                    if hub.bots.count > 1 {
+                        Menu {
+                            ForEach(hub.bots) { b in
+                                Button {
+                                    onSelectBot?(b.id)
+                                } label: {
+                                    Label(b.displayName, systemImage: b.id == botId ? "checkmark" : "bubble.left")
                                 }
-                                .buttonStyle(.bordered)
                             }
-                            .controlSize(.small)
-                            .padding(.horizontal, 16).padding(.vertical, 8)
-                            .background(.bar)
-                        }
-                        if !inDesktopSidebar && hub.activeDesktopTarget.temporary {
-                            HStack(spacing: 8) {
-                                Label(
-                                    hub.t("tempDesktopBanner", ["name": hub.activeDesktopTarget.name ?? hub.activeDesktopTarget.target]),
-                                    systemImage: "desktopcomputer"
-                                )
-                                .font(.system(size: 14, weight: .medium)).foregroundStyle(p.text).lineLimit(1)
-                                Spacer(minLength: 4)
-                                Button(hub.t("desktopShort")) {
-                                    router.openDesktop(hub.activeDesktopTarget.target)
-                                }
-                                .buttonStyle(.bordered)
-                                Button(hub.t("switchBackLocal")) {
-                                    Task { try? await hub.setActiveDesktopTarget("local") }
-                                }
-                                .buttonStyle(.bordered)
+                        } label: {
+                            HStack(spacing: 6) {
+                                titleView
+                                Image(systemName: "chevron.down")
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundStyle(.secondary)
                             }
-                            .controlSize(.small)
-                            .padding(.horizontal, 16).padding(.vertical, 8)
-                            .background(.bar)
                         }
-                    if let to = hub.takeovers.first {
-                        HStack(spacing: 8) {
-                            Label(hub.t("takeoverInline", ["reason": to.reason ?? ""]), systemImage: "hand.raised.fill")
-                                .font(.system(size: 15)).foregroundStyle(p.pinkInk).lineLimit(2)
-                            Spacer(minLength: 4)
-                            Button(hub.t("handleAction")) { router.openDesktop(to.target ?? "local") }
-                                .buttonStyle(.bordered)
-                            Button(hub.t("resumeShort")) { Task { try? await hub.resolveTakeover(to.id) } }
-                                .buttonStyle(.borderedProminent).tint(pal.accent)
+                        .buttonStyle(.plain)
+                    } else {
+                        titleView
+                    }
+                    Spacer()
+                    if let onCloseSidebar {
+                        Button { onCloseSidebar() } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 12, weight: .semibold))
                         }
-                        .controlSize(.small)
-                        .padding(.horizontal, 16).padding(.vertical, 8)
-                        .background(.bar)
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel(hub.t("close"))
                     }
                 }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(p.card)
+                .overlay(alignment: .bottom) {
+                    Rectangle().fill(p.s2).frame(height: 1)
+                }
             }
+            #endif
+            topBanners(pal)
+            thread(pal)
             composer(pal)
                 .background(p.page)
         }
@@ -160,6 +154,7 @@ struct ChatView: View {
                     commands = list
                 }
             }
+            #if os(iOS)
             .photosPicker(isPresented: $showPhotoPicker, selection: $selectedPhotoItems, maxSelectionCount: 5, matching: .images)
             .onChange(of: selectedPhotoItems) { _, items in
                 guard !items.isEmpty else { return }
@@ -173,22 +168,25 @@ struct ChatView: View {
                     }
                 }
             }
+            #endif
             .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
                 guard case .success(let urls) = result else { return }
-                for url in urls {
-                    let accessed = url.startAccessingSecurityScopedResource()
-                    defer { if accessed { url.stopAccessingSecurityScopedResource() } }
-                    if let data = try? Data(contentsOf: url) {
-                        let name = url.lastPathComponent
-                        let mime = UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? "application/octet-stream"
-                        let isImg = mime.hasPrefix("image/")
-                        Task {
-                            await uploadData(data: data, filename: name, mimeType: mime, isImage: isImg)
+                importFileURLs(urls)
+            }
+            #if os(macOS)
+            .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+                for provider in providers {
+                    _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                        guard let url else { return }
+                        Task { @MainActor in
+                            importFileURLs([url])
                         }
                     }
                 }
+                return !providers.isEmpty
             }
-            .background(p.page)
+            #endif
+            .background(p.page.ignoresSafeArea())
             .sheet(item: $collabPeer) { target in
                 NavigationStack {
                     CollabSheetView(botId: botId, peerId: target.id)
@@ -197,8 +195,9 @@ struct ChatView: View {
             .sheet(item: $previewMedia) { media in
                 MediaPreviewSheet(media: media)
             }
+            #if os(iOS)
             .navigationTitle(name)
-            .navigationBarTitleDisplayMode(.inline)
+            .inlineNavTitle()
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     if inDesktopSidebar && hub.bots.count > 1 {
@@ -240,6 +239,15 @@ struct ChatView: View {
                     }
                 }
             }
+            #else
+            .modifier(MacChatToolbarModifier(inDesktopSidebar: inDesktopSidebar, titleView: titleView, onOpenFiles: {
+                router.openFiles(botId: botId)
+            }, onOpenDesktop: {
+                router.openDesktop(hub.takeovers.first?.target ?? "local")
+            }, onToggleDetail: {
+                router.detailOpen.toggle()
+            }, hasTakeover: !hub.takeovers.isEmpty))
+            #endif
             .task(id: botId) {
                 hub.setActiveChat(botId)
                 try? await hub.loadMessages(botId)
@@ -258,74 +266,146 @@ struct ChatView: View {
             }
     }
 
-    private var titleView: some View {
-        HStack(spacing: 8) {
-            BotAvatar(id: botId, size: 28, index: index, avatar: bot?.avatar, color: bot?.color, busy: bot?.isBusy ?? false)
-            Text(name).font(.system(size: 17, weight: .bold)).lineLimit(1)
+    @ViewBuilder
+    private func topBanners(_ pal: (accent: Color, text: Color, soft: Color)) -> some View {
+        let showStandby = !inDesktopSidebar && hub.usingStandby
+        let showTemp = !inDesktopSidebar && hub.activeDesktopTarget.temporary
+        let takeover = hub.takeovers.first
+        if showStandby || showTemp || takeover != nil {
+            VStack(spacing: 0) {
+                if showStandby {
+                    HStack(spacing: 8) {
+                        Label(hub.t("standbyActiveBanner"), systemImage: "arrow.triangle.2.circlepath")
+                            .font(.system(size: AppFont.body, weight: .medium)).foregroundStyle(p.text).lineLimit(1)
+                        Spacer(minLength: 4)
+                        Button(hub.t("retryPrimary")) {
+                            Task { await hub.reconnect() }
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                    .controlSize(.small)
+                    .padding(.horizontal, 16).padding(.vertical, 8)
+                    .background(p.card)
+                }
+                if showTemp {
+                    HStack(spacing: 8) {
+                        Label(
+                            hub.t("tempDesktopBanner", ["name": hub.activeDesktopTarget.name ?? hub.activeDesktopTarget.target]),
+                            systemImage: "desktopcomputer"
+                        )
+                        .font(.system(size: AppFont.body, weight: .medium)).foregroundStyle(p.text).lineLimit(1)
+                        Spacer(minLength: 4)
+                        Button(hub.t("desktopShort")) {
+                            router.openDesktop(hub.activeDesktopTarget.target)
+                        }
+                        .buttonStyle(.bordered)
+                        Button(hub.t("switchBackLocal")) {
+                            Task { try? await hub.setActiveDesktopTarget("local") }
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                    .controlSize(.small)
+                    .padding(.horizontal, 16).padding(.vertical, 8)
+                    .background(p.card)
+                }
+                if let to = takeover {
+                    HStack(spacing: 8) {
+                        Label(hub.t("takeoverInline", ["reason": to.reason ?? ""]), systemImage: "hand.raised.fill")
+                            .font(.system(size: AppFont.body)).foregroundStyle(p.pinkInk).lineLimit(2)
+                        Spacer(minLength: 4)
+                        Button(hub.t("handleAction")) { router.openDesktop(to.target ?? "local") }
+                            .buttonStyle(.bordered)
+                        Button(hub.t("resumeShort")) { Task { try? await hub.resolveTakeover(to.id) } }
+                            .buttonStyle(.borderedProminent).tint(pal.accent)
+                    }
+                    .controlSize(.small)
+                    .padding(.horizontal, 16).padding(.vertical, 8)
+                    .background(p.card)
+                }
+                Rectangle().fill(p.s2).frame(height: 1)
+            }
         }
     }
 
+    private var titleView: some View {
+        HStack(spacing: 8) {
+            BotAvatar(id: botId, size: 28, index: index, avatar: bot?.avatar, color: bot?.color, busy: bot?.isBusy ?? false)
+            Text(name).font(.system(size: AppFont.cardTitle, weight: .bold)).lineLimit(1)
+        }
+        #if os(macOS)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 4)
+        .fixedSize(horizontal: true, vertical: false)
+        #endif
+    }
+
+    @ViewBuilder
     private func thread(_ pal: (accent: Color, text: Color, soft: Color)) -> some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 10) {
-                    if list.isEmpty { emptyState(pal) }
-                    ForEach(Array(timelineEntries.enumerated()), id: \.element.id) { i, entry in
-                        let prevAt = i > 0 ? timelineEntries[i - 1].createdAt : nil
-                        if showStamp(entry.createdAt, prevAt) {
-                            Text(formatStamp(entry.createdAt)).font(.system(size: 13)).foregroundStyle(p.mute)
-                                .frame(maxWidth: .infinity).padding(.top, 4)
-                        }
-                        switch entry {
-                        case let .collab(_, peerId, items, _):
-                            let peerIdx = hub.bots.firstIndex { $0.id == peerId } ?? -1
-                            let peerBot = peerIdx >= 0 ? hub.bots[peerIdx] : nil
-                            let peerName = peerBot?.displayName ?? peerId
-                            let peerCollab = p.botCollab(peerId, max(0, peerIdx), custom: peerBot?.color)
-                            Button {
-                                if !peerId.isEmpty { collabPeer = CollabTarget(id: peerId) }
-                            } label: {
-                                HStack(spacing: 8) {
-                                    BotAvatar(id: peerId, size: 16, index: peerIdx, avatar: peerBot?.avatar, color: peerBot?.color)
-                                    Text("\(hub.t("collabWith", ["peer": peerName])) · \(hub.t("collabCount", ["count": "\(items.count)"]))")
-                                        .font(.system(size: 13, weight: .semibold))
-                                        .foregroundStyle(peerCollab.ink)
-                                    Image(systemName: "chevron.right")
-                                        .font(.system(size: 11, weight: .semibold))
-                                        .foregroundStyle(peerCollab.ink.opacity(0.75))
-                                }
-                                .padding(.horizontal, 12).padding(.vertical, 7)
-                                .background(peerCollab.bg, in: Capsule())
+        if list.isEmpty && bot?.isBusy != true && botQuestions.isEmpty && sendErr.isEmpty {
+            emptyState(pal)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(.horizontal, 24)
+        } else {
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 10) {
+                        ForEach(Array(timelineEntries.enumerated()), id: \.element.id) { i, entry in
+                            let prevAt = i > 0 ? timelineEntries[i - 1].createdAt : nil
+                            if showStamp(entry.createdAt, prevAt) {
+                                Text(formatStamp(entry.createdAt)).font(.system(size: 13)).foregroundStyle(p.mute)
+                                    .frame(maxWidth: .infinity).padding(.top, 4)
                             }
-                            .buttonStyle(PressStyle())
-                        case let .message(m):
-                            MessageBubble(msg: m, soft: pal.soft, botId: botId, onPreviewMedia: { previewMedia = $0 })
+                            switch entry {
+                            case let .collab(_, peerId, items, _):
+                                let peerIdx = hub.bots.firstIndex { $0.id == peerId } ?? -1
+                                let peerBot = peerIdx >= 0 ? hub.bots[peerIdx] : nil
+                                let peerName = peerBot?.displayName ?? peerId
+                                let peerCollab = p.botCollab(peerId, max(0, peerIdx), custom: peerBot?.color)
+                                Button {
+                                    if !peerId.isEmpty { collabPeer = CollabTarget(id: peerId) }
+                                } label: {
+                                    HStack(spacing: 8) {
+                                        BotAvatar(id: peerId, size: 16, index: peerIdx, avatar: peerBot?.avatar, color: peerBot?.color)
+                                        Text("\(hub.t("collabWith", ["peer": peerName])) · \(hub.t("collabCount", ["count": "\(items.count)"]))")
+                                            .font(.system(size: 13, weight: .semibold))
+                                            .foregroundStyle(peerCollab.ink)
+                                        Image(systemName: "chevron.right")
+                                            .font(.system(size: 11, weight: .semibold))
+                                            .foregroundStyle(peerCollab.ink.opacity(0.75))
+                                    }
+                                    .padding(.horizontal, 12).padding(.vertical, 7)
+                                    .background(peerCollab.bg, in: Capsule())
+                                }
+                                .buttonStyle(PressStyle())
+                            case let .message(m):
+                                MessageBubble(msg: m, soft: pal.soft, botId: botId, onPreviewMedia: { previewMedia = $0 })
+                            }
                         }
-                    }
-                    if bot?.isBusy == true {
-                        HStack(spacing: 8) {
-                            BotAvatar(id: botId, size: 24, index: index, avatar: bot?.avatar, color: bot?.color, busy: true)
-                            Text(hub.t("processing"))
-                                .font(.system(size: 15)).foregroundStyle(p.busy)
+                        if bot?.isBusy == true {
+                            HStack(spacing: 8) {
+                                BotAvatar(id: botId, size: 24, index: index, avatar: bot?.avatar, color: bot?.color, busy: true)
+                                Text(hub.t("processing"))
+                                    .font(.system(size: AppFont.body)).foregroundStyle(p.busy)
+                            }
+                            .padding(.vertical, 6)
                         }
-                        .padding(.vertical, 6)
+                        ForEach(botQuestions) { q in
+                            QuestionCardView(question: q, pal: pal)
+                        }
+                        if !sendErr.isEmpty { StatusText(text: sendErr) }
+                        Color.clear.frame(height: 1).id("bottom")
                     }
-                    ForEach(botQuestions) { q in
-                        QuestionCardView(question: q, pal: pal)
-                    }
-                    if !sendErr.isEmpty { StatusText(text: sendErr) }
-                    Color.clear.frame(height: 1).id("bottom")
+                    .frame(maxWidth: 840)
+                    .padding(.horizontal, hsc == .compact ? 10 : 14)
+                    .padding(.vertical, 12)
+                    .frame(maxWidth: .infinity)
                 }
-                .frame(maxWidth: 840)
-                .padding(.horizontal, hsc == .compact ? 10 : 14)
-                .padding(.vertical, 12)
-                .frame(maxWidth: .infinity)
+                .defaultScrollAnchor(.bottom)
+                .scrollDismissesKeyboard(.interactively)
+                .onChange(of: list.count) { _, _ in withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
+                .onChange(of: botQuestions.count) { _, _ in withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
+                .onChange(of: bot?.isBusy) { _, _ in withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
             }
-            .defaultScrollAnchor(.bottom)
-            .scrollDismissesKeyboard(.interactively)
-            .onChange(of: list.count) { _, _ in withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
-            .onChange(of: botQuestions.count) { _, _ in withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
-            .onChange(of: bot?.isBusy) { _, _ in withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
         }
     }
 
@@ -338,12 +418,11 @@ struct ChatView: View {
     private func emptyState(_ pal: (accent: Color, text: Color, soft: Color)) -> some View {
         VStack(spacing: 10) {
             BotAvatar(id: botId, size: 72, index: index, avatar: bot?.avatar, color: bot?.color)
-            Text(name).font(.system(size: 22, weight: .bold))
+            Text(name).font(.system(size: AppFont.hero, weight: .bold))
             Text((bot?.description ?? "").isEmpty ? hub.t("emptyChatHint") : bot!.description!)
-                .font(.system(size: 15)).foregroundStyle(p.text2).multilineTextAlignment(.center)
+                .font(.system(size: AppFont.secondary)).foregroundStyle(p.text2).multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
-        .padding(.top, 40)
     }
 
     private var slashQuery: String? {
@@ -456,8 +535,8 @@ struct ChatView: View {
                         ForEach(pendingAttachments) { att in
                             ZStack(alignment: .topTrailing) {
                                 Group {
-                                    if att.isImage, let data = att.imageData, let uiImg = UIImage(data: data) {
-                                        Image(uiImage: uiImg)
+                                    if att.isImage, let data = att.imageData, let img = PlatformImage(data: data) {
+                                        Image(platform: img)
                                             .resizable()
                                             .scaledToFill()
                                             .frame(width: 52, height: 52)
@@ -514,6 +593,7 @@ struct ChatView: View {
         let hasContent = !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !pendingAttachments.isEmpty
         let hasUploading = pendingAttachments.contains { $0.uploading }
         let row = HStack(alignment: .bottom, spacing: 10) {
+            #if os(iOS)
             Menu {
                 Button { showPhotoPicker = true } label: { Label(hub.t("photoLibrary"), systemImage: "photo") }
                 Button { showFileImporter = true } label: { Label(hub.t("chooseFile"), systemImage: "doc") }
@@ -524,15 +604,38 @@ struct ChatView: View {
             }
             .composerGlassButton()
             .accessibilityLabel(hub.t("attachments"))
+            #else
+            Button { showFileImporter = true } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 16, weight: .semibold))
+                    .frame(width: 28, height: 28)
+            }
+            .composerGlassButton()
+            .help(hub.t("macChooseFileOrImage"))
+            .accessibilityLabel(hub.t("attachments"))
+            #endif
 
             TextField(hub.t("msgBotPh", ["name": name]), text: $input, axis: .vertical)
                 .textFieldStyle(.plain)
-                .font(.system(size: 16))
+                .font(.system(size: AppFont.body))
                 .lineLimit(1...6)
                 .focused($focused)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 9)
                 .composerGlassField()
+                #if os(macOS)
+                .onKeyPress(.return, phases: .down) { press in
+                    if press.modifiers.contains(.shift) {
+                        return .ignored
+                    }
+                    if showStop {
+                        interrupt()
+                    } else {
+                        submit()
+                    }
+                    return .handled
+                }
+                #endif
                 .onChange(of: input) { _, v in
                     acDismissed = false
                     if v.count > 8000 { input = String(v.prefix(8000)) }
@@ -564,11 +667,7 @@ struct ChatView: View {
             .accessibilityLabel(showStop ? hub.t("stopOutput") : hub.t("sendMsg"))
         }
 
-        if #available(iOS 26.0, *) {
-            GlassEffectContainer(spacing: 10) { row }
-        } else {
-            row
-        }
+        row.glassRowContainer(spacing: 10)
     }
 
     private func sourceLabel(_ source: String?) -> String {
@@ -585,6 +684,21 @@ struct ChatView: View {
         case "bot": return hub.t("mentionBot")
         case "agent": return hub.t("mentionAgent")
         default: return hub.t("mentionFile")
+        }
+    }
+
+    private func importFileURLs(_ urls: [URL]) {
+        for url in urls {
+            let accessed = url.startAccessingSecurityScopedResource()
+            defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+            if let data = try? Data(contentsOf: url) {
+                let name = url.lastPathComponent
+                let mime = UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? "application/octet-stream"
+                let isImg = mime.hasPrefix("image/")
+                Task {
+                    await uploadData(data: data, filename: name, mimeType: mime, isImage: isImg)
+                }
+            }
         }
     }
 
@@ -832,9 +946,11 @@ struct FileAttachmentRow: View {
                 Text(errMsg).font(.system(size: 12)).foregroundStyle(p.danger)
             }
         }
+        #if os(iOS)
         .sheet(item: $shareItem) { item in
             ShareSheet(items: [item.url])
         }
+        #endif
     }
 
     private func downloadAndShare() {
@@ -844,11 +960,20 @@ struct FileAttachmentRow: View {
             do {
                 let data = try await hub.fetchMediaData(file.url)
                 let safeName = (displayName as NSString).lastPathComponent
+                let fname = safeName.isEmpty ? file.id : safeName
+                #if os(macOS)
+                let panel = NSSavePanel()
+                panel.nameFieldStringValue = fname
+                if panel.runModal() == .OK, let dst = panel.url {
+                    try data.write(to: dst, options: .atomic)
+                }
+                #else
                 let dir = FileManager.default.temporaryDirectory.appendingPathComponent("bothub-files-\(file.id)", isDirectory: true)
                 try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-                let dst = dir.appendingPathComponent(safeName.isEmpty ? file.id : safeName)
+                let dst = dir.appendingPathComponent(fname)
                 try data.write(to: dst, options: .atomic)
                 shareItem = SharedFileURL(url: dst)
+                #endif
             } catch {
                 errMsg = hub.t("downloadFailed")
             }
@@ -857,6 +982,7 @@ struct FileAttachmentRow: View {
     }
 }
 
+#if os(iOS)
 struct ShareSheet: UIViewControllerRepresentable {
     var items: [Any]
 
@@ -875,6 +1001,7 @@ struct ShareSheet: UIViewControllerRepresentable {
 
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
+#endif
 
 struct AuthMediaImage: View {
     @Environment(HubStore.self) private var hub
@@ -884,8 +1011,8 @@ struct AuthMediaImage: View {
 
     var body: some View {
         Group {
-            if let data, let uiImage = UIImage(data: data) {
-                Image(uiImage: uiImage)
+            if let data, let img = PlatformImage(data: data) {
+                Image(platform: img)
                     .resizable()
                     .scaledToFill()
             } else {
@@ -911,8 +1038,8 @@ struct MediaPreviewSheet: View {
         NavigationStack {
             ZStack {
                 Color.black.ignoresSafeArea()
-                if let data, let uiImage = UIImage(data: data) {
-                    Image(uiImage: uiImage)
+                if let data, let img = PlatformImage(data: data) {
+                    Image(platform: img)
                         .resizable()
                         .scaledToFit()
                         .padding()
@@ -1012,7 +1139,7 @@ struct CollabSheetView: View {
                 }
             }
         }
-        .navigationBarTitleDisplayMode(.inline)
+        .inlineNavTitle()
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
                 Button(hub.t("close")) { dismiss() }
@@ -1245,3 +1372,41 @@ struct QuestionCardView: View {
         }
     }
 }
+
+#if os(macOS)
+private struct MacChatToolbarModifier<TitleView: View>: ViewModifier {
+    @Environment(HubStore.self) private var hub
+    var inDesktopSidebar: Bool
+    var titleView: TitleView
+    var onOpenFiles: () -> Void
+    var onOpenDesktop: () -> Void
+    var onToggleDetail: () -> Void
+    var hasTakeover: Bool
+
+    func body(content: Content) -> some View {
+        if inDesktopSidebar {
+            content
+        } else {
+            content
+                .navigationTitle("")
+                .macSeamlessWindowToolbar()
+                .toolbar {
+                    ToolbarItem(placement: .principal) {
+                        titleView
+                    }
+                    ToolbarItemGroup(placement: .primaryAction) {
+                        Button(action: onOpenFiles) {
+                            Label(hub.t("workspaceFiles"), systemImage: "folder")
+                        }
+                        Button(action: onOpenDesktop) {
+                            Label(hub.t("remoteDesktop"), systemImage: hasTakeover ? "exclamationmark.triangle" : "display")
+                        }
+                        Button(action: onToggleDetail) {
+                            Label(hub.t("botDetails"), systemImage: "info.circle")
+                        }
+                    }
+                }
+        }
+    }
+}
+#endif

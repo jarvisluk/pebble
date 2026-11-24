@@ -40,142 +40,196 @@ struct BotDetailView: View {
 
     var body: some View {
         let pal = p.bot(botId, index, custom: editColor.isEmpty ? active?.color : editColor)
-        Form { Group {
-            if !err.isEmpty { Section { StatusText(text: err) } }
-            Section {
-                Button {
-                    router.openDesktop(hub.takeovers.first?.target ?? "local")
-                } label: {
-                    ZStack(alignment: .topTrailing) {
-                        ZStack {
-                            Color.black
-                            H264DisplayView(controller: previewStream)
-                            if !previewStream.connected {
-                                VStack(spacing: 6) {
-                                    if !previewStream.error.isEmpty {
-                                        Image(systemName: "display")
-                                            .font(.system(size: 20))
-                                            .foregroundStyle(.secondary)
-                                        Text(previewStream.error)
-                                            .font(.system(size: 12))
-                                            .foregroundStyle(.secondary)
-                                            .multilineTextAlignment(.center)
-                                            .lineLimit(2)
-                                            .padding(.horizontal, 12)
-                                    } else {
-                                        ProgressView()
-                                            .tint(.white)
+        let formContent = Form {
+            Group {
+                if !err.isEmpty { Section { StatusText(text: err) } }
+                Section {
+                    Button {
+                        router.openDesktop(hub.takeovers.first?.target ?? "local")
+                    } label: {
+                        ZStack(alignment: .topTrailing) {
+                            ZStack {
+                                Color.black
+                                H264DisplayView(controller: previewStream)
+                                if !previewStream.connected {
+                                    VStack(spacing: 6) {
+                                        if !previewStream.error.isEmpty {
+                                            Image(systemName: "display")
+                                                .font(.system(size: 20))
+                                                .foregroundStyle(.secondary)
+                                            Text(previewStream.error)
+                                                .font(.system(size: AppFont.caption))
+                                                .foregroundStyle(.secondary)
+                                                .multilineTextAlignment(.center)
+                                                .lineLimit(2)
+                                                .padding(.horizontal, 12)
+                                        } else {
+                                            ProgressView()
+                                                .tint(.white)
+                                        }
                                     }
                                 }
                             }
+                            .frame(minWidth: 0, maxWidth: .infinity)
+                            .aspectRatio(16.0 / 10.0, contentMode: .fit)
+                            .clipped()
+
+                            Image(systemName: "arrow.up.left.and.arrow.down.right")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .padding(7)
+                                .background(.black.opacity(0.55), in: Circle())
+                                .padding(10)
                         }
-                        .aspectRatio(16.0 / 10.0, contentMode: .fit)
-
-                        Image(systemName: "arrow.up.left.and.arrow.down.right")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .padding(7)
-                            .background(.black.opacity(0.55), in: Circle())
-                            .padding(12)
+                        #if os(macOS)
+                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        #endif
                     }
+                    .buttonStyle(.plain)
+                    #if os(iOS)
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.black)
+                    #endif
                 }
-                .buttonStyle(.plain)
-                .listRowInsets(EdgeInsets())
-                .listRowBackground(Color.black)
-            }
-            Section {
-                HStack(spacing: 14) {
-                    BotAvatar(id: botId, size: 56, index: index, avatar: editAvatar, color: editColor)
-                    VStack(alignment: .leading, spacing: 4) {
-                        TextField(hub.t("botNamePh"), text: $editName).font(.system(size: 16, weight: .semibold))
-                        Text("@\(botId)").font(.system(size: 13, design: .monospaced)).foregroundStyle(.secondary)
+                Section {
+                    HStack(spacing: 14) {
+                        BotAvatar(id: botId, size: 56, index: index, avatar: editAvatar, color: editColor)
+                        VStack(alignment: .leading, spacing: 4) {
+                            TextField("", text: $editName, prompt: Text(hub.t("botNamePh")))
+                                .labelsHidden()
+                                .font(.system(size: AppFont.body, weight: .semibold))
+                            Text("@\(botId)").font(.system(size: AppFont.caption, design: .monospaced)).foregroundStyle(.secondary)
+                        }
                     }
+                    TextField("", text: $editDesc, prompt: Text(hub.t("descPh")), axis: .vertical)
+                        .labelsHidden()
+                    DisclosureGroup(hub.t("appearance"), isExpanded: $appearOpen) {
+                        BotAppearancePicker(botId: botId, index: index, avatar: $editAvatar, color: $editColor, accent: pal.accent)
+                    }
+                    LabeledContent(hub.t("statTurns"), value: "\(active?.session?.turnCount ?? 0)")
+                    LabeledContent(hub.t("statCost"), value: String(format: "$%.4f", active?.session?.totalCostUsd ?? 0))
                 }
-                TextField(hub.t("descPh"), text: $editDesc, axis: .vertical)
-                DisclosureGroup(hub.t("appearance"), isExpanded: $appearOpen) {
-                    BotAppearancePicker(botId: botId, index: index, avatar: $editAvatar, color: $editColor, accent: pal.accent)
-                }
-                LabeledContent(hub.t("statTurns"), value: "\(active?.session?.turnCount ?? 0)")
-                LabeledContent(hub.t("statCost"), value: String(format: "$%.4f", active?.session?.totalCostUsd ?? 0))
-            }
 
-            memorySection(pal)
+                memorySection(pal)
 
-            Section {
-                DisclosureGroup(hub.t("techDetails"), isExpanded: $techOpen) {
-                    LabeledContent(hub.t("statHarness"), value: active?.harness ?? "-")
-                    LabeledContent(hub.t("statModel"), value: (active?.model ?? "").isEmpty ? hub.t("defaultTag") : active!.model!)
-                    LabeledContent(hub.t("statArchived"), value: hub.t("archivedCount", ["n": active?.archivedSessions ?? 0])
-                        + ((active?.privateSessions ?? false) ? hub.t("privateTag") : ""))
-                    LabeledContent(hub.t("workspaceDir")) {
-                        Button {
-                            isPresented = false
-                            router.openFiles(botId: botId)
-                        } label: {
-                            HStack(spacing: 4) {
-                                Text(active?.workspace ?? "-")
-                                    .font(.system(size: 13, design: .monospaced))
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
-                                Image(systemName: "folder")
-                                    .font(.system(size: 12))
+                Section {
+                    DisclosureGroup(hub.t("techDetails"), isExpanded: $techOpen) {
+                        LabeledContent(hub.t("statHarness"), value: active?.harness ?? "-")
+                        LabeledContent(hub.t("statModel"), value: (active?.model ?? "").isEmpty ? hub.t("defaultTag") : active!.model!)
+                        LabeledContent(hub.t("statArchived"), value: hub.t("archivedCount", ["n": active?.archivedSessions ?? 0])
+                            + ((active?.privateSessions ?? false) ? hub.t("privateTag") : ""))
+                        LabeledContent(hub.t("workspaceDir")) {
+                            Button {
+                                #if os(iOS)
+                                isPresented = false
+                                #endif
+                                router.openFiles(botId: botId)
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Text(active?.workspace ?? "-")
+                                        .font(.system(size: AppFont.secondary, design: .monospaced))
+                                        .foregroundStyle(p.text2)
+                                        .lineLimit(1)
+                                        .truncationMode(.middle)
+                                    Image(systemName: "folder")
+                                        .font(.system(size: AppFont.caption))
+                                        .foregroundStyle(p.text2)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        Toggle(hub.t("privateSessions"), isOn: $editPrivate).tint(pal.accent)
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("AGENTS.md").font(.system(size: AppFont.secondary)).foregroundStyle(.secondary)
+                            if loading && detail == nil {
+                                ProgressView()
+                            } else {
+                                TextField(hub.t("agentsPh"), text: $editInst, axis: .vertical)
+                                    .lineLimit(6...24)
+                                    .font(.system(size: AppFont.secondary, design: .monospaced))
                             }
                         }
-                        .buttonStyle(.plain)
-                    }
-                    Toggle(hub.t("privateSessions"), isOn: $editPrivate).tint(pal.accent)
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("AGENTS.md").font(.system(size: 15)).foregroundStyle(.secondary)
-                        if loading && detail == nil {
-                            ProgressView()
-                        } else {
-                            TextField(hub.t("agentsPh"), text: $editInst, axis: .vertical)
-                                .lineLimit(6...24)
-                                .font(.system(size: 15, design: .monospaced))
-                        }
                     }
                 }
-            }
 
-            RoutinesSection(botId: botId)
+                RoutinesSection(botId: botId)
 
-            Section {
-                Button(hub.t("resetSessionBtn")) {
-                    confirm = ConfirmItem(title: hub.t("resetSessionTitle"), message: hub.t("resetSessionDesc", ["name": bot?.displayName ?? botId])) {
-                        do {
-                            try await hub.resetBot(botId)
-                            isPresented = false
-                            try? await hub.loadMessages(botId)
-                        } catch { err = errText(error, hub.t("resetFailed")) }
-                    }
-                }
-                if hub.bots.count > 1 {
-                    Button(hub.t("deleteBotBtn"), role: .destructive) {
-                        confirm = ConfirmItem(title: hub.t("deleteBotTitle", ["name": bot?.displayName ?? botId]), message: hub.t("deleteBotDesc")) {
+                Section {
+                    Button(hub.t("resetSessionBtn")) {
+                        confirm = ConfirmItem(title: hub.t("resetSessionTitle"), message: hub.t("resetSessionDesc", ["name": bot?.displayName ?? botId])) {
                             do {
-                                try await hub.deleteBot(botId)
+                                try await hub.resetBot(botId)
                                 isPresented = false
-                                router.closeBot()
-                            } catch { err = errText(error, hub.t("delFailed")) }
+                                try? await hub.loadMessages(botId)
+                            } catch { err = errText(error, hub.t("resetFailed")) }
+                        }
+                    }
+                    if hub.bots.count > 1 {
+                        Button(hub.t("deleteBotBtn"), role: .destructive) {
+                            confirm = ConfirmItem(title: hub.t("deleteBotTitle", ["name": bot?.displayName ?? botId]), message: hub.t("deleteBotDesc")) {
+                                do {
+                                    try await hub.deleteBot(botId)
+                                    isPresented = false
+                                    router.closeBot()
+                                } catch { err = errText(error, hub.t("delFailed")) }
+                            }
                         }
                     }
                 }
             }
-        }.listRowBackground(p.card) }
+            #if os(iOS)
+            .listRowBackground(p.card)
+            #endif
+        }
         .hubForm()
-        .navigationTitle(hub.t("botDetails"))
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
-                Button(hub.t("close")) { isPresented = false }
-            }
-            ToolbarItem(placement: .confirmationAction) {
-                if saving { ProgressView().controlSize(.small) } else {
-                    Button(hub.t("save")) { save() }
-                        .disabled(!dirty || editName.trimmingCharacters(in: .whitespaces).isEmpty)
+
+        #if os(iOS)
+        formContent
+            .navigationTitle(hub.t("botDetails"))
+            .inlineNavTitle()
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(hub.t("close")) { isPresented = false }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    if saving { ProgressView().controlSize(.small) } else {
+                        Button(hub.t("save")) { save() }
+                            .disabled(!dirty || editName.trimmingCharacters(in: .whitespaces).isEmpty)
+                    }
                 }
             }
+            .confirmAlert($confirm)
+            .task(id: botId) {
+                if hub.isConnected, let req = hub.makeDesktopWSRequest(target: hub.takeovers.first?.target ?? "local") {
+                    previewStream.start(request: req)
+                }
+                await open()
+            }
+            .onDisappear { previewStream.stop() }
+        #else
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                Text(hub.t("botDetails"))
+                    .font(.system(size: AppFont.cardTitle, weight: .semibold))
+                    .foregroundStyle(p.text)
+                Spacer()
+                if saving {
+                    ProgressView().controlSize(.small)
+                } else if dirty {
+                    Button(hub.t("save")) { save() }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        .disabled(editName.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+            .padding(.bottom, 6)
+            .background(p.page)
+
+            formContent
         }
+        .background(p.page)
         .confirmAlert($confirm)
         .task(id: botId) {
             if hub.isConnected, let req = hub.makeDesktopWSRequest(target: hub.takeovers.first?.target ?? "local") {
@@ -184,6 +238,7 @@ struct BotDetailView: View {
             await open()
         }
         .onDisappear { previewStream.stop() }
+        #endif
     }
 
     private func open() async {
@@ -260,12 +315,20 @@ struct BotDetailView: View {
                 ForEach(mem?.items ?? []) { it in
                     MemoryRow(item: it) { askDelete(it) }
                 }
-                HStack(alignment: .bottom) {
-                    TextField(hub.t("botMemPh"), text: $memText, axis: .vertical).lineLimit(1...5)
-                    if memSaving { ProgressView().controlSize(.small) } else {
+                HStack(alignment: .center, spacing: 8) {
+                    TextField("", text: $memText, prompt: Text(hub.t("botMemPh")), axis: .vertical)
+                        .labelsHidden()
+                        .lineLimit(1...5)
+                    let memReady = !memText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    if memSaving {
+                        ProgressView().controlSize(.small)
+                    } else if memReady {
                         Button(hub.t("saveMemory")) { addMem() }
                             .buttonStyle(.borderedProminent).tint(pal.accent).controlSize(.small)
-                            .disabled(memText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    } else {
+                        Button(hub.t("saveMemory")) { addMem() }
+                            .buttonStyle(.bordered).controlSize(.small)
+                            .disabled(true)
                     }
                 }
             }
@@ -385,9 +448,9 @@ struct RoutinesSection: View {
         let meta = [trig, deliv, (rt.webhookUrl ?? "").isEmpty ? "" : hub.t("rtWebhookPushTag"), rt.model ?? ""].filter { !$0.isEmpty }.joined(separator: " · ")
         return VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
-                Text(rt.name ?? rt.id).font(.system(size: 16, weight: .semibold)).lineLimit(1)
+                Text(rt.name ?? rt.id).font(.system(size: AppFont.body, weight: .semibold)).lineLimit(1)
                 if !status.isEmpty {
-                    Text(status).font(.system(size: 13, weight: .semibold))
+                    Text(status).font(.system(size: AppFont.caption, weight: .semibold))
                         .foregroundStyle(rt.lastRun?.status == "error" && !running ? p.danger : p.sageInk)
                 }
                 Spacer()
@@ -395,9 +458,11 @@ struct RoutinesSection: View {
                     Task { do { try await hub.updateRoutine(botId, rt.id, ["enabled": v]) } catch { err = errText(error, hub.t("rtStatusUpdateFailed")) } }
                 }))
                 .labelsHidden()
+                .toggleStyle(.switch)
+                .controlSize(.small)
             }
-            Text(meta).font(.system(size: 13)).foregroundStyle(.secondary)
-            Text(rt.prompt ?? "").font(.system(size: 15)).lineLimit(4)
+            Text(meta).font(.system(size: AppFont.caption)).foregroundStyle(.secondary)
+            Text(rt.prompt ?? "").font(.system(size: AppFont.secondary)).lineLimit(4)
             HStack(spacing: 8) {
                 Button(running ? hub.t("rtRunningBtn") : hub.t("rtRunNow")) {
                     err = ""
@@ -499,7 +564,7 @@ struct RoutineEditor: View {
                 .pickerStyle(.segmented)
                 switch mode {
                 case .interval: TextField(hub.t("rtEveryPh"), text: $every).monoInput()
-                    .keyboardType(.numberPad)
+                    .numberPadKeyboard()
                 case .daily: TextField(hub.t("rtDailyPh"), text: $daily).monoInput()
                 case .cron: TextField(hub.t("rtCronPh"), text: $cron).monoInput()
                 case .webhook: EmptyView()
@@ -529,7 +594,7 @@ struct RoutineEditor: View {
         }
         .hubForm()
         .navigationTitle(routine == nil ? hub.t("routines") : (routine?.name ?? hub.t("routines")))
-        .navigationBarTitleDisplayMode(.inline)
+        .inlineNavTitle()
         .toolbar {
             ToolbarItem(placement: .cancellationAction) { Button(hub.t("cancel")) { dismiss() } }
             ToolbarItem(placement: .confirmationAction) {

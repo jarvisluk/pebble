@@ -19,6 +19,7 @@ import (
 	"bot-hub/internal/channel"
 	"bot-hub/internal/config"
 	"bot-hub/internal/desktop"
+	"bot-hub/internal/desktophost"
 	"bot-hub/internal/harness"
 	"bot-hub/internal/hub"
 	"bot-hub/internal/mcp"
@@ -42,6 +43,10 @@ func Main(args []string) {
 	}
 	if sub == "connect" {
 		runConnect(args[1:])
+		return
+	}
+	if sub == "host-daemon" {
+		runHostDaemon(args[1:])
 		return
 	}
 	switch sub {
@@ -106,6 +111,33 @@ func printUsage() {
   bot-hub routine <list|upsert|delete|run> [flags]                Manage and trigger scheduled routines
   bot-hub node    <list|exec|file> [flags]                        List or invoke remote computer nodes
   bot-hub desktop <task|takeover|setup|power> [flags]             Delegate desktop GUI tasks, setup virtual desktop, or control power`)
+}
+
+func runHostDaemon(args []string) {
+	fs := flag.NewFlagSet("host-daemon", flag.ExitOnError)
+	dirFlag := fs.String("dir", "", "override desktop host data directory")
+	_ = fs.Parse(args)
+
+	desktophost.ShellEnv()
+	dir := strings.TrimSpace(*dirFlag)
+	if dir == "" {
+		var err error
+		dir, err = desktophost.DataDir()
+		if err != nil {
+			log.Fatal(err)
+		}
+	} else if err := os.MkdirAll(dir, 0o700); err != nil {
+		log.Fatal(err)
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := desktophost.RunDaemon(ctx, desktophost.DaemonOptions{
+		Dir:        dir,
+		ServeLocal: Serve,
+	}); err != nil {
+		log.Fatal(err)
+	}
 }
 
 func runConnect(args []string) {

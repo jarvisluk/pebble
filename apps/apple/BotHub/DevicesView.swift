@@ -38,11 +38,11 @@ struct DevicesView: View {
     }
 
     var body: some View {
-        Form {
+        let form = Form {
             Section(hub.t("currentMobileConn")) {
                 if let s = hub.activeServer {
                     LabeledContent(s.label) {
-                        Text(s.address).font(.system(size: 13, design: .monospaced)).lineLimit(1).truncationMode(.middle)
+                        Text(s.address).font(.system(size: AppFont.secondary, design: .monospaced)).lineLimit(1).truncationMode(.middle)
                     }
                     HStack(spacing: 6) {
                         Tag(text: hub.isTailscale ? hub.t("tailscaleE2E") : hub.isTailcat ? hub.t("tailcatE2E") : hub.t("httpLan"),
@@ -80,11 +80,42 @@ struct DevicesView: View {
             }
         }
         .hubForm()
-        .navigationTitle(hub.t("devicesTunnel"))
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar { SheetToolbar() }
-        .refreshable { await load() }
+
+        #if os(macOS)
+        VStack(spacing: 0) {
+            HStack {
+                Text(hub.t("devicesTunnel"))
+                    .font(.system(size: AppFont.title, weight: .semibold))
+                    .foregroundStyle(p.text)
+                Spacer()
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 14)
+            .background(p.page)
+            Rectangle().fill(p.s2).frame(height: 1)
+
+            form
+
+            Rectangle().fill(p.s2).frame(height: 1)
+            HStack {
+                Spacer()
+                Button(hub.t("close")) { router.sheet = nil }
+                    .buttonStyle(.borderedProminent)
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
+            .background(p.page)
+        }
+        .background(p.page)
         .task { await load() }
+        #else
+        form
+            .navigationTitle(hub.t("devicesTunnel"))
+            .inlineNavTitle()
+            .toolbar { SheetToolbar() }
+            .refreshable { await load() }
+            .task { await load() }
+        #endif
     }
 
     private func load() async {
@@ -102,12 +133,12 @@ struct DevicesView: View {
         let labels = ["files": hub.t("permFiles"), "exec": hub.t("permExec"), "desktop": hub.t("permDesktop")]
         return VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text(node.name ?? node.id).font(.system(size: 16, weight: .semibold))
+                Text(node.name ?? node.id).font(.system(size: AppFont.body, weight: .semibold))
                 Spacer()
                 Tag(text: on ? hub.t("online") : hub.t("offline"), bg: on ? p.sage : p.s2, fg: on ? p.sageInk : .secondary)
             }
             Text("\(node.os ?? "")/\(node.arch ?? "")\((node.hostname ?? "").isEmpty ? "" : " · \(node.hostname!)")")
-                .font(.system(size: 13, design: .monospaced)).foregroundStyle(.secondary)
+                .font(.system(size: AppFont.secondary, design: .monospaced)).foregroundStyle(.secondary)
             if !perms.isEmpty {
                 HStack(spacing: 6) {
                     ForEach(perms, id: \.self) { Tag(text: labels[$0] ?? $0, bg: p.s1, fg: .secondary) }

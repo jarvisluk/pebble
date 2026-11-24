@@ -1,6 +1,8 @@
 import SwiftUI
+#if os(iOS)
 import UIKit
 import AVFoundation
+#endif
 
 private let desktopDownloadURL = URL(string: "https://github.com/pebble-ai/bot-hub/releases/latest")!
 
@@ -74,7 +76,7 @@ struct ConnectView: View {
         .animation(.spring(response: 0.34, dampingFraction: 0.88), value: showFreshHero)
         .animation(.easeOut(duration: 0.22), value: isConnectingGate)
         .navigationTitle(showFreshHero ? "" : (isGate ? "Pebble" : hub.t("connectHost")))
-        .navigationBarTitleDisplayMode(.inline)
+        .inlineNavTitle()
         .toolbar { connectToolbar }
         .confirmAlert($confirm)
         .onAppear {
@@ -146,6 +148,7 @@ struct ConnectView: View {
 
                     Spacer(minLength: 24)
 
+                    #if os(iOS)
                     if scanning {
                         QRScanner { onScanned($0) }
                             .frame(height: 240)
@@ -153,8 +156,10 @@ struct ConnectView: View {
                             .padding(.bottom, 16)
                             .transition(.opacity.combined(with: .scale(scale: 0.96)))
                     }
+                    #endif
 
                     VStack(spacing: 10) {
+                        #if os(iOS)
                         Button {
                             withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
                                 toggleScanner()
@@ -172,6 +177,7 @@ struct ConnectView: View {
                             .foregroundStyle(p.card)
                         }
                         .buttonStyle(.plain)
+                        #endif
 
                         Button {
                             scanning = false
@@ -242,6 +248,7 @@ struct ConnectView: View {
                     }
                 }
             }
+            #if os(iOS)
             Section {
                 Button {
                     toggleScanner()
@@ -259,6 +266,7 @@ struct ConnectView: View {
             } footer: {
                 Text(hub.t("scanPairDesc"))
             }
+            #endif
             Section {
                 TextField("", text: $address, prompt: Text(hub.t("pairingLinkPh")), axis: .vertical)
                     .monoInput()
@@ -324,6 +332,7 @@ struct ConnectView: View {
     }
 
     private func toggleScanner() {
+        #if os(iOS)
         err = ""
         if scanning { scanning = false; return }
         switch AVCaptureDevice.authorizationStatus(for: .video) {
@@ -334,8 +343,10 @@ struct ConnectView: View {
             }
         default: err = hub.t("camPermReq")
         }
+        #endif
     }
 
+    #if os(iOS)
     private func onScanned(_ raw: String) {
         let s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         let lower = s.lowercased()
@@ -350,10 +361,11 @@ struct ConnectView: View {
         if !norm.token.isEmpty { token = norm.token }
         connect(address: s, token: norm.token.isEmpty ? token : norm.token)
     }
+    #endif
 
     private func pastePairingLink() {
         err = ""
-        let raw = (UIPasteboard.general.string ?? "")
+        let raw = readClipboardString()
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .replacingOccurrences(of: "[\\r\\n]+", with: "", options: .regularExpression)
         guard !raw.isEmpty else {
@@ -499,6 +511,7 @@ struct ConnectView: View {
 
 }
 
+#if os(iOS)
 /// AVFoundation 二维码扫描。
 struct QRScanner: UIViewRepresentable {
     var onCode: (String) -> Void
@@ -572,3 +585,4 @@ struct QRScanner: UIViewRepresentable {
         }
     }
 }
+#endif

@@ -325,6 +325,7 @@ struct WorkspaceFilesView: View {
                         Label(hub.t("back"), systemImage: "chevron.backward")
                             .font(.system(size: 15, weight: .semibold))
                     }
+                    .buttonStyle(.plain)
                 }
 
                 VStack(alignment: .leading, spacing: 1) {
