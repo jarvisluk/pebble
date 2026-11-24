@@ -20,6 +20,7 @@ import type {
 import { api, setUnauthorizedHandler } from './lib/api';
 import { getLangPref, resolveLang, setLangPref, translate } from './lib/i18n';
 import { installMacWindowDragBridge } from './lib/macShell';
+import { botColor, contrastText } from './lib/theme';
 import { useViewTransition } from './lib/useViewTransition';
 import { Sidebar } from './components/Sidebar';
 import { ChatView } from './components/ChatView';
@@ -1119,7 +1120,18 @@ export default function App() {
                   onClose={() => setDeskOpen(false)}
                 />
               </div>
-              <div className="stage-pane-slot" hidden={activeStageTabId !== 'files'}>
+              <div
+                className="stage-pane-slot"
+                hidden={activeStageTabId !== 'files'}
+                style={
+                  activeBot
+                    ? ({
+                        '--bot-accent': botColor(activeBot.id, bots),
+                        '--bot-accent-text': contrastText(botColor(activeBot.id, bots)),
+                      } as React.CSSProperties)
+                    : undefined
+                }
+              >
                 <WorkspaceFilesPane
                   botId={activeBotId || ''}
                   initialPath={filesOpenPath}

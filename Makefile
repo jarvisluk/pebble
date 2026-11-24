@@ -1,4 +1,4 @@
-.PHONY: web build desktop app app-wails serve chat status test ios-tunnel android-tunnel
+.PHONY: web build desktop app app-wails serve chat status test ios-tunnel android-tunnel android-native android-native-debug
 
 web:
 	cd web && npm run build
@@ -143,3 +143,9 @@ ios-tunnel:
 
 android-tunnel:
 	./scripts/build-tunnel-android.sh
+
+android-native: android-tunnel
+	cd apps/android && ./gradlew :app:assembleRelease
+
+android-native-debug: android-tunnel
+	cd apps/android && ./gradlew :app:assembleDebug

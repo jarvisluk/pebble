@@ -31,6 +31,12 @@ struct WorkspaceFilesView: View {
         dirPath.split(separator: "/").map(String.init)
     }
 
+    private var botCollab: (bg: Color, ink: Color) {
+        let idx = max(0, hub.bots.firstIndex { $0.id == botId } ?? 0)
+        let botObj = hub.bots.first { $0.id == botId }
+        return p.botCollab(botId, idx, custom: botObj?.color)
+    }
+
     var body: some View {
         GeometryReader { geo in
             let isSplit = geo.size.width >= 680
@@ -246,8 +252,8 @@ struct WorkspaceFilesView: View {
                                 .font(.system(size: 11, weight: .semibold))
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 1)
-                                .background(p.s1, in: Capsule())
-                                .foregroundStyle(p.text2)
+                                .background(botCollab.bg, in: Capsule())
+                                .foregroundStyle(botCollab.ink)
                         }
                         if !ent.isDir {
                             Text(formatByteSize(ent.size))
@@ -277,7 +283,7 @@ struct WorkspaceFilesView: View {
     private func fileSymbol(for ent: WorkspaceFileEntry) -> (symbol: String, color: Color) {
         if ent.isDir {
             if ent.isShared == true {
-                return ("folder.fill.badge.person.crop", p.accent)
+                return ("folder.fill.badge.person.crop", botCollab.ink)
             }
             return ("folder.fill", p.accent)
         }

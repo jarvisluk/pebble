@@ -360,6 +360,7 @@ struct ChatView: View {
                                 let peerIdx = hub.bots.firstIndex { $0.id == peerId } ?? -1
                                 let peerBot = peerIdx >= 0 ? hub.bots[peerIdx] : nil
                                 let peerName = peerBot?.displayName ?? peerId
+                                let peerCollab = p.botCollab(peerId, max(0, peerIdx), custom: peerBot?.color)
                                 Button {
                                     if !peerId.isEmpty { collabPeer = CollabTarget(id: peerId) }
                                 } label: {
@@ -367,17 +368,17 @@ struct ChatView: View {
                                         BotAvatar(id: peerId, size: 16, index: peerIdx, avatar: peerBot?.avatar, color: peerBot?.color)
                                         Text("\(hub.t("collabWith", ["peer": peerName])) · \(hub.t("collabCount", ["count": "\(items.count)"]))")
                                             .font(.system(size: 13, weight: .semibold))
-                                            .foregroundStyle(p.lilacInk)
+                                            .foregroundStyle(peerCollab.ink)
                                         Image(systemName: "chevron.right")
                                             .font(.system(size: 11, weight: .semibold))
-                                            .foregroundStyle(p.lilacInk.opacity(0.75))
+                                            .foregroundStyle(peerCollab.ink.opacity(0.75))
                                     }
                                     .padding(.horizontal, 12).padding(.vertical, 7)
-                                    .background(p.lilac, in: Capsule())
+                                    .background(peerCollab.bg, in: Capsule())
                                 }
                                 .buttonStyle(PressStyle())
                             case let .message(m):
-                                MessageBubble(msg: m, soft: pal.soft, onPreviewMedia: { previewMedia = $0 })
+                                MessageBubble(msg: m, soft: pal.soft, botId: botId, onPreviewMedia: { previewMedia = $0 })
                             }
                         }
                         if bot?.isBusy == true {
@@ -760,6 +761,9 @@ struct MessageBubble: View {
     @Environment(\.palette) private var p
     var msg: ChatMessage
     var soft: Color
+    var showCollabHeader: Bool = true
+    var bubbleColor: Color? = nil
+    var botId: String = ""
     var onPreviewMedia: ((MessageMedia) -> Void)? = nil
 
     var body: some View {
@@ -803,17 +807,28 @@ struct MessageBubble: View {
             .background(p.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
             .padding(.trailing, 24)
         case "bot_out", "bot_in":
+            let isOut = msg.role == "bot_out"
+            let rawPeer = (isOut ? msg.to : msg.from) ?? ""
+            let peerId = rawPeer.hasPrefix("bot:") ? String(rawPeer.dropFirst(4)) : rawPeer
+            let senderId = (isOut && !botId.isEmpty) ? botId : peerId
+            let senderIdx = max(0, hub.bots.firstIndex { $0.id == senderId } ?? 0)
+            let senderObj = hub.bots.first { $0.id == senderId }
+            let senderCollab = p.botCollab(senderId, senderIdx, custom: senderObj?.color)
             VStack(alignment: .leading, spacing: 6) {
-                Text(msg.role == "bot_out" ? hub.t("delegateTo", ["peer": msg.to ?? ""]) : hub.t("fromPeer", ["peer": msg.from ?? ""]))
-                    .font(.system(size: 13, weight: .semibold)).foregroundStyle(p.lilacInk)
+                if showCollabHeader {
+                    let peerDisplay = hub.bots.first { $0.id == peerId }?.displayName ?? peerId
+                    Text(isOut ? hub.t("delegateTo", ["peer": peerDisplay]) : hub.t("fromPeer", ["peer": peerDisplay]))
+                        .font(.system(size: 13, weight: .semibold)).foregroundStyle(senderCollab.ink)
+                }
                 if !msg.body.isEmpty {
                     MarkdownText(text: msg.body)
                 }
                 mediaGrid
             }
             .padding(.horizontal, 16).padding(.vertical, 10)
-            .background(p.lilac, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .padding(.trailing, 24)
+            .background(bubbleColor ?? senderCollab.bg, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .padding(.leading, isOut ? 24 : 0)
+            .padding(.trailing, isOut ? 0 : 24)
         default:
             if msg.from == "command" {
                 Text(msg.body)
@@ -1056,8 +1071,12 @@ struct CollabSheetView: View {
     @State private var loading = false
     @State private var previewMedia: MessageMedia?
 
-    private var botName: String { hub.bots.first { $0.id == botId }?.displayName ?? botId }
-    private var peerName: String { hub.bots.first { $0.id == peerId }?.displayName ?? peerId }
+    private var botIdx: Int { max(0, hub.bots.firstIndex { $0.id == botId } ?? 0) }
+    private var peerIdx: Int { max(0, hub.bots.firstIndex { $0.id == peerId } ?? 0) }
+    private var botObj: BotStatus? { hub.bots.first { $0.id == botId } }
+    private var peerObj: BotStatus? { hub.bots.first { $0.id == peerId } }
+    private var botName: String { botObj?.displayName ?? botId }
+    private var peerName: String { peerObj?.displayName ?? peerId }
 
     private var items: [ChatMessage] {
         let peerTag = "bot:\(peerId)"
@@ -1070,8 +1089,10 @@ struct CollabSheetView: View {
     }
 
     var body: some View {
+        let botCollab = p.botCollab(botId, botIdx, custom: botObj?.color)
+        let peerCollab = p.botCollab(peerId, peerIdx, custom: peerObj?.color)
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 10) {
+            LazyVStack(alignment: .leading, spacing: 12) {
                 if loading && items.isEmpty {
                     ProgressView().frame(maxWidth: .infinity).padding(.top, 40)
                 } else if items.isEmpty {
@@ -1083,11 +1104,23 @@ struct CollabSheetView: View {
                 } else {
                     ForEach(items) { m in
                         let isOut = m.role == "bot_out"
+                        let collab = isOut ? botCollab : peerCollab
+                        let senderId = isOut ? botId : peerId
+                        let senderIdx = isOut ? botIdx : peerIdx
+                        let senderObj = isOut ? botObj : peerObj
                         VStack(alignment: isOut ? .trailing : .leading, spacing: 4) {
-                            Text(isOut ? hub.t("delegateTo", ["peer": peerName]) : hub.t("fromPeer", ["peer": peerName]))
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(p.lilacInk)
-                            MessageBubble(msg: m, soft: p.s1, onPreviewMedia: { previewMedia = $0 })
+                            HStack(spacing: 6) {
+                                if !isOut {
+                                    BotAvatar(id: senderId, size: 18, index: senderIdx, avatar: senderObj?.avatar, color: senderObj?.color)
+                                }
+                                Text(isOut ? hub.t("delegateTo", ["peer": peerName]) : hub.t("fromPeer", ["peer": peerName]))
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundStyle(collab.ink)
+                                if isOut {
+                                    BotAvatar(id: senderId, size: 18, index: senderIdx, avatar: senderObj?.avatar, color: senderObj?.color)
+                                }
+                            }
+                            MessageBubble(msg: m, soft: p.s1, showCollabHeader: false, bubbleColor: collab.bg, onPreviewMedia: { previewMedia = $0 })
                         }
                         .frame(maxWidth: .infinity, alignment: isOut ? .trailing : .leading)
                     }
@@ -1096,7 +1129,16 @@ struct CollabSheetView: View {
             .padding(16)
         }
         .background(p.page)
-        .navigationTitle(hub.t("collabTitle", ["bot": botName, "peer": peerName]))
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                HStack(spacing: 8) {
+                    BotAvatar(id: peerId, size: 22, index: peerIdx, avatar: peerObj?.avatar, color: peerObj?.color)
+                    Text(hub.t("collabTitle", ["bot": botName, "peer": peerName]))
+                        .font(.system(size: 17, weight: .bold))
+                        .lineLimit(1)
+                }
+            }
+        }
         .inlineNavTitle()
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {

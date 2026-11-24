@@ -279,7 +279,10 @@
 .msg.me .bubble { background: var(--bot-accent-soft); max-width: 72%; }
 .msg .label { display: flex; align-items: center; gap: 6px; font-size: var(--fs-xs); color: var(--mute); margin: 8px 16px 4px; }
 .msg .label .av { width: 16px; height: 16px; }
-.msg.peer .bubble { background: var(--lilac); }
+.msg.peer .bubble { background: color-mix(in srgb, var(--bot-accent) var(--bot-collab-bg-mix), var(--card)); }
+.collab-panel .msg.me .bubble,
+.collab-panel .msg.peer .bubble { background: color-mix(in srgb, var(--bot-accent) var(--bot-collab-bg-mix), var(--card)); }
+.collab-panel .msg .label { color: color-mix(in srgb, var(--bot-accent) var(--bot-collab-ink-mix), var(--bot-collab-ink-base)); }
 .msg .foot { font-size: var(--fs-xs); color: var(--mute); margin: 4px 16px 0; }
 .msg.sys { align-items: center; }
 
@@ -290,8 +293,8 @@
   gap: 8px;
   padding: 6px 12px;
   border-radius: 999px;
-  background: var(--lilac);
-  color: var(--lilac-ink);
+  background: color-mix(in srgb, var(--bot-accent) var(--bot-collab-bg-mix), var(--card));
+  color: color-mix(in srgb, var(--bot-accent) var(--bot-collab-ink-mix), var(--bot-collab-ink-base));
   font-size: var(--fs-xs);
   font-weight: 600;
   transition: transform var(--dur-fast), filter var(--dur-fast);
@@ -472,7 +475,7 @@
 .sug b { display: block; font-size: var(--fs-sm); font-weight: 600; }
 .sug span { opacity: .75; }
 .sug.p { background: var(--pink); color: var(--pink-ink); }
-.sug.l { background: var(--lilac); color: var(--lilac-ink); }
+.sug.l { background: color-mix(in srgb, var(--bot-accent) var(--bot-collab-bg-mix), var(--card)); color: color-mix(in srgb, var(--bot-accent) var(--bot-collab-ink-mix), var(--bot-collab-ink-base)); }
 .sug.g { background: var(--sage); color: var(--sage-ink); }
 .sug.n { background: var(--card); color: var(--text-2); }
 
@@ -505,7 +508,7 @@
 .ac-desc { font-size: var(--fs-xs); color: var(--mute); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ac-tag { flex: none; font-size: var(--fs-xs); font-weight: 600; padding: 2px 8px; border-radius: 999px; background: var(--s1); color: var(--text-2); }
 .ac-item.active .ac-tag { background: var(--s2); }
-.ac-tag.src-hub, .ac-tag.kind-bot { background: var(--lilac); color: var(--lilac-ink); }
+.ac-tag.src-hub, .ac-tag.kind-bot { background: color-mix(in srgb, var(--bot-accent) var(--bot-collab-bg-mix), var(--card)); color: color-mix(in srgb, var(--bot-accent) var(--bot-collab-ink-mix), var(--bot-collab-ink-base)); }
 .ac-tag.src-skill, .ac-tag.kind-agent { background: var(--sage); color: var(--sage-ink); }
 .ac-tag.src-harness, .ac-tag.src-workflow { background: var(--pink); color: var(--pink-ink); }
 
@@ -1613,6 +1616,7 @@
   display: grid;
   place-items: center;
 }
+.ws-row.is-shared .ws-row-ico { color: color-mix(in srgb, var(--bot-accent) var(--bot-collab-ink-mix), var(--bot-collab-ink-base)); }
 .ws-row-ico svg { width: 18px; height: 18px; }
 .ws-row-main { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
 .ws-row-name {
@@ -1633,8 +1637,8 @@
 .ws-badge {
   padding: 1px 6px;
   border-radius: 999px;
-  background: var(--lilac);
-  color: var(--lilac-ink);
+  background: color-mix(in srgb, var(--bot-accent) var(--bot-collab-bg-mix), var(--card));
+  color: color-mix(in srgb, var(--bot-accent) var(--bot-collab-ink-mix), var(--bot-collab-ink-base));
   font-weight: 600;
 }
 .ws-empty {

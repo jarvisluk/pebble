@@ -15,6 +15,9 @@
   --bot-accent: var(--accent);
   --bot-accent-text: var(--accent-text);
   --bot-accent-soft: color-mix(in srgb, var(--bot-accent) 16%, var(--card));
+  --bot-collab-bg-mix: 16%;
+  --bot-collab-ink-mix: 62%;
+  --bot-collab-ink-base: var(--text);
   --pink: #fde8e8;
   --pink-ink: #dc2626;
   --lilac: #e0dbfb;
@@ -79,6 +82,9 @@
     --accent-text: #171717;
     --accent-soft: #2a2a2a;
     --bot-accent-soft: #2a2a2a;
+    --bot-collab-bg-mix: 28%;
+    --bot-collab-ink-mix: 72%;
+    --bot-collab-ink-base: #ffffff;
     --sel: #262626;
     --pink: #2c1616;
     --pink-ink: #ff6961;
@@ -110,6 +116,9 @@ html[data-theme="dark"] {
   --accent-text: #171717;
   --accent-soft: #2a2a2a;
   --bot-accent-soft: #2a2a2a;
+  --bot-collab-bg-mix: 28%;
+  --bot-collab-ink-mix: 72%;
+  --bot-collab-ink-base: #ffffff;
   --sel: #262626;
   --pink: #2c1616;
   --pink-ink: #ff6961;
