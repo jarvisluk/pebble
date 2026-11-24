@@ -26,19 +26,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
-import androidx.compose.material.icons.automirrored.rounded.Reply
-import androidx.compose.material.icons.rounded.Code
-import androidx.compose.material.icons.rounded.Description
-import androidx.compose.material.icons.rounded.Folder
-import androidx.compose.material.icons.rounded.FolderShared
-import androidx.compose.material.icons.rounded.FolderZip
-import androidx.compose.material.icons.rounded.FormatQuote
-import androidx.compose.material.icons.rounded.Image
-import androidx.compose.material.icons.rounded.IosShare
-import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -85,6 +72,8 @@ import ai.pebble.android.ui.theme.TagPill
 import coil3.compose.SubcomposeAsyncImage
 import kotlinx.coroutines.launch
 import java.util.Locale
+import androidx.compose.ui.res.painterResource
+import ai.pebble.android.ui.theme.PebbleIcons
 
 @Composable
 fun WorkspaceFilesView(
@@ -95,6 +84,7 @@ fun WorkspaceFilesView(
     refreshTrigger: Int,
     onQuotePath: (String) -> Unit,
     modifier: Modifier = Modifier,
+    inWideStage: Boolean = false,
 ) {
     val p = LocalPalette.current
     val context = LocalContext.current
@@ -214,12 +204,18 @@ fun WorkspaceFilesView(
     ) {
         val isSplit = maxWidth >= 720.dp
         if (isSplit) {
-            Row(modifier = Modifier.fillMaxSize()) {
-                Box(
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Surface(
+                    color = p.card,
+                    shape = RoundedCornerShape(20.dp),
                     modifier = Modifier
-                        .width(300.dp)
-                        .fillMaxHeight()
-                        .background(p.card),
+                        .width(296.dp)
+                        .fillMaxHeight(),
                 ) {
                     WorkspaceListPanel(
                         store = store,
@@ -234,17 +230,12 @@ fun WorkspaceFilesView(
                         onOpenFile = { scope.launch { openFile(it) } },
                     )
                 }
-                Box(
-                    modifier = Modifier
-                        .width(0.5.dp)
-                        .fillMaxHeight()
-                        .background(p.s2),
-                )
-                Box(
+                Surface(
+                    color = p.card,
+                    shape = RoundedCornerShape(20.dp),
                     modifier = Modifier
                         .weight(1f)
-                        .fillMaxHeight()
-                        .background(p.page),
+                        .fillMaxHeight(),
                 ) {
                     val path = selectedPath
                     if (path != null) {
@@ -280,12 +271,64 @@ fun WorkspaceFilesView(
                                 verticalArrangement = Arrangement.spacedBy(8.dp),
                                 modifier = Modifier.padding(24.dp),
                             ) {
-                                Icon(Icons.Rounded.Description, contentDescription = null, tint = p.mute, modifier = Modifier.size(40.dp))
+                                Icon(painterResource(PebbleIcons.Description), contentDescription = null, tint = p.mute, modifier = Modifier.size(40.dp))
                                 Text(store.t("workspaceFiles"), color = p.text, fontSize = PebbleFont.title, fontWeight = FontWeight.Bold)
                                 Text(store.t("selectFileHint"), color = p.text2, fontSize = PebbleFont.secondary, textAlign = TextAlign.Center)
                             }
                         }
                     }
+                }
+            }
+        } else if (inWideStage) {
+            Surface(
+                color = p.card,
+                shape = RoundedCornerShape(20.dp),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(12.dp),
+            ) {
+                val path = selectedPath
+                if (path != null) {
+                    WorkspacePreviewPanel(
+                        store = store,
+                        path = path,
+                        preview = preview,
+                        imageUrl = imageUrl,
+                        loading = previewLoading,
+                        error = previewErr,
+                        downloading = downloading,
+                        toastMsg = toastMsg,
+                        isSplit = false,
+                        inCard = true,
+                        onBack = {
+                            selectedPath = null
+                            preview = null
+                            imageUrl = null
+                        },
+                        onRetry = { scope.launch { openFile(path) } },
+                        onQuotePath = { onQuotePath(path) },
+                        onShare = {
+                            downloadAndShare(
+                                path = path,
+                                fileName = preview?.name?.ifEmpty { null } ?: path.substringAfterLast('/'),
+                                mimeType = preview?.mimeType,
+                            )
+                        },
+                    )
+                } else {
+                    WorkspaceListPanel(
+                        store = store,
+                        botPal = botPal,
+                        dirPath = dirPath,
+                        listResult = listResult,
+                        listLoading = listLoading,
+                        listErr = listErr,
+                        selectedPath = null,
+                        isSplit = false,
+                        inCard = true,
+                        onLoadDir = { scope.launch { loadDir(it) } },
+                        onOpenFile = { scope.launch { openFile(it) } },
+                    )
                 }
             }
         } else {
@@ -347,6 +390,7 @@ private fun WorkspaceListPanel(
     isSplit: Boolean,
     onLoadDir: (String) -> Unit,
     onOpenFile: (String) -> Unit,
+    inCard: Boolean = false,
 ) {
     val p = LocalPalette.current
     val segments = remember(dirPath) {
@@ -371,12 +415,12 @@ private fun WorkspaceListPanel(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    Icon(Icons.Rounded.Folder, contentDescription = null, tint = p.text2, modifier = Modifier.size(15.dp))
+                    Icon(painterResource(PebbleIcons.Folder), contentDescription = null, tint = p.text2, modifier = Modifier.size(15.dp))
                     Text(store.t("rootWorkspace"), color = p.text2, fontSize = PebbleFont.secondary, fontWeight = FontWeight.Medium)
                 }
                 segments.forEachIndexed { idx, seg ->
                     Icon(
-                        imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
+                        painter = painterResource( PebbleIcons.KeyboardArrowRight),
                         contentDescription = null,
                         tint = p.mute,
                         modifier = Modifier.size(14.dp),
@@ -416,7 +460,7 @@ private fun WorkspaceListPanel(
                             verticalArrangement = Arrangement.spacedBy(10.dp),
                             modifier = Modifier.padding(24.dp),
                         ) {
-                            Icon(Icons.Rounded.Warning, contentDescription = null, tint = p.danger, modifier = Modifier.size(32.dp))
+                            Icon(painterResource(PebbleIcons.Warning), contentDescription = null, tint = p.danger, modifier = Modifier.size(32.dp))
                             Text(listErr, color = p.text2, fontSize = PebbleFont.secondary, textAlign = TextAlign.Center)
                             Button(
                                 onClick = { onLoadDir(dirPath) },
@@ -435,19 +479,19 @@ private fun WorkspaceListPanel(
                                 horizontalAlignment = Alignment.CenterHorizontally,
                                 verticalArrangement = Arrangement.spacedBy(8.dp),
                             ) {
-                                Icon(Icons.Rounded.Folder, contentDescription = null, tint = p.mute, modifier = Modifier.size(36.dp))
+                                Icon(painterResource(PebbleIcons.Folder), contentDescription = null, tint = p.mute, modifier = Modifier.size(36.dp))
                                 Text(store.t("emptyFolder"), color = p.text2, fontSize = PebbleFont.body)
                             }
                         }
                     } else {
                         LazyColumn(
                             modifier = Modifier.fillMaxSize(),
-                            contentPadding = PaddingValues(if (isSplit) 8.dp else 12.dp),
+                            contentPadding = PaddingValues(if (isSplit || inCard) 8.dp else 12.dp),
                         ) {
                             item(key = "card") {
                                 Surface(
-                                    color = if (isSplit) Color.Transparent else p.card,
-                                    shape = if (isSplit) RoundedCornerShape(0.dp) else PebbleDimens.cardShape,
+                                    color = if (isSplit || inCard) Color.Transparent else p.card,
+                                    shape = if (isSplit || inCard) RoundedCornerShape(0.dp) else PebbleDimens.cardShape,
                                     modifier = Modifier.fillMaxWidth(),
                                 ) {
                                     Column(modifier = Modifier.fillMaxWidth()) {
@@ -460,7 +504,7 @@ private fun WorkspaceListPanel(
                                                 verticalAlignment = Alignment.CenterVertically,
                                                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                                             ) {
-                                                Icon(Icons.AutoMirrored.Rounded.Reply, contentDescription = null, tint = p.text2, modifier = Modifier.size(18.dp))
+                                                Icon(painterResource(PebbleIcons.Reply), contentDescription = null, tint = p.text2, modifier = Modifier.size(18.dp))
                                                 Text("..", color = p.text, fontSize = PebbleFont.body, fontWeight = FontWeight.Medium)
                                             }
                                             HorizontalDivider(
@@ -535,11 +579,11 @@ private fun WorkspaceEntryRow(
     val p = LocalPalette.current
     val ext = entry.name.substringAfterLast('.', "").lowercase()
     val icon = when {
-        entry.isDir && entry.isShared == true -> Icons.Rounded.FolderShared
-        entry.isDir -> Icons.Rounded.Folder
-        ext in setOf("png", "jpg", "jpeg", "gif", "webp") -> Icons.Rounded.Image
-        ext in setOf("go", "kt", "kts", "swift", "ts", "tsx", "js", "jsx", "py", "rs", "json", "yaml", "yml", "toml", "sh", "sql", "css", "html") -> Icons.Rounded.Code
-        else -> Icons.Rounded.Description
+        entry.isDir && entry.isShared == true -> PebbleIcons.FolderShared
+        entry.isDir -> PebbleIcons.Folder
+        ext in setOf("png", "jpg", "jpeg", "gif", "webp") -> PebbleIcons.Image
+        ext in setOf("go", "kt", "kts", "swift", "ts", "tsx", "js", "jsx", "py", "rs", "json", "yaml", "yml", "toml", "sh", "sql", "css", "html") -> PebbleIcons.Code
+        else -> PebbleIcons.Description
     }
     val iconColor = when {
         entry.isDir && entry.isShared == true -> botPal.collabInk
@@ -558,7 +602,7 @@ private fun WorkspaceEntryRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Icon(icon, contentDescription = null, tint = iconColor, modifier = Modifier.size(20.dp))
+        Icon(painterResource(icon), contentDescription = null, tint = iconColor, modifier = Modifier.size(20.dp))
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(
                 text = entry.name,
@@ -584,7 +628,7 @@ private fun WorkspaceEntryRow(
         }
         if (entry.isDir) {
             Icon(
-                imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
+                painter = painterResource( PebbleIcons.KeyboardArrowRight),
                 contentDescription = null,
                 tint = p.mute,
                 modifier = Modifier.size(18.dp),
@@ -608,6 +652,7 @@ private fun WorkspacePreviewPanel(
     onRetry: () -> Unit,
     onQuotePath: () -> Unit,
     onShare: () -> Unit,
+    inCard: Boolean = false,
 ) {
     val p = LocalPalette.current
 
@@ -615,14 +660,14 @@ private fun WorkspacePreviewPanel(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(if (isSplit) Color.Transparent else p.card)
+                .background(if (isSplit || inCard) Color.Transparent else p.card)
                 .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             if (!isSplit) {
                 IconButton(onClick = onBack, modifier = Modifier.size(34.dp)) {
-                    Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = store.t("back"), tint = p.accent)
+                    Icon(painterResource(PebbleIcons.ArrowBack), contentDescription = store.t("back"), tint = p.accent)
                 }
             }
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
@@ -649,7 +694,7 @@ private fun WorkspacePreviewPanel(
                 onClick = onQuotePath,
                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
             ) {
-                Icon(Icons.Rounded.FormatQuote, contentDescription = store.t("insertToChat"), tint = p.accent, modifier = Modifier.size(16.dp))
+                Icon(painterResource(PebbleIcons.FormatQuote), contentDescription = store.t("insertToChat"), tint = p.accent, modifier = Modifier.size(16.dp))
                 if (isSplit) {
                     Spacer(Modifier.width(4.dp))
                     Text(store.t("insertToChat"), color = p.text, fontSize = PebbleFont.secondary, maxLines = 1)
@@ -659,7 +704,7 @@ private fun WorkspacePreviewPanel(
                 CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = p.accent)
             } else {
                 IconButton(onClick = onShare, modifier = Modifier.size(34.dp)) {
-                    Icon(Icons.Rounded.IosShare, contentDescription = store.t("openQuickLook"), tint = p.accent, modifier = Modifier.size(18.dp))
+                    Icon(painterResource(PebbleIcons.IosShare), contentDescription = store.t("openQuickLook"), tint = p.accent, modifier = Modifier.size(18.dp))
                 }
             }
         }
@@ -687,7 +732,7 @@ private fun WorkspacePreviewPanel(
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                         modifier = Modifier.padding(24.dp),
                     ) {
-                        Icon(Icons.Rounded.Warning, contentDescription = null, tint = p.danger, modifier = Modifier.size(32.dp))
+                        Icon(painterResource(PebbleIcons.Warning), contentDescription = null, tint = p.danger, modifier = Modifier.size(32.dp))
                         Text(error, color = p.text2, fontSize = PebbleFont.secondary, textAlign = TextAlign.Center)
                         Button(
                             onClick = onRetry,
@@ -762,7 +807,7 @@ private fun WorkspacePreviewPanel(
                                 horizontalAlignment = Alignment.CenterHorizontally,
                                 verticalArrangement = Arrangement.spacedBy(10.dp),
                             ) {
-                                Icon(Icons.Rounded.FolderZip, contentDescription = null, tint = p.mute, modifier = Modifier.size(40.dp))
+                                Icon(painterResource(PebbleIcons.FolderZip), contentDescription = null, tint = p.mute, modifier = Modifier.size(40.dp))
                                 Text(preview.name, color = p.text, fontSize = PebbleFont.title, fontWeight = FontWeight.Bold)
                                 Text(
                                     text = "${preview.mimeType} · ${formatByteSize(preview.size)}",

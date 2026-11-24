@@ -1,7 +1,9 @@
 package ai.pebble.android.ui.theme
 
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.MaterialExpressiveTheme
+import androidx.compose.material3.MotionScheme
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
@@ -260,6 +262,7 @@ private val PebbleTypography = Typography(
 
 val MonoFont = FontFamily.Monospace
 
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun PebbleTheme(
     dark: Boolean,
@@ -325,8 +328,9 @@ fun PebbleTheme(
     }
 
     CompositionLocalProvider(LocalPalette provides pal) {
-        MaterialTheme(
+        MaterialExpressiveTheme(
             colorScheme = colorScheme,
+            motionScheme = MotionScheme.expressive(),
             typography = PebbleTypography,
             content = content,
         )

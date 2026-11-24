@@ -25,15 +25,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Add
-import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.DesktopWindows
-import androidx.compose.material.icons.rounded.ExpandLess
-import androidx.compose.material.icons.rounded.ExpandMore
-import androidx.compose.material.icons.rounded.Folder
-import androidx.compose.material.icons.rounded.MoreVert
-import androidx.compose.material.icons.rounded.OpenInFull
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -101,6 +92,8 @@ import ai.pebble.android.ui.theme.copyToClipboard
 import ai.pebble.android.ui.theme.pebbleFieldColors
 import kotlinx.coroutines.launch
 import java.util.Locale
+import androidx.compose.ui.res.painterResource
+import ai.pebble.android.ui.theme.PebbleIcons
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -156,7 +149,7 @@ fun BotDetailScreen(
                 ),
                 navigationIcon = {
                     IconButton(onClick = onClose) {
-                        Icon(Icons.Rounded.Close, contentDescription = store.t("close"), tint = p.text)
+                        Icon(painterResource(PebbleIcons.Close), contentDescription = store.t("close"), tint = p.text)
                     }
                 },
                 title = {
@@ -211,7 +204,7 @@ fun BotDetailScreen(
                             verticalArrangement = Arrangement.spacedBy(6.dp),
                         ) {
                             if (previewError.isNotEmpty()) {
-                                Icon(Icons.Rounded.DesktopWindows, contentDescription = null, tint = Color.White.copy(alpha = 0.6f))
+                                Icon(painterResource(PebbleIcons.DesktopWindows), contentDescription = null, tint = Color.White.copy(alpha = 0.6f))
                                 Text(previewError, color = Color.White.copy(alpha = 0.7f), fontSize = PebbleFont.caption, textAlign = TextAlign.Center, maxLines = 2)
                             } else {
                                 CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp, color = Color.White)
@@ -227,7 +220,7 @@ fun BotDetailScreen(
                             .background(Color.Black.copy(alpha = 0.55f)),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Icon(Icons.Rounded.OpenInFull, contentDescription = null, tint = Color.White, modifier = Modifier.size(15.dp))
+                        Icon(painterResource(PebbleIcons.OpenInFull), contentDescription = null, tint = Color.White, modifier = Modifier.size(15.dp))
                     }
                 }
             }
@@ -366,7 +359,7 @@ fun BotInfoSheet(
                 ),
                 navigationIcon = {
                     IconButton(onClick = onClose) {
-                        Icon(Icons.Rounded.Close, contentDescription = store.t("close"), tint = p.text)
+                        Icon(painterResource(PebbleIcons.Close), contentDescription = store.t("close"), tint = p.text)
                     }
                 },
                 title = {
@@ -463,8 +456,7 @@ fun BotInfoSheet(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(store.t("appearance"), color = p.text, fontSize = PebbleFont.body, modifier = Modifier.weight(1f))
-                        Icon(
-                            if (appearOpen) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                        Icon(painterResource(if (appearOpen) PebbleIcons.ExpandLess else PebbleIcons.ExpandMore),
                             contentDescription = null,
                             tint = p.mute,
                         )
@@ -604,7 +596,7 @@ fun BotInfoSheet(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(store.t("techDetails"), color = p.text, fontSize = PebbleFont.body, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
-                        Icon(if (techOpen) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore, contentDescription = null, tint = p.mute)
+                        Icon(painterResource(if (techOpen) PebbleIcons.ExpandLess else PebbleIcons.ExpandMore), contentDescription = null, tint = p.mute)
                     }
                     AnimatedVisibility(visible = techOpen) {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -640,7 +632,7 @@ fun BotInfoSheet(
                                         modifier = Modifier.weight(1f),
                                     )
                                     Icon(
-                                        imageVector = Icons.Rounded.Folder,
+                                        painter = painterResource( PebbleIcons.Folder),
                                         contentDescription = store.t("workspaceFiles"),
                                         tint = pal.accent,
                                         modifier = Modifier.size(16.dp),
@@ -818,7 +810,7 @@ private fun RoutinesBlock(
         title = store.t("routines"),
         trailing = {
             IconButton(onClick = onCreate, modifier = Modifier.size(28.dp)) {
-                Icon(Icons.Rounded.Add, contentDescription = store.t("addShort"), tint = p.accent, modifier = Modifier.size(20.dp))
+                Icon(painterResource(PebbleIcons.Add), contentDescription = store.t("addShort"), tint = p.accent, modifier = Modifier.size(20.dp))
             }
         },
     )
@@ -928,7 +920,7 @@ private fun RoutinesBlock(
                             }
                             Box {
                                 IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(32.dp)) {
-                                    Icon(Icons.Rounded.MoreVert, contentDescription = store.t("moreActions"), tint = p.text2)
+                                    Icon(painterResource(PebbleIcons.MoreVert), contentDescription = store.t("moreActions"), tint = p.text2)
                                 }
                                 DropdownMenu(
                                     expanded = menuOpen,

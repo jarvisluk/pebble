@@ -6,7 +6,11 @@ plugins {
 
 android {
     namespace = "ai.pebble.android"
-    compileSdk = 36
+    compileSdk {
+        version = release(37) {
+            minorApiLevel = 2
+        }
+    }
 
     defaultConfig {
         applicationId = "ai.pebble.android"
@@ -15,8 +19,13 @@ android {
         versionCode = 1
         versionName = "1.0.0"
 
+        val abiProp = providers.gradleProperty("pebble.abis").orNull
         ndk {
-            abiFilters += listOf("arm64-v8a", "x86_64")
+            abiFilters += if (abiProp.isNullOrBlank()) {
+                listOf("arm64-v8a", "x86_64")
+            } else {
+                abiProp.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+            }
         }
     }
 
@@ -32,7 +41,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            val ksPath = System.getenv("PEBBLE_KEYSTORE_PATH")
+            val ksPath = providers.environmentVariable("PEBBLE_KEYSTORE_PATH").orNull
             if (ksPath.isNullOrBlank()) {
                 signingConfig = signingConfigs.getByName("debug")
             }
@@ -47,6 +56,13 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+        aidl = false
+        shaders = false
+        resValues = false
+    }
+
+    lint {
+        checkReleaseBuilds = false
     }
 
     packaging {
@@ -75,7 +91,6 @@ dependencies {
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.foundation)
     implementation(libs.androidx.compose.material3)
-    implementation(libs.androidx.compose.material.icons.extended)
     debugImplementation(libs.androidx.compose.ui.tooling)
 
     implementation(libs.okhttp)

@@ -24,20 +24,6 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Add
-import androidx.compose.material.icons.rounded.ArrowDownward
-import androidx.compose.material.icons.rounded.ArrowUpward
-import androidx.compose.material.icons.rounded.Check
-import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.DeleteOutline
-import androidx.compose.material.icons.rounded.MarkEmailRead
-import androidx.compose.material.icons.rounded.MarkEmailUnread
-import androidx.compose.material.icons.rounded.PanTool
-import androidx.compose.material.icons.rounded.PushPin
-import androidx.compose.material.icons.rounded.Search
-import androidx.compose.material.icons.rounded.Settings
-import androidx.compose.material.icons.rounded.SwapVert
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -77,6 +63,8 @@ import ai.pebble.android.ui.theme.ConfirmItem
 import ai.pebble.android.ui.theme.LocalPalette
 import ai.pebble.android.ui.theme.PebbleDimens
 import kotlinx.coroutines.launch
+import androidx.compose.ui.res.painterResource
+import ai.pebble.android.ui.theme.PebbleIcons
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -162,7 +150,7 @@ fun BotListScreen(
                 navigationIcon = {
                     Box {
                         IconButton(onClick = { sortMenuOpen = true }) {
-                            Icon(Icons.Rounded.SwapVert, contentDescription = store.t("sortBots"), tint = p.text)
+                            Icon(painterResource(PebbleIcons.SwapVert), contentDescription = store.t("sortBots"), tint = p.text)
                         }
                         DropdownMenu(
                             expanded = sortMenuOpen,
@@ -173,7 +161,7 @@ fun BotListScreen(
                                 text = { Text(store.t("sortByRecent"), color = p.text) },
                                 trailingIcon = {
                                     if (store.sortMode == BotSortMode.RECENT) {
-                                        Icon(Icons.Rounded.Check, contentDescription = null, tint = p.accent, modifier = Modifier.size(16.dp))
+                                        Icon(painterResource(PebbleIcons.Check), contentDescription = null, tint = p.accent, modifier = Modifier.size(16.dp))
                                     }
                                 },
                                 onClick = {
@@ -185,7 +173,7 @@ fun BotListScreen(
                                 text = { Text(store.t("sortManual"), color = p.text) },
                                 trailingIcon = {
                                     if (store.sortMode == BotSortMode.MANUAL) {
-                                        Icon(Icons.Rounded.Check, contentDescription = null, tint = p.accent, modifier = Modifier.size(16.dp))
+                                        Icon(painterResource(PebbleIcons.Check), contentDescription = null, tint = p.accent, modifier = Modifier.size(16.dp))
                                     }
                                 },
                                 onClick = {
@@ -199,7 +187,7 @@ fun BotListScreen(
                 title = {},
                 actions = {
                     IconButton(onClick = onOpenSettings) {
-                        Icon(Icons.Rounded.Settings, contentDescription = store.t("settings"), tint = p.text)
+                        Icon(painterResource(PebbleIcons.Settings), contentDescription = store.t("settings"), tint = p.text)
                     }
                 },
             )
@@ -226,7 +214,7 @@ fun BotListScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
-                        Icon(Icons.Rounded.Search, contentDescription = null, tint = p.mute, modifier = Modifier.size(17.dp))
+                        Icon(painterResource(PebbleIcons.Search), contentDescription = null, tint = p.mute, modifier = Modifier.size(17.dp))
                         Box(modifier = Modifier.weight(1f)) {
                             if (query.isEmpty()) {
                                 Text(store.t("searchBot"), color = p.mute, fontSize = PebbleFont.secondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -242,7 +230,7 @@ fun BotListScreen(
                         }
                         if (query.isNotEmpty()) {
                             Icon(
-                                imageVector = Icons.Rounded.Close,
+                                painter = painterResource( PebbleIcons.Close),
                                 contentDescription = store.t("clear"),
                                 tint = p.mute,
                                 modifier = Modifier
@@ -257,7 +245,7 @@ fun BotListScreen(
                         onClick = { sortMenuOpen = true },
                         modifier = Modifier.size(34.dp),
                     ) {
-                        Icon(Icons.Rounded.SwapVert, contentDescription = store.t("sortBots"), tint = p.text2, modifier = Modifier.size(19.dp))
+                        Icon(painterResource(PebbleIcons.SwapVert), contentDescription = store.t("sortBots"), tint = p.text2, modifier = Modifier.size(19.dp))
                     }
                     DropdownMenu(
                         expanded = sortMenuOpen,
@@ -268,7 +256,7 @@ fun BotListScreen(
                             text = { Text(store.t("sortByRecent"), color = p.text) },
                             trailingIcon = {
                                 if (store.sortMode == BotSortMode.RECENT) {
-                                    Icon(Icons.Rounded.Check, contentDescription = null, tint = p.accent, modifier = Modifier.size(16.dp))
+                                    Icon(painterResource(PebbleIcons.Check), contentDescription = null, tint = p.accent, modifier = Modifier.size(16.dp))
                                 }
                             },
                             onClick = {
@@ -280,7 +268,7 @@ fun BotListScreen(
                             text = { Text(store.t("sortManual"), color = p.text) },
                             trailingIcon = {
                                 if (store.sortMode == BotSortMode.MANUAL) {
-                                    Icon(Icons.Rounded.Check, contentDescription = null, tint = p.accent, modifier = Modifier.size(16.dp))
+                                    Icon(painterResource(PebbleIcons.Check), contentDescription = null, tint = p.accent, modifier = Modifier.size(16.dp))
                                 }
                             },
                             onClick = {
@@ -330,7 +318,7 @@ fun BotListScreen(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                             ) {
-                                Icon(Icons.Rounded.Search, contentDescription = null, tint = p.mute, modifier = Modifier.size(18.dp))
+                                Icon(painterResource(PebbleIcons.Search), contentDescription = null, tint = p.mute, modifier = Modifier.size(18.dp))
                                 Box(modifier = Modifier.weight(1f)) {
                                     if (query.isEmpty()) {
                                         Text(store.t("searchBot"), color = p.mute, fontSize = PebbleFont.body)
@@ -346,7 +334,7 @@ fun BotListScreen(
                                 }
                                 if (query.isNotEmpty()) {
                                     Icon(
-                                        imageVector = Icons.Rounded.Close,
+                                        painter = painterResource( PebbleIcons.Close),
                                         contentDescription = store.t("clear"),
                                         tint = p.mute,
                                         modifier = Modifier
@@ -376,7 +364,7 @@ fun BotListScreen(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                             ) {
-                                Icon(Icons.Rounded.PanTool, contentDescription = null, tint = p.pinkInk, modifier = Modifier.size(18.dp))
+                                Icon(painterResource(PebbleIcons.PanTool), contentDescription = null, tint = p.pinkInk, modifier = Modifier.size(18.dp))
                                 Text(
                                     text = store.t(
                                         "takeoverBanner",
@@ -487,7 +475,7 @@ fun BotListScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(5.dp),
                 ) {
-                    Icon(Icons.Rounded.Add, contentDescription = null, tint = p.text, modifier = Modifier.size(17.dp))
+                    Icon(painterResource(PebbleIcons.Add), contentDescription = null, tint = p.text, modifier = Modifier.size(17.dp))
                     Text(store.t("newBot"), color = p.text, fontSize = PebbleFont.secondary, fontWeight = FontWeight.Medium)
                 }
                 Spacer(Modifier.weight(1f))
@@ -499,7 +487,7 @@ fun BotListScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(5.dp),
                 ) {
-                    Icon(Icons.Rounded.Settings, contentDescription = null, tint = p.text2, modifier = Modifier.size(17.dp))
+                    Icon(painterResource(PebbleIcons.Settings), contentDescription = null, tint = p.text2, modifier = Modifier.size(17.dp))
                     Text(store.t("settings"), color = p.text2, fontSize = PebbleFont.secondary, fontWeight = FontWeight.Medium)
                 }
             }
@@ -590,7 +578,7 @@ private fun BotListRow(
                         )
                         if (pinned) {
                             Icon(
-                                imageVector = Icons.Rounded.PushPin,
+                                painter = painterResource( PebbleIcons.PushPin),
                                 contentDescription = null,
                                 tint = p.mute,
                                 modifier = Modifier.size(13.dp),
@@ -644,8 +632,7 @@ private fun BotListRow(
                         enabled = canMoveUp,
                         modifier = Modifier.size(30.dp),
                     ) {
-                        Icon(
-                            Icons.Rounded.ArrowUpward,
+                        Icon(painterResource( PebbleIcons.ArrowUpward),
                             contentDescription = store.t("moveUp"),
                             tint = if (canMoveUp) p.text2 else p.mute.copy(alpha = 0.35f),
                             modifier = Modifier.size(16.dp),
@@ -656,8 +643,7 @@ private fun BotListRow(
                         enabled = canMoveDown,
                         modifier = Modifier.size(30.dp),
                     ) {
-                        Icon(
-                            Icons.Rounded.ArrowDownward,
+                        Icon(painterResource( PebbleIcons.ArrowDownward),
                             contentDescription = store.t("moveDown"),
                             tint = if (canMoveDown) p.text2 else p.mute.copy(alpha = 0.35f),
                             modifier = Modifier.size(16.dp),
@@ -674,7 +660,7 @@ private fun BotListRow(
         ) {
             DropdownMenuItem(
                 text = { Text(store.t(if (pinned) "unpinBot" else "pinBot"), color = p.text) },
-                leadingIcon = { Icon(Icons.Rounded.PushPin, contentDescription = null, tint = p.text2, modifier = Modifier.size(18.dp)) },
+                leadingIcon = { Icon(painterResource(PebbleIcons.PushPin), contentDescription = null, tint = p.text2, modifier = Modifier.size(18.dp)) },
                 onClick = {
                     menuOpen = false
                     onTogglePin()
@@ -683,8 +669,7 @@ private fun BotListRow(
             DropdownMenuItem(
                 text = { Text(store.t(if (isUnread) "markRead" else "markUnread"), color = p.text) },
                 leadingIcon = {
-                    Icon(
-                        if (isUnread) Icons.Rounded.MarkEmailRead else Icons.Rounded.MarkEmailUnread,
+                    Icon(painterResource(if (isUnread) PebbleIcons.MarkEmailRead else PebbleIcons.MarkEmailUnread),
                         contentDescription = null,
                         tint = p.text2,
                         modifier = Modifier.size(18.dp),
@@ -699,7 +684,7 @@ private fun BotListRow(
                 HorizontalDivider(color = p.s2)
                 DropdownMenuItem(
                     text = { Text(store.t("delete"), color = p.danger) },
-                    leadingIcon = { Icon(Icons.Rounded.DeleteOutline, contentDescription = null, tint = p.danger, modifier = Modifier.size(18.dp)) },
+                    leadingIcon = { Icon(painterResource(PebbleIcons.DeleteOutline), contentDescription = null, tint = p.danger, modifier = Modifier.size(18.dp)) },
                     onClick = {
                         menuOpen = false
                         onDelete()

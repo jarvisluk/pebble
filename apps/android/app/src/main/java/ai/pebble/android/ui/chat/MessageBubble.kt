@@ -18,10 +18,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.ArrowCircleDown
-import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -73,6 +69,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.Locale
+import androidx.compose.ui.res.painterResource
+import ai.pebble.android.ui.theme.PebbleIcons
 
 @Composable
 fun MessageBubble(
@@ -84,8 +82,12 @@ fun MessageBubble(
     showCollabHeader: Boolean = true,
     bubbleColor: Color? = null,
     botId: String = "",
+    inSidebar: Boolean = false,
 ) {
     val p = LocalPalette.current
+    val bubbleShape = if (inSidebar) RoundedCornerShape(16.dp) else PebbleDimens.bubbleShape
+    val hPad = if (inSidebar) 12.dp else 16.dp
+    val vPad = if (inSidebar) 9.dp else 10.dp
 
     when (msg.role) {
         "user" -> {
@@ -93,14 +95,14 @@ fun MessageBubble(
                 modifier = modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.End,
             ) {
-                Spacer(Modifier.weight(0.15f, fill = false))
+                Spacer(Modifier.weight(if (inSidebar) 0.1f else 0.15f, fill = false))
                 Surface(
-                    color = soft,
-                    shape = PebbleDimens.bubbleShape,
+                    color = if (inSidebar && p.dark) p.s2 else soft,
+                    shape = bubbleShape,
                     modifier = Modifier.widthIn(max = 560.dp),
                 ) {
                     Column(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                        modifier = Modifier.padding(horizontal = hPad, vertical = vPad),
                         horizontalAlignment = Alignment.End,
                         verticalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
@@ -133,13 +135,13 @@ fun MessageBubble(
 
             Surface(
                 modifier = modifier
-                    .padding(end = 24.dp)
+                    .padding(end = if (inSidebar) 8.dp else 24.dp)
                     .widthIn(max = 680.dp),
-                color = p.card,
-                shape = PebbleDimens.bubbleShape,
+                color = if (inSidebar) p.s1 else p.card,
+                shape = bubbleShape,
             ) {
                 Column(
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                    modifier = Modifier.padding(horizontal = hPad, vertical = vPad),
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     val from = msg.from.orEmpty()
@@ -211,10 +213,10 @@ fun MessageBubble(
             if (msg.from == "command") {
                 Surface(
                     modifier = modifier
-                        .padding(end = 24.dp)
+                        .padding(end = if (inSidebar) 8.dp else 24.dp)
                         .widthIn(max = 680.dp),
-                    color = p.card,
-                    shape = PebbleDimens.bubbleShape,
+                    color = if (inSidebar) p.s1 else p.card,
+                    shape = bubbleShape,
                 ) {
                     SelectionContainer {
                         Text(
@@ -222,7 +224,7 @@ fun MessageBubble(
                             fontFamily = MonoFont,
                             fontSize = PebbleFont.body,
                             color = p.text,
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                            modifier = Modifier.padding(horizontal = hPad, vertical = vPad),
                         )
                     }
                 }
@@ -376,7 +378,7 @@ private fun FileAttachmentRow(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Icon(Icons.Rounded.Description, contentDescription = null, tint = p.text2, modifier = Modifier.size(18.dp))
+            Icon(painterResource(PebbleIcons.Description), contentDescription = null, tint = p.text2, modifier = Modifier.size(18.dp))
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
                 Text(
                     text = displayName,
@@ -393,7 +395,7 @@ private fun FileAttachmentRow(
             if (loading) {
                 CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = p.mute)
             } else {
-                Icon(Icons.Rounded.ArrowCircleDown, contentDescription = null, tint = p.mute, modifier = Modifier.size(20.dp))
+                Icon(painterResource(PebbleIcons.ArrowCircleDown), contentDescription = null, tint = p.mute, modifier = Modifier.size(20.dp))
             }
         }
         if (errMsg.isNotEmpty()) {
@@ -434,7 +436,7 @@ fun MediaPreviewDialog(
                     },
                     navigationIcon = {
                         IconButton(onClick = onDismiss) {
-                            Icon(Icons.Rounded.Close, contentDescription = store.t("close"), tint = Color.White)
+                            Icon(painterResource(PebbleIcons.Close), contentDescription = store.t("close"), tint = Color.White)
                         }
                     },
                 )

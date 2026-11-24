@@ -31,10 +31,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.FlashlightOff
-import androidx.compose.material.icons.rounded.FlashlightOn
-import androidx.compose.material.icons.rounded.PhotoLibrary
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -81,6 +77,8 @@ import kotlinx.coroutines.delay
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import androidx.compose.ui.res.painterResource
+import ai.pebble.android.ui.theme.PebbleIcons
 
 @Composable
 fun QrScannerBox(
@@ -325,7 +323,7 @@ fun QrScannerBox(
                         ScannerPillButton(
                             icon = {
                                 Icon(
-                                    imageVector = if (torchOn) Icons.Rounded.FlashlightOn else Icons.Rounded.FlashlightOff,
+                                    painter = painterResource(if (torchOn) PebbleIcons.FlashlightOn else PebbleIcons.FlashlightOff),
                                     contentDescription = L.t("scanTorch"),
                                     tint = Color.White,
                                     modifier = Modifier.size(16.dp),
@@ -342,7 +340,7 @@ fun QrScannerBox(
                     ScannerPillButton(
                         icon = {
                             Icon(
-                                imageVector = Icons.Rounded.PhotoLibrary,
+                                painter = painterResource( PebbleIcons.PhotoLibrary),
                                 contentDescription = L.t("scanPickPhoto"),
                                 tint = Color.White,
                                 modifier = Modifier.size(16.dp),
