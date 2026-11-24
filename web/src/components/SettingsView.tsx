@@ -679,7 +679,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             id="settingsSubmit"
             className="btn go set-save"
             disabled={!isDirty || saving}
-            hidden={tab === 'remote' && !isDirty}
+            hidden={(tab === 'remote' || tab === 'desktop' || tab === 'general') && !isDirty}
           >
             {t('saveConfig')}
           </button>
@@ -2113,13 +2113,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   const permName = permText(`deskPermName_${perm.id}`, perm.name);
                   const permDesc = permText(`deskPermDesc_${perm.id}`, perm.description);
                   return (
-                    <div key={perm.id} className="node-row">
-                      <div>
-                        <div className="nm">{permName}</div>
+                    <div key={perm.id} className="node-row desk-perm-row">
+                      <div className="desk-perm-info">
+                        <div className="desk-perm-head">
+                          <span className="nm">{permName}</span>
+                          <span className={`mp${statusClass}`}>{statusLabel}</span>
+                        </div>
                         <div className="meta">{permDesc}</div>
                       </div>
-                      <div className="row-inline-sm row-wrap">
-                        <span className={`mp${statusClass}`}>{statusLabel}</span>
+                      <div className="desk-perm-acts">
                         {perm.canPrompt && perm.status !== 'granted' && (
                           <button
                             type="button"
@@ -2155,71 +2157,69 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   {localDeskEngine || t('checking')}
                 </span>
               </div>
-              <div className="two">
-                <div className="fld">
-                  <label>
-                    {t('deskWorkerHarness')} <em>{t('rtOptional')}</em>
-                  </label>
-                  <select
-                    id="sDeskHarness"
-                    value={deskHarness}
-                    onChange={(e) => {
-                      setDeskHarness(e.target.value);
-                      if (e.target.value) void onLoadModels(e.target.value);
-                    }}
-                  >
-                    <option value="">{t('deskWorkerFollowBot')}</option>
-                    {(settings?.harnesses || []).map((h) => (
-                      <option key={h.id} value={h.id}>
-                        {h.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="fld">
-                  <label>
-                    {t('deskWorkerModel')} <em>{t('deskWorkerModelHint')}</em>
-                  </label>
-                  <div className="row-inline">
-                    <input
-                      id="sDeskModel"
-                      className="mono flex-1"
-                      list={deskHarness ? `models-${deskHarness}` : 'models-global'}
-                      placeholder={t('rtModelPh')}
-                      spellCheck={false}
-                      value={deskModel}
-                      onChange={(e) => setDeskModel(e.target.value)}
-                    />
-                    <button
-                      type="button"
-                      id="sDeskWorkerSave"
-                      className="mp go"
-                      disabled={remoteBusy}
-                      onClick={async () => {
-                        setRemoteBusy(true);
-                        setDeskPermErr('');
-                        try {
-                          const next = await api<SettingsData>('/api/settings', {
-                            method: 'PUT',
-                            body: { desktopHarness: deskHarness, desktopModel: deskModel.trim() },
-                          });
-                          onSettingsUpdated(next);
-                          onToast(t('deskWorkerSaved'));
-                        } catch (e) {
-                          if (e instanceof Error && e.message !== 'unauthorized') setDeskPermErr(e.message);
-                        } finally {
-                          setRemoteBusy(false);
-                        }
-                      }}
-                    >
-                      {t('save')}
-                    </button>
-                  </div>
-                </div>
+              <div className="fld">
+                <label>
+                  {t('deskWorkerHarness')} <em>{t('rtOptional')}</em>
+                </label>
+                <select
+                  id="sDeskHarness"
+                  value={deskHarness}
+                  onChange={(e) => {
+                    setDeskHarness(e.target.value);
+                    if (e.target.value) void onLoadModels(e.target.value);
+                  }}
+                >
+                  <option value="">{t('deskWorkerFollowBot')}</option>
+                  {(settings?.harnesses || []).map((h) => (
+                    <option key={h.id} value={h.id}>
+                      {h.label}
+                    </option>
+                  ))}
+                </select>
               </div>
-              <p className="set-card-desc">
-                {t('deskWorkerDesc')}
-              </p>
+              <div className="fld">
+                <label>
+                  {t('deskWorkerModel')} <em>{t('deskWorkerModelHint')}</em>
+                </label>
+                <input
+                  id="sDeskModel"
+                  className="mono"
+                  list={deskHarness ? `models-${deskHarness}` : 'models-global'}
+                  placeholder={t('rtModelPh')}
+                  spellCheck={false}
+                  value={deskModel}
+                  onChange={(e) => setDeskModel(e.target.value)}
+                />
+              </div>
+              <div className="desk-worker-foot">
+                <p className="set-card-desc">
+                  {t('deskWorkerDesc')}
+                </p>
+                <button
+                  type="button"
+                  id="sDeskWorkerSave"
+                  className="btn go set-save"
+                  disabled={remoteBusy}
+                  onClick={async () => {
+                    setRemoteBusy(true);
+                    setDeskPermErr('');
+                    try {
+                      const next = await api<SettingsData>('/api/settings', {
+                        method: 'PUT',
+                        body: { desktopHarness: deskHarness, desktopModel: deskModel.trim() },
+                      });
+                      onSettingsUpdated(next);
+                      onToast(t('deskWorkerSaved'));
+                    } catch (e) {
+                      if (e instanceof Error && e.message !== 'unauthorized') setDeskPermErr(e.message);
+                    } finally {
+                      setRemoteBusy(false);
+                    }
+                  }}
+                >
+                  {t('save')}
+                </button>
+              </div>
             </section>
           </div>
 
