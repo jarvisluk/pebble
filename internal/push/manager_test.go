@@ -115,6 +115,24 @@ func TestManagerLiveActivityThrottleAndTakeover(t *testing.T) {
 	if alertPayload.APS.InterruptionLevel != "time-sensitive" || alertPayload.DeepLink != "pebble://desktop?target=local" {
 		t.Fatalf("unexpected takeover alert payload: %+v", alertPayload)
 	}
+
+	// 4. Question request -> alert emits pebble://bot/ deep link.
+	mgr.processEvent(rawEvent{
+		Type: "questions",
+		Payload: map[string]any{
+			"items": []map[string]any{
+				{"id": "q-1", "botId": "alpha", "prompt": "Proceed?"},
+			},
+		},
+	})
+	reqs = sender.list()
+	if len(reqs) != 5 {
+		t.Fatalf("expected 5 total requests after question, got %d", len(reqs))
+	}
+	qPayload, _ := reqs[4].Payload.(APNSPayload)
+	if qPayload.DeepLink != "pebble://bot/alpha" {
+		t.Fatalf("expected question deep link pebble://bot/alpha, got %+v", qPayload)
+	}
 }
 
 func TestCompactPreviewStripsMarkdown(t *testing.T) {

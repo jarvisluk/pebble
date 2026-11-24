@@ -98,6 +98,7 @@ while IFS= read -r line; do
   id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
   case "$line" in
     *'"method":"initialize"'*)
+      echo "INITIALIZE $line" >> "` + logFile + `"
       printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1}}\n' "$id"
       ;;
     *'"method":"session/new"'*)
@@ -155,7 +156,11 @@ done
 	if starts != 2 {
 		t.Fatalf("expected 2 ACP process starts (1 pooled + 1 ephemeral), got %d:\n%s", starts, raw)
 	}
-	if !strings.Contains(string(raw), `"name":"pebble"`) || !strings.Contains(string(raw), `"PEBBLE_API_TOKEN"`) {
+	rawStr := string(raw)
+	if !strings.Contains(rawStr, `INITIALIZE `) || !strings.Contains(rawStr, `"clientInfo":{"name":"pebble"`) {
+		t.Fatalf("expected initialize clientInfo.name=pebble, got:\n%s", raw)
+	}
+	if !strings.Contains(rawStr, `"name":"pebble"`) || strings.Contains(rawStr, `"name":"bot-hub"`) || !strings.Contains(rawStr, `"PEBBLE_API_TOKEN"`) {
 		t.Fatalf("expected session/new to include pebble mcpServers, got:\n%s", raw)
 	}
 }

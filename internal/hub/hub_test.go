@@ -1724,3 +1724,64 @@ esac
 	}
 }
 
+type envCaptureHarness struct {
+	mu       sync.Mutex
+	lastOpts harness.RunOptions
+}
+
+func (e *envCaptureHarness) Kind() string                             { return "fake" }
+func (e *envCaptureHarness) Label() string                            { return "Fake" }
+func (e *envCaptureHarness) Models(context.Context) ([]string, error) { return nil, nil }
+func (e *envCaptureHarness) Close()                                   {}
+func (e *envCaptureHarness) RunTurn(_ context.Context, opts harness.RunOptions) (*harness.TurnResult, error) {
+	e.mu.Lock()
+	e.lastOpts = opts
+	e.mu.Unlock()
+	return &harness.TurnResult{BotID: opts.Bot.ID, SessionID: "ses-env", Text: "ok"}, nil
+}
+
+func TestRunTurnInjectsPebbleEnvAndMCP(t *testing.T) {
+	tmp := t.TempDir()
+	store, err := state.NewStore(filepath.Join(tmp, "sessions.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	capH := &envCaptureHarness{}
+	reg := harness.NewRegistry()
+	reg.Register(capH)
+
+	cfgPath := filepath.Join(tmp, "config", "bots.json")
+	cfg := &config.HubConfig{
+		ProjectRoot: tmp,
+		ConfigPath:  cfgPath,
+		SharedDir:   filepath.Join(tmp, "workspaces", "_shared"),
+		StateFile:   filepath.Join(tmp, "sessions.json"),
+		HTTP:        config.HTTPConfig{Host: "127.0.0.1", Port: 3789, APIToken: "tok-run"},
+		Bots: []config.BotConfig{
+			{ID: "alpha", Name: "Alpha", Workspace: filepath.Join(tmp, "workspaces", "alpha"), Harness: "fake"},
+		},
+	}
+	h := New(cfg, store, nil, reg)
+	defer h.Close()
+
+	if _, err := h.Send(context.Background(), "alpha", "hello", SendOptions{}); err != nil {
+		t.Fatalf("Send failed: %v", err)
+	}
+
+	capH.mu.Lock()
+	opts := capH.lastOpts
+	capH.mu.Unlock()
+
+	if opts.ExtraEnv["PEBBLE_URL"] != "http://127.0.0.1:3789" ||
+		opts.ExtraEnv["PEBBLE_BOT_ID"] != "alpha" ||
+		opts.ExtraEnv["PEBBLE_API_TOKEN"] != "tok-run" ||
+		opts.ExtraEnv["PEBBLE_CONFIG"] != cfgPath {
+		t.Fatalf("unexpected ExtraEnv in RunTurn: %+v", opts.ExtraEnv)
+	}
+	if opts.MCPEnv["PEBBLE_API_TOKEN"] != "tok-run" {
+		t.Fatalf("unexpected MCPEnv in RunTurn: %+v", opts.MCPEnv)
+	}
+}
+

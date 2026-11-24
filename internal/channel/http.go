@@ -463,7 +463,7 @@ func (s *HTTPServer) handleCreateBot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if queryBool(r, "validate") {
-		vctx, vcancel := context.WithTimeout(r.Context(), 20*time.Second)
+		vctx, vcancel := context.WithTimeout(r.Context(), 30*time.Second)
 		defer vcancel()
 		if err := s.hub.ValidateCreateBot(vctx, req, true); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
@@ -984,7 +984,7 @@ func (s *HTTPServer) handleUpdateBot(w http.ResponseWriter, r *http.Request) {
 	validate := queryBool(r, "validate")
 	dryRun := queryBool(r, "dryRun")
 	if validate || dryRun {
-		vctx, vcancel := context.WithTimeout(r.Context(), 20*time.Second)
+		vctx, vcancel := context.WithTimeout(r.Context(), 30*time.Second)
 		defer vcancel()
 		preview, err := s.hub.ValidateBotUpdate(vctx, botID, upd, validate)
 		if err != nil {
@@ -1243,7 +1243,7 @@ func (s *HTTPServer) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if queryBool(r, "validate") {
-		vctx, vcancel := context.WithTimeout(r.Context(), 20*time.Second)
+		vctx, vcancel := context.WithTimeout(r.Context(), 30*time.Second)
 		defer vcancel()
 		if body.DefaultHarness != nil && strings.TrimSpace(*body.DefaultHarness) != "" {
 			if err := s.hub.ValidateHarnessReady(vctx, nextDefaultHarness); err != nil {
