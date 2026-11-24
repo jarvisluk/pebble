@@ -150,6 +150,7 @@ struct TailcatStatus: Codable {
     var error: String?
     var hasToken: Bool?
     var tokenEnvRef: String?
+    var apiToken: String?
 }
 
 struct TailscalePeer: Codable, Identifiable, Hashable {
@@ -188,6 +189,8 @@ struct HostTailscaleStatus: Codable {
     var error: String?
     var hasToken: Bool?
     var tokenEnvRef: String?
+    var apiToken: String?
+    var authKeyEnvRef: String?
 }
 
 struct NodeInfo: Codable, Identifiable, Hashable {

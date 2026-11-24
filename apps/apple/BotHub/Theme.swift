@@ -472,17 +472,17 @@ extension View {
     /// 原生 Form 套 DESIGN 页面底色与卡片圆角。
     func hubForm() -> some View { modifier(HubSurface(form: true)) }
 
-    /// 窄宽度：insetGrouped + page 底；宽屏：系统悬浮侧栏；macOS：实色侧栏卡片 + 1px 细分隔。
+    /// 窄宽度：insetGrouped + page 底。
     @ViewBuilder
     func hubColumnList(compact: Bool, page: Color) -> some View {
         #if os(iOS)
         if compact {
             self.listStyle(.insetGrouped).scrollContentBackground(.hidden).background(page)
         } else {
-            self.listStyle(.sidebar)
+            self
         }
         #else
-        self.modifier(HubMacColumnListModifier())
+        self
         #endif
     }
 
@@ -619,7 +619,7 @@ struct BotAppearancePicker: View {
                 }
             }
             Text(hub.t("botColorLabel")).font(.system(size: AppFont.secondary)).foregroundStyle(.secondary)
-            HStack(spacing: 8) {
+            FlowLayout(spacing: 8) {
                 ForEach(botColors, id: \.self) { hex in
                     let active = normalizeBotHex(color) == hex
                     Button { color = hex } label: {
@@ -632,14 +632,15 @@ struct BotAppearancePicker: View {
                     }
                     .buttonStyle(.plain)
                 }
-                Spacer(minLength: 4)
                 ColorPicker("", selection: Binding(
                     get: { Color(hex: effectiveHex) },
                     set: { if let h = colorToHex($0) { color = h } }
                 ), supportsOpacity: false)
                 .labelsHidden()
             }
+            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
         }
+        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 4)
     }
 }
@@ -723,20 +724,88 @@ struct HubMenuPicker<Selection: Hashable>: View {
     }
 }
 
-/// 跨平台表单左侧固定标签输入行。
+/// 跨平台表单上下结构输入行（标签在输入框上方，避免窄屏折行并给足输入宽度）。
 struct HubFormField<Field: View>: View {
     @Environment(\.palette) private var p
     var label: String
     @ViewBuilder var field: () -> Field
 
     var body: some View {
-        HStack(spacing: 12) {
+        VStack(alignment: .leading, spacing: 5) {
             Text(label)
-                .foregroundStyle(p.text)
-                .frame(width: 96, alignment: .leading)
+                .font(.system(size: AppFont.caption, weight: .medium))
+                .foregroundStyle(p.mute)
             field()
                 .labelsHidden()
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+}
+
+/// 跨平台无缝弹窗与 Inspector 顶栏外壳（消除 macOS 模态上下灰条分叉）。
+struct HubSheetScaffold<Content: View>: View {
+    @Environment(\.palette) private var p
+    var title: String
+    var closeTitle: String = L.t("close")
+    var onClose: (() -> Void)? = nil
+    var enableCancelShortcut = true
+    var actionTitle: String? = nil
+    var actionDisabled = false
+    var loading = false
+    var onAction: (() -> Void)? = nil
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ZStack {
+                Text(title)
+                    .font(.system(size: AppFont.cardTitle, weight: .semibold))
+                    .foregroundStyle(p.text)
+                    .lineLimit(1)
+                    .padding(.horizontal, 92)
+
+                HStack {
+                    if let onClose {
+                        let closeBtn = Button(closeTitle, action: onClose)
+                            .font(.system(size: AppFont.body))
+                            .foregroundStyle(p.text2)
+                            .buttonStyle(.plain)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(p.s1, in: Capsule())
+                        if enableCancelShortcut {
+                            closeBtn.keyboardShortcut(.cancelAction)
+                        } else {
+                            closeBtn
+                        }
+                    }
+                    Spacer()
+                    if let actionTitle, let onAction {
+                        if loading {
+                            ProgressView()
+                                .controlSize(.small)
+                                .padding(.horizontal, 12)
+                        } else {
+                            Button(actionTitle, action: onAction)
+                                .font(.system(size: AppFont.body, weight: .semibold))
+                                .foregroundStyle(actionDisabled ? p.mute : p.card)
+                                .buttonStyle(.plain)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 6)
+                                .background(Capsule().fill(actionDisabled ? p.s1 : p.accent))
+                                .disabled(actionDisabled)
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 14)
+            .padding(.bottom, 10)
+
+            content()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .background(p.page.ignoresSafeArea())
     }
 }
 
@@ -833,6 +902,23 @@ struct HubRowButtonStyle: ButtonStyle {
     }
 }
 
+/// 跨平台高对比度主操作胶囊按钮（深色白底黑字 / 浅色黑底白字）。
+struct HubPrimaryButtonStyle: ButtonStyle {
+    @Environment(\.palette) private var p
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: AppFont.secondary, weight: .semibold))
+            .foregroundStyle(isEnabled ? p.card : p.mute)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 5)
+            .background(Capsule().fill(isEnabled ? p.accent : p.s1))
+            .opacity(configuration.isPressed ? 0.82 : 1)
+            .contentShape(Capsule())
+    }
+}
+
 @available(iOS 18.0, macOS 15.0, *)
 struct HubFormStyle: FormStyle {
     @Environment(\.palette) private var p
@@ -880,7 +966,7 @@ struct HubFormStyle: FormStyle {
                     }
                 }
             }
-            .padding(.horizontal, 20)
+            .padding(.horizontal, 16)
             .padding(.top, 8)
             .padding(.bottom, 24)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -914,13 +1000,6 @@ struct HubSurface: ViewModifier {
 }
 
 #if os(macOS)
-private struct HubMacColumnListModifier: ViewModifier {
-    func body(content: Content) -> some View {
-        content
-            .listStyle(.sidebar)
-    }
-}
-
 private struct MacComposerCircleButtonStyle: ButtonStyle {
     @Environment(\.palette) private var p
     @Environment(\.isEnabled) private var isEnabled

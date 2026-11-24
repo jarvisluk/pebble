@@ -53,7 +53,8 @@ struct CreateBotView: View {
                     BotAvatar(id: botId.isEmpty ? (name.isEmpty ? "new" : name) : botId, size: 68, avatar: avatar, color: color)
                     Spacer()
                 }
-                .padding(.bottom, 10)
+                .padding(.top, 2)
+                .padding(.bottom, 8)
             }
             Section(hub.t("appearance")) {
                 BotAppearancePicker(
@@ -110,11 +111,16 @@ struct CreateBotView: View {
         }
         .hubForm()
 
-        form
-            .navigationTitle(hub.t("newBot"))
-            .inlineNavTitle()
-            .toolbar { SheetToolbar(actionTitle: hub.t("create"), loading: submitting, action: { create() }) }
-            .task {
+        HubSheetScaffold(
+            title: hub.t("newBot"),
+            onClose: { router.sheet = nil },
+            actionTitle: hub.t("create"),
+            loading: submitting,
+            onAction: { create() }
+        ) {
+            form
+        }
+        .task {
                 if hub.settings == nil { _ = try? await hub.loadSettings() }
                 if !harnessTouched {
                     harness = hub.settings?.defaultHarness ?? harnesses.first?.id ?? "opencode"

@@ -73,6 +73,17 @@ struct BotListView: View {
         UserDefaults.standard.set(manualOrder, forKey: "bothub_manual_order")
     }
 
+    private func moveBot(id: String, before targetId: String) {
+        guard id != targetId else { return }
+        var ids = orderedBots.map(\.1.id)
+        guard let fromIdx = ids.firstIndex(of: id), let toIdx = ids.firstIndex(of: targetId) else { return }
+        ids.remove(at: fromIdx)
+        let dest = fromIdx < toIdx ? max(0, toIdx - 1) : toIdx
+        ids.insert(id, at: dest)
+        manualOrder = ids
+        UserDefaults.standard.set(manualOrder, forKey: "bothub_manual_order")
+    }
+
     var body: some View {
         @Bindable var r = router
         if compact {
@@ -94,18 +105,23 @@ struct BotListView: View {
                 }
                 .confirmAlert($confirm)
         } else {
-            List { wideRows }
-                .hubColumnList(compact: false, page: p.page)
-                .contentMargins(.top, 4, for: .scrollContent)
-                .refreshable {
-                    if hub.isConnected { try? await hub.refreshBots() } else { await hub.reconnect() }
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 4) {
+                    wideRows
                 }
-                .safeAreaInset(edge: .top, spacing: 0) { sidebarSearchSortBar }
-                .safeAreaInset(edge: .bottom, spacing: 0) { sidebarFooterBar }
-                .frame(minWidth: 0, maxWidth: .infinity)
-                .navigationTitle("")
-                .inlineNavTitle()
-                .confirmAlert($confirm)
+                .padding(.horizontal, 12)
+                .padding(.top, 4)
+                .padding(.bottom, 8)
+            }
+            .refreshable {
+                if hub.isConnected { try? await hub.refreshBots() } else { await hub.reconnect() }
+            }
+            .safeAreaInset(edge: .top, spacing: 0) { sidebarSearchSortBar }
+            .safeAreaInset(edge: .bottom, spacing: 0) { sidebarFooterBar }
+            .frame(minWidth: 0, maxWidth: .infinity)
+            .navigationTitle("")
+            .inlineNavTitle()
+            .confirmAlert($confirm)
         }
     }
 
@@ -152,39 +168,56 @@ struct BotListView: View {
             }
             .buttonStyle(.plain)
         }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, 12)
         .padding(.vertical, 10)
     }
 
     @ViewBuilder
     private var wideRows: some View {
-        if let to = hub.takeovers.first { takeoverSection(to) }
+        let canReorder = sortMode == .manual && query.isEmpty
+        if let to = hub.takeovers.first {
+            takeoverCard(to)
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(p.pink.opacity(0.65), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .padding(.bottom, 4)
+        }
         ForEach(orderedBots, id: \.1.id) { idx, bot in
             let pinned = pinnedIds.contains(bot.id)
-            Button {
+            let active = router.selected == bot.id
+            let row = Button {
                 router.openBot(bot.id)
             } label: {
                 BotRow(bot: bot, index: idx, pinned: pinned)
+                    .padding(.horizontal, 10)
                     .padding(.vertical, 6)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
+                    .background(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(active ? Color.primary.opacity(p.dark ? 0.14 : 0.08) : Color.clear)
+                    )
+                    .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
             .buttonStyle(.plain)
-            .listRowInsets(EdgeInsets(top: 2, leading: 6, bottom: 2, trailing: 6))
-            .listRowBackground(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(router.selected == bot.id ? Color.primary.opacity(p.dark ? 0.14 : 0.08) : Color.clear)
-                    .padding(.horizontal, 11)
-            )
-            .listRowSeparator(.hidden)
             .contextMenu { botContextMenu(bot, pinned: pinned) }
+
+            if canReorder {
+                row
+                    .draggable(bot.id)
+                    .dropDestination(for: String.self) { items, _ in
+                        guard let dragged = items.first else { return false }
+                        moveBot(id: dragged, before: bot.id)
+                        return true
+                    }
+            } else {
+                row
+            }
         }
-        .onMove(perform: sortMode == .manual && query.isEmpty ? moveBots : nil)
         if orderedBots.isEmpty {
             Text(query.isEmpty ? hub.t("noBotsYet") : hub.t("noMatchedBots"))
                 .foregroundStyle(.secondary)
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
         }
     }
 
@@ -195,7 +228,9 @@ struct BotListView: View {
             .listRowBackground(Color.clear)
             .listRowSeparator(.hidden)
             .selectionDisabled()
-        if let to = hub.takeovers.first { takeoverSection(to) }
+        if let to = hub.takeovers.first {
+            Section { takeoverCard(to) }.selectionDisabled()
+        }
         Section {
             ForEach(orderedBots, id: \.1.id) { idx, bot in
                 let pinned = pinnedIds.contains(bot.id)
@@ -260,22 +295,19 @@ struct BotListView: View {
         }
     }
 
-    private func takeoverSection(_ to: TakeoverRequest) -> some View {
-        Section {
-            VStack(alignment: .leading, spacing: 8) {
-                Label(hub.t("takeoverBanner", ["bot": to.botName ?? to.botId ?? "Bot", "reason": to.reason ?? ""]), systemImage: "hand.raised.fill")
-                    .font(.system(size: AppFont.body)).foregroundStyle(p.pinkInk)
-                HStack {
-                    Button(hub.t("desktopShort")) { router.openDesktop(to.target ?? "local") }
-                        .buttonStyle(.bordered)
-                    Button(hub.t("resumeAI")) { Task { try? await hub.resolveTakeover(to.id) } }
-                        .buttonStyle(.borderedProminent)
-                }
-                .controlSize(.small)
+    private func takeoverCard(_ to: TakeoverRequest) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(hub.t("takeoverBanner", ["bot": to.botName ?? to.botId ?? "Bot", "reason": to.reason ?? ""]), systemImage: "hand.raised.fill")
+                .font(.system(size: AppFont.body)).foregroundStyle(p.pinkInk)
+            HStack {
+                Button(hub.t("desktopShort")) { router.openDesktop(to.target ?? "local") }
+                    .buttonStyle(.bordered)
+                Button(hub.t("resumeAI")) { Task { try? await hub.resolveTakeover(to.id) } }
+                    .buttonStyle(.borderedProminent)
             }
-            .padding(.vertical, 4)
+            .controlSize(.small)
         }
-        .selectionDisabled()
+        .padding(.vertical, 4)
     }
 }
 

@@ -38,52 +38,54 @@ struct DevicesView: View {
     }
 
     var body: some View {
-        Form {
-            Section(hub.t("currentMobileConn")) {
-                if let s = hub.activeServer {
-                    LabeledContent(s.label) {
-                        Text(s.address).font(.system(size: AppFont.secondary, design: .monospaced)).lineLimit(1).truncationMode(.middle)
+        HubSheetScaffold(
+            title: hub.t("devicesTunnel"),
+            onClose: { router.sheet = nil }
+        ) {
+            Form {
+                Section(hub.t("currentMobileConn")) {
+                    if let s = hub.activeServer {
+                        LabeledContent(s.label) {
+                            Text(s.address).font(.system(size: AppFont.secondary, design: .monospaced)).lineLimit(1).truncationMode(.middle)
+                        }
+                        HStack(spacing: 6) {
+                            Tag(text: hub.isTailscale ? hub.t("tailscaleE2E") : hub.isTailcat ? hub.t("tailcatE2E") : hub.t("httpLan"),
+                                bg: p.lilac, fg: p.lilacInk)
+                            Tag(text: hub.online ? hub.t("streamConnected") : hub.t("reconnecting"),
+                                bg: hub.online ? p.sage : p.s2, fg: hub.online ? p.sageInk : .secondary)
+                        }
+                    } else {
+                        Text(hub.t("notConnectedHost")).foregroundStyle(.secondary)
                     }
-                    HStack(spacing: 6) {
-                        Tag(text: hub.isTailscale ? hub.t("tailscaleE2E") : hub.isTailcat ? hub.t("tailcatE2E") : hub.t("httpLan"),
-                            bg: p.lilac, fg: p.lilacInk)
-                        Tag(text: hub.online ? hub.t("streamConnected") : hub.t("reconnecting"),
-                            bg: hub.online ? p.sage : p.s2, fg: hub.online ? p.sageInk : .secondary)
+                    LabeledContent(hub.t("tsMobileStatus")) {
+                        Text(mobileTailscaleText)
+                            .foregroundStyle(hub.mobileTailscale?.state == "running" ? p.sageInk : .secondary)
                     }
-                } else {
-                    Text(hub.t("notConnectedHost")).foregroundStyle(.secondary)
+                    Button(hub.t("manageConn")) { router.sheet = .connect(scan: false) }
+                    if hub.activeServer != nil {
+                        Button(hub.t("openHostDesktop")) { router.openDesktop("local") }
+                    }
                 }
-                LabeledContent(hub.t("tsMobileStatus")) {
-                    Text(mobileTailscaleText)
-                        .foregroundStyle(hub.mobileTailscale?.state == "running" ? p.sageInk : .secondary)
+                Section(hub.t("hostRemoteAccess")) {
+                    LabeledContent(hub.t("tunnelState")) {
+                        Text(tailcatText).foregroundStyle(hub.tailcat?.state == "ready" ? p.sageInk : hub.tailcat?.state == "error" ? p.danger : .secondary)
+                    }
+                    LabeledContent(hub.t("tsHostStatus")) {
+                        Text(hostTailscaleText).foregroundStyle(hub.hostTailscale?.state == "running" ? p.sageInk : hub.hostTailscale?.state == "error" ? p.danger : .secondary)
+                    }
+                    LabeledContent(hub.t("tokenProtect"), value: hub.tailcat?.hasToken == true ? hub.t("tokenEnabled") : hub.t("tokenUnset"))
                 }
-                Button(hub.t("manageConn")) { router.sheet = .connect(scan: false) }
-                if hub.activeServer != nil {
-                    Button(hub.t("openHostDesktop")) { router.openDesktop("local") }
-                }
-            }
-            Section(hub.t("hostRemoteAccess")) {
-                LabeledContent(hub.t("tunnelState")) {
-                    Text(tailcatText).foregroundStyle(hub.tailcat?.state == "ready" ? p.sageInk : hub.tailcat?.state == "error" ? p.danger : .secondary)
-                }
-                LabeledContent(hub.t("tsHostStatus")) {
-                    Text(hostTailscaleText).foregroundStyle(hub.hostTailscale?.state == "running" ? p.sageInk : hub.hostTailscale?.state == "error" ? p.danger : .secondary)
-                }
-                LabeledContent(hub.t("tokenProtect"), value: hub.tailcat?.hasToken == true ? hub.t("tokenEnabled") : hub.t("tokenUnset"))
-            }
-            Section(hub.t("connectedNodes")) {
-                if hub.nodes.isEmpty {
-                    Text(hub.t("noRemoteNodes")).foregroundStyle(.secondary)
-                } else {
-                    ForEach(hub.nodes) { node in nodeRow(node) }
+                Section(hub.t("connectedNodes")) {
+                    if hub.nodes.isEmpty {
+                        Text(hub.t("noRemoteNodes")).foregroundStyle(.secondary)
+                    } else {
+                        ForEach(hub.nodes) { node in nodeRow(node) }
+                    }
                 }
             }
+            .hubForm()
+            .refreshable { await load() }
         }
-        .hubForm()
-        .navigationTitle(hub.t("devicesTunnel"))
-        .inlineNavTitle()
-        .toolbar { SheetToolbar() }
-        .refreshable { await load() }
         .task { await load() }
     }
 

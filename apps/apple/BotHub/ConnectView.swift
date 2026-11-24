@@ -63,21 +63,45 @@ struct ConnectView: View {
                         removal: .move(edge: .leading).combined(with: .opacity)
                     ))
             } else {
-                formContent
+                let inner = formContent
                     .frame(maxWidth: isGate ? 560 : .infinity)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(p.page)
+                if isGate {
+                    HubSheetScaffold(
+                        title: "Pebble",
+                        closeTitle: hub.t("backBtn"),
+                        onClose: (isFreshOnboarding && manualOpen) ? { withAnimation { manualOpen = false } } : nil,
+                        enableCancelShortcut: false,
+                        actionTitle: hub.t("connect"),
+                        loading: submitting,
+                        onAction: { submit() }
+                    ) {
+                        inner
+                    }
                     .transition(.asymmetric(
                         insertion: .move(edge: .trailing).combined(with: .opacity),
                         removal: .move(edge: .trailing).combined(with: .opacity)
                     ))
+                } else {
+                    HubSheetScaffold(
+                        title: hub.t("connectHost"),
+                        onClose: { router.sheet = nil },
+                        actionTitle: hub.t("connect"),
+                        loading: submitting,
+                        onAction: { submit() }
+                    ) {
+                        inner
+                    }
+                    .transition(.asymmetric(
+                        insertion: .move(edge: .trailing).combined(with: .opacity),
+                        removal: .move(edge: .trailing).combined(with: .opacity)
+                    ))
+                }
             }
         }
         .animation(.spring(response: 0.34, dampingFraction: 0.88), value: showFreshHero)
         .animation(.easeOut(duration: 0.22), value: isConnectingGate)
-        .navigationTitle(showFreshHero ? "" : (isGate ? "Pebble" : hub.t("connectHost")))
-        .inlineNavTitle()
-        .toolbar { connectToolbar }
         .confirmAlert($confirm)
         .onAppear {
             if let s = hub.activeServer, hub.connState == .unauthorized || hub.connState == .error {
@@ -102,30 +126,6 @@ struct ConnectView: View {
                 submitting = false
                 err = hub.connError.isEmpty ? hub.t("connFailed") : hub.connError
             }
-        }
-    }
-
-    @ToolbarContentBuilder
-    private var connectToolbar: some ToolbarContent {
-        if isGate {
-            if isFreshOnboarding && manualOpen {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button(hub.t("backBtn")) {
-                        withAnimation { manualOpen = false }
-                    }
-                }
-            }
-            if !isConnectingGate && !showFreshHero {
-                ToolbarItem(placement: .confirmationAction) {
-                    if submitting {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Button(hub.t("connect")) { submit() }
-                    }
-                }
-            }
-        } else {
-            SheetToolbar(actionTitle: hub.t("connect"), loading: submitting, action: { submit() })
         }
     }
 

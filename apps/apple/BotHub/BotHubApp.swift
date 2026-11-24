@@ -387,9 +387,7 @@ struct RootView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(palette.page)
                 #else
-                NavigationStack {
-                    ConnectView(startScan: false, isGate: true)
-                }
+                ConnectView(startScan: false, isGate: true)
                 #endif
             } else if macStage, let pres = router.desktop {
                 DesktopView(
@@ -444,9 +442,7 @@ struct RootView: View {
                 .macSeamlessWindowToolbar()
                 .inspector(isPresented: $r.detailOpen) {
                     if r.detailOpen, let id = router.selected, hub.bots.contains(where: { $0.id == id }) {
-                        NavigationStack {
-                            BotDetailView(botId: id, isPresented: $r.detailOpen)
-                        }
+                        BotDetailView(botId: id, isPresented: $r.detailOpen)
                         .id(id)
                         .inspectorColumnWidth(min: 320, ideal: 360, max: 440)
                         .overlay(alignment: .leading) {
@@ -575,7 +571,7 @@ struct SheetHost: View {
     var route: SheetRoute
 
     var body: some View {
-        NavigationStack {
+        Group {
             switch route {
             case let .connect(scan): ConnectView(startScan: scan)
             case .createBot: CreateBotView()
@@ -587,28 +583,5 @@ struct SheetHost: View {
             height: route == .createBot ? 620 : route == .devices ? 600 : 540
         )
         .background(p.page)
-    }
-}
-
-/// Sheet 工具栏：左「关闭」，右可选主操作。
-struct SheetToolbar: ToolbarContent {
-    @Environment(Router.self) private var router
-    var actionTitle: String?
-    var actionDisabled = false
-    var loading = false
-    var onClose: (() -> Void)? = nil
-    var action: (() -> Void)?
-
-    var body: some ToolbarContent {
-        ToolbarItem(placement: .cancellationAction) {
-            Button(L.t("close")) { (onClose ?? { router.sheet = nil })() }
-        }
-        if let actionTitle, let action {
-            ToolbarItem(placement: .confirmationAction) {
-                if loading { ProgressView().controlSize(.small) } else {
-                    Button(actionTitle, action: action).disabled(actionDisabled)
-                }
-            }
-        }
     }
 }
