@@ -31,6 +31,20 @@ func triggerScanSuccessHaptic() {
 }
 
 #if os(iOS)
+private func selectScannerCamera() -> AVCaptureDevice? {
+    let discovery = AVCaptureDevice.DiscoverySession(
+        deviceTypes: [
+            .builtInTripleCamera,
+            .builtInDualWideCamera,
+            .builtInDualCamera,
+            .builtInWideAngleCamera,
+        ],
+        mediaType: .video,
+        position: .back
+    )
+    return discovery.devices.first ?? AVCaptureDevice.default(for: .video)
+}
+
 struct QRScannerBox: View {
     @Environment(HubStore.self) private var hub
     @Environment(\.palette) private var p
@@ -40,7 +54,7 @@ struct QRScannerBox: View {
     var onMessage: (String) -> Void
 
     @State private var authStatus: AVAuthorizationStatus = AVCaptureDevice.authorizationStatus(for: .video)
-    @State private var hasCameraHardware: Bool = AVCaptureDevice.default(for: .video) != nil
+    @State private var hasCameraHardware: Bool = selectScannerCamera() != nil
     @State private var hasTorch = false
     @State private var torchOn = false
     @State private var focusPoint: CGPoint? = nil
@@ -111,7 +125,7 @@ struct QRScannerBox: View {
             let effectiveBottomBar = max(bottomBarHeight, 88)
             let availHeight = max(size.height - effectiveBottomBar - topPad - gapAboveBar, 64)
             let availWidth = max(size.width - 32, 64)
-            let frameSide = min(max(min(availWidth * 0.70, availHeight * 0.90), 72), 196)
+            let frameSide = min(max(min(availWidth * 0.80, availHeight * 0.88), 120), 280)
             let left = (size.width - frameSide) / 2
             let top = topPad + (availHeight - frameSide) / 2
             let rect = CGRect(x: left, y: top, width: frameSide, height: frameSide)
@@ -232,7 +246,7 @@ struct QRScannerBox: View {
     }
 
     private func refreshCameraState() {
-        hasCameraHardware = AVCaptureDevice.default(for: .video) != nil
+        hasCameraHardware = selectScannerCamera() != nil
         authStatus = AVCaptureDevice.authorizationStatus(for: .video)
     }
 
@@ -397,8 +411,17 @@ private struct QRCameraPreview: UIViewRepresentable {
         v.addGestureRecognizer(pinch)
         v.addGestureRecognizer(tap)
 
-        if let dev = AVCaptureDevice.default(for: .video) {
+        if let dev = selectScannerCamera() {
             coordinator.device = dev
+            let defaultZoom: CGFloat = {
+                if dev.deviceType == .builtInTripleCamera || dev.deviceType == .builtInDualWideCamera,
+                   let firstSwitch = dev.virtualDeviceSwitchOverVideoZoomFactors.first {
+                    return CGFloat(truncating: firstSwitch)
+                }
+                return 1.0
+            }()
+            coordinator.minZoom = dev.minAvailableVideoZoomFactor
+            coordinator.maxZoom = min(dev.activeFormat.videoMaxZoomFactor, defaultZoom * 6.0)
             let hasTorch = dev.hasTorch
             DispatchQueue.main.async {
                 coordinator.onHasTorch(hasTorch)
@@ -422,6 +445,9 @@ private struct QRCameraPreview: UIViewRepresentable {
                 guard !coordinator.disposed else { return }
                 let session = coordinator.session
                 session.beginConfiguration()
+                if session.canSetSessionPreset(.high) {
+                    session.sessionPreset = .high
+                }
                 if let input = try? AVCaptureDeviceInput(device: dev), session.canAddInput(input) {
                     session.addInput(input)
                 }
@@ -434,6 +460,19 @@ private struct QRCameraPreview: UIViewRepresentable {
                     }
                 }
                 session.commitConfiguration()
+                if (try? dev.lockForConfiguration()) != nil {
+                    if dev.isFocusModeSupported(.continuousAutoFocus) {
+                        dev.focusMode = .continuousAutoFocus
+                    }
+                    if dev.isAutoFocusRangeRestrictionSupported {
+                        dev.autoFocusRangeRestriction = .near
+                    }
+                    if dev.isSmoothAutoFocusSupported {
+                        dev.isSmoothAutoFocusEnabled = true
+                    }
+                    dev.videoZoomFactor = min(max(defaultZoom, dev.minAvailableVideoZoomFactor), dev.activeFormat.videoMaxZoomFactor)
+                    dev.unlockForConfiguration()
+                }
                 if !coordinator.disposed && !session.isRunning {
                     session.startRunning()
                 }
@@ -499,6 +538,8 @@ private struct QRCameraPreview: UIViewRepresentable {
         var locked = false
         var disposed = false
         var lastAppliedTorch = false
+        var minZoom: CGFloat = 1.0
+        var maxZoom: CGFloat = 6.0
         private var pinchStartZoom: CGFloat = 1.0
         private var lastInvalidMessageAt = Date.distantPast
 
@@ -533,8 +574,9 @@ private struct QRCameraPreview: UIViewRepresentable {
             if recognizer.state == .began {
                 pinchStartZoom = device.videoZoomFactor
             } else if recognizer.state == .changed {
-                let maxZoom = min(device.activeFormat.videoMaxZoomFactor, 6.0)
-                let target = min(max(pinchStartZoom * recognizer.scale, 1.0), maxZoom)
+                let upperBound = min(device.activeFormat.videoMaxZoomFactor, maxZoom)
+                let lowerBound = max(device.minAvailableVideoZoomFactor, minZoom)
+                let target = min(max(pinchStartZoom * recognizer.scale, lowerBound), upperBound)
                 sessionQueue.async { [weak self] in
                     guard let self, !self.disposed else { return }
                     guard (try? device.lockForConfiguration()) != nil else { return }

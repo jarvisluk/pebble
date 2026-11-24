@@ -127,13 +127,20 @@ struct ConnectView: View {
 
     private var freshHeroContent: some View {
         GeometryReader { geo in
+            let heroScannerHeight = min(max(geo.size.height - 270, 360), 540)
             ScrollView {
                 VStack(spacing: 0) {
-                    Spacer(minLength: 24)
+                    if !scanning {
+                        Spacer(minLength: 24)
+                    } else {
+                        Spacer().frame(height: 12)
+                    }
 
-                    VStack(spacing: 16) {
-                        BotAvatar(id: "assistant", size: scanning ? 72 : 104, color: pebbleColor, busy: submitting)
-                            .animation(.spring(response: 0.32, dampingFraction: 0.86), value: scanning)
+                    VStack(spacing: scanning ? 4 : 16) {
+                        if !scanning {
+                            BotAvatar(id: "assistant", size: 104, color: pebbleColor, busy: submitting)
+                                .transition(.opacity.combined(with: .scale(scale: 0.85)))
+                        }
                         Text("Pebble")
                             .font(.system(size: AppFont.hero, weight: .bold))
                             .foregroundStyle(p.text)
@@ -143,16 +150,20 @@ struct ConnectView: View {
                             .multilineTextAlignment(.center)
                     }
 
-                    Spacer(minLength: 24)
+                    if !scanning {
+                        Spacer(minLength: 24)
+                    } else {
+                        Spacer().frame(height: 14)
+                    }
 
                     if platformSupportsQRScanner && scanning {
                         QRScannerBox(
                             onCode: { onScanned($0) },
                             onMessage: { err = $0 }
                         )
-                        .frame(height: 300)
+                        .frame(height: heroScannerHeight)
                         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                        .padding(.bottom, 16)
+                        .padding(.bottom, 14)
                         .transition(.opacity.combined(with: .scale(scale: 0.96)))
                     }
 
@@ -223,11 +234,11 @@ struct ConnectView: View {
                         .foregroundStyle(p.text2)
                         .buttonStyle(.plain)
                     }
-                    .padding(.top, 24)
-                    .padding(.bottom, 20)
+                    .padding(.top, scanning ? 14 : 24)
+                    .padding(.bottom, scanning ? 12 : 20)
                 }
-                .frame(maxWidth: 360)
-                .padding(.horizontal, 24)
+                .padding(.horizontal, scanning ? 16 : 24)
+                .frame(maxWidth: scanning ? 512 : 408)
                 .frame(maxWidth: .infinity, minHeight: geo.size.height)
             }
         }
@@ -262,7 +273,7 @@ struct ConnectView: View {
                             onCode: { onScanned($0) },
                             onMessage: { err = $0 }
                         )
-                        .frame(height: 300)
+                        .frame(height: 420)
                         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                         .listRowInsets(EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8))
                     }

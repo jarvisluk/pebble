@@ -2,6 +2,7 @@ package ai.pebble.android.ui.connect
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.util.Size
 import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
@@ -13,6 +14,8 @@ import androidx.camera.core.CameraSelector
 import androidx.camera.core.FocusMeteringAction
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
+import androidx.camera.core.resolutionselector.ResolutionSelector
+import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.Canvas
@@ -208,6 +211,16 @@ fun QrScannerBox(
                         }
                         val analysis = ImageAnalysis.Builder()
                             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                            .setResolutionSelector(
+                                ResolutionSelector.Builder()
+                                    .setResolutionStrategy(
+                                        ResolutionStrategy(
+                                            Size(1280, 720),
+                                            ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER,
+                                        ),
+                                    )
+                                    .build(),
+                            )
                             .build()
                         analysis.setAnalyzer(executor) { imageProxy ->
                             val mediaImage = imageProxy.image
@@ -301,7 +314,7 @@ fun QrScannerBox(
                 val effectiveBottomBar = if (bottomBarHeightPx > 0) bottomBarHeightPx.toFloat() else 88.dp.toPx()
                 val availHeight = (size.height - effectiveBottomBar - topPad - gapAboveBar).coerceAtLeast(64.dp.toPx())
                 val availWidth = (size.width - 32.dp.toPx()).coerceAtLeast(64.dp.toPx())
-                val frameSide = minOf(availWidth * 0.70f, availHeight * 0.90f).coerceIn(72.dp.toPx(), 196.dp.toPx())
+                val frameSide = minOf(availWidth * 0.80f, availHeight * 0.88f).coerceIn(120.dp.toPx(), 280.dp.toPx())
                 val left = (size.width - frameSide) / 2f
                 val top = topPad + (availHeight - frameSide) / 2f
                 val rect = Rect(left, top, left + frameSide, top + frameSide)

@@ -3,7 +3,6 @@ package ai.pebble.android.ui.connect
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -258,6 +257,7 @@ fun ConnectScreen(
                 .navigationBarsPadding(),
         ) {
             val minH = maxHeight
+            val heroScannerHeight = (minH - 270.dp).coerceIn(340.dp, 540.dp)
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -266,30 +266,35 @@ fun ConnectScreen(
             ) {
                 Column(
                     modifier = Modifier
-                        .widthIn(max = 380.dp)
+                        .widthIn(max = if (scanning) 512.dp else 408.dp)
                         .fillMaxWidth()
                         .heightIn(min = minH)
-                        .padding(horizontal = 24.dp, vertical = 20.dp),
+                        .padding(
+                            horizontal = if (scanning) 16.dp else 24.dp,
+                            vertical = if (scanning) 12.dp else 20.dp,
+                        ),
                     horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = if (scanning) Arrangement.Center else Arrangement.Top,
                 ) {
-                    val heroAvatarSize by animateDpAsState(
-                        targetValue = if (scanning) 72.dp else 104.dp,
-                        label = "heroAvatarSize",
-                    )
-
-                    Spacer(Modifier.weight(1f))
+                    if (!scanning) {
+                        Spacer(Modifier.weight(1f))
+                    } else {
+                        Spacer(Modifier.height(4.dp))
+                    }
 
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(if (scanning) 4.dp else 14.dp),
                     ) {
-                        BotAvatar(
-                            id = "assistant",
-                            size = heroAvatarSize,
-                            color = PEBBLE_COLOR_HEX,
-                            busy = submitting,
-                            interactive = true,
-                        )
+                        AnimatedVisibility(visible = !scanning) {
+                            BotAvatar(
+                                id = "assistant",
+                                size = 104.dp,
+                                color = PEBBLE_COLOR_HEX,
+                                busy = submitting,
+                                interactive = true,
+                            )
+                        }
                         Text(
                             text = "Pebble",
                             color = p.text,
@@ -304,7 +309,11 @@ fun ConnectScreen(
                         )
                     }
 
-                    Spacer(Modifier.weight(1f))
+                    if (!scanning) {
+                        Spacer(Modifier.weight(1f))
+                    } else {
+                        Spacer(Modifier.height(14.dp))
+                    }
 
                     AnimatedVisibility(visible = scanning) {
                         QrScannerBox(
@@ -312,8 +321,8 @@ fun ConnectScreen(
                             onMessage = { err = it },
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(300.dp)
-                                .padding(bottom = 16.dp),
+                                .height(heroScannerHeight)
+                                .padding(bottom = 14.dp),
                         )
                     }
 
@@ -384,7 +393,7 @@ fun ConnectScreen(
                         )
                     }
 
-                    Spacer(Modifier.height(22.dp))
+                    Spacer(Modifier.height(if (scanning) 14.dp else 22.dp))
 
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
@@ -558,7 +567,7 @@ fun ConnectScreen(
                                 onMessage = { err = it },
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(300.dp),
+                                    .height(420.dp),
                             )
                         }
                     }
