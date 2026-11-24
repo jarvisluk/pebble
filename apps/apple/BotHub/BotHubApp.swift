@@ -272,6 +272,7 @@ final class Router {
     func openBot(_ id: String) {
         if case .botInfo = sheet { sheet = nil }
         inSettings = false
+        clearSettingsDirty()
         selected = id
         preferredColumn = .detail
     }
@@ -298,10 +299,24 @@ final class Router {
         }
     }
 
-    func leaveSettings() {
-        inSettings = false
+    func clearSettingsDirty() {
         settingsDirty = false
         requestLeaveSettings = false
+    }
+
+    func requestSettingsBack(fallback: (() -> Void)? = nil) {
+        if settingsDirty {
+            requestLeaveSettings = true
+        } else if let fallback {
+            fallback()
+        } else {
+            leaveSettings()
+        }
+    }
+
+    func leaveSettings() {
+        inSettings = false
+        clearSettingsDirty()
         preferredColumn = selected == nil ? .sidebar : .detail
     }
 
@@ -310,6 +325,7 @@ final class Router {
         let dest = resolved.isEmpty ? "local" : resolved
         sheet = nil
         inSettings = false
+        clearSettingsDirty()
         detailOpen = false
         stageTab = .desktop
         desktop = DesktopPresentation(target: dest, initialTab: .desktop, botId: selected)
@@ -318,6 +334,7 @@ final class Router {
     func openFiles(botId: String, path: String? = nil) {
         sheet = nil
         inSettings = false
+        clearSettingsDirty()
         detailOpen = false
         stageTab = .files
         desktop = DesktopPresentation(target: "local", initialTab: .files, botId: botId, initialPath: path)
@@ -331,6 +348,7 @@ final class Router {
         let kind = StageKind(rawValue: ev.kind) ?? .files
         sheet = nil
         inSettings = false
+        clearSettingsDirty()
         detailOpen = false
         stageTab = kind
         desktop = DesktopPresentation(target: "local", initialTab: kind, botId: targetBot, initialPath: ev.path)

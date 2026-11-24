@@ -52,6 +52,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
@@ -301,6 +302,9 @@ fun SettingsDetailScreen(
     val dirty = settingsChanged || botUpdates.isNotEmpty()
 
     LaunchedEffect(dirty) { onDirtyChanged(dirty) }
+    DisposableEffect(Unit) {
+        onDispose { onDirtyChanged(false) }
+    }
     LaunchedEffect(requestLeave) {
         if (requestLeave) {
             onClearRequestLeave()
