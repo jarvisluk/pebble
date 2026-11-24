@@ -146,7 +146,7 @@ struct SettingsView: View {
 
     private var harnesses: [HarnessInfo] {
         if let h = hub.settings?.harnesses, !h.isEmpty { return h }
-        return ["opencode", "codebuddy", "qoder", "codex", "claude", "grok", "pi"].map { HarnessInfo(id: $0, label: $0) }
+        return ["opencode", "codebuddy", "qoder", "codex", "claude", "grok", "trae", "pi", "dsh", "agy"].map { HarnessInfo(id: $0, label: $0) }
     }
 
     private var primaryHarness: String { harnesses.first?.id ?? "opencode" }
@@ -269,6 +269,10 @@ struct SettingsView: View {
                 if tsHostnameIn.isEmpty, let hn = hub.hostTailscale?.hostname, !hn.isEmpty { tsHostnameIn = hn }
                 if tsControlUrlIn.isEmpty, let cu = hub.hostTailscale?.controlUrl, !cu.isEmpty { tsControlUrlIn = cu }
             }
+        }
+        .task(id: "\(tab == .models)|\(hub.isConnected)|\(hub.modelsGeneration)|\(harnesses.map(\.id).joined(separator: ","))") {
+            guard tab == .models, hub.isConnected else { return }
+            await preloadAllModels()
         }
         .task(id: "\(tab == .remote)|\(hub.tailcat?.state ?? "")|\(hub.tailcat?.link ?? "")|\(tcQRVersion)") {
             guard tab == .remote, hub.tailcat?.state == "ready" else {
@@ -918,7 +922,6 @@ struct SettingsView: View {
     }
 
     private func nativeHarnessRow(_ h: HarnessInfo, magpieInstalled: Bool) -> some View {
-        let cands = hub.models[h.id] ?? []
         let key = "magpie:\(h.id)"
         return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
@@ -946,25 +949,10 @@ struct SettingsView: View {
                 ), prompt: Text(hub.t("nativeModelPh")))
                     .monoInput()
                     .labelsHidden()
-                Menu {
-                    if cands.isEmpty {
-                        Button(loadingModelsFor.contains(h.id) ? hub.t("loading") : hub.t("optionalModels")) {
-                            loadCands(for: h.id)
-                        }
-                    } else {
-                        ForEach(Array(cands.prefix(40)), id: \.self) { m in
-                            Button(m) {
-                                guard m != (perHarness[h.id] ?? "") else { return }
-                                perHarness[h.id] = m; perTouched = true; saved = ""
-                            }
-                        }
-                    }
-                } label: {
-                    Label(hub.t("optionalModels"), systemImage: "list.bullet").labelStyle(.iconOnly)
+                modelMenu(for: h.id, current: perHarness[h.id] ?? "") { m in
+                    guard m != (perHarness[h.id] ?? "") else { return }
+                    perHarness[h.id] = m; perTouched = true; saved = ""
                 }
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .onAppear { if cands.isEmpty, hub.isConnected { loadCands(for: h.id) } }
             }
         }
         .padding(.vertical, 2)
@@ -1115,6 +1103,81 @@ struct SettingsView: View {
     }
     // MARK: 模型
 
+    private var orderedGlobalHarnesses: [HarnessInfo] {
+        var seen: Set<String> = []
+        var out: [HarnessInfo] = []
+        let anyInstalled = harnesses.contains { $0.installed == true }
+        func appendIfNeeded(_ h: HarnessInfo) {
+            guard seen.insert(h.id).inserted else { return }
+            out.append(h)
+        }
+        if let def = harnesses.first(where: { $0.id == defaultHarness }) {
+            appendIfNeeded(def)
+        }
+        for h in harnesses where h.installed == true && h.magpie?.connected != true {
+            appendIfNeeded(h)
+        }
+        for h in harnesses where h.installed == true && h.magpie?.connected == true {
+            appendIfNeeded(h)
+        }
+        if !anyInstalled {
+            for h in harnesses {
+                appendIfNeeded(h)
+            }
+        } else {
+            for h in harnesses where !(hub.models[h.id] ?? []).isEmpty {
+                appendIfNeeded(h)
+            }
+        }
+        return out
+    }
+
+    private func harnessFieldLabel(_ h: HarnessInfo) -> String {
+        if h.magpie?.connected == true {
+            return "\(h.title) · Magpie"
+        }
+        if hub.settings?.magpie?.installed == true {
+            return "\(h.title) · \(hub.t("mpNative"))"
+        }
+        return h.title
+    }
+
+    @ViewBuilder
+    private func modelOptionsContent(for harness: String, current: String, onSelect: @escaping (String) -> Void) -> some View {
+        let cands = hub.models[harness] ?? []
+        let trimmedCurrent = current.trimmingCharacters(in: .whitespaces)
+        if cands.isEmpty {
+            if loadingModelsFor.contains(harness) {
+                Text(hub.t("loading"))
+            } else {
+                Text(hub.t("noModels"))
+                Button {
+                    loadCands(for: harness, force: true)
+                } label: {
+                    Label(hub.t("refresh"), systemImage: "arrow.clockwise")
+                }
+            }
+        } else {
+            ForEach(cands, id: \.self) { m in
+                Button {
+                    onSelect(m)
+                } label: {
+                    if m == trimmedCurrent {
+                        Label(m, systemImage: "checkmark")
+                    } else {
+                        Text(m)
+                    }
+                }
+            }
+            Divider()
+            Button {
+                loadCands(for: harness, force: true)
+            } label: {
+                Label(hub.t("refresh"), systemImage: "arrow.clockwise")
+            }
+        }
+    }
+
     @ViewBuilder
     private func modelMenu(for harness: String, current: String, onSelect: @escaping (String) -> Void) -> some View {
         let cands = hub.models[harness] ?? []
@@ -1123,26 +1186,55 @@ struct SettingsView: View {
                 Button(hub.t("clear")) { onSelect("") }
                 Divider()
             }
-            if cands.isEmpty {
-                Button(loadingModelsFor.contains(harness) ? hub.t("loading") : hub.t("optionalModels")) {
-                    loadCands(for: harness)
-                }
-                .disabled(loadingModelsFor.contains(harness))
+            modelOptionsContent(for: harness, current: current, onSelect: onSelect)
+        } label: {
+            Label(hub.t("optionalModels"), systemImage: "list.bullet").labelStyle(.iconOnly)
+        }
+        .buttonStyle(.plain)
+        .hubBorderlessMenu()
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .task(id: "\(harness)|\(hub.isConnected)|\(hub.modelsGeneration)") {
+            if cands.isEmpty, hub.isConnected, !harness.isEmpty {
+                await fetchCands(for: harness)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func globalModelMenu(current: String, onSelect: @escaping (String) -> Void) -> some View {
+        let targets = orderedGlobalHarnesses
+        let trimmedCurrent = current.trimmingCharacters(in: .whitespaces)
+        Menu {
+            if !trimmedCurrent.isEmpty {
+                Button(hub.t("clear")) { onSelect("") }
+                Divider()
+            }
+            if targets.count == 1, let only = targets.first {
+                modelOptionsContent(for: only.id, current: current, onSelect: onSelect)
             } else {
-                ForEach(Array(cands.prefix(40)), id: \.self) { m in
-                    Button(m) { onSelect(m) }
+                ForEach(targets) { h in
+                    let label = h.id == defaultHarness
+                        ? "\(harnessFieldLabel(h)) (\(hub.t("defaultTag")))"
+                        : harnessFieldLabel(h)
+                    Menu(label) {
+                        modelOptionsContent(for: h.id, current: current, onSelect: onSelect)
+                    }
+                }
+                Divider()
+                Button {
+                    Task { await preloadAllModels(force: true) }
+                } label: {
+                    Label(hub.t("refresh"), systemImage: "arrow.clockwise")
                 }
             }
         } label: {
             Label(hub.t("optionalModels"), systemImage: "list.bullet").labelStyle(.iconOnly)
         }
+        .buttonStyle(.plain)
+        .hubBorderlessMenu()
         .menuIndicator(.hidden)
         .fixedSize()
-        .onAppear {
-            if cands.isEmpty, hub.isConnected, !harness.isEmpty {
-                loadCands(for: harness)
-            }
-        }
     }
 
     private var defaultModelSection: some View {
@@ -1154,6 +1246,9 @@ struct SettingsView: View {
                     set: {
                         guard $0 != defaultHarness else { return }
                         defaultHarness = $0; defaultHarnessTouched = true; saved = ""
+                        if (hub.models[$0] ?? []).isEmpty, hub.isConnected {
+                            loadCands(for: $0)
+                        }
                     }
                 ),
                 options: harnesses.map { ($0.id, $0.title) }
@@ -1169,41 +1264,69 @@ struct SettingsView: View {
                           prompt: Text("magpie/claude-sonnet-4"))
                     .monoInput()
                     .labelsHidden()
-                modelMenu(for: primaryHarness, current: defaultModel) { m in
+                globalModelMenu(current: defaultModel) { m in
                     guard m != defaultModel else { return }
                     defaultModel = m; defaultTouched = true; saved = ""
                 }
             }
             DisclosureGroup(hub.t("perHarnessTitle"), isExpanded: $perOpen) {
-                ForEach(harnesses) { h in
-                    HStack {
-                        TextField(h.title, text: Binding(
-                            get: { perHarness[h.id] ?? "" },
-                            set: {
-                                guard $0 != (perHarness[h.id] ?? "") else { return }
-                                perHarness[h.id] = $0; perTouched = true; saved = ""
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(harnesses) { h in
+                        HubFormField(label: harnessFieldLabel(h)) {
+                            HStack(spacing: 8) {
+                                TextField("", text: Binding(
+                                    get: { perHarness[h.id] ?? "" },
+                                    set: {
+                                        guard $0 != (perHarness[h.id] ?? "") else { return }
+                                        perHarness[h.id] = $0; perTouched = true; saved = ""
+                                    }
+                                ),
+                                          prompt: Text(hub.t("followGlobalPh")))
+                                    .monoInput()
+                                modelMenu(for: h.id, current: perHarness[h.id] ?? "") { m in
+                                    guard m != (perHarness[h.id] ?? "") else { return }
+                                    perHarness[h.id] = m; perTouched = true; saved = ""
+                                }
                             }
-                        ),
-                                  prompt: Text(hub.t("followGlobalPh")))
-                            .monoInput()
-                        modelMenu(for: h.id, current: perHarness[h.id] ?? "") { m in
-                            guard m != (perHarness[h.id] ?? "") else { return }
-                            perHarness[h.id] = m; perTouched = true; saved = ""
                         }
                     }
+                }
+                .padding(.top, 4)
+            }
+        }
+    }
+
+    private func fetchCands(for harness: String, force: Bool = false, showError: Bool = false) async {
+        guard !harness.isEmpty else { return }
+        if !force, let existing = hub.models[harness], !existing.isEmpty { return }
+        guard force || !loadingModelsFor.contains(harness) else { return }
+        loadingModelsFor.insert(harness)
+        defer { loadingModelsFor.remove(harness) }
+        do {
+            _ = try await hub.loadModels(harness, force: force)
+        } catch {
+            if showError {
+                self.error = errText(error, hub.t("loadModelsFailed"))
+            }
+        }
+    }
+
+    private func preloadAllModels(force: Bool = false) async {
+        let ids = harnesses.map(\.id)
+        await withTaskGroup(of: Void.self) { group in
+            for id in ids {
+                group.addTask { @MainActor in
+                    await fetchCands(for: id, force: force, showError: false)
                 }
             }
         }
     }
 
-    private func loadCands(for harness: String? = nil) {
+    private func loadCands(for harness: String? = nil, force: Bool = false, showError: Bool? = nil) {
         let target = harness ?? primaryHarness
-        guard !target.isEmpty, !loadingModelsFor.contains(target) else { return }
-        loadingModelsFor.insert(target)
-        Task {
-            do { _ = try await hub.loadModels(target) } catch { self.error = errText(error, hub.t("loadModelsFailed")) }
-            loadingModelsFor.remove(target)
-        }
+        guard !target.isEmpty else { return }
+        let reportErr = showError ?? force
+        Task { await fetchCands(for: target, force: force, showError: reportErr) }
     }
 
     private var botModelsSection: some View {

@@ -282,6 +282,7 @@
   "noHostSelected" : "未选择主电脑",
   "noInstructions" : "未配置指令",
   "noMatchedBots" : "没有匹配的 Bot",
+  "noModels" : "暂无可选模型",
   "noRemoteNodes" : "暂无远端电脑节点接入。在另一台电脑打开 Pebble 桌面端并开启「允许主电脑操控本机」即可出现。",
   "notConnectedHost" : "尚未连接主电脑",
   "notInstalled" : "未安装",

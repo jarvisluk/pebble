@@ -127,6 +127,7 @@ data class HarnessInfo(
     val id: String,
     val label: String? = null,
     val defaultModel: String? = null,
+    val installed: Boolean? = null,
     val magpie: HarnessMagpie? = null,
 ) {
     val title: String get() = if (label.isNullOrEmpty()) id else label

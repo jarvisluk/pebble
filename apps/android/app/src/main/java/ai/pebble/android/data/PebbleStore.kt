@@ -10,8 +10,10 @@ import ai.pebble.android.i18n.L
 import ai.pebble.android.notify.BotActivityService
 import ai.pebble.android.notify.NotificationHelper
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.serialization.encodeToString
@@ -174,6 +176,8 @@ class PebbleStore(context: Context) {
     var settings by mutableStateOf<SettingsData?>(null)
         private set
     val models = mutableStateMapOf<String, List<String>>()
+    var modelsGeneration by mutableIntStateOf(0)
+        private set
     var nodes by mutableStateOf<List<NodeInfo>>(emptyList())
         private set
     var tailcat by mutableStateOf<TailcatStatus?>(null)
@@ -207,6 +211,7 @@ class PebbleStore(context: Context) {
     private val botSteps = mutableMapOf<String, Int>()
     private val activeBusyBots = mutableSetOf<String>()
     private val activeTakeoverIds = mutableSetOf<String>()
+    private val modelLoadJobs = mutableMapOf<String, Deferred<List<String>>>()
 
     init {
         L.lang = resolvedLang
@@ -594,7 +599,8 @@ class PebbleStore(context: Context) {
             if (seq != connSeq) return
             val list = data.bots.orEmpty()
             bots = list
-            msgs.clear(); last.clear(); unread.clear(); tools.clear(); models.clear(); routines.clear()
+            msgs.clear(); last.clear(); unread.clear(); tools.clear(); routines.clear()
+            resetModelsCache()
             usingStandby = isStandby
             connState = ConnState.CONNECTED
             connError = ""
@@ -922,10 +928,37 @@ class PebbleStore(context: Context) {
         return s
     }
 
-    suspend fun loadModels(harness: String): List<String> {
-        val list = api.call<ModelsResp>("/api/models?harness=${encodeURIComponent(harness)}").models.orEmpty()
-        models[harness] = list
-        return list
+    suspend fun loadModels(harness: String, force: Boolean = false): List<String> {
+        if (harness.isEmpty()) return emptyList()
+        val cached = models[harness]
+        if (!force && !cached.isNullOrEmpty()) return cached
+        if (force) {
+            modelLoadJobs.remove(harness)?.cancel()
+        } else {
+            modelLoadJobs[harness]?.let { return it.await() }
+        }
+        val job = scope.async {
+            api.call<ModelsResp>("/api/models?harness=${encodeURIComponent(harness)}").models.orEmpty()
+        }
+        modelLoadJobs[harness] = job
+        return try {
+            val list = job.await()
+            if (list.isNotEmpty() || force || models[harness] == null) {
+                models[harness] = list
+            }
+            models[harness].orEmpty()
+        } finally {
+            if (modelLoadJobs[harness] === job) {
+                modelLoadJobs.remove(harness)
+            }
+        }
+    }
+
+    private fun resetModelsCache() {
+        modelLoadJobs.values.forEach { it.cancel() }
+        modelLoadJobs.clear()
+        models.clear()
+        modelsGeneration += 1
     }
 
     suspend fun saveSettings(
@@ -961,7 +994,7 @@ class PebbleStore(context: Context) {
             method = "POST",
             body = mapOf("action" to "connect", "model" to model),
         )
-        models.clear()
+        resetModelsCache()
     }
 
     suspend fun disconnectMagpie(harness: String) {
@@ -970,7 +1003,7 @@ class PebbleStore(context: Context) {
             method = "POST",
             body = mapOf("action" to "disconnect"),
         )
-        models.clear()
+        resetModelsCache()
     }
 
     suspend fun openMagpie() {
@@ -987,6 +1020,7 @@ class PebbleStore(context: Context) {
             throw HubException(st.error ?: "Magpie install failed")
         }
         loadSettings()
+        resetModelsCache()
     }
 
     suspend fun setDesktopWorker(harness: String, model: String) {

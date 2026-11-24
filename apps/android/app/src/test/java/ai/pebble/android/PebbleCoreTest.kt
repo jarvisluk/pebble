@@ -1,6 +1,7 @@
 package ai.pebble.android
 
 import ai.pebble.android.data.BotStatus
+import ai.pebble.android.data.HarnessInfo
 import ai.pebble.android.data.HubJson
 import ai.pebble.android.data.countToolCalls
 import ai.pebble.android.data.formatDurationMs
@@ -77,6 +78,13 @@ class PebbleCoreTest {
         val decoded = HubJson.decodeFromString<BotStatus>("""{"id":"a","name":"Test","unknownField":123}""")
         assertEquals("Test", decoded.displayName)
         assertFalse(decoded.isBusy)
+
+        val harness = HubJson.decodeFromString<HarnessInfo>(
+            """{"id":"codex","label":"Codex","installed":true,"magpie":{"installed":true,"connected":false,"nativeModel":"codex/gpt-6-luna"}}""",
+        )
+        assertEquals(true, harness.installed)
+        assertEquals(false, harness.magpie?.connected)
+        assertEquals("codex/gpt-6-luna", harness.magpie?.nativeModel)
     }
 
     @Test

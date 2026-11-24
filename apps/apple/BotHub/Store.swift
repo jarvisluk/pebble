@@ -164,6 +164,7 @@ final class HubStore {
     var tools: [String: String] = [:]
     var settings: SettingsData?
     var models: [String: [String]] = [:]
+    var modelsGeneration = 0
     var nodes: [NodeInfo] = []
     var tailcat: TailcatStatus?
     var mobileTailscale: MobileTailscaleStatus?
@@ -182,6 +183,7 @@ final class HubStore {
     @ObservationIgnored private var activeChat: String?
     @ObservationIgnored private var connSeq = 0
     @ObservationIgnored private let stream = EventStream()
+    @ObservationIgnored private var modelLoadTasks: [String: (UUID, Task<[String], Error>)] = [:]
 
     init(autoConnect: Bool = true) {
         let d = UserDefaults.standard
@@ -459,7 +461,8 @@ final class HubStore {
             guard seq == connSeq else { return }
             let list = data.bots ?? []
             bots = list
-            msgs = [:]; last = [:]; unread = [:]; tools = [:]; models = [:]; routines = [:]
+            msgs = [:]; last = [:]; unread = [:]; tools = [:]; routines = [:]
+            resetModelsCache()
             usingStandby = isStandby
             connState = .connected
             connError = ""
@@ -610,7 +613,8 @@ final class HubStore {
             guard seq == connSeq else { return }
             let list = data.bots ?? []
             bots = list
-            msgs = [:]; last = [:]; unread = [:]; tools = [:]; models = [:]; routines = [:]
+            msgs = [:]; last = [:]; unread = [:]; tools = [:]; routines = [:]
+            resetModelsCache()
             connState = .connected
             connError = ""
 
@@ -831,10 +835,40 @@ final class HubStore {
     }
 
     @discardableResult
-    func loadModels(_ harness: String) async throws -> [String] {
-        let d: ModelsResp = try await api.call("/api/models?harness=\(enc(harness))")
-        models[harness] = d.models ?? []
-        return models[harness]!
+    func loadModels(_ harness: String, force: Bool = false) async throws -> [String] {
+        guard !harness.isEmpty else { return [] }
+        if !force, let cached = models[harness], !cached.isEmpty {
+            return cached
+        }
+        if force {
+            modelLoadTasks[harness]?.1.cancel()
+            modelLoadTasks.removeValue(forKey: harness)
+        } else if let existing = modelLoadTasks[harness] {
+            return try await existing.1.value
+        }
+        let token = UUID()
+        let task = Task<[String], Error> {
+            let d: ModelsResp = try await api.call("/api/models?harness=\(enc(harness))")
+            return d.models ?? []
+        }
+        modelLoadTasks[harness] = (token, task)
+        defer {
+            if modelLoadTasks[harness]?.0 == token {
+                modelLoadTasks.removeValue(forKey: harness)
+            }
+        }
+        let list = try await task.value
+        if !list.isEmpty || force || models[harness] == nil {
+            models[harness] = list
+        }
+        return models[harness] ?? list
+    }
+
+    private func resetModelsCache() {
+        for (_, entry) in modelLoadTasks { entry.1.cancel() }
+        modelLoadTasks.removeAll()
+        models = [:]
+        modelsGeneration += 1
     }
 
     func saveSettings(changed: Bool, defaultHarness: String, defaultModel: String, defaultModels: [String: String], sharedUserMd: String,
@@ -850,12 +884,12 @@ final class HubStore {
 
     func connectMagpie(_ harness: String, model: String) async throws {
         settings = try await api.call("/api/harnesses/\(enc(harness))/magpie", method: "POST", body: ["action": "connect", "model": model])
-        models = [:]
+        resetModelsCache()
     }
 
     func disconnectMagpie(_ harness: String) async throws {
         settings = try await api.call("/api/harnesses/\(enc(harness))/magpie", method: "POST", body: ["action": "disconnect"])
-        models = [:]
+        resetModelsCache()
     }
 
     func openMagpie() async throws {
@@ -872,6 +906,7 @@ final class HubStore {
             throw NSError(domain: "BotHub", code: 400, userInfo: [NSLocalizedDescriptionKey: st.error ?? "Magpie install failed"])
         }
         _ = try await loadSettings()
+        resetModelsCache()
     }
 
     func setDesktopWorker(harness: String, model: String) async throws {

@@ -282,6 +282,7 @@
   "noHostSelected" : "No host selected",
   "noInstructions" : "No instructions configured",
   "noMatchedBots" : "No matching bots",
+  "noModels" : "No models available",
   "noRemoteNodes" : "No remote nodes connected yet.",
   "notConnectedHost" : "Not connected to a host",
   "notInstalled" : "Not installed",

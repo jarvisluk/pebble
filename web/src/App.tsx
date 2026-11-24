@@ -51,6 +51,8 @@ export default function App() {
   const [filter, setFilter] = useState('');
   const [settings, setSettings] = useState<SettingsData | null>(null);
   const [modelsMap, setModelsMap] = useState<Record<string, string[]>>({});
+  const modelsRef = useRef<Record<string, string[]>>({});
+  const modelsInFlightRef = useRef<Record<string, Promise<string[]> | undefined>>({});
   const [nodesFromEvents, setNodesFromEvents] = useState<NodeInfo[] | null>(null);
   const [takeovers, setTakeovers] = useState<TakeoverRequest[]>([]);
   const [questions, setQuestions] = useState<PendingQuestion[]>([]);
@@ -249,20 +251,35 @@ export default function App() {
 
   const loadModels = useCallback(async (harness: string, force = false): Promise<string[]> => {
     if (!harness) return [];
-    let existing: string[] | undefined;
-    setModelsMap((prev) => {
-      existing = prev[harness];
-      return prev;
-    });
+    const existing = modelsRef.current[harness];
     if (!force && existing && existing.length > 0) return existing;
-    try {
-      const d = await api<{ models?: string[] }>(`/api/models?harness=${encodeURIComponent(harness)}`);
-      const list = d.models || [];
-      setModelsMap((prev) => ({ ...prev, [harness]: list }));
-      return list;
-    } catch {
-      return [];
+    const inflight = modelsInFlightRef.current[harness];
+    if (!force && inflight) {
+      return inflight;
     }
+    const req = api<{ models?: string[] }>(`/api/models?harness=${encodeURIComponent(harness)}`)
+      .then((d) => {
+        const list = d.models || [];
+        if (list.length > 0 || force || modelsRef.current[harness] === undefined) {
+          modelsRef.current = { ...modelsRef.current, [harness]: list };
+          setModelsMap(modelsRef.current);
+        }
+        return modelsRef.current[harness] || list;
+      })
+      .catch(() => modelsRef.current[harness] || [])
+      .finally(() => {
+        if (modelsInFlightRef.current[harness] === req) {
+          delete modelsInFlightRef.current[harness];
+        }
+      });
+    modelsInFlightRef.current[harness] = req;
+    return req;
+  }, []);
+
+  const resetModels = useCallback(() => {
+    modelsRef.current = {};
+    modelsInFlightRef.current = {};
+    setModelsMap({});
   }, []);
 
   const refreshTakeovers = useCallback(async () => {
@@ -787,7 +804,7 @@ export default function App() {
           onBotUpdated={(st) => {
             setBots((prev) => prev.map((b) => (b.id === st.id ? { ...b, ...st } : b)));
           }}
-          onResetModels={() => setModelsMap({})}
+          onResetModels={resetModels}
         />
         {toastMsg && <div className="toast">{toastMsg}</div>}
       </>
@@ -951,7 +968,7 @@ export default function App() {
             onSettingsUpdated={setSettings}
             onReloadBots={loadBots}
             onLoadModels={loadModels}
-            onResetModels={() => setModelsMap({})}
+            onResetModels={resetModels}
             onOpenDesktopTarget={(target) => {
               setView('chat');
               setDeskTarget(target || 'local');

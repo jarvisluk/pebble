@@ -99,6 +99,7 @@ struct HarnessInfo: Codable, Identifiable, Hashable {
     var id: String
     var label: String?
     var defaultModel: String?
+    var installed: Bool?
     var magpie: HarnessMagpie?
 
     var title: String { (label ?? "").isEmpty ? id : label! }
