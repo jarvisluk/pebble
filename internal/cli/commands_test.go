@@ -80,18 +80,18 @@ func TestCLIBotCommandsAndPartialUpdate(t *testing.T) {
 	if out, errOut, code := run("bot", "get"); code != 0 || !strings.Contains(out, "# Assistant") {
 		t.Fatalf("bot get failed: code=%d out=%s err=%s", code, out, errOut)
 	}
-	if _, errOut, code := run("bot", "create", "--id", "writer", "--name", "Writer", "--harness", "agy"); code != 0 {
+	if _, errOut, code := run("bot", "create", "--id", "writer", "--name", "Writer", "--harness", "agy", "--desktop-target", "virtual:writer", "--browser-mode", "isolated"); code != 0 {
 		t.Fatalf("bot create failed: code=%d err=%s", code, errOut)
 	}
-	if gotCreate["harness"] != "agy" || gotCreate["id"] != "writer" {
+	if gotCreate["harness"] != "agy" || gotCreate["id"] != "writer" || gotCreate["desktopTarget"] != "virtual:writer" || gotCreate["browserMode"] != "isolated" {
 		t.Fatalf("unexpected create payload: %#v", gotCreate)
 	}
 
 	// Update only name and instructions-file; description/model/harness must not be sent.
-	if _, errOut, code := run("bot", "update", "--name", "Jarvis", "--instructions-file", "AGENTS.md"); code != 0 {
+	if _, errOut, code := run("bot", "update", "--name", "Jarvis", "--instructions-file", "AGENTS.md", "--desktop-target", "macbook", "--browser-mode", "attach"); code != 0 {
 		t.Fatalf("bot update failed: code=%d err=%s", code, errOut)
 	}
-	if gotPatch["name"] != "Jarvis" || gotPatch["instructions"] != "# Jarvis\nBe concise.\n" {
+	if gotPatch["name"] != "Jarvis" || gotPatch["instructions"] != "# Jarvis\nBe concise.\n" || gotPatch["desktopTarget"] != "macbook" || gotPatch["browserMode"] != "attach" {
 		t.Fatalf("unexpected patch payload: %#v", gotPatch)
 	}
 	if _, hasModel := gotPatch["model"]; hasModel {

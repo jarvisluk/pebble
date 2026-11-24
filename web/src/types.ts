@@ -21,6 +21,8 @@ export interface BotStatus {
   workspace?: string;
   busy?: boolean;
   privateSessions?: boolean;
+  desktopTarget?: string;
+  browserMode?: 'auto' | 'isolated' | 'attach' | string;
 }
 
 export interface BotDetail extends BotStatus {
@@ -275,9 +277,12 @@ export interface DesktopTarget {
   id: string;
   name: string;
   local?: boolean;
+  hostId?: string;
+  slot?: string;
   supported?: boolean;
   webrtcAvailable?: boolean;
   virtual?: boolean;
+  virtualSupported?: boolean;
   powerState?: 'running' | 'frozen' | 'stopped' | string;
   installable?: boolean;
   screen?: ScreenState;

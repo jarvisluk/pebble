@@ -38,9 +38,16 @@ func (s *HTTPServer) handleDesktopStreamWS(w http.ResponseWriter, r *http.Reques
 	defer conn.CloseNow()
 
 	target := s.resolveDesktopTarget(r, "")
-	if target != "local" {
+	spec := desktop.ParseTarget(target)
+	if !spec.IsLocal() {
 		_ = sendWSError(r.Context(), conn, "", "远端节点暂不支持 H.264 视频流")
 		_ = conn.Close(websocket.StatusUnsupportedData, "unsupported target")
+		return
+	}
+	eng, err := s.localDeskPool().ForSlot(spec.VirtualSlot)
+	if err != nil {
+		_ = sendWSError(r.Context(), conn, "", err.Error())
+		_ = conn.Close(websocket.StatusUnsupportedData, "unsupported slot")
 		return
 	}
 
@@ -78,7 +85,7 @@ func (s *HTTPServer) handleDesktopStreamWS(w http.ResponseWriter, r *http.Reques
 				return
 			case ev := <-inputCh:
 				ictx, icancel := context.WithTimeout(ctx, 4*time.Second)
-				_ = s.localDesk().SendInput(ictx, ev)
+				_ = eng.SendInput(ictx, ev)
 				icancel()
 			}
 		}
@@ -307,7 +314,7 @@ func (s *HTTPServer) handleDesktopStreamWS(w http.ResponseWriter, r *http.Reques
 			}
 		}()
 
-		err := s.localDesk().StartVideoStream(
+		err := eng.StartVideoStream(
 			sctx,
 			preset,
 			reqCodec,

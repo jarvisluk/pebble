@@ -373,3 +373,70 @@ func TestBotAvatarAndColorValidation(t *testing.T) {
 	}
 }
 
+func TestBotDesktopTargetAndBrowserModeValidation(t *testing.T) {
+	validTargets := []struct {
+		in   string
+		want string
+	}{
+		{"", ""},
+		{" LOCAL ", "local"},
+		{"virtual:bot1", "virtual:bot1"},
+		{"local:virtual:bot_2", "virtual:bot_2"},
+		{"macbook-1", "macbook-1"},
+		{"linux-node.local:virtual:slot_a", "linux-node.local:virtual:slot_a"},
+	}
+	for _, tc := range validTargets {
+		got, err := NormalizeDesktopTarget(tc.in)
+		if err != nil {
+			t.Fatalf("NormalizeDesktopTarget(%q) unexpected error: %v", tc.in, err)
+		}
+		if got != tc.want {
+			t.Fatalf("NormalizeDesktopTarget(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+	for _, bad := range []string{"virtual:", "virtual:bad slot", "local:virtual:bad/slot", "node:other", "node:virtual:"} {
+		if _, err := NormalizeDesktopTarget(bad); err == nil {
+			t.Fatalf("expected NormalizeDesktopTarget(%q) to fail", bad)
+		}
+	}
+
+	for _, tc := range []struct {
+		in   string
+		want string
+	}{
+		{"", ""},
+		{"AUTO", ""},
+		{" isolated ", "isolated"},
+		{"Attach", "attach"},
+	} {
+		got, err := NormalizeBrowserMode(tc.in)
+		if err != nil {
+			t.Fatalf("NormalizeBrowserMode(%q) unexpected error: %v", tc.in, err)
+		}
+		if got != tc.want {
+			t.Fatalf("NormalizeBrowserMode(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+	if _, err := NormalizeBrowserMode("invalid"); err == nil {
+		t.Fatal("expected invalid browserMode to fail")
+	}
+
+	root := t.TempDir()
+	cfgDir := filepath.Join(root, "config")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfgPath := filepath.Join(cfgDir, "bots.json")
+	raw := `{"bots":[{"id":"a","desktopTarget":"local:virtual:a","browserMode":"isolated"}]}`
+	if err := os.WriteFile(cfgPath, []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _, err := Load(root, cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Bots[0].DesktopTarget != "virtual:a" || cfg.Bots[0].BrowserMode != "isolated" || cfg.Bots[0].EffectiveBrowserMode() != "isolated" {
+		t.Fatalf("unexpected loaded bot config: %+v", cfg.Bots[0])
+	}
+}
+

@@ -110,13 +110,31 @@ func NewEngine() *Engine {
 }
 
 func NewEngineWithConfig(cfg VirtualConfig) *Engine {
-	vm := newVirtualManager(cfg, nil)
+	return NewEngineWithBackend(cfg, nil)
+}
+
+func NewEngineWithBackend(cfg VirtualConfig, backend virtualBackend) *Engine {
+	vm := newVirtualManager(cfg, backend)
 	host := newBotHostClient()
 	host.envFn = vm.Env
 	return &Engine{
 		host: host,
 		vm:   vm,
 	}
+}
+
+func (e *Engine) VirtualSupported() bool {
+	if e == nil || e.vm == nil {
+		return false
+	}
+	return e.vm.backend.Probe().VirtualSupported
+}
+
+func (e *Engine) VirtualStatus() VirtualStatus {
+	if e == nil || e.vm == nil {
+		return VirtualStatus{}
+	}
+	return e.vm.Status()
 }
 
 func (e *Engine) recordScreenRecording(state string) {
@@ -734,11 +752,7 @@ func cloneMap(m map[string]any) map[string]any {
 }
 
 func NormalizeTarget(t string) string {
-	t = strings.TrimSpace(t)
-	if t == "" {
-		return "local"
-	}
-	return t
+	return ParseTarget(t).Raw
 }
 
 func FormatScreenError(err error) string {

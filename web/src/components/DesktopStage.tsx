@@ -956,6 +956,11 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
                     {tr.id === 'local' ? t('localDesktopName') : tr.name}
                   </option>
                 ))}
+                {target && !targets.some((tr) => tr.id === target) && (
+                  <option key={target} value={target}>
+                    {target}
+                  </option>
+                )}
               </select>
               <select
                 id="deskWindow"

@@ -191,6 +191,8 @@ type BotConfig struct {
 	AutoApprove     *bool             `json:"autoApprove,omitempty"` // default: true
 	TimeoutSec      int               `json:"timeoutSec,omitempty"`  // default: 300
 	PrivateSessions bool              `json:"privateSessions,omitempty"`
+	DesktopTarget   string            `json:"desktopTarget,omitempty"`
+	BrowserMode     string            `json:"browserMode,omitempty"` // "" | "auto" | "isolated" | "attach"
 	Env             map[string]string `json:"env,omitempty"`
 	Schedules       []ScheduleConfig  `json:"schedules,omitempty"`
 }
@@ -495,9 +497,11 @@ type HubConfig struct {
 }
 
 var (
-	envRefRe   = regexp.MustCompile(`\$\{([A-Z0-9_]+)\}`)
-	botIDRe    = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
-	botColorRe = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
+	envRefRe    = regexp.MustCompile(`\$\{([A-Z0-9_]+)\}`)
+	botIDRe     = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+	botColorRe  = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
+	nodeIDRe    = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
+	deskSlotRe  = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
 )
 
 // ValidBotAvatars lists the supported built-in bot avatar shapes.
@@ -553,6 +557,79 @@ func ValidateBotID(id string) error {
 		return fmt.Errorf("bot id %q is reserved", id)
 	}
 	return nil
+}
+
+// NormalizeDesktopTarget validates and canonicalizes a bot's desktopTarget binding.
+// Accepted values:
+//   - "" (follow global active target)
+//   - "local" (local host primary screen)
+//   - "virtual:<slot>" or "local:virtual:<slot>" (local Linux virtual screen slot)
+//   - "<nodeId>" (remote node default screen)
+//   - "<nodeId>:virtual:<slot>" (remote Linux node virtual screen slot)
+func NormalizeDesktopTarget(v string) (string, error) {
+	s := strings.TrimSpace(v)
+	if s == "" {
+		return "", nil
+	}
+	if strings.EqualFold(s, "local") {
+		return "local", nil
+	}
+	lower := strings.ToLower(s)
+	if strings.HasPrefix(lower, "local:virtual:") {
+		slot := strings.TrimSpace(s[len("local:virtual:"):])
+		if !deskSlotRe.MatchString(slot) {
+			return "", fmt.Errorf("invalid virtual screen slot %q (use 1-64 letters, digits, - or _)", slot)
+		}
+		return "virtual:" + slot, nil
+	}
+	if strings.HasPrefix(lower, "virtual:") {
+		slot := strings.TrimSpace(s[len("virtual:"):])
+		if !deskSlotRe.MatchString(slot) {
+			return "", fmt.Errorf("invalid virtual screen slot %q (use 1-64 letters, digits, - or _)", slot)
+		}
+		return "virtual:" + slot, nil
+	}
+	if idx := strings.Index(lower, ":virtual:"); idx >= 0 {
+		nodeID := strings.TrimSpace(s[:idx])
+		slot := strings.TrimSpace(s[idx+len(":virtual:"):])
+		if nodeID == "" || strings.EqualFold(nodeID, "local") || !nodeIDRe.MatchString(nodeID) {
+			return "", fmt.Errorf("invalid desktop node id %q", nodeID)
+		}
+		if !deskSlotRe.MatchString(slot) {
+			return "", fmt.Errorf("invalid virtual screen slot %q (use 1-64 letters, digits, - or _)", slot)
+		}
+		return nodeID + ":virtual:" + slot, nil
+	}
+	if strings.Contains(s, ":") || !nodeIDRe.MatchString(s) {
+		return "", fmt.Errorf("invalid desktopTarget %q", v)
+	}
+	return s, nil
+}
+
+// NormalizeBrowserMode validates and normalizes a bot's browser isolation mode.
+// "" and "auto" normalize to ""; "isolated" and "attach" are preserved.
+func NormalizeBrowserMode(v string) (string, error) {
+	s := strings.ToLower(strings.TrimSpace(v))
+	switch s {
+	case "", "auto":
+		return "", nil
+	case "isolated", "attach":
+		return s, nil
+	default:
+		return "", fmt.Errorf("invalid browserMode %q (expected auto, isolated, or attach)", v)
+	}
+}
+
+// EffectiveBrowserMode returns "isolated", "attach", or "auto".
+func (b BotConfig) EffectiveBrowserMode() string {
+	switch strings.ToLower(strings.TrimSpace(b.BrowserMode)) {
+	case "isolated":
+		return "isolated"
+	case "attach":
+		return "attach"
+	default:
+		return "auto"
+	}
 }
 
 // ContainsEnvRef reports whether s contains a `${VAR}` environment variable reference.
@@ -753,6 +830,16 @@ func Load(projectRoot, explicitPath string) (*HubConfig, string, error) {
 			return nil, cfgPath, fmt.Errorf("bot %q: %w", b.ID, err)
 		}
 		b.Color = color
+		dt, err := NormalizeDesktopTarget(b.DesktopTarget)
+		if err != nil {
+			return nil, cfgPath, fmt.Errorf("bot %q: %w", b.ID, err)
+		}
+		b.DesktopTarget = dt
+		bm, err := NormalizeBrowserMode(b.BrowserMode)
+		if err != nil {
+			return nil, cfgPath, fmt.Errorf("bot %q: %w", b.ID, err)
+		}
+		b.BrowserMode = bm
 
 		NormalizeBot(b, &cfg)
 		if err := EnsureWorkspace(b, &cfg, ""); err != nil {
@@ -776,6 +863,12 @@ func NormalizeBot(b *BotConfig, cfg *HubConfig) {
 	}
 	if color, err := NormalizeBotColor(b.Color); err == nil {
 		b.Color = color
+	}
+	if dt, err := NormalizeDesktopTarget(b.DesktopTarget); err == nil {
+		b.DesktopTarget = dt
+	}
+	if bm, err := NormalizeBrowserMode(b.BrowserMode); err == nil {
+		b.BrowserMode = bm
 	}
 	if b.Harness == "" {
 		b.Harness = cfg.EffectiveDefaultHarness()
@@ -895,7 +988,7 @@ func PlatformInstructionsText() string {
 		"  - `send_message(text?, images?, files?)`: send visible text, local images, and/or files to the user.",
 		"  - `message_bot(botId, message)`: collaborate with another bot.",
 		"  - `recall_session(...)`: read sliced messages from `previous` / `active` / `<sessionId>` (keep slices small; fetch single oversized messages by `messageId`). If `bot-hub session list` returns a `magpieSession`, pass it to `magpie-sessions__read_session` for raw tool transcripts.",
-		"  - `desktop_task(goal, ...)` & `request_takeover(reason, ...)`: delegate multi-step GUI tasks to the visible desktop worker, or pause for human QR/2FA/CAPTCHA/payment takeover.",
+		"  - `desktop_task(goal, ...)` & `request_takeover(reason, ...)`: delegate multi-step GUI tasks to the visible desktop worker, or pause for human QR/2FA/CAPTCHA/payment takeover (omit `nodeId` to use this bot's bound screen `desktopTarget` or the active desktop target).",
 		"  - `node_exec(command, ...)` & `node_file(op, path, ...)`: run shell commands or read/write/list files on connected remote nodes.",
 		"- **Full `bot-hub` CLI (auto-reads current bot context from env or workspace config)**:",
 		"  - **Bots & Self-Edit**: `bot-hub bot list | get [--id <id>] | create --id <id> --name <name> [--harness opencode|pi|dsh|claude|agy] | update [--id <id>] [--name ...] [--description ...] [--instructions-file AGENTS.md] | delete --id <id> | message <id> <msg> | send [--text \"...\"] [--image <path>] [--file <path>]`.",
@@ -905,9 +998,8 @@ func PlatformInstructionsText() string {
 		"- **Local Desktop & Browser CLI (run locally or via `node_exec`)**:",
 		"  - Desktop GUI (`agent-desktop` CLI): operate apps via accessibility-tree `snapshot` + `@ref` instead of blind coordinates.",
 		"  - Browser (`agent-browser` CLI):",
-		"    1. Prefer `agent-browser --auto-connect --pin-tab` to attach to the running Chromium browser in an isolated tab (reuses logins without stealing mouse/focus).",
-		"    2. If attach fails, use default headless mode for background/read-only work, or `--headed --profile ~/.bot-hub/browser/<bot-id>` when login or human visual takeover is needed.",
-		"    3. Pass `--session <bot-id>` to isolate state across bots.",
+		"    1. `AGENT_BROWSER_SESSION` is automatically pre-set per bot (`bot-<id>`), and `AGENT_BROWSER_PROFILE` is pre-set when the bot's browser mode is `isolated`. Always keep `--session <bot-id>` when invoking inside shared-server harnesses (e.g., `opencode`).",
+		"    2. In `auto`/`attach` mode, prefer `agent-browser --auto-connect --pin-tab` to attach to the running Chromium browser in an isolated tab (reuses logins without stealing mouse/focus). In `isolated` mode (or if attach fails), use `--headed` when human takeover is needed or default headless mode for background/read-only work.",
 		"",
 	}, "\n")
 }

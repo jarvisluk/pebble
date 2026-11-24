@@ -480,7 +480,14 @@ fun ChatScreen(
                             tint = p.text,
                         )
                     }
-                    IconButton(onClick = { onOpenDesktop(store.takeovers.firstOrNull()?.target ?: "local") }) {
+                    IconButton(onClick = {
+                        val toTarget = store.takeovers.firstOrNull { it.botId == botId }?.target?.takeIf { it.isNotEmpty() }
+                            ?: bot?.desktopTarget?.takeIf { it.isNotEmpty() }
+                            ?: store.takeovers.firstOrNull()?.target?.takeIf { it.isNotEmpty() }
+                            ?: store.activeDesktopTarget.target.takeIf { it.isNotEmpty() }
+                            ?: "local"
+                        onOpenDesktop(toTarget)
+                    }) {
                         Icon(
                             imageVector = if (store.takeovers.isEmpty()) Icons.Rounded.DesktopWindows else Icons.Rounded.Warning,
                             contentDescription = store.t("remoteDesktop"),

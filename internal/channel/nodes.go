@@ -94,7 +94,46 @@ func (s *HTTPServer) handleNodeCall(w http.ResponseWriter, r *http.Request) {
 	if timeout <= 0 {
 		timeout = 60 * time.Second
 	}
-	res, resolvedID, err := s.nodes().Call(r.Context(), nodeID, req.Action, req.Args, timeout)
+	callArgs := req.Args
+	if req.BotID != "" && s.hub != nil {
+		session, isolated, boundNodeID, boundSlot := s.hub.GetBotBrowserInfo(req.BotID)
+		if nodeID == "" && boundNodeID != "" {
+			nodeID = boundNodeID
+		}
+		if req.Action == "exec" {
+			var m map[string]any
+			if len(callArgs) == 0 || json.Unmarshal(callArgs, &m) == nil {
+				if m == nil {
+					m = make(map[string]any)
+				}
+				envMap, _ := m["env"].(map[string]any)
+				if envMap == nil {
+					envMap = make(map[string]any)
+				}
+				if _, ok := envMap["BOT_HUB_BOT_ID"]; !ok {
+					envMap["BOT_HUB_BOT_ID"] = req.BotID
+				}
+				if _, ok := envMap["AGENT_BROWSER_SESSION"]; !ok && session != "" {
+					envMap["AGENT_BROWSER_SESSION"] = session
+				}
+				m["env"] = envMap
+				if isolated {
+					if _, ok := m["browserProfileBotId"]; !ok {
+						m["browserProfileBotId"] = req.BotID
+					}
+				}
+				if boundSlot != "" && (nodeID == "" || nodeID == boundNodeID) {
+					if _, ok := m["desktopSlot"]; !ok {
+						m["desktopSlot"] = boundSlot
+					}
+				}
+				if b, merr := json.Marshal(m); merr == nil {
+					callArgs = b
+				}
+			}
+		}
+	}
+	res, resolvedID, err := s.nodes().Call(r.Context(), nodeID, req.Action, callArgs, timeout)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
 		return

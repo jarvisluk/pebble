@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -42,6 +43,9 @@ var ErrDesktopTaskBusy = errors.New("desktop task already running for target")
 
 // ErrLocalDesktopDisabled indicates local host desktop automation is turned off in settings.
 var ErrLocalDesktopDisabled = errors.New("本机桌面操控已在「设置 › 远程与设备」中关闭")
+
+// ErrBoundDesktopOffline indicates a bot's explicitly bound desktop target is offline or unavailable.
+var ErrBoundDesktopOffline = errors.New("绑定的桌面节点当前离线或未开启桌面权限")
 
 // ErrForbidden indicates the caller is not permitted to access another bot's private sessions.
 var ErrForbidden = errors.New("forbidden")
@@ -135,6 +139,8 @@ type BotStatus struct {
 	// ModelInherited: the model is the hub default for the bot's harness.
 	ModelInherited   bool                 `json:"modelInherited"`
 	PrivateSessions  bool                 `json:"privateSessions,omitempty"`
+	DesktopTarget    string               `json:"desktopTarget,omitempty"`
+	BrowserMode      string               `json:"browserMode,omitempty"`
 	ArchivedSessions int                  `json:"archivedSessions,omitempty"`
 	Busy             bool                 `json:"busy"`
 	Queued           int64                `json:"queued"`
@@ -156,6 +162,8 @@ type CreateBotRequest struct {
 	Model           string `json:"model,omitempty"`
 	Instructions    string `json:"instructions,omitempty"`
 	PrivateSessions bool   `json:"privateSessions,omitempty"`
+	DesktopTarget   string `json:"desktopTarget,omitempty"`
+	BrowserMode     string `json:"browserMode,omitempty"`
 }
 
 // BotUpdate changes a bot's settings; nil fields stay as they are. An empty
@@ -169,6 +177,8 @@ type BotUpdate struct {
 	Model           *string `json:"model,omitempty"`
 	Instructions    *string `json:"instructions,omitempty"`
 	PrivateSessions *bool   `json:"privateSessions,omitempty"`
+	DesktopTarget   *string `json:"desktopTarget,omitempty"`
+	BrowserMode     *string `json:"browserMode,omitempty"`
 }
 
 type RotateResult struct {
@@ -250,10 +260,10 @@ type Hub struct {
 	store     *state.Store
 	messages  *state.MessageStore
 	mediaDir  string
-	registry  *harness.Registry
-	nodes     *node.Registry
-	localDesk *desktop.Engine
-	desktop   *desktop.Coordinator
+	registry      *harness.Registry
+	nodes         *node.Registry
+	localDeskPool *desktop.EnginePool
+	desktop       *desktop.Coordinator
 
 	lanesMu sync.RWMutex
 	lanes   map[string]*botLane
@@ -331,7 +341,7 @@ func New(cfg *config.HubConfig, store *state.Store, messages *state.MessageStore
 		messages:           messages,
 		mediaDir:           mediaDir,
 		registry:           reg,
-		localDesk:          desktop.NewEngineWithConfig(deskCfg),
+		localDeskPool:      desktop.NewEnginePool(deskCfg),
 		lanes:              make(map[string]*botLane, len(cfg.Bots)),
 		order:              make([]string, 0, len(cfg.Bots)),
 		pendingReload:      make(map[string]bool),
@@ -359,9 +369,10 @@ func New(cfg *config.HubConfig, store *state.Store, messages *state.MessageStore
 			h.broadcast(Event{Type: "takeover", Payload: map[string]any{"items": items}})
 		},
 	)
-	h.localDesk.SetHasTakeover(func() bool {
+	h.localDeskPool.SetHasTakeover(func(target string) bool {
+		t := desktop.NormalizeTarget(target)
 		for _, item := range h.desktop.ListTakeovers() {
-			if item.Target == "local" || item.Target == "" {
+			if desktop.NormalizeTarget(item.Target) == t {
 				return true
 			}
 		}
@@ -410,7 +421,7 @@ func (h *Hub) Close() {
 		h.activeDesktopTimer = nil
 	}
 	h.desktopTargetMu.Unlock()
-	h.localDesk.Close()
+	h.localDeskPool.Close()
 	h.registry.Close()
 	if h.push != nil {
 		h.push.Close()
@@ -433,7 +444,14 @@ func (h *Hub) Store() *state.Store {
 }
 
 func (h *Hub) LocalDesktop() *desktop.Engine {
-	return h.localDesk
+	if h.localDeskPool == nil {
+		return nil
+	}
+	return h.localDeskPool.Default()
+}
+
+func (h *Hub) LocalDesktopPool() *desktop.EnginePool {
+	return h.localDeskPool
 }
 
 func (h *Hub) Desktop() *desktop.Coordinator {
@@ -943,6 +961,8 @@ func (h *Hub) statusOfLocked(lane *botLane) BotStatus {
 		Model:            lane.bot.Model,
 		ModelInherited:   lane.bot.ModelInherited,
 		PrivateSessions:  lane.bot.PrivateSessions,
+		DesktopTarget:    lane.bot.DesktopTarget,
+		BrowserMode:      lane.bot.BrowserMode,
 		ArchivedSessions: archivedCount,
 		Busy:             lane.busy.Load(),
 		Queued:           lane.queued.Load(),
@@ -987,6 +1007,16 @@ func (h *Hub) CreateBot(req CreateBotRequest) (*BotStatus, error) {
 	if _, err := h.registry.Get(req.Harness); err != nil {
 		return nil, err
 	}
+	dt, err := config.NormalizeDesktopTarget(req.DesktopTarget)
+	if err != nil {
+		return nil, err
+	}
+	req.DesktopTarget = dt
+	bm, err := config.NormalizeBrowserMode(req.BrowserMode)
+	if err != nil {
+		return nil, err
+	}
+	req.BrowserMode = bm
 	req.Instructions = strings.TrimSpace(req.Instructions)
 
 	if err := config.ValidateBotID(req.ID); err != nil {
@@ -1009,6 +1039,8 @@ func (h *Hub) CreateBot(req CreateBotRequest) (*BotStatus, error) {
 		Model:           req.Model,
 		Harness:         req.Harness,
 		PrivateSessions: req.PrivateSessions,
+		DesktopTarget:   req.DesktopTarget,
+		BrowserMode:     req.BrowserMode,
 	}
 	config.NormalizeBot(&bot, h.cfg)
 	if err := config.EnsureWorkspace(&bot, h.cfg, req.Instructions); err != nil {
@@ -1616,6 +1648,11 @@ func (h *Hub) executeTurn(ctx context.Context, lane *botLane, bot config.BotConf
 	if apiToken != "" {
 		extraEnv["BOT_HUB_API_TOKEN"] = apiToken
 	}
+	for k, v := range h.botBrowserEnv(bot) {
+		if k != "" && v != "" {
+			extraEnv[k] = v
+		}
+	}
 
 	h.hopsMu.Lock()
 	h.hops[bot.ID] = opts.Hop
@@ -2127,6 +2164,20 @@ func (h *Hub) UpdateBot(botID string, upd BotUpdate) (*BotStatus, error) {
 		}
 		*upd.Color = color
 	}
+	if upd.DesktopTarget != nil {
+		dt, err := config.NormalizeDesktopTarget(*upd.DesktopTarget)
+		if err != nil {
+			return nil, err
+		}
+		*upd.DesktopTarget = dt
+	}
+	if upd.BrowserMode != nil {
+		bm, err := config.NormalizeBrowserMode(*upd.BrowserMode)
+		if err != nil {
+			return nil, err
+		}
+		*upd.BrowserMode = bm
+	}
 	h.lanesMu.Lock()
 	lane, ok := h.lanes[botID]
 	if !ok {
@@ -2157,6 +2208,12 @@ func (h *Hub) UpdateBot(botID string, upd BotUpdate) (*BotStatus, error) {
 	if upd.PrivateSessions != nil {
 		bot.PrivateSessions = *upd.PrivateSessions
 	}
+	if upd.DesktopTarget != nil {
+		bot.DesktopTarget = *upd.DesktopTarget
+	}
+	if upd.BrowserMode != nil {
+		bot.BrowserMode = *upd.BrowserMode
+	}
 	if bot.ModelInherited {
 		bot.Model = h.cfg.DefaultModelFor(bot.Harness)
 	}
@@ -2171,6 +2228,8 @@ func (h *Hub) UpdateBot(botID string, upd BotUpdate) (*BotStatus, error) {
 				rb.Name, rb.Description, rb.Harness = bot.Name, bot.Description, bot.Harness
 				rb.Avatar, rb.Color = bot.Avatar, bot.Color
 				rb.PrivateSessions = bot.PrivateSessions
+				rb.DesktopTarget = bot.DesktopTarget
+				rb.BrowserMode = bot.BrowserMode
 				if upd.Model != nil || harnessChanged {
 					rb.Model = ""
 					if !bot.ModelInherited {
@@ -2283,6 +2342,10 @@ func (h *Hub) DeleteBot(botID string) error {
 	if h.desktop != nil {
 		h.desktop.CancelTakeoversByBot(botID)
 	}
+	if h.localDeskPool != nil {
+		h.localDeskPool.RemoveSlot(botID)
+	}
+	go closeBotBrowserSession(botID)
 	lane.stop()
 
 	if h.store != nil {
@@ -2655,6 +2718,11 @@ func (h *Hub) RunIsolated(ctx context.Context, botID, prompt string, opts Isolat
 			mcpEnv = make(map[string]string, 1)
 		}
 		mcpEnv["BOT_HUB_MCP_ROLE"] = role
+	}
+	for k, v := range h.botBrowserEnv(bot) {
+		if k != "" && v != "" {
+			extraEnv[k] = v
+		}
 	}
 	for k, v := range opts.ExtraEnv {
 		if k != "" && v != "" {
@@ -3239,24 +3307,50 @@ func (h *Hub) resetActiveDesktopTargetLocked() ActiveDesktopTarget {
 	return ActiveDesktopTarget{Target: "local", Temporary: false}
 }
 
+func formatVirtualTargetName(hostName, slot string) string {
+	if slot == "" {
+		return hostName
+	}
+	if hostName == "" || hostName == "local" {
+		return "虚拟屏 · " + slot
+	}
+	return hostName + " · 虚拟屏 " + slot
+}
+
 // ActiveDesktopTarget returns the currently active desktop target, falling back to
 // "local" if a temporary remote target has expired, disconnected, or lost desktop permission.
 func (h *Hub) ActiveDesktopTarget() ActiveDesktopTarget {
 	h.desktopTargetMu.Lock()
 	cur := strings.TrimSpace(h.activeDesktopTarget)
 	exp := h.activeDesktopExpires
-	if cur == "" || strings.EqualFold(cur, "local") {
+	spec := desktop.ParseTarget(cur)
+	if spec.IsLocal() && !spec.IsVirtualSlot() {
 		h.desktopTargetMu.Unlock()
 		return ActiveDesktopTarget{Target: "local", Temporary: false}
+	}
+	if spec.IsLocal() && spec.IsVirtualSlot() {
+		supported := h.localDeskPool != nil && h.localDeskPool.VirtualSupported()
+		if supported {
+			h.desktopTargetMu.Unlock()
+			return ActiveDesktopTarget{
+				Target:    spec.Raw,
+				Name:      formatVirtualTargetName("local", spec.VirtualSlot),
+				Temporary: false,
+			}
+		}
+		snap := h.resetActiveDesktopTargetLocked()
+		h.desktopTargetMu.Unlock()
+		h.broadcast(Event{Type: "desktop_target", Payload: snap})
+		return snap
 	}
 	expired := !exp.IsZero() && !time.Now().Before(exp)
 	h.desktopTargetMu.Unlock()
 
 	if !expired {
-		if n, ok := h.findRemoteDesktopNode(cur); ok {
+		if n, ok := h.findRemoteDesktopNode(spec.NodeID); ok && (!spec.IsVirtualSlot() || n.OS == "linux") {
 			return ActiveDesktopTarget{
-				Target:    n.ID,
-				Name:      n.Name,
+				Target:    spec.Raw,
+				Name:      formatVirtualTargetName(n.Name, spec.VirtualSlot),
 				Temporary: true,
 				ExpiresAt: exp.UTC().Format(time.RFC3339),
 			}
@@ -3270,13 +3364,23 @@ func (h *Hub) ActiveDesktopTarget() ActiveDesktopTarget {
 		snap = h.resetActiveDesktopTargetLocked()
 	} else {
 		curNow := strings.TrimSpace(h.activeDesktopTarget)
-		if curNow != "" && !strings.EqualFold(curNow, "local") {
+		specNow := desktop.ParseTarget(curNow)
+		if specNow.IsLocal() && specNow.IsVirtualSlot() {
+			if h.localDeskPool != nil && h.localDeskPool.VirtualSupported() {
+				h.desktopTargetMu.Unlock()
+				return ActiveDesktopTarget{
+					Target:    specNow.Raw,
+					Name:      formatVirtualTargetName("local", specNow.VirtualSlot),
+					Temporary: false,
+				}
+			}
+		} else if !specNow.IsLocal() {
 			expNow := h.activeDesktopExpires
 			h.desktopTargetMu.Unlock()
-			if n, ok := h.findRemoteDesktopNode(curNow); ok {
+			if n, ok := h.findRemoteDesktopNode(specNow.NodeID); ok && (!specNow.IsVirtualSlot() || n.OS == "linux") {
 				return ActiveDesktopTarget{
-					Target:    n.ID,
-					Name:      n.Name,
+					Target:    specNow.Raw,
+					Name:      formatVirtualTargetName(n.Name, specNow.VirtualSlot),
 					Temporary: true,
 					ExpiresAt: expNow.UTC().Format(time.RFC3339),
 				}
@@ -3291,20 +3395,43 @@ func (h *Hub) ActiveDesktopTarget() ActiveDesktopTarget {
 	return snap
 }
 
-// SetActiveDesktopTarget switches the active desktop target to "local" or a connected
-// remote node with desktop permission. Non-local targets are temporary and expire after ttl.
+// SetActiveDesktopTarget switches the active desktop target to "local", a local virtual slot,
+// or a connected remote node (with optional virtual slot). Non-local targets expire after ttl.
 func (h *Hub) SetActiveDesktopTarget(target string, ttl time.Duration) (ActiveDesktopTarget, error) {
-	t := strings.TrimSpace(target)
-	if t == "" || strings.EqualFold(t, "local") {
+	spec := desktop.ParseTarget(target)
+	if spec.IsLocal() && !spec.IsVirtualSlot() {
 		h.desktopTargetMu.Lock()
 		snap := h.resetActiveDesktopTargetLocked()
 		h.desktopTargetMu.Unlock()
 		h.broadcast(Event{Type: "desktop_target", Payload: snap})
 		return snap, nil
 	}
-	n, ok := h.findRemoteDesktopNode(t)
+	if spec.IsLocal() && spec.IsVirtualSlot() {
+		if h.localDeskPool == nil || !h.localDeskPool.VirtualSupported() {
+			return ActiveDesktopTarget{}, errors.New("当前主机不支持独立虚拟屏幕（仅 Linux 支持多虚拟屏）")
+		}
+		h.desktopTargetMu.Lock()
+		if h.activeDesktopTimer != nil {
+			h.activeDesktopTimer.Stop()
+			h.activeDesktopTimer = nil
+		}
+		h.activeDesktopTarget = spec.Raw
+		h.activeDesktopExpires = time.Time{}
+		h.desktopTargetMu.Unlock()
+		snap := ActiveDesktopTarget{
+			Target:    spec.Raw,
+			Name:      formatVirtualTargetName("local", spec.VirtualSlot),
+			Temporary: false,
+		}
+		h.broadcast(Event{Type: "desktop_target", Payload: snap})
+		return snap, nil
+	}
+	n, ok := h.findRemoteDesktopNode(spec.NodeID)
 	if !ok {
-		return ActiveDesktopTarget{}, fmt.Errorf("remote desktop target %q unavailable", t)
+		return ActiveDesktopTarget{}, fmt.Errorf("remote desktop target %q unavailable", spec.NodeID)
+	}
+	if spec.IsVirtualSlot() && n.OS != "linux" {
+		return ActiveDesktopTarget{}, fmt.Errorf("remote node %q (%s) does not support virtual screens", spec.NodeID, n.OS)
 	}
 	if ttl <= 0 {
 		ttl = defaultDesktopTargetTTL
@@ -3315,14 +3442,14 @@ func (h *Hub) SetActiveDesktopTarget(target string, ttl time.Duration) (ActiveDe
 	if h.activeDesktopTimer != nil {
 		h.activeDesktopTimer.Stop()
 	}
-	h.activeDesktopTarget = n.ID
+	h.activeDesktopTarget = spec.Raw
 	h.activeDesktopExpires = exp
 	h.activeDesktopTimer = time.AfterFunc(ttl, h.reconcileActiveDesktopTarget)
 	h.desktopTargetMu.Unlock()
 
 	snap := ActiveDesktopTarget{
-		Target:    n.ID,
-		Name:      n.Name,
+		Target:    spec.Raw,
+		Name:      formatVirtualTargetName(n.Name, spec.VirtualSlot),
 		Temporary: true,
 		ExpiresAt: exp.UTC().Format(time.RFC3339),
 	}
@@ -3341,11 +3468,13 @@ func (h *Hub) reconcileActiveDesktopTarget() {
 }
 
 func (h *Hub) touchActiveDesktopTarget(target string) {
-	if target == "" || strings.EqualFold(target, "local") {
+	spec := desktop.ParseTarget(target)
+	if spec.IsLocal() {
 		return
 	}
 	h.desktopTargetMu.Lock()
-	if h.activeDesktopTarget != target {
+	curSpec := desktop.ParseTarget(h.activeDesktopTarget)
+	if curSpec.IsLocal() || curSpec.HostKey() != spec.HostKey() {
 		h.desktopTargetMu.Unlock()
 		return
 	}
@@ -3357,12 +3486,12 @@ func (h *Hub) touchActiveDesktopTarget(target string) {
 	h.activeDesktopTimer = time.AfterFunc(defaultDesktopTargetTTL, h.reconcileActiveDesktopTarget)
 	h.desktopTargetMu.Unlock()
 
-	if n, ok := h.findRemoteDesktopNode(target); ok {
+	if n, ok := h.findRemoteDesktopNode(curSpec.NodeID); ok {
 		h.broadcast(Event{
 			Type: "desktop_target",
 			Payload: ActiveDesktopTarget{
-				Target:    n.ID,
-				Name:      n.Name,
+				Target:    curSpec.Raw,
+				Name:      formatVirtualTargetName(n.Name, curSpec.VirtualSlot),
 				Temporary: true,
 				ExpiresAt: exp.UTC().Format(time.RFC3339),
 			},
@@ -3370,12 +3499,119 @@ func (h *Hub) touchActiveDesktopTarget(target string) {
 	}
 }
 
+// ResolveBotDesktopTarget resolves the desktop target for a bot task or takeover.
+// Priority: explicitTarget > bot's bound DesktopTarget > global ActiveDesktopTarget.
+// Bound remote targets never fall back silently to local when offline.
+func (h *Hub) ResolveBotDesktopTarget(botID, explicitTarget string) (string, error) {
+	raw := strings.TrimSpace(explicitTarget)
+	boundFromBot := false
+	if raw == "" && strings.TrimSpace(botID) != "" {
+		if bot, ok := h.GetBot(botID); ok && strings.TrimSpace(bot.DesktopTarget) != "" {
+			raw = bot.DesktopTarget
+			boundFromBot = true
+		}
+	}
+	if raw == "" {
+		return h.ActiveDesktopTarget().Target, nil
+	}
+
+	spec := desktop.ParseTarget(raw)
+	if spec.IsLocal() {
+		if spec.IsVirtualSlot() && (h.localDeskPool == nil || !h.localDeskPool.VirtualSupported()) {
+			return "", errors.New("当前主机不支持独立虚拟屏幕（仅 Linux 支持多虚拟屏）")
+		}
+		return spec.Raw, nil
+	}
+
+	n, ok := h.findRemoteDesktopNode(spec.NodeID)
+	if !ok {
+		if boundFromBot {
+			return "", fmt.Errorf("Bot %q 绑定的桌面节点 %q 当前离线或未开启桌面权限: %w", botID, spec.NodeID, ErrBoundDesktopOffline)
+		}
+		return "", fmt.Errorf("remote desktop target %q unavailable: %w", spec.NodeID, ErrBoundDesktopOffline)
+	}
+	if spec.IsVirtualSlot() && n.OS != "linux" {
+		return "", fmt.Errorf("remote node %q (%s) does not support virtual screens", spec.NodeID, n.OS)
+	}
+	return spec.Raw, nil
+}
+
+// BrowserProfileDir returns the persistent isolated browser profile directory for botID.
+func (h *Hub) BrowserProfileDir(botID string) string {
+	base := ""
+	if h.cfg != nil && strings.TrimSpace(h.cfg.StateFile) != "" {
+		base = filepath.Dir(h.cfg.StateFile)
+	} else if h.cfg != nil && strings.TrimSpace(h.cfg.ProjectRoot) != "" {
+		base = filepath.Join(h.cfg.ProjectRoot, "state")
+	} else {
+		base = os.TempDir()
+	}
+	return filepath.Join(base, "browsers", botID)
+}
+
+func (h *Hub) botBrowserEnv(bot config.BotConfig) map[string]string {
+	env := make(map[string]string)
+	if strings.TrimSpace(bot.Env["AGENT_BROWSER_SESSION"]) == "" {
+		env["AGENT_BROWSER_SESSION"] = "bot-" + bot.ID
+	}
+	if bot.EffectiveBrowserMode() == "isolated" && strings.TrimSpace(bot.Env["AGENT_BROWSER_PROFILE"]) == "" {
+		dir := h.BrowserProfileDir(bot.ID)
+		if err := os.MkdirAll(dir, 0o700); err == nil {
+			env["AGENT_BROWSER_PROFILE"] = dir
+		}
+	}
+	if strings.TrimSpace(bot.DesktopTarget) != "" && h.localDeskPool != nil {
+		spec := desktop.ParseTarget(bot.DesktopTarget)
+		if spec.IsLocal() && spec.IsVirtualSlot() {
+			for _, kv := range h.localDeskPool.SlotEnv(spec.VirtualSlot) {
+				if k, v, ok := strings.Cut(kv, "="); ok && v != "" {
+					if _, exists := bot.Env[k]; !exists {
+						env[k] = v
+					}
+				}
+			}
+		}
+	}
+	return env
+}
+
+// GetBotBrowserInfo returns browser isolation settings and bound remote target details for node_exec forwarding.
+func (h *Hub) GetBotBrowserInfo(botID string) (session string, isolated bool, boundNodeID string, boundSlot string) {
+	bot, ok := h.GetBot(botID)
+	if !ok {
+		return "", false, "", ""
+	}
+	session = strings.TrimSpace(bot.Env["AGENT_BROWSER_SESSION"])
+	if session == "" {
+		session = "bot-" + bot.ID
+	}
+	isolated = bot.EffectiveBrowserMode() == "isolated"
+	if strings.TrimSpace(bot.DesktopTarget) != "" {
+		spec := desktop.ParseTarget(bot.DesktopTarget)
+		if !spec.IsLocal() {
+			boundNodeID = spec.NodeID
+			boundSlot = spec.VirtualSlot
+		}
+	}
+	return session, isolated, boundNodeID, boundSlot
+}
+
+func closeBotBrowserSession(botID string) {
+	if strings.TrimSpace(botID) == "" {
+		return
+	}
+	bin, err := exec.LookPath("agent-browser")
+	if err != nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_ = exec.CommandContext(ctx, bin, "--session", "bot-"+botID, "close").Run()
+}
+
 // ActiveDesktopTaskBot returns the bot ID currently running a computer-use worker on target, if any.
 func (h *Hub) ActiveDesktopTaskBot(target string) string {
-	t := strings.TrimSpace(target)
-	if strings.EqualFold(t, "local") {
-		t = "local"
-	}
+	t := desktop.NormalizeTarget(target)
 	h.desktopTaskMu.Lock()
 	defer h.desktopTaskMu.Unlock()
 	if id := h.activeDesktopTasks[t]; id != "" {
@@ -3402,14 +3638,13 @@ func (h *Hub) RunDesktopTask(ctx context.Context, req DesktopTaskRequest) (*harn
 		return nil, errors.New("goal is required")
 	}
 
-	target := strings.TrimSpace(req.Target)
-	if target == "" {
-		target = h.ActiveDesktopTarget().Target
+	target, err := h.ResolveBotDesktopTarget(botID, req.Target)
+	if err != nil {
+		return nil, err
 	}
-	if strings.EqualFold(target, "local") {
-		target = "local"
-	} else {
-		h.touchActiveDesktopTarget(target)
+	spec := desktop.ParseTarget(target)
+	if !spec.IsLocal() {
+		h.touchActiveDesktopTarget(spec.HostKey())
 	}
 
 	h.desktopTaskMu.Lock()
@@ -3428,11 +3663,17 @@ func (h *Hub) RunDesktopTask(ctx context.Context, req DesktopTaskRequest) (*harn
 	}()
 
 	var taskEnv map[string]string
-	if target == "local" && h.localDesk != nil {
-		release := h.localDesk.AcquireTaskLease()
+	if spec.IsLocal() && h.localDeskPool != nil {
+		eng, err := h.localDeskPool.ForSlot(spec.VirtualSlot)
+		if err != nil {
+			return nil, err
+		}
+		release := eng.AcquireTaskLease()
 		defer release()
-		_ = h.localDesk.PrepareForTask(ctx)
-		if envs := h.localDesk.Env(); len(envs) > 0 {
+		if err := eng.PrepareForTask(ctx); err != nil && spec.IsVirtualSlot() {
+			return nil, err
+		}
+		if envs := eng.Env(); len(envs) > 0 {
 			taskEnv = make(map[string]string, len(envs))
 			for _, kv := range envs {
 				if k, v, ok := strings.Cut(kv, "="); ok {

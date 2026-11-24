@@ -120,6 +120,7 @@ export default function App() {
   const deskOpenRef = useRef(deskOpen);
   const deskTargetRef = useRef(deskTarget);
   const activeDeskTargetRef = useRef(activeDeskTarget);
+  const activeBotDesktopTargetRef = useRef('');
   const panelOpenRef = useRef(panelOpen);
   const panelDetailRef = useRef(panelDetail);
   const loginOpenRef = useRef(loginOpen);
@@ -281,7 +282,9 @@ export default function App() {
         expiresAt: next?.expiresAt,
       };
       setActiveDeskTarget(normalized);
-      setDeskTarget(normalized.target);
+      if (!activeBotDesktopTargetRef.current) {
+        setDeskTarget(normalized.target);
+      }
       if (notifyFallback && prev.temporary && !normalized.temporary && normalized.target === 'local') {
         showToast(t('deskTargetFallback'));
       }
@@ -301,6 +304,7 @@ export default function App() {
   const selectDesktopTarget = useCallback(
     async (nextTarget: string) => {
       const want = nextTarget || 'local';
+      setDeskTarget(want);
       try {
         const res = await api<{ activeTarget?: ActiveDesktopTarget }>('/api/desktop/target', {
           method: 'PUT',
@@ -660,6 +664,15 @@ export default function App() {
   };
 
   const activeBot = bots.find((b) => b.id === activeBotId);
+  activeBotDesktopTargetRef.current = activeBot?.desktopTarget || '';
+  useEffect(() => {
+    const bound = activeBot?.desktopTarget || '';
+    if (bound) {
+      setDeskTarget(bound);
+    } else {
+      setDeskTarget(activeDeskTargetRef.current.target || 'local');
+    }
+  }, [activeBotId, activeBot?.desktopTarget]);
   const shadeOpen = mobileSideOpen || panelOpen || Boolean(collabPeerId);
 
   const handleSendMessage = useCallback(
@@ -882,6 +895,7 @@ export default function App() {
               if (deskOpen && stageKind === 'desktop') {
                 setDeskOpen(false);
               } else {
+                setDeskTarget(activeBot?.desktopTarget || activeDeskTarget.target || 'local');
                 setStageKind('desktop');
                 setActiveStageTabId('desktop');
                 setDeskOpen(true);

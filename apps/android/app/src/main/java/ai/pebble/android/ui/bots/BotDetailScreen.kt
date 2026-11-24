@@ -27,6 +27,7 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DesktopWindows
 import androidx.compose.material.icons.rounded.ExpandLess
@@ -59,6 +60,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -119,6 +121,9 @@ fun BotDetailScreen(
     var creatingRoutine by remember(botId) { mutableStateOf(false) }
 
     LaunchedEffect(botId) {
+        if (store.desktopTargets.isEmpty()) {
+            runCatching { store.refreshDesktopTargets() }
+        }
         runCatching { store.fetchRoutines(botId) }
     }
 
@@ -143,7 +148,12 @@ fun BotDetailScreen(
         }
     }
 
-    val previewTarget = store.takeovers.firstOrNull()?.target ?: "local"
+    val previewTarget = store.takeovers.firstOrNull { it.botId == botId }?.target?.takeIf { it.isNotEmpty() }
+        ?: store.bots.firstOrNull { it.id == botId }?.desktopTarget?.takeIf { it.isNotEmpty() }
+        ?: store.activeDesktopTarget.target.takeIf { it.isNotEmpty() }
+        ?: "local"
+    val previewBadgeLabel = store.desktopTargets.firstOrNull { it.id == previewTarget }?.name?.takeIf { it.isNotEmpty() }
+        ?: previewTarget
     val previewWsUrl = store.makeDesktopWsUrl(previewTarget).orEmpty()
 
     Scaffold(
@@ -193,15 +203,17 @@ fun BotDetailScreen(
                         .background(Color.Black)
                         .clickable { onOpenDesktop(previewTarget) },
                 ) {
-                    H264SurfaceView(
-                        url = previewWsUrl,
-                        token = store.authToken,
-                        preset = "low",
-                        active = true,
-                        onStatus = { connected, _ -> previewConnected = connected },
-                        onStreamError = { _, msg -> previewError = msg },
-                        modifier = Modifier.fillMaxSize(),
-                    )
+                    key(previewTarget) {
+                        H264SurfaceView(
+                            url = previewWsUrl,
+                            token = store.authToken,
+                            preset = "low",
+                            active = true,
+                            onStatus = { connected, _ -> previewConnected = connected },
+                            onStreamError = { _, msg -> previewError = msg },
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
                     if (!previewConnected) {
                         Column(
                             modifier = Modifier
@@ -217,6 +229,22 @@ fun BotDetailScreen(
                                 CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp, color = Color.White)
                             }
                         }
+                    }
+                    if (previewTarget != "local") {
+                        Text(
+                            text = previewBadgeLabel,
+                            color = Color.White,
+                            fontSize = PebbleFont.caption,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier
+                                .align(Alignment.BottomStart)
+                                .padding(12.dp)
+                                .clip(CircleShape)
+                                .background(Color.Black.copy(alpha = 0.60f))
+                                .padding(horizontal = 9.dp, vertical = 4.dp),
+                        )
                     }
                     Box(
                         modifier = Modifier
@@ -268,6 +296,10 @@ fun BotInfoSheet(
     var editColor by remember(botId) { mutableStateOf("") }
     var editInst by remember(botId) { mutableStateOf("") }
     var editPrivate by remember(botId) { mutableStateOf(false) }
+    var editDesktopTarget by remember(botId) { mutableStateOf("") }
+    var editBrowserMode by remember(botId) { mutableStateOf("") }
+    var screenMenuOpen by remember(botId) { mutableStateOf(false) }
+    var browserMenuOpen by remember(botId) { mutableStateOf(false) }
     var saving by remember(botId) { mutableStateOf(false) }
     var err by remember(botId) { mutableStateOf("") }
     var confirm by remember(botId) { mutableStateOf<ConfirmItem?>(null) }
@@ -282,15 +314,53 @@ fun BotInfoSheet(
     val active = detail ?: bot
     val pal = p.bot(botId, index, editColor.ifEmpty { active?.color })
 
-    val dirty = remember(active, detail, editName, editDesc, editAvatar, editColor, editPrivate, editInst) {
+    val dirty = remember(active, detail, editName, editDesc, editAvatar, editColor, editPrivate, editDesktopTarget, editBrowserMode, editInst) {
         active != null && (
             editName != (active.name ?: botId) ||
                 editDesc != active.description.orEmpty() ||
                 editAvatar != active.avatar.orEmpty() ||
                 editColor != active.color.orEmpty() ||
                 editPrivate != (active.privateSessions == true) ||
+                editDesktopTarget != active.desktopTarget.orEmpty() ||
+                editBrowserMode != active.browserMode.orEmpty() ||
                 editInst != detail?.instructions.orEmpty()
             )
+    }
+
+    val desktopTargetOptions = remember(store.desktopTargets, botId, editDesktopTarget) {
+        val opts = mutableListOf(
+            "" to store.t("deskBindDefault"),
+            "local" to store.t("localDesktopName"),
+        )
+        val seen = linkedSetOf("", "local")
+        if (store.desktopTargets.firstOrNull { it.id == "local" }?.virtualSupported == true) {
+            val vid = "virtual:$botId"
+            seen.add(vid)
+            opts.add(vid to store.t("deskBindLocalVirtual"))
+        }
+        store.desktopTargets.filter { it.id != "local" }.forEach { tr ->
+            if (seen.add(tr.id)) {
+                opts.add(tr.id to (tr.name ?: tr.id))
+            }
+            if (tr.virtual != true && tr.virtualSupported == true) {
+                val rvid = "${tr.id}:virtual:$botId"
+                if (seen.add(rvid)) {
+                    opts.add(rvid to store.t("deskBindRemoteVirtual", mapOf("name" to (tr.name ?: tr.id))))
+                }
+            }
+        }
+        if (editDesktopTarget.isNotEmpty() && seen.add(editDesktopTarget)) {
+            opts.add(editDesktopTarget to store.t("deskBindOfflineTag", mapOf("id" to editDesktopTarget)))
+        }
+        opts
+    }
+
+    val browserModeOptions = remember(store.langPref) {
+        listOf(
+            "" to store.t("browserModeAuto"),
+            "isolated" to store.t("browserModeIsolated"),
+            "attach" to store.t("browserModeAttach"),
+        )
     }
 
     fun apply(d: BotStatus) {
@@ -301,6 +371,8 @@ fun BotInfoSheet(
         editColor = d.color.orEmpty()
         editInst = d.instructions.orEmpty()
         editPrivate = d.privateSessions == true
+        editDesktopTarget = d.desktopTarget.orEmpty()
+        editBrowserMode = d.browserMode.orEmpty()
     }
 
     suspend fun loadMem() {
@@ -318,8 +390,11 @@ fun BotInfoSheet(
         editColor = src?.color.orEmpty()
         editInst = detail?.instructions.orEmpty()
         editPrivate = src?.privateSessions == true
+        editDesktopTarget = src?.desktopTarget.orEmpty()
+        editBrowserMode = src?.browserMode.orEmpty()
         loading = true
         scope.launch { loadMem() }
+        scope.launch { runCatching { store.refreshDesktopTargets() } }
         runCatching { store.botDetail(botId) }.getOrNull()?.let { apply(it) }
         loading = false
     }
@@ -343,6 +418,8 @@ fun BotInfoSheet(
                         "color" to editColor,
                         "instructions" to editInst,
                         "privateSessions" to editPrivate,
+                        "desktopTarget" to editDesktopTarget,
+                        "browserMode" to editBrowserMode,
                     ),
                 )
                 apply(store.botDetail(botId))
@@ -645,6 +722,92 @@ fun BotInfoSheet(
                                         tint = pal.accent,
                                         modifier = Modifier.size(16.dp),
                                     )
+                                }
+                            }
+                            Box(modifier = Modifier.fillMaxWidth()) {
+                                val currentScreenLabel = desktopTargetOptions.firstOrNull { it.first == editDesktopTarget }?.second ?: editDesktopTarget
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(PebbleDimens.rowShape)
+                                        .clickable { screenMenuOpen = true }
+                                        .padding(vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    Text(store.t("botDesktopTarget"), color = p.text, fontSize = PebbleFont.body, modifier = Modifier.weight(1f))
+                                    Text(
+                                        text = currentScreenLabel,
+                                        color = p.text2,
+                                        fontSize = PebbleFont.secondary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.widthIn(max = 170.dp),
+                                    )
+                                    Icon(Icons.Rounded.ExpandMore, contentDescription = null, tint = p.mute, modifier = Modifier.size(18.dp))
+                                }
+                                DropdownMenu(
+                                    expanded = screenMenuOpen,
+                                    onDismissRequest = { screenMenuOpen = false },
+                                    containerColor = p.card,
+                                ) {
+                                    desktopTargetOptions.forEach { (id, label) ->
+                                        DropdownMenuItem(
+                                            text = { Text(label, color = p.text, fontSize = PebbleFont.body) },
+                                            trailingIcon = {
+                                                if (editDesktopTarget == id) {
+                                                    Icon(Icons.Rounded.Check, contentDescription = null, tint = pal.accent, modifier = Modifier.size(16.dp))
+                                                }
+                                            },
+                                            onClick = {
+                                                editDesktopTarget = id
+                                                screenMenuOpen = false
+                                            },
+                                        )
+                                    }
+                                }
+                            }
+                            Box(modifier = Modifier.fillMaxWidth()) {
+                                val currentBrowserLabel = browserModeOptions.firstOrNull { it.first == editBrowserMode }?.second ?: editBrowserMode
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(PebbleDimens.rowShape)
+                                        .clickable { browserMenuOpen = true }
+                                        .padding(vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    Text(store.t("botBrowserMode"), color = p.text, fontSize = PebbleFont.body, modifier = Modifier.weight(1f))
+                                    Text(
+                                        text = currentBrowserLabel,
+                                        color = p.text2,
+                                        fontSize = PebbleFont.secondary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.widthIn(max = 170.dp),
+                                    )
+                                    Icon(Icons.Rounded.ExpandMore, contentDescription = null, tint = p.mute, modifier = Modifier.size(18.dp))
+                                }
+                                DropdownMenu(
+                                    expanded = browserMenuOpen,
+                                    onDismissRequest = { browserMenuOpen = false },
+                                    containerColor = p.card,
+                                ) {
+                                    browserModeOptions.forEach { (id, label) ->
+                                        DropdownMenuItem(
+                                            text = { Text(label, color = p.text, fontSize = PebbleFont.body) },
+                                            trailingIcon = {
+                                                if (editBrowserMode == id) {
+                                                    Icon(Icons.Rounded.Check, contentDescription = null, tint = pal.accent, modifier = Modifier.size(16.dp))
+                                                }
+                                            },
+                                            onClick = {
+                                                editBrowserMode = id
+                                                browserMenuOpen = false
+                                            },
+                                        )
+                                    }
                                 }
                             }
                             Row(
