@@ -4,7 +4,7 @@
 
 - **iPhone / iPad（`BotHub`）**：支持多主机连接（HTTP / Tailcat / Tailscale）、扫码配对、Bot 列表与对话（SSE 实时流）、Bot 详情与记忆、定时任务、设置、设备与远程桌面接管；iPhone 为单栏导航，iPad 为侧栏 + 会话 + 详情 inspector 三栏。
 - **macOS 原生端（`PebbleMac`）**：直接复用同一套 SwiftUI 界面与模型层，并通过内置 `bot-hub host-daemon` sidecar 子进程承接本机运行、远程连接（Tailcat / Tailscale / HTTP）、本机节点授权、容灾接管与增量回传、菜单栏常驻与远程桌面独立原生窗口（支持鼠标、滚轮与原生键盘输入透传）。
-- 视觉规范沿用 `DESIGN.md`（macOS 桌面基准正文 `14px`，iOS/iPadOS 移动端 `16px`）。
+- 视觉规范沿用 `DESIGN.md`（macOS 桌面基准正文 `14px`，iOS/iPadOS 移动端 `15px`）。
 
 ## 构建
 
