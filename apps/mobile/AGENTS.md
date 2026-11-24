@@ -1,3 +1,5 @@
+> **[ARCHIVED]** `apps/mobile` 为历史 Expo/React Native 客户端目录，已被原生客户端 `apps/android` 与 `apps/apple` 取代。除非任务明确指定维护本目录，否则无需修改，也不纳入仓库多端同步与视觉回归约束。
+
 This is an Expo/React Native mobile application. Prioritize mobile-first patterns, performance, and cross-platform compatibility.
 
 ## Expo has changed — do not trust your training data
