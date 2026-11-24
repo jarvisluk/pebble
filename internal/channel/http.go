@@ -15,6 +15,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"path"
 	"strconv"
 	"strings"
@@ -58,10 +59,19 @@ type HTTPServer struct {
 
 	mediaTicketsMu sync.Mutex
 	mediaTickets   map[string]mediaTicket
+
+	fileTicketsMu sync.Mutex
+	fileTickets   map[string]fileTicket
 }
 
 type mediaTicket struct {
 	mediaID   string
+	expiresAt time.Time
+}
+
+type fileTicket struct {
+	botID     string
+	relPath   string
 	expiresAt time.Time
 }
 
@@ -106,6 +116,11 @@ func NewHTTPServer(h *hub.Hub, cfg config.HTTPConfig) *HTTPServer {
 	mux.HandleFunc("GET /api/bots/{id}/commands", s.handleBotCommands)
 	mux.HandleFunc("GET /api/bots/{id}/mentions", s.handleBotMentions)
 	mux.HandleFunc("POST /api/bots/{id}/attachments", s.handleUploadAttachment)
+	mux.HandleFunc("GET /api/bots/{id}/files", s.handleBotFilesList)
+	mux.HandleFunc("GET /api/bots/{id}/files/content", s.handleBotFileContent)
+	mux.HandleFunc("POST /api/bots/{id}/files/ticket", s.handleBotFileTicket)
+	mux.HandleFunc("GET /api/bots/{id}/files/raw", s.handleBotFileRaw)
+	mux.HandleFunc("POST /api/bots/{id}/stage", s.handleBotStageOpen)
 	mux.HandleFunc("POST /api/media/{id}/ticket", s.handleMediaTicket)
 	mux.HandleFunc("GET /api/media/{id}", s.handleMedia)
 	mux.HandleFunc("POST /api/bots/{id}/reset", s.handleReset)
@@ -281,7 +296,8 @@ func (s *HTTPServer) guard(next http.Handler) http.Handler {
 			!strings.HasPrefix(r.URL.Path, "/assets/") &&
 			r.URL.Path != "/api/login" &&
 			!s.authorized(r) &&
-			!(r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/media/") && s.validMediaTicket(strings.TrimPrefix(r.URL.Path, "/api/media/"), r.URL.Query().Get("ticket"))) {
+			!(r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/media/") && s.validMediaTicket(strings.TrimPrefix(r.URL.Path, "/api/media/"), r.URL.Query().Get("ticket"))) &&
+			!(r.Method == http.MethodGet && s.validWorkspaceFileRawRequest(r)) {
 			writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "unauthorized"})
 			return
 		}
@@ -649,6 +665,197 @@ func (s *HTTPServer) handleMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, res)
+}
+
+func (s *HTTPServer) validWorkspaceFileRawRequest(r *http.Request) bool {
+	if r.Method != http.MethodGet {
+		return false
+	}
+	const prefix = "/api/bots/"
+	const suffix = "/files/raw"
+	if !strings.HasPrefix(r.URL.Path, prefix) || !strings.HasSuffix(r.URL.Path, suffix) {
+		return false
+	}
+	botID := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, prefix), suffix)
+	if botID == "" || strings.Contains(botID, "/") {
+		return false
+	}
+	ticket := r.URL.Query().Get("ticket")
+	relPath := r.URL.Query().Get("path")
+	if ticket == "" || relPath == "" {
+		return false
+	}
+	now := time.Now()
+	s.fileTicketsMu.Lock()
+	defer s.fileTicketsMu.Unlock()
+	if s.fileTickets == nil {
+		return false
+	}
+	for k, v := range s.fileTickets {
+		if now.After(v.expiresAt) {
+			delete(s.fileTickets, k)
+		}
+	}
+	entry, ok := s.fileTickets[ticket]
+	if !ok || now.After(entry.expiresAt) {
+		return false
+	}
+	return entry.botID == botID && entry.relPath == relPath
+}
+
+func writeWorkspaceFileErr(w http.ResponseWriter, err error) {
+	status := http.StatusInternalServerError
+	switch {
+	case errors.Is(err, hub.ErrBotNotFound), errors.Is(err, hub.ErrWorkspaceNotFound):
+		status = http.StatusNotFound
+	case errors.Is(err, hub.ErrWorkspacePathBlocked):
+		status = http.StatusForbidden
+	case errors.Is(err, hub.ErrWorkspaceIsDir), errors.Is(err, hub.ErrInvalidStageKind):
+		status = http.StatusBadRequest
+	}
+	writeJSON(w, status, map[string]any{"error": err.Error()})
+}
+
+func (s *HTTPServer) handleBotFilesList(w http.ResponseWriter, r *http.Request) {
+	botID := r.PathValue("id")
+	relPath := r.URL.Query().Get("path")
+	showHidden := r.URL.Query().Get("showHidden") == "1" || strings.EqualFold(r.URL.Query().Get("showHidden"), "true")
+	res, err := s.hub.ListWorkspaceFiles(botID, relPath, showHidden)
+	if err != nil {
+		writeWorkspaceFileErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+func (s *HTTPServer) handleBotFileContent(w http.ResponseWriter, r *http.Request) {
+	botID := r.PathValue("id")
+	relPath := r.URL.Query().Get("path")
+	maxBytes := 0
+	if rawMax := r.URL.Query().Get("maxBytes"); rawMax != "" {
+		if n, err := strconv.Atoi(rawMax); err == nil && n > 0 {
+			maxBytes = n
+		}
+	}
+	res, err := s.hub.ReadWorkspaceFile(botID, relPath, maxBytes)
+	if err != nil {
+		writeWorkspaceFileErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+func (s *HTTPServer) handleBotFileTicket(w http.ResponseWriter, r *http.Request) {
+	botID := r.PathValue("id")
+	var req struct {
+		Path string `json:"path"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json body"})
+		return
+	}
+	absPath, cleanRel, _, err := s.hub.ResolveWorkspacePath(botID, req.Path)
+	if err != nil {
+		writeWorkspaceFileErr(w, err)
+		return
+	}
+	if cleanRel == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "path is a directory"})
+		return
+	}
+	info, err := os.Stat(absPath)
+	if err != nil {
+		writeWorkspaceFileErr(w, hub.ErrWorkspaceNotFound)
+		return
+	}
+	if info.IsDir() {
+		writeWorkspaceFileErr(w, hub.ErrWorkspaceIsDir)
+		return
+	}
+
+	rb := make([]byte, 16)
+	if _, err := rand.Read(rb); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "failed to issue ticket"})
+		return
+	}
+	ticket := hex.EncodeToString(rb)
+	now := time.Now()
+
+	s.fileTicketsMu.Lock()
+	if s.fileTickets == nil {
+		s.fileTickets = make(map[string]fileTicket)
+	}
+	for k, v := range s.fileTickets {
+		if now.After(v.expiresAt) {
+			delete(s.fileTickets, k)
+		}
+	}
+	s.fileTickets[ticket] = fileTicket{
+		botID:     botID,
+		relPath:   cleanRel,
+		expiresAt: now.Add(60 * time.Second),
+	}
+	s.fileTicketsMu.Unlock()
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ticket":    ticket,
+		"path":      cleanRel,
+		"expiresIn": 60,
+	})
+}
+
+func (s *HTTPServer) handleBotFileRaw(w http.ResponseWriter, r *http.Request) {
+	botID := r.PathValue("id")
+	relPath := r.URL.Query().Get("path")
+	absPath, cleanRel, _, err := s.hub.ResolveWorkspacePath(botID, relPath)
+	if err != nil {
+		writeWorkspaceFileErr(w, err)
+		return
+	}
+	if cleanRel == "" {
+		writeWorkspaceFileErr(w, hub.ErrWorkspaceIsDir)
+		return
+	}
+	info, err := os.Stat(absPath)
+	if err != nil {
+		writeWorkspaceFileErr(w, hub.ErrWorkspaceNotFound)
+		return
+	}
+	if info.IsDir() {
+		writeWorkspaceFileErr(w, hub.ErrWorkspaceIsDir)
+		return
+	}
+
+	meta, err := s.hub.ReadWorkspaceFile(botID, cleanRel, 512)
+	mimeType := "application/octet-stream"
+	if err == nil && meta.MimeType != "" {
+		mimeType = meta.MimeType
+	}
+	w.Header().Set("Content-Type", mimeType)
+	w.Header().Set("Cache-Control", "private, no-cache")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	if r.URL.Query().Get("download") == "1" || !isSafeInlineImageMIME(mimeType) {
+		dlName := path.Base(cleanRel)
+		asciiName := sanitizeASCIIName(dlName)
+		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"; filename*=UTF-8''%s`, asciiName, url.PathEscape(dlName)))
+		w.Header().Set("Content-Security-Policy", "sandbox")
+	}
+	http.ServeFile(w, r, absPath)
+}
+
+func (s *HTTPServer) handleBotStageOpen(w http.ResponseWriter, r *http.Request) {
+	botID := r.PathValue("id")
+	var req hub.StageOpenPayload
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 32*1024)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json body"})
+		return
+	}
+	out, err := s.hub.OpenBotStage(botID, req)
+	if err != nil {
+		writeWorkspaceFileErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *HTTPServer) handleBotCommands(w http.ResponseWriter, r *http.Request) {

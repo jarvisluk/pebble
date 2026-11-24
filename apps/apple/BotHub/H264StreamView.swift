@@ -65,6 +65,7 @@ final class H264StreamController {
     @ObservationIgnored private var ppsData: Data?
     @ObservationIgnored private var needKeyframe = true
     @ObservationIgnored private var ptsCounter: Int64 = 0
+    @ObservationIgnored private var generation: Int = 0
 
     func attach(layer: AVSampleBufferDisplayLayer) {
         displayLayer = layer
@@ -72,6 +73,8 @@ final class H264StreamController {
 
     func start(request: URLRequest) {
         stop()
+        generation += 1
+        let gen = generation
         error = ""
         screenRecordingDenied = false
         needKeyframe = true
@@ -82,18 +85,19 @@ final class H264StreamController {
         fpsTimer = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
-                guard let self, !Task.isCancelled else { break }
+                guard let self, !Task.isCancelled, self.generation == gen else { break }
                 self.fps = self.frameCounter
                 self.frameCounter = 0
             }
         }
 
         receiveLoop = Task { [weak self] in
-            await self?.runReceive(ws: ws)
+            await self?.runReceive(ws: ws, gen: gen)
         }
     }
 
     func stop() {
+        generation += 1
         receiveLoop?.cancel()
         receiveLoop = nil
         fpsTimer?.cancel()
@@ -133,11 +137,11 @@ final class H264StreamController {
         }
     }
 
-    private func runReceive(ws: URLSessionWebSocketTask) async {
-        while !Task.isCancelled {
+    private func runReceive(ws: URLSessionWebSocketTask, gen: Int) async {
+        while !Task.isCancelled && gen == generation {
             do {
                 let msg = try await ws.receive()
-                if Task.isCancelled { break }
+                if Task.isCancelled || gen != generation { break }
                 switch msg {
                 case let .string(text):
                     handleText(text)
@@ -147,7 +151,7 @@ final class H264StreamController {
                     break
                 }
             } catch {
-                if !Task.isCancelled && task === ws {
+                if !Task.isCancelled && gen == generation && task === ws {
                     connected = false
                     if self.error.isEmpty {
                         self.error = error.localizedDescription

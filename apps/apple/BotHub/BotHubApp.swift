@@ -59,6 +59,9 @@ enum SettingsTab: String, CaseIterable, Identifiable, Hashable {
 struct DesktopPresentation: Identifiable, Equatable {
     let id = UUID()
     var target: String
+    var initialTab: StageKind = .desktop
+    var botId: String? = nil
+    var initialPath: String? = nil
 }
 
 @MainActor
@@ -113,7 +116,22 @@ final class Router {
     func openDesktop(_ target: String = "local") {
         let resolved = target.trimmingCharacters(in: .whitespacesAndNewlines)
         sheet = nil
-        desktop = DesktopPresentation(target: resolved.isEmpty ? "local" : resolved)
+        desktop = DesktopPresentation(target: resolved.isEmpty ? "local" : resolved, initialTab: .desktop, botId: selected)
+    }
+
+    func openFiles(botId: String, path: String? = nil) {
+        sheet = nil
+        desktop = DesktopPresentation(target: "local", initialTab: .files, botId: botId, initialPath: path)
+    }
+
+    func handleStageOpen(_ ev: StageOpenEvent) {
+        let targetBot = ev.botId ?? selected
+        if let bid = targetBot, !bid.isEmpty, bid != selected {
+            openBot(bid)
+        }
+        let kind = StageKind(rawValue: ev.kind) ?? .files
+        sheet = nil
+        desktop = DesktopPresentation(target: "local", initialTab: kind, botId: targetBot, initialPath: ev.path)
     }
 }
 
@@ -217,13 +235,22 @@ struct RootView: View {
             if id == nil { router.detailOpen = false }
         }
         .fullScreenCover(item: $r.desktop) { pres in
-            DesktopView(initialTarget: pres.target, initialBotId: router.selected)
-                .environment(\.palette, palette)
-                .environment(router)
-                .environment(hub)
-                .tint(palette.accent)
-                .buttonBorderShape(.capsule)
-                .preferredColorScheme(scheme0)
+            DesktopView(
+                initialTarget: pres.target,
+                initialBotId: pres.botId ?? router.selected,
+                initialTab: pres.initialTab,
+                initialPath: pres.initialPath
+            )
+            .environment(\.palette, palette)
+            .environment(router)
+            .environment(hub)
+            .tint(palette.accent)
+            .buttonBorderShape(.capsule)
+            .preferredColorScheme(scheme0)
+        }
+        .onChange(of: hub.pendingStageOpen) { _, ev in
+            guard let ev else { return }
+            router.handleStageOpen(ev)
         }
         .onChange(of: showGate) { _, gate in
             if gate {

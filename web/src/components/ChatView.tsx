@@ -130,8 +130,10 @@ interface ChatViewProps {
   inDesktopSidebar?: boolean;
   lang: ResolvedLang;
   inputRef: React.RefObject<HTMLTextAreaElement | null>;
+  pendingInsert?: { seq: number; text: string } | null;
   onOpenMenu: () => void;
   onToggleDesktop: () => void;
+  onOpenFiles?: () => void;
   onOpenDesktopTarget: (target: string) => void;
   onSwitchBackLocal?: () => void;
   onResolveTakeover: (to: TakeoverRequest) => void;
@@ -162,8 +164,10 @@ export const ChatView: React.FC<ChatViewProps> = ({
   inDesktopSidebar = false,
   lang,
   inputRef,
+  pendingInsert,
   onOpenMenu,
   onToggleDesktop,
+  onOpenFiles,
   onOpenDesktopTarget,
   onSwitchBackLocal,
   onResolveTakeover,
@@ -501,6 +505,15 @@ export const ChatView: React.FC<ChatViewProps> = ({
     await onSendMessage(text, sentMediaIds);
   };
 
+  useEffect(() => {
+    if (!pendingInsert || !pendingInsert.text) return;
+    setDraft((prev) => {
+      const needsSpace = prev.length > 0 && !/\s$/.test(prev);
+      return prev + (needsSpace ? ' ' : '') + pendingInsert.text;
+    });
+    window.requestAnimationFrame(() => inputRef.current?.focus());
+  }, [pendingInsert?.seq]);
+
   const firstTakeover = takeovers[0] || null;
   let lastTs = 0;
 
@@ -570,6 +583,28 @@ export const ChatView: React.FC<ChatViewProps> = ({
             </button>
           ) : (
             <>
+              {onOpenFiles && (
+                <button
+                  id="filesBtn"
+                  type="button"
+                  className="ghost"
+                  aria-label={t('workspaceFiles')}
+                  title={t('workspaceFiles')}
+                  disabled={!activeBot}
+                  onClick={onOpenFiles}
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.9"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+                  </svg>
+                </button>
+              )}
               <button
                 id="deskBtn"
                 type="button"

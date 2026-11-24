@@ -24,11 +24,12 @@ import type { ChatMessage } from '../types';
 
 interface DesktopChatSidebarProps {
   botId: string;
+  pendingInsert?: { seq: number; text: string } | null;
   onSelectBot: (id: string) => void;
   onClose: () => void;
 }
 
-export function DesktopChatSidebar({ botId, onSelectBot, onClose }: DesktopChatSidebarProps) {
+export function DesktopChatSidebar({ botId, pendingInsert, onSelectBot, onClose }: DesktopChatSidebarProps) {
   const theme = useTheme();
   const { t, lang } = useI18n();
   const insets = useSafeAreaInsets();
@@ -61,6 +62,14 @@ export function DesktopChatSidebar({ botId, onSelectBot, onClose }: DesktopChatS
     void loadMessages(botId).catch(() => {});
     return () => setActiveChatBot(null);
   }, [botId, loadMessages, setActiveChatBot]);
+
+  useEffect(() => {
+    if (!pendingInsert?.text) return;
+    setDraft((prev) => {
+      const needsSpace = prev.length > 0 && !/\s$/.test(prev);
+      return prev + (needsSpace ? ' ' : '') + pendingInsert.text;
+    });
+  }, [pendingInsert?.seq]);
 
   const stopMode = Boolean(bot?.busy) && !draft.trim();
 
@@ -114,7 +123,7 @@ export function DesktopChatSidebar({ botId, onSelectBot, onClose }: DesktopChatS
         styles.root,
         {
           backgroundColor: theme.card,
-          borderLeftColor: theme.s2,
+          borderRightColor: theme.s2,
           paddingTop: insets.top,
           paddingBottom: insets.bottom,
         },

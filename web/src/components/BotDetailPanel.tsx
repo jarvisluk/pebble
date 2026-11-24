@@ -33,6 +33,7 @@ interface BotDetailPanelProps {
   onLoadModels: (harness: string, force?: boolean) => Promise<unknown>;
   onRefreshDetail: (id: string) => Promise<void>;
   onSettingsUpdated?: (s: SettingsData) => void;
+  onOpenFiles?: (botId: string) => void;
 }
 
 export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
@@ -52,6 +53,7 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
   onLoadModels,
   onRefreshDetail,
   onSettingsUpdated,
+  onOpenFiles,
 }) => {
   const t = (k: string, vars?: Record<string, string | number>) => translate(lang, k, vars);
 
@@ -972,7 +974,20 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
                   </div>
                   <div>
                     <dt>Workspace</dt>
-                    <dd id="pWs">{detail.workspace}</dd>
+                    <dd id="pWs">
+                      {onOpenFiles ? (
+                        <button
+                          type="button"
+                          className="ws-link-btn"
+                          onClick={() => onOpenFiles(detail.id)}
+                          title={t('workspaceFiles')}
+                        >
+                          <span>{detail.workspace}</span>
+                        </button>
+                      ) : (
+                        detail.workspace
+                      )}
+                    </dd>
                   </div>
                 </dl>
                 <label className="perm self-start mt-10">

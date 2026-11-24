@@ -229,6 +229,9 @@ struct ChatView: View {
                         }
                     } else {
                         if !router.detailOpen {
+                            Button { router.openFiles(botId: botId) } label: {
+                                Label(hub.t("workspaceFiles"), systemImage: "folder")
+                            }
                             Button { router.openDesktop(hub.takeovers.first?.target ?? "local") } label: {
                                 Label(hub.t("remoteDesktop"), systemImage: hub.takeovers.isEmpty ? "display" : "exclamationmark.triangle")
                             }
@@ -240,6 +243,12 @@ struct ChatView: View {
             .task(id: botId) {
                 hub.setActiveChat(botId)
                 try? await hub.loadMessages(botId)
+            }
+            .onChange(of: hub.pendingChatInsert?.seq) { _, seq in
+                guard seq != nil, let insert = hub.pendingChatInsert, !insert.text.isEmpty else { return }
+                let needsSpace = !input.isEmpty && !(input.last?.isWhitespace ?? false)
+                input += (needsSpace ? " " : "") + insert.text
+                focused = true
             }
             .onDisappear { hub.setActiveChat(nil) }
             .onChange(of: hub.bots.map(\.id)) { _, ids in

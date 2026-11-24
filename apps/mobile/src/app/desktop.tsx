@@ -22,13 +22,24 @@ import {
 } from '../../modules/bothub-tunnel';
 import { DesktopChatSidebar } from '../components/DesktopChatSidebar';
 import { XIcon } from '../components/Icons';
+import { WorkspaceFilesPane } from '../components/WorkspaceFilesPane';
 import { useI18n } from '../i18n';
 import { useHub } from '../store';
 import { MONO_FONT, useTheme } from '../theme';
-import type { DesktopTarget, ScreenState } from '../types';
+import type { DesktopTarget, ScreenState, StageKind } from '../types';
 
 export default function DesktopScreen() {
-  const { target: initialTarget } = useLocalSearchParams<{ target?: string }>();
+  const {
+    target: initialTarget,
+    tab: initialTab,
+    botId: initialBotId,
+    path: initialPath,
+  } = useLocalSearchParams<{
+    target?: string;
+    tab?: string;
+    botId?: string;
+    path?: string;
+  }>();
   const theme = useTheme();
   const { t } = useI18n();
   const insets = useSafeAreaInsets();
@@ -42,6 +53,7 @@ export default function DesktopScreen() {
     desktopTargets,
     activeDesktopTarget,
     takeovers,
+    pendingStageOpen,
     refreshDesktopTargets,
     setActiveDesktopTarget,
     fetchDesktopState,
@@ -49,6 +61,9 @@ export default function DesktopScreen() {
     resolveTakeover,
   } = useHub();
 
+  const [activeTab, setActiveTab] = useState<StageKind>(
+    initialTab === 'files' ? 'files' : 'desktop'
+  );
   const [selectedTarget, setSelectedTarget] = useState(
     typeof initialTarget === 'string' && initialTarget ? initialTarget : 'local'
   );
@@ -62,7 +77,22 @@ export default function DesktopScreen() {
   const [textDraft, setTextDraft] = useState('');
   const [showTextBar, setShowTextBar] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
-  const [chatBotId, setChatBotId] = useState('');
+  const [chatBotId, setChatBotId] = useState(typeof initialBotId === 'string' ? initialBotId : '');
+  const [filePath, setFilePath] = useState(typeof initialPath === 'string' ? initialPath : '');
+  const [pendingInsert, setPendingInsert] = useState<{ seq: number; text: string } | null>(null);
+
+  useEffect(() => {
+    if (!pendingStageOpen) return;
+    if (pendingStageOpen.botId) setChatBotId(pendingStageOpen.botId);
+    if (pendingStageOpen.kind === 'files') {
+      setActiveTab('files');
+      setFilePath(pendingStageOpen.path || '');
+    } else if (pendingStageOpen.kind === 'desktop') {
+      setActiveTab('desktop');
+    } else {
+      setActiveTab(pendingStageOpen.kind);
+    }
+  }, [pendingStageOpen?.seq]);
 
   const h264Ref = useRef<BothubH264ViewRef | null>(null);
 
@@ -81,6 +111,7 @@ export default function DesktopScreen() {
   }, [activeDesktopTarget.target]);
 
   useEffect(() => {
+    if (activeTab !== 'desktop') return;
     let stop = false;
     const pollState = async () => {
       try {
@@ -99,7 +130,7 @@ export default function DesktopScreen() {
       stop = true;
       clearInterval(timer);
     };
-  }, [fetchDesktopState, selectedTarget, t]);
+  }, [activeTab, fetchDesktopState, selectedTarget, t]);
 
   const wsURL = useMemo(() => {
     if (!baseURL) return '';
@@ -177,13 +208,18 @@ export default function DesktopScreen() {
     else router.replace('/');
   };
 
+  const isDarkStage = activeTab === 'desktop';
+  const pillBg = isDarkStage ? '#1f1d1b' : theme.s1;
+  const pillText = isDarkStage ? '#f3f1ee' : theme.text;
+
   return (
-    <View style={[styles.root, { backgroundColor: '#111110' }]}>
+    <View style={[styles.root, { backgroundColor: isDarkStage ? '#111110' : theme.page }]}>
       <View style={styles.mainArea}>
         {isWide && chatOpen && resolvedBotId ? (
           <View style={styles.sideInline}>
             <DesktopChatSidebar
               botId={resolvedBotId}
+              pendingInsert={pendingInsert}
               onSelectBot={setChatBotId}
               onClose={() => setChatOpen(false)}
             />
@@ -196,36 +232,67 @@ export default function DesktopScreen() {
         >
           <View style={styles.topStrip}>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.targetRow}>
-              <Pressable onPress={closeSheet} style={[styles.pillBtn, { backgroundColor: '#1f1d1b' }]}>
-                <XIcon size={16} color="#f3f1ee" />
+              <Pressable onPress={closeSheet} style={[styles.pillBtn, { backgroundColor: pillBg }]}>
+                <XIcon size={16} color={pillText} />
               </Pressable>
 
-              {targets.map((item) => {
-                const active = selectedTarget === item.id;
+              <Pressable
+                onPress={() => setChatOpen((v) => !v)}
+                style={[
+                  styles.targetPill,
+                  { backgroundColor: chatOpen ? theme.accent : pillBg },
+                ]}
+              >
+                <Text style={[styles.targetTxt, { color: chatOpen ? theme.accentText : pillText }]}>
+                  {t('deskChatSidebar')}
+                </Text>
+              </Pressable>
+
+              {(['files', 'desktop'] as const).map((tabKey) => {
+                const active = activeTab === tabKey;
                 return (
                   <Pressable
-                    key={item.id}
-                    onPress={() => {
-                      setSelectedTarget(item.id);
-                      setMeta(null);
-                      setConnected(false);
-                      void setActiveDesktopTarget(item.id).catch((err: any) => {
-                        setError(err?.message || t('opFailed'));
-                      });
-                    }}
+                    key={tabKey}
+                    onPress={() => setActiveTab(tabKey)}
                     style={[
                       styles.targetPill,
-                      { backgroundColor: active ? theme.accent : '#1f1d1b' },
+                      { backgroundColor: active ? theme.accent : pillBg },
                     ]}
                   >
-                    <Text style={[styles.targetTxt, { color: active ? theme.accentText : '#f3f1ee' }]}>
-                      {item.id === 'local' ? t('localDesktopName') : item.name}
+                    <Text style={[styles.targetTxt, { color: active ? theme.accentText : pillText }]}>
+                      {t(tabKey === 'files' ? 'stageFilesTab' : 'stageDesktopTab')}
                     </Text>
                   </Pressable>
                 );
               })}
 
-              {connected && (
+              {activeTab === 'desktop' &&
+                targets.map((item) => {
+                  const active = selectedTarget === item.id;
+                  return (
+                    <Pressable
+                      key={item.id}
+                      onPress={() => {
+                        setSelectedTarget(item.id);
+                        setMeta(null);
+                        setConnected(false);
+                        void setActiveDesktopTarget(item.id).catch((err: any) => {
+                          setError(err?.message || t('opFailed'));
+                        });
+                      }}
+                      style={[
+                        styles.targetPill,
+                        { backgroundColor: active ? theme.accent : '#1f1d1b' },
+                      ]}
+                    >
+                      <Text style={[styles.targetTxt, { color: active ? theme.accentText : '#f3f1ee' }]}>
+                        {item.id === 'local' ? t('localDesktopName') : item.name}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+
+              {activeTab === 'desktop' && connected && (
                 <View style={[styles.targetPill, { backgroundColor: '#1f1d1b' }]}>
                   <Text style={[styles.targetTxt, { color: '#a6a09a', fontFamily: MONO_FONT }]}>
                     {`H.264 · ${fps} fps`}
@@ -233,28 +300,40 @@ export default function DesktopScreen() {
                 </View>
               )}
 
-              <Pressable
-                onPress={() => setStreaming((v) => !v)}
-                style={[styles.targetPill, { backgroundColor: '#1f1d1b' }]}
-              >
-                <Text style={[styles.targetTxt, { color: '#f3f1ee' }]}>
-                  {streaming ? t('pause') : t('resume')}
-                </Text>
-              </Pressable>
-
-              <Pressable
-                onPress={() => setChatOpen((v) => !v)}
-                style={[
-                  styles.targetPill,
-                  { backgroundColor: chatOpen ? theme.accent : '#1f1d1b' },
-                ]}
-              >
-                <Text style={[styles.targetTxt, { color: chatOpen ? theme.accentText : '#f3f1ee' }]}>
-                  {t('deskChatSidebar')}
-                </Text>
-              </Pressable>
+              {activeTab === 'desktop' && (
+                <Pressable
+                  onPress={() => setStreaming((v) => !v)}
+                  style={[styles.targetPill, { backgroundColor: '#1f1d1b' }]}
+                >
+                  <Text style={[styles.targetTxt, { color: '#f3f1ee' }]}>
+                    {streaming ? t('pause') : t('resume')}
+                  </Text>
+                </Pressable>
+              )}
             </ScrollView>
           </View>
+
+          <View style={{ flex: 1, display: activeTab === 'files' ? 'flex' : 'none' }}>
+            <WorkspaceFilesPane
+              baseURL={baseURL}
+              authToken={authToken}
+              botId={resolvedBotId}
+              initialPath={filePath}
+              onQuotePath={(relPath) => {
+                setChatOpen(true);
+                setPendingInsert({ seq: Date.now(), text: `@${relPath} ` });
+              }}
+            />
+          </View>
+          {activeTab !== 'files' && activeTab !== 'desktop' ? (
+            <View style={styles.centerBox}>
+              <Text style={[styles.waitTxt, { color: theme.mute }]}>
+                {t('stagePlaceholderDesc', { kind: activeTab })}
+              </Text>
+            </View>
+          ) : null}
+          {activeTab === 'desktop' ? (
+            <>
 
           {activeDesktopTarget.temporary ? (
             <View style={[styles.alertCard, { backgroundColor: '#1f1d1b', borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)' }]}>
@@ -302,7 +381,7 @@ export default function DesktopScreen() {
                   url={wsURL}
                   token={authToken}
                   preset="auto"
-                  active={streaming}
+                  active={activeTab === 'desktop' && streaming}
                   onMeta={(ev) => {
                     setMeta(ev.nativeEvent);
                     setError('');
@@ -384,19 +463,22 @@ export default function DesktopScreen() {
               ))}
             </ScrollView>
           </View>
+            </>
+          ) : null}
         </KeyboardAvoidingView>
       </View>
 
       {!isWide && chatOpen && resolvedBotId ? (
         <View style={[StyleSheet.absoluteFill, styles.drawerWrap]}>
-          <Pressable style={styles.drawerShade} onPress={() => setChatOpen(false)} />
           <View style={[styles.drawerPanel, { width: Math.min(380, winWidth * 0.9) }]}>
             <DesktopChatSidebar
               botId={resolvedBotId}
+              pendingInsert={pendingInsert}
               onSelectBot={setChatBotId}
               onClose={() => setChatOpen(false)}
             />
           </View>
+          <Pressable style={styles.drawerShade} onPress={() => setChatOpen(false)} />
         </View>
       ) : null}
     </View>

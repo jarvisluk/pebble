@@ -20,6 +20,7 @@ interface DesktopStageProps {
   liveScreen: ScreenState | null;
   takeovers: TakeoverRequest[];
   chatOpen: boolean;
+  embeddedInStage?: boolean;
   activeBotName?: string;
   lang: ResolvedLang;
   onChangeTarget: (target: string) => void;
@@ -39,6 +40,7 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
   liveScreen,
   takeovers,
   chatOpen,
+  embeddedInStage = false,
   activeBotName,
   lang,
   onChangeTarget,
@@ -93,6 +95,7 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
   const lastMoveRef = useRef(0);
   const wheelAccRef = useRef({ dx: 0, dy: 0 });
   const wheelTimerRef = useRef<number | null>(null);
+  const streamGenRef = useRef(0);
 
   modeRef.current = mode;
   openRef.current = open;
@@ -107,6 +110,7 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
   }, [liveScreen, open, screenUpdateSeq, target]);
 
   const stopStreams = useCallback(() => {
+    streamGenRef.current += 1;
     if (statsTimerRef.current) {
       window.clearInterval(statsTimerRef.current);
       statsTimerRef.current = null;
@@ -188,6 +192,7 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
   const startWsH264Stream = useCallback(async () => {
     if (!openRef.current) return;
     stopStreams();
+    const gen = ++streamGenRef.current;
     if (typeof VideoDecoder === 'undefined') {
       setMode('error');
       setCenterText(t('deskNoWebCodecs'));
@@ -204,7 +209,7 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
       });
       preferHevc = Boolean(sup?.supported);
     } catch {}
-    if (!openRef.current) return;
+    if (!openRef.current || gen !== streamGenRef.current) return;
 
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsURL = `${proto}//${window.location.host}/api/desktop/stream/ws?target=${encodeURIComponent(
@@ -442,6 +447,7 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
   const startStream = useCallback(async () => {
     stopStreams();
     if (!openRef.current) return;
+    const gen = ++streamGenRef.current;
     setMode('connecting');
     setCenterText(t('deskConnecting'));
     setShowRetry(false);
@@ -453,7 +459,7 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
         screen?: ScreenState;
         takeovers?: TakeoverRequest[];
       }>(`/api/desktop/state?target=${encodeURIComponent(targetRef.current)}`);
-      if (!openRef.current) return;
+      if (!openRef.current || gen !== streamGenRef.current) return;
       hostStatusRef.current = st.status || null;
       setHostStatus(st.status || null);
       setInstallCmdHint(st.status?.installCommand || '');
@@ -480,6 +486,7 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
       }
       void refreshWindows();
     } catch (err) {
+      if (!openRef.current || gen !== streamGenRef.current) return;
       setMode('error');
       setCenterText(err instanceof Error ? err.message : t('deskUnreachable'));
       setShowRetry(true);
@@ -487,8 +494,9 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
       return;
     }
 
+    if (!openRef.current || gen !== streamGenRef.current) return;
     if (!hostStatusRef.current?.webrtcAvailable || typeof RTCPeerConnection === 'undefined') {
-      startWsH264Stream();
+      void startWsH264Stream();
       return;
     }
 
@@ -527,6 +535,7 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
       };
 
       await pc.setLocalDescription(await pc.createOffer());
+      if (!openRef.current || gen !== streamGenRef.current || pcRef.current !== pc) return;
       await new Promise<void>((resolve) => {
         if (pc.iceGatheringState === 'complete') {
           resolve();
@@ -544,9 +553,10 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
         const gt = window.setTimeout(done, 450);
       });
       const offerSdp = pc.localDescription?.sdp || '';
+      if (!openRef.current || gen !== streamGenRef.current || pcRef.current !== pc) return;
       if (!/^a=candidate:/m.test(offerSdp)) {
         window.clearTimeout(timer);
-        startWsH264Stream();
+        void startWsH264Stream();
         return;
       }
 
@@ -561,7 +571,7 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
           bitrate: 35_000_000,
         },
       });
-      if (pcRef.current !== pc || !openRef.current) {
+      if (pcRef.current !== pc || !openRef.current || gen !== streamGenRef.current) {
         if (ans.session) {
           api('/api/desktop/stream/close', {
             method: 'POST',
@@ -620,7 +630,8 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
         }
       }, 1000);
     } catch {
-      startWsH264Stream();
+      if (!openRef.current || gen !== streamGenRef.current) return;
+      void startWsH264Stream();
     }
   }, [onTakeoversChange, refreshWindows, startWsH264Stream, stopStreams, t]);
 
@@ -630,8 +641,14 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
       setMode('idle');
       return;
     }
-    void refreshTargets().then(() => startStream());
+    let cancelled = false;
+    void refreshTargets().then(() => {
+      if (!cancelled && openRef.current) {
+        void startStream();
+      }
+    });
     return () => {
+      cancelled = true;
       stopStreams();
     };
   }, [open, target]);
@@ -996,6 +1013,7 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
             </dl>
           </div>
 
+          {!embeddedInStage && (
           <div className="d-pill tr">
             <div className="d-tools">
               <button
@@ -1023,6 +1041,7 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
               </button>
             </div>
           </div>
+          )}
         </div>
 
           {activeDeskTarget?.temporary && (

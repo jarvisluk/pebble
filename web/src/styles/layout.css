@@ -73,6 +73,10 @@ body.resizing-side, body.resizing-side * { cursor: col-resize !important; user-s
   display: flex;
   background: var(--stage);
 }
+.desk-fs-shell[data-surface="adaptive"] {
+  background: var(--page);
+  color: var(--text);
+}
 .desk-fs-shell[hidden] { display: none; }
 .desk-fs-main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; position: relative; }
 .desk-fs-shell .desk-stage { border-radius: 0; }
@@ -85,10 +89,10 @@ body.resizing-side, body.resizing-side * { cursor: col-resize !important; user-s
   display: flex;
   flex-direction: column;
   background: var(--card);
-  border-left: 1px solid var(--s2);
+  border-right: 1px solid var(--s2);
   padding-top: env(safe-area-inset-top);
   padding-bottom: env(safe-area-inset-bottom);
-  padding-right: env(safe-area-inset-right);
+  padding-left: env(safe-area-inset-left);
 }
 .desk-chat-side[hidden] { display: none; }
 
@@ -123,11 +127,11 @@ body.resizing-side, body.resizing-side * { cursor: col-resize !important; user-s
   .desk-chat-side {
     position: fixed;
     top: 0;
-    right: 0;
+    left: 0;
     bottom: 0;
     width: min(380px, 92vw);
     z-index: 7;
-    box-shadow: -12px 0 32px rgba(0, 0, 0, .35);
+    box-shadow: 12px 0 32px rgba(0, 0, 0, .35);
   }
   .thread { padding: 12px 0; }
   .set-body { padding: 12px 4px 24px; }
@@ -143,7 +147,8 @@ body.resizing-side, body.resizing-side * { cursor: col-resize !important; user-s
 /* macOS desktop: traffic lights sit in the sidebar's top bar (12px from its top-left corner) */
 html.mac-app .side-hd h2 { visibility: hidden; }
 html.mac-app .app.side-collapsed:not(.in-settings) .chat-hd { padding-left: 84px; }
-html.mac-app .desk-fs-shell .d-top-stack { left: 84px; }
+html.mac-app .desk-fs-shell:not(.chat-open) .stage-topbar { padding-left: 84px; }
+html.mac-app .desk-fs-shell.chat-open .desk-chat-side .chat-hd { padding-left: 84px; }
 html.mac-app .dlg-wrap { padding-top: 52px; }
 @media (max-width: 820px) {
   html.mac-app .chat-hd, html.mac-app .set-hd { padding-left: 84px; }

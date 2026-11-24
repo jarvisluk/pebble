@@ -23,7 +23,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { BotAppearancePicker } from '../../components/BotAppearancePicker';
 import { BotAvatar } from '../../components/BotAvatar';
-import { ChevronLeftIcon, DocIcon, MonitorIcon, PaperclipIcon, SendIcon, StopIcon } from '../../components/Icons';
+import { ChevronLeftIcon, DocIcon, FolderIcon, MonitorIcon, PaperclipIcon, SendIcon, StopIcon } from '../../components/Icons';
 import { MarkdownText } from '../../components/MarkdownText';
 import { ModalHeader } from '../../components/ModalHeader';
 import { QuestionCard } from '../../components/QuestionCard';
@@ -73,6 +73,7 @@ export default function BotChatScreen() {
     tools,
     takeovers,
     activeDesktopTarget,
+    pendingStageOpen,
     usingStandby,
     questions,
     setActiveChatBot,
@@ -110,6 +111,18 @@ export default function BotChatScreen() {
   const [mentions, setMentions] = useState<MentionCandidate[]>([]);
   const [acDismissed, setAcDismissed] = useState(false);
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
+
+  useEffect(() => {
+    if (!pendingStageOpen) return;
+    const targetBot = pendingStageOpen.botId || botId;
+    if (pendingStageOpen.kind === 'files') {
+      const qs = new URLSearchParams({ tab: 'files', botId: targetBot });
+      if (pendingStageOpen.path) qs.set('path', pendingStageOpen.path);
+      router.push(`/desktop?${qs.toString()}`);
+    } else if (pendingStageOpen.kind === 'desktop') {
+      router.push(`/desktop?tab=desktop&botId=${encodeURIComponent(targetBot)}`);
+    }
+  }, [pendingStageOpen?.seq]);
 
   useEffect(() => {
     setPendingAttachments([]);
@@ -843,8 +856,16 @@ export default function BotChatScreen() {
         </View>
 
         <Pressable
+          accessibilityLabel={t('workspaceFiles')}
+          onPress={() => router.push(`/desktop?tab=files&botId=${encodeURIComponent(botId)}`)}
+          style={[styles.docBtn, { backgroundColor: theme.s1, marginRight: 6 }]}
+          hitSlop={8}
+        >
+          <FolderIcon size={18} color={theme.text2} />
+        </Pressable>
+        <Pressable
           accessibilityLabel={t('remoteDesktop')}
-          onPress={() => router.push(`/desktop?target=${encodeURIComponent(takeovers[0]?.target || 'local')}`)}
+          onPress={() => router.push(`/desktop?target=${encodeURIComponent(takeovers[0]?.target || 'local')}&botId=${encodeURIComponent(botId)}`)}
           style={[styles.docBtn, { backgroundColor: theme.s1, marginRight: 6 }]}
           hitSlop={8}
         >
@@ -1345,9 +1366,16 @@ export default function BotChatScreen() {
                       </View>
                       <View style={{ gap: 4 }}>
                         <Text style={[styles.sectionLabel, { color: theme.mute }]}>{t('workspaceDir')}</Text>
-                        <Text selectable style={[styles.monoBlock, { color: theme.text2, fontFamily: MONO_FONT }]}>
-                          {activeDetail?.workspace || '-'}
-                        </Text>
+                        <Pressable
+                          onPress={() => {
+                            setDetailOpen(false);
+                            router.push(`/desktop?tab=files&botId=${encodeURIComponent(botId)}`);
+                          }}
+                        >
+                          <Text style={[styles.monoBlock, { color: theme.text2, fontFamily: MONO_FONT, textDecorationLine: 'underline' }]}>
+                            {activeDetail?.workspace || '-'}
+                          </Text>
+                        </Pressable>
                       </View>
                       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 4 }}>
                         <Text style={[styles.instructionsTxt, { color: theme.text, flex: 1 }]}>{t('privateSessions')}</Text>
