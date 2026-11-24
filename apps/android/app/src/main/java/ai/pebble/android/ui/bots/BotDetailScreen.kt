@@ -86,6 +86,7 @@ import ai.pebble.android.data.RoutineRun
 import ai.pebble.android.data.errText
 import ai.pebble.android.ui.desktop.H264SurfaceView
 import ai.pebble.android.ui.theme.BotAppearancePicker
+import ai.pebble.android.ui.theme.PebbleFont
 import ai.pebble.android.ui.theme.BotAvatar
 import ai.pebble.android.ui.theme.CardDivider
 import ai.pebble.android.ui.theme.ConfirmAlertDialog
@@ -257,7 +258,7 @@ fun BotDetailScreen(
                     }
                 },
                 title = {
-                    Text(store.t("botDetails"), fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                    Text(store.t("botDetails"), fontSize = PebbleFont.title, fontWeight = FontWeight.Bold)
                 },
                 actions = {
                     if (saving) {
@@ -270,7 +271,7 @@ fun BotDetailScreen(
                             Text(
                                 text = store.t("save"),
                                 color = if (dirty && editName.trim().isNotEmpty()) pal.accent else p.mute,
-                                fontSize = 15.sp,
+                                fontSize = PebbleFont.body,
                                 fontWeight = FontWeight.SemiBold,
                             )
                         }
@@ -327,7 +328,7 @@ fun BotDetailScreen(
                         ) {
                             if (previewError.isNotEmpty()) {
                                 Icon(Icons.Rounded.DesktopWindows, contentDescription = null, tint = Color.White.copy(alpha = 0.6f))
-                                Text(previewError, color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp, textAlign = TextAlign.Center, maxLines = 2)
+                                Text(previewError, color = Color.White.copy(alpha = 0.7f), fontSize = PebbleFont.caption, textAlign = TextAlign.Center, maxLines = 2)
                             } else {
                                 CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp, color = Color.White)
                             }
@@ -371,12 +372,12 @@ fun BotDetailScreen(
                                 onValueChange = { editName = it },
                                 placeholder = { Text(store.t("botNamePh")) },
                                 singleLine = true,
-                                textStyle = TextStyle(fontSize = 16.sp, fontWeight = FontWeight.SemiBold),
+                                textStyle = TextStyle(fontSize = PebbleFont.cardTitle, fontWeight = FontWeight.SemiBold),
                                 shape = PebbleDimens.rowShape,
                                 colors = pebbleFieldColors(),
                                 modifier = Modifier.fillMaxWidth(),
                             )
-                            Text("@$botId", color = p.mute, fontSize = 13.sp, fontFamily = MonoFont)
+                            Text("@$botId", color = p.mute, fontSize = PebbleFont.secondary, fontFamily = MonoFont)
                         }
                     }
 
@@ -399,7 +400,7 @@ fun BotDetailScreen(
                             .padding(horizontal = 4.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text(store.t("appearance"), color = p.text, fontSize = 15.sp, modifier = Modifier.weight(1f))
+                        Text(store.t("appearance"), color = p.text, fontSize = PebbleFont.body, modifier = Modifier.weight(1f))
                         Icon(
                             if (appearOpen) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
                             contentDescription = null,
@@ -437,7 +438,7 @@ fun BotDetailScreen(
                     when {
                         memLoading && m == null -> CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = p.accent)
                         m?.installed != true -> {
-                            Text(store.t("hostNoMagpie"), color = p.text2, fontSize = 15.sp)
+                            Text(store.t("hostNoMagpie"), color = p.text2, fontSize = PebbleFont.body)
                             TextButton(
                                 onClick = {
                                     scope.launch {
@@ -449,16 +450,16 @@ fun BotDetailScreen(
                                 },
                                 contentPadding = PaddingValues(0.dp),
                             ) {
-                                Text(store.t("mpInstallOnHost"), color = pal.accent, fontSize = 15.sp)
+                                Text(store.t("mpInstallOnHost"), color = pal.accent, fontSize = PebbleFont.body)
                             }
                         }
                         m.available != true -> {
-                            Text(store.t("magpieNoResp"), color = p.danger, fontSize = 15.sp)
+                            Text(store.t("magpieNoResp"), color = p.danger, fontSize = PebbleFont.body)
                         }
                         else -> {
                             val items = m.items.orEmpty()
                             if (items.isEmpty()) {
-                                Text(store.t("noBotMemories"), color = p.mute, fontSize = 14.sp)
+                                Text(store.t("noBotMemories"), color = p.mute, fontSize = PebbleFont.secondary)
                             } else {
                                 items.forEachIndexed { idx, item ->
                                     if (idx > 0) CardDivider()
@@ -521,7 +522,7 @@ fun BotDetailScreen(
                                     enabled = !memSaving && memText.trim().isNotEmpty(),
                                     colors = ButtonDefaults.buttonColors(containerColor = pal.accent, contentColor = pal.onAccent),
                                 ) {
-                                    Text(store.t("saveMemory"), fontSize = 13.sp)
+                                    Text(store.t("saveMemory"), fontSize = PebbleFont.secondary)
                                 }
                             }
                         }
@@ -540,7 +541,7 @@ fun BotDetailScreen(
                             .padding(horizontal = 4.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text(store.t("techDetails"), color = p.text, fontSize = 15.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+                        Text(store.t("techDetails"), color = p.text, fontSize = PebbleFont.body, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
                         Icon(if (techOpen) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore, contentDescription = null, tint = p.mute)
                     }
                     AnimatedVisibility(visible = techOpen) {
@@ -554,7 +555,7 @@ fun BotDetailScreen(
                                 if (active?.privateSessions == true) store.t("privateTag") else ""
                             DetailRow(store.t("statArchived"), archivedText)
                             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                Text(store.t("workspaceDir"), color = p.text2, fontSize = 13.sp)
+                                Text(store.t("workspaceDir"), color = p.text2, fontSize = PebbleFont.secondary)
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -570,7 +571,7 @@ fun BotDetailScreen(
                                     Text(
                                         text = active?.workspace ?: "-",
                                         color = pal.accent,
-                                        fontSize = 13.sp,
+                                        fontSize = PebbleFont.secondary,
                                         fontFamily = MonoFont,
                                         maxLines = 1,
                                         overflow = TextOverflow.MiddleEllipsis,
@@ -588,10 +589,10 @@ fun BotDetailScreen(
                                 modifier = Modifier.fillMaxWidth(),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Text(store.t("privateSessions"), color = p.text, fontSize = 15.sp, modifier = Modifier.weight(1f))
+                                Text(store.t("privateSessions"), color = p.text, fontSize = PebbleFont.body, modifier = Modifier.weight(1f))
                                 Switch(checked = editPrivate, onCheckedChange = { editPrivate = it })
                             }
-                            Text("AGENTS.md", color = p.text2, fontSize = 13.sp)
+                            Text("AGENTS.md", color = p.text2, fontSize = PebbleFont.secondary)
                             if (loading && detail == null) {
                                 CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = p.accent)
                             } else {
@@ -599,7 +600,7 @@ fun BotDetailScreen(
                                     value = editInst,
                                     onValueChange = { editInst = it },
                                     placeholder = { Text(store.t("agentsPh"), fontFamily = MonoFont) },
-                                    textStyle = TextStyle(fontFamily = MonoFont, fontSize = 14.sp),
+                                    textStyle = TextStyle(fontFamily = MonoFont, fontSize = PebbleFont.secondary),
                                     minLines = 5,
                                     maxLines = 16,
                                     shape = PebbleDimens.rowShape,
@@ -627,7 +628,7 @@ fun BotDetailScreen(
                     Text(
                         text = store.t("resetSessionBtn"),
                         color = p.text,
-                        fontSize = 16.sp,
+                        fontSize = PebbleFont.cardTitle,
                         fontWeight = FontWeight.Medium,
                         modifier = Modifier
                             .fillMaxWidth()
@@ -654,7 +655,7 @@ fun BotDetailScreen(
                         Text(
                             text = store.t("deleteBotBtn"),
                             color = p.danger,
-                            fontSize = 16.sp,
+                            fontSize = PebbleFont.cardTitle,
                             fontWeight = FontWeight.Medium,
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -692,8 +693,8 @@ private fun DetailRow(label: String, value: String) {
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(label, color = p.text2, fontSize = 15.sp, modifier = Modifier.weight(1f))
-        Text(value, color = p.text, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+        Text(label, color = p.text2, fontSize = PebbleFont.body, modifier = Modifier.weight(1f))
+        Text(value, color = p.text, fontSize = PebbleFont.body, fontWeight = FontWeight.Medium)
     }
 }
 
@@ -715,29 +716,29 @@ fun MemoryItemRow(
     ) {
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(item.kind ?: "memory", color = p.sageInk, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                Text(item.kind ?: "memory", color = p.sageInk, fontSize = PebbleFont.secondary, fontWeight = FontWeight.SemiBold)
                 if (showScope && !item.scope.isNullOrEmpty()) {
                     Text(
                         text = if (item.scope == "everywhere" || item.scope == "global") store.t("memScopeEverywhere") else store.t("memScopeProject"),
                         color = p.mute,
-                        fontSize = 12.sp,
+                        fontSize = PebbleFont.caption,
                     )
                 }
                 if (showTags) {
                     item.tags.orEmpty().filterNot { it.startsWith("bot:") }.forEach { tag ->
-                        Text("#$tag", color = p.mute, fontSize = 12.sp)
+                        Text("#$tag", color = p.mute, fontSize = PebbleFont.caption)
                     }
                 }
             }
             SelectionContainer {
-                Text(item.text.orEmpty(), color = p.text, fontSize = 15.sp)
+                Text(item.text.orEmpty(), color = p.text, fontSize = PebbleFont.body)
             }
         }
         TextButton(
             onClick = onDelete,
             contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
         ) {
-            Text(store.t("delete"), color = p.danger, fontSize = 13.sp)
+            Text(store.t("delete"), color = p.danger, fontSize = PebbleFont.secondary)
         }
     }
 }
@@ -775,7 +776,7 @@ private fun RoutinesBlock(
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             if (list.isEmpty()) {
-                Text(store.t("rtEmpty"), color = p.mute, fontSize = 14.sp)
+                Text(store.t("rtEmpty"), color = p.mute, fontSize = PebbleFont.secondary)
             } else {
                 list.forEachIndexed { idx, rt ->
                     if (idx > 0) CardDivider()
@@ -815,18 +816,18 @@ private fun RoutinesBlock(
                         ) {
                             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Text(rt.name ?: rt.id, color = p.text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Text(rt.name ?: rt.id, color = p.text, fontSize = PebbleFont.cardTitle, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     if (statusLabel.isNotEmpty()) {
                                         Text(
                                             text = statusLabel,
                                             color = if (rt.lastRun?.status == "error" && !running) p.danger else p.sageInk,
-                                            fontSize = 13.sp,
+                                            fontSize = PebbleFont.secondary,
                                             fontWeight = FontWeight.SemiBold,
                                         )
                                     }
                                 }
                                 if (meta.isNotEmpty()) {
-                                    Text(meta, color = p.text2, fontSize = 13.sp)
+                                    Text(meta, color = p.text2, fontSize = PebbleFont.secondary)
                                 }
                             }
                             Switch(
@@ -839,7 +840,7 @@ private fun RoutinesBlock(
                                 },
                             )
                         }
-                        Text(rt.prompt.orEmpty(), color = p.text, fontSize = 15.sp, maxLines = 4, overflow = TextOverflow.Ellipsis)
+                        Text(rt.prompt.orEmpty(), color = p.text, fontSize = PebbleFont.body, maxLines = 4, overflow = TextOverflow.Ellipsis)
                         Row(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalAlignment = Alignment.CenterVertically,
@@ -854,7 +855,7 @@ private fun RoutinesBlock(
                                 enabled = !running,
                                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
                             ) {
-                                Text(if (running) store.t("rtRunningBtn") else store.t("rtRunNow"), fontSize = 13.sp, color = p.text)
+                                Text(if (running) store.t("rtRunningBtn") else store.t("rtRunNow"), fontSize = PebbleFont.secondary, color = p.text)
                             }
                             OutlinedButton(
                                 onClick = {
@@ -870,7 +871,7 @@ private fun RoutinesBlock(
                                 },
                                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
                             ) {
-                                Text(if (isOpen) store.t("rtRunsHide") else store.t("rtRunsBtn"), fontSize = 13.sp, color = p.text)
+                                Text(if (isOpen) store.t("rtRunsHide") else store.t("rtRunsBtn"), fontSize = PebbleFont.secondary, color = p.text)
                             }
                             Box {
                                 IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(32.dp)) {
@@ -919,7 +920,7 @@ private fun RoutinesBlock(
                         if (isOpen) {
                             val listRuns = runsMap[rt.id].orEmpty()
                             if (listRuns.isEmpty()) {
-                                Text(store.t("rtRunsEmpty"), color = p.mute, fontSize = 13.sp)
+                                Text(store.t("rtRunsEmpty"), color = p.mute, fontSize = PebbleFont.secondary)
                             } else {
                                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                     listRuns.forEach { r ->
@@ -939,12 +940,12 @@ private fun RoutinesBlock(
                                             Text(
                                                 text = "$rs · ${r.trigger.orEmpty()} · ${String.format(Locale.US, "%.1fs", (r.durationMs ?: 0.0) / 1000.0)}",
                                                 color = p.text2,
-                                                fontSize = 12.sp,
+                                                fontSize = PebbleFont.caption,
                                             )
                                             if (!r.error.isNullOrEmpty()) {
-                                                Text(r.error, color = p.danger, fontSize = 13.sp)
+                                                Text(r.error, color = p.danger, fontSize = PebbleFont.secondary)
                                             } else if (!r.output.isNullOrEmpty()) {
-                                                Text(r.output, color = p.text, fontSize = 13.sp, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                                                Text(r.output, color = p.text, fontSize = PebbleFont.secondary, maxLines = 3, overflow = TextOverflow.Ellipsis)
                                             }
                                         }
                                     }
@@ -1051,7 +1052,7 @@ private fun RoutineEditorSheet(
             Text(
                 text = routine?.name ?: store.t("routines"),
                 color = p.text,
-                fontSize = 17.sp,
+                fontSize = PebbleFont.title,
                 fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.weight(1f),
@@ -1092,7 +1093,7 @@ private fun RoutineEditorSheet(
                         if (m == RoutineMode.WEBHOOK) webhookTrigger = true
                     },
                     shape = SegmentedButtonDefaults.itemShape(idx, RoutineMode.entries.size),
-                    label = { Text(lbl, fontSize = 13.sp, maxLines = 1) },
+                    label = { Text(lbl, fontSize = PebbleFont.secondary, maxLines = 1) },
                 )
             }
         }
@@ -1104,7 +1105,7 @@ private fun RoutineEditorSheet(
                 placeholder = { Text(store.t("rtEveryPh")) },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 singleLine = true,
-                textStyle = TextStyle(fontFamily = MonoFont, fontSize = 15.sp),
+                textStyle = TextStyle(fontFamily = MonoFont, fontSize = PebbleFont.body),
                 shape = PebbleDimens.rowShape,
                 colors = pebbleFieldColors(),
                 modifier = Modifier.fillMaxWidth(),
@@ -1114,7 +1115,7 @@ private fun RoutineEditorSheet(
                 onValueChange = { daily = it },
                 placeholder = { Text(store.t("rtDailyPh")) },
                 singleLine = true,
-                textStyle = TextStyle(fontFamily = MonoFont, fontSize = 15.sp),
+                textStyle = TextStyle(fontFamily = MonoFont, fontSize = PebbleFont.body),
                 shape = PebbleDimens.rowShape,
                 colors = pebbleFieldColors(),
                 modifier = Modifier.fillMaxWidth(),
@@ -1124,7 +1125,7 @@ private fun RoutineEditorSheet(
                 onValueChange = { cron = it },
                 placeholder = { Text(store.t("rtCronPh")) },
                 singleLine = true,
-                textStyle = TextStyle(fontFamily = MonoFont, fontSize = 15.sp),
+                textStyle = TextStyle(fontFamily = MonoFont, fontSize = PebbleFont.body),
                 shape = PebbleDimens.rowShape,
                 colors = pebbleFieldColors(),
                 modifier = Modifier.fillMaxWidth(),
@@ -1134,7 +1135,7 @@ private fun RoutineEditorSheet(
 
         if (mode != RoutineMode.WEBHOOK) {
             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text(store.t("rtAllowWebhook"), color = p.text, fontSize = 15.sp, modifier = Modifier.weight(1f))
+                Text(store.t("rtAllowWebhook"), color = p.text, fontSize = PebbleFont.body, modifier = Modifier.weight(1f))
                 Switch(checked = webhookTrigger, onCheckedChange = { webhookTrigger = it })
             }
         }
@@ -1155,7 +1156,7 @@ private fun RoutineEditorSheet(
             )
             if (secretSet) {
                 Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text(store.t("rtWebhookClearSecret"), color = p.text, fontSize = 15.sp, modifier = Modifier.weight(1f))
+                    Text(store.t("rtWebhookClearSecret"), color = p.text, fontSize = PebbleFont.body, modifier = Modifier.weight(1f))
                     Switch(checked = clearSecret, onCheckedChange = { clearSecret = it; if (it) secret = "" })
                 }
             }
@@ -1166,7 +1167,7 @@ private fun RoutineEditorSheet(
             onValueChange = { webhookUrl = it },
             placeholder = { Text(store.t("rtWebhookUrlPh"), fontFamily = MonoFont) },
             singleLine = true,
-            textStyle = TextStyle(fontFamily = MonoFont, fontSize = 14.sp),
+            textStyle = TextStyle(fontFamily = MonoFont, fontSize = PebbleFont.secondary),
             shape = PebbleDimens.rowShape,
             colors = pebbleFieldColors(),
             modifier = Modifier.fillMaxWidth(),
@@ -1183,7 +1184,7 @@ private fun RoutineEditorSheet(
                     selected = delivery == key,
                     onClick = { delivery = key },
                     shape = SegmentedButtonDefaults.itemShape(idx, delivs.size),
-                    label = { Text(lbl, fontSize = 13.sp, maxLines = 1) },
+                    label = { Text(lbl, fontSize = PebbleFont.secondary, maxLines = 1) },
                 )
             }
         }
@@ -1200,7 +1201,7 @@ private fun RoutineEditorSheet(
         )
 
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text(store.t("rtEnabled"), color = p.text, fontSize = 15.sp, modifier = Modifier.weight(1f))
+            Text(store.t("rtEnabled"), color = p.text, fontSize = PebbleFont.body, modifier = Modifier.weight(1f))
             Switch(checked = enabled, onCheckedChange = { enabled = it })
         }
 

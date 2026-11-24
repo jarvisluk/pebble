@@ -89,6 +89,7 @@ import ai.pebble.android.data.StageKind
 import ai.pebble.android.data.errText
 import ai.pebble.android.ui.chat.ChatScreen
 import ai.pebble.android.ui.theme.LocalPalette
+import ai.pebble.android.ui.theme.PebbleFont
 import ai.pebble.android.ui.theme.PebbleTheme
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -284,8 +285,13 @@ fun DesktopScreen(
                                 titleContentColor = barFg,
                             ),
                             navigationIcon = {
-                                IconButton(onClick = onClose, modifier = Modifier.size(40.dp)) {
-                                    Icon(Icons.Rounded.ArrowBackIosNew, contentDescription = store.t("close"), tint = barFg, modifier = Modifier.size(20.dp))
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    IconButton(onClick = onClose, modifier = Modifier.size(40.dp)) {
+                                        Icon(Icons.Rounded.ArrowBackIosNew, contentDescription = store.t("close"), tint = barFg, modifier = Modifier.size(20.dp))
+                                    }
+                                    IconButton(onClick = { showChatSidebar = !showChatSidebar }, modifier = Modifier.size(36.dp)) {
+                                        Icon(Icons.AutoMirrored.Rounded.Chat, contentDescription = store.t("deskChatSidebar"), tint = barFg, modifier = Modifier.size(20.dp))
+                                    }
                                 }
                             },
                             title = {
@@ -298,9 +304,6 @@ fun DesktopScreen(
                                 )
                             },
                             actions = {
-                                IconButton(onClick = { showChatSidebar = !showChatSidebar }, modifier = Modifier.size(36.dp)) {
-                                    Icon(Icons.AutoMirrored.Rounded.Chat, contentDescription = store.t("deskChatSidebar"), tint = barFg, modifier = Modifier.size(20.dp))
-                                }
                                 if (activeTab == StageKind.FILES) {
                                     IconButton(onClick = { showHiddenFiles = !showHiddenFiles }, modifier = Modifier.size(36.dp)) {
                                         Icon(
@@ -380,7 +383,7 @@ fun DesktopScreen(
                                         ) {
                                             if (streamConnected) {
                                                 DropdownMenuItem(
-                                                    text = { Text("H.264 · $streamFps fps", color = pillMute, fontSize = 13.sp) },
+                                                    text = { Text("H.264 · $streamFps fps", color = pillMute, fontSize = PebbleFont.secondary) },
                                                     enabled = false,
                                                     onClick = {},
                                                 )
@@ -463,7 +466,7 @@ fun DesktopScreen(
                                         Text(
                                             text = store.t("tempDesktopBanner", mapOf("name" to (store.activeDesktopTarget.name ?: store.activeDesktopTarget.target))),
                                             color = pillText,
-                                            fontSize = 13.sp,
+                                            fontSize = PebbleFont.secondary,
                                             fontWeight = FontWeight.SemiBold,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis,
@@ -476,7 +479,7 @@ fun DesktopScreen(
                                             },
                                             contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
                                         ) {
-                                            Text(store.t("switchBackLocal"), color = pillText, fontSize = 12.sp)
+                                            Text(store.t("switchBackLocal"), color = pillText, fontSize = PebbleFont.caption)
                                         }
                                     }
                                 }
@@ -499,7 +502,7 @@ fun DesktopScreen(
                                                 mapOf("bot" to (activeTakeover.botName ?: activeTakeover.botId ?: "Bot"), "reason" to activeTakeover.reason.orEmpty()),
                                             ),
                                             color = Color(0xFFFF6961),
-                                            fontSize = 14.sp,
+                                            fontSize = PebbleFont.body,
                                             maxLines = 2,
                                             overflow = TextOverflow.Ellipsis,
                                             modifier = Modifier.weight(1f),
@@ -509,7 +512,7 @@ fun DesktopScreen(
                                             colors = ButtonDefaults.buttonColors(containerColor = pillText, contentColor = stageBg),
                                             contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
                                         ) {
-                                            Text(store.t("doneResumeAI"), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                            Text(store.t("doneResumeAI"), fontSize = PebbleFont.caption, fontWeight = FontWeight.SemiBold)
                                         }
                                     }
                                 }
@@ -631,7 +634,7 @@ fun DesktopScreen(
                                                 Text(
                                                     text = displayErr.ifEmpty { store.t("deskH264Connecting") },
                                                     color = pillMute,
-                                                    fontSize = 15.sp,
+                                                    fontSize = PebbleFont.body,
                                                     textAlign = TextAlign.Center,
                                                 )
                                                 if (displayErr.isNotEmpty()) {
@@ -644,7 +647,7 @@ fun DesktopScreen(
                                                         },
                                                         colors = ButtonDefaults.buttonColors(containerColor = pillText, contentColor = stageBg),
                                                     ) {
-                                                        Text(store.t("retryConnect"), fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                                                        Text(store.t("retryConnect"), fontSize = PebbleFont.body, fontWeight = FontWeight.SemiBold)
                                                     }
                                                 }
                                             }
@@ -659,7 +662,7 @@ fun DesktopScreen(
                                                 Text(
                                                     text = displayErr,
                                                     color = pillText,
-                                                    fontSize = 13.sp,
+                                                    fontSize = PebbleFont.secondary,
                                                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                                                 )
                                             }
@@ -693,13 +696,13 @@ fun DesktopScreen(
                                         ) {
                                             Box(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
                                                 if (draft.isEmpty()) {
-                                                    Text(store.t("typeDesktopPh"), color = pillMute, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                                    Text(store.t("typeDesktopPh"), color = pillMute, fontSize = PebbleFont.body, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                                 }
                                                 BasicTextField(
                                                     value = draft,
                                                     onValueChange = { draft = it },
                                                     singleLine = true,
-                                                    textStyle = TextStyle(color = pillText, fontSize = 15.sp),
+                                                    textStyle = TextStyle(color = pillText, fontSize = PebbleFont.body),
                                                     cursorBrush = SolidColor(pillText),
                                                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                                                     keyboardActions = KeyboardActions(onSend = { sendText() }),
@@ -769,7 +772,7 @@ private fun StageTabSwitcher(
                     Text(
                         text = lbl,
                         color = if (sel) activeFg else inactiveFg,
-                        fontSize = 13.sp,
+                        fontSize = PebbleFont.secondary,
                         fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Medium,
                         maxLines = 1,
                     )

@@ -21,19 +21,19 @@ extension Image {
 
 enum AppFont {
     #if os(macOS)
-    static let body: CGFloat = 14
-    static let secondary: CGFloat = 13
     static let caption: CGFloat = 12
+    static let secondary: CGFloat = 13
+    static let body: CGFloat = 14
     static let cardTitle: CGFloat = 15
     static let title: CGFloat = 17
     static let hero: CGFloat = 20
     #else
-    static let body: CGFloat = 16
-    static let secondary: CGFloat = 15
-    static let caption: CGFloat = 13
+    static let caption: CGFloat = 12
+    static let secondary: CGFloat = 13
+    static let body: CGFloat = 15
     static let cardTitle: CGFloat = 16
     static let title: CGFloat = 17
-    static let hero: CGFloat = 22
+    static let hero: CGFloat = 20
     #endif
 }
 

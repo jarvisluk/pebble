@@ -45,6 +45,7 @@ import ai.pebble.android.ui.settings.SettingsDetailScreen
 import ai.pebble.android.ui.settings.SettingsSidebar
 import ai.pebble.android.ui.settings.SettingsTab
 import ai.pebble.android.ui.theme.LocalPalette
+import ai.pebble.android.ui.theme.PebbleFont
 
 sealed interface SheetRoute {
     data class Connect(val scan: Boolean = false) : SheetRoute
@@ -342,7 +343,7 @@ fun RootScaffold(
                                     Text(
                                         text = store.t(if (store.isConnected) "selectBotHint" else "connectHost"),
                                         color = p.text2,
-                                        fontSize = 16.sp,
+                                        fontSize = PebbleFont.cardTitle,
                                         fontWeight = FontWeight.Medium,
                                     )
                                 }

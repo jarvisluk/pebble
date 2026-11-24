@@ -72,6 +72,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import ai.pebble.android.i18n.L
 import ai.pebble.android.ui.theme.LocalPalette
+import ai.pebble.android.ui.theme.PebbleFont
 import com.google.mlkit.vision.barcode.BarcodeScannerOptions
 import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.barcode.common.Barcode
@@ -311,7 +312,7 @@ fun QrScannerBox(
                 Text(
                     text = L.t("scanHint"),
                     color = Color.White.copy(alpha = 0.90f),
-                    fontSize = 12.sp,
+                    fontSize = PebbleFont.caption,
                     lineHeight = 16.sp,
                     maxLines = 2,
                     textAlign = TextAlign.Center,
@@ -365,7 +366,7 @@ fun QrScannerBox(
                 Text(
                     text = L.t("scanAlbumFallback"),
                     color = Color.White.copy(alpha = 0.85f),
-                    fontSize = 14.sp,
+                    fontSize = PebbleFont.secondary,
                     textAlign = TextAlign.Center,
                 )
                 Spacer(Modifier.height(14.dp))
@@ -374,7 +375,7 @@ fun QrScannerBox(
                         onClick = { permLauncher.launch(Manifest.permission.CAMERA) },
                         colors = ButtonDefaults.buttonColors(containerColor = p.card, contentColor = p.text),
                     ) {
-                        Text(L.t("scanGrantCamera"), fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        Text(L.t("scanGrantCamera"), fontSize = PebbleFont.body, fontWeight = FontWeight.SemiBold)
                     }
                     Button(
                         onClick = {
@@ -382,7 +383,7 @@ fun QrScannerBox(
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.2f), contentColor = Color.White),
                     ) {
-                        Text(L.t("scanPickPhoto"), fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        Text(L.t("scanPickPhoto"), fontSize = PebbleFont.body, fontWeight = FontWeight.SemiBold)
                     }
                 }
             }
@@ -410,7 +411,7 @@ private fun ScannerPillButton(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             icon()
-            Text(text = label, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+            Text(text = label, color = Color.White, fontSize = PebbleFont.secondary, fontWeight = FontWeight.Medium)
         }
     }
 }

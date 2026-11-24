@@ -64,6 +64,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ai.pebble.android.i18n.L
 import ai.pebble.android.ui.theme.LocalPalette
+import ai.pebble.android.ui.theme.PebbleFont
 import ai.pebble.android.ui.theme.MonoFont
 import ai.pebble.android.ui.theme.PebblePalette
 import ai.pebble.android.ui.theme.copyToClipboard
@@ -926,7 +927,7 @@ internal fun buildInlineMarkdown(
                     if (ticks >= 2 && content.startsWith(" ") && content.endsWith(" ") && content.isNotBlank()) {
                         content = content.drop(1).dropLast(1)
                     }
-                    withStyle(SpanStyle(fontFamily = MonoFont, fontSize = 14.sp, background = p.s2, color = baseColor)) {
+                    withStyle(SpanStyle(fontFamily = MonoFont, fontSize = PebbleFont.secondary, background = p.s2, color = baseColor)) {
                         append(" $content ")
                     }
                     i = end + ticks
@@ -977,12 +978,12 @@ internal fun buildInlineMarkdown(
                         flushPlain()
                         when (tag) {
                             "code", "kbd" -> withStyle(
-                                SpanStyle(fontFamily = MonoFont, fontSize = 14.sp, background = p.s2, color = baseColor)
+                                SpanStyle(fontFamily = MonoFont, fontSize = PebbleFont.secondary, background = p.s2, color = baseColor)
                             ) { append(" $inner ") }
                             "sup", "sub" -> appendStyled(
                                 inner,
                                 SpanStyle(
-                                    fontSize = 11.sp,
+                                    fontSize = PebbleFont.caption,
                                     baselineShift = if (tag == "sup") BaselineShift(0.35f) else BaselineShift(-0.22f),
                                 )
                             )
@@ -1048,7 +1049,7 @@ internal fun buildInlineMarkdown(
                     flushPlain()
                     withStyle(
                         SpanStyle(
-                            fontSize = 11.sp,
+                            fontSize = PebbleFont.caption,
                             fontWeight = FontWeight.SemiBold,
                             color = p.text2,
                             baselineShift = BaselineShift(0.35f),
@@ -1249,10 +1250,10 @@ private fun RenderMarkdownBlock(
         }
         is MarkdownBlock.Heading -> {
             val size = when (block.level) {
-                1 -> 20.sp
-                2 -> 18.sp
-                3 -> 17.sp
-                else -> 16.sp
+                1 -> PebbleFont.hero
+                2 -> PebbleFont.title
+                3 -> PebbleFont.cardTitle
+                else -> PebbleFont.body
             }
             val headColor = if (block.level >= 5) p.text2 else fg
             Text(
@@ -1285,8 +1286,8 @@ private fun RenderMarkdownBlock(
                 }
                 Text(
                     text = buildInlineMarkdown(block.text, p, p.text2),
-                    fontSize = 16.sp,
-                    lineHeight = 23.sp,
+                    fontSize = PebbleFont.body,
+                    lineHeight = 22.sp,
                     color = p.text2,
                 )
             }
@@ -1312,16 +1313,16 @@ private fun RenderMarkdownBlock(
                         } else {
                             Text(
                                 text = item.marker,
-                                fontSize = 16.sp,
-                                lineHeight = 23.sp,
+                                fontSize = PebbleFont.body,
+                                lineHeight = 22.sp,
                                 color = p.mute,
                             )
                         }
                         val itemColor = if (item.task && item.checked) p.text2 else fg
                         Text(
                             text = buildInlineMarkdown(item.text, p, itemColor),
-                            fontSize = 16.sp,
-                            lineHeight = 23.sp,
+                            fontSize = PebbleFont.body,
+                            lineHeight = 22.sp,
                             color = itemColor,
                             textDecoration = if (item.task && item.checked) TextDecoration.LineThrough else null,
                         )
@@ -1336,13 +1337,13 @@ private fun RenderMarkdownBlock(
             ) {
                 Text(
                     text = "[${block.id}]",
-                    fontSize = 12.sp,
+                    fontSize = PebbleFont.caption,
                     fontWeight = FontWeight.SemiBold,
                     color = p.mute,
                 )
                 Text(
                     text = buildInlineMarkdown(block.text, p, p.text2),
-                    fontSize = 13.sp,
+                    fontSize = PebbleFont.secondary,
                     lineHeight = 19.sp,
                     color = p.text2,
                 )
@@ -1352,8 +1353,8 @@ private fun RenderMarkdownBlock(
         is MarkdownBlock.Para -> {
             Text(
                 text = buildInlineMarkdown(block.text, p, fg),
-                fontSize = 16.sp,
-                lineHeight = 24.sp,
+                fontSize = PebbleFont.body,
+                lineHeight = 22.sp,
                 color = fg,
             )
         }
@@ -1494,7 +1495,7 @@ private fun DetailsBlockView(
             Text(
                 text = summary,
                 color = p.text,
-                fontSize = 14.sp,
+                fontSize = PebbleFont.secondary,
                 fontWeight = FontWeight.SemiBold,
             )
         }
@@ -1552,7 +1553,7 @@ private fun TableBlockView(
                         ) {
                             Text(
                                 text = buildInlineMarkdown(cellText, p, fg),
-                                fontSize = 14.sp,
+                                fontSize = PebbleFont.secondary,
                                 fontWeight = if (isHeader) FontWeight.SemiBold else FontWeight.Normal,
                                 color = fg,
                                 textAlign = align.textAlign(),
@@ -1662,7 +1663,7 @@ private fun MarkdownImageView(alt: String, url: String) {
                 Text(
                     text = label,
                     color = p.accent,
-                    fontSize = 14.sp,
+                    fontSize = PebbleFont.secondary,
                     modifier = Modifier
                         .clip(RoundedCornerShape(8.dp))
                         .background(p.s1)
@@ -1675,7 +1676,7 @@ private fun MarkdownImageView(alt: String, url: String) {
         Text(
             text = label,
             color = p.text2,
-            fontSize = 14.sp,
+            fontSize = PebbleFont.secondary,
             modifier = Modifier
                 .clip(RoundedCornerShape(8.dp))
                 .background(p.s1)
@@ -1716,13 +1717,13 @@ fun CodeCard(
             Text(
                 text = lang.ifEmpty { "code" },
                 color = p.mute,
-                fontSize = 13.sp,
+                fontSize = PebbleFont.secondary,
                 modifier = Modifier.weight(1f),
             )
             Text(
                 text = if (copied) L.t("copied") else L.t("copy"),
                 color = p.text2,
-                fontSize = 13.sp,
+                fontSize = PebbleFont.secondary,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier
                     .clip(RoundedCornerShape(6.dp))
@@ -1742,7 +1743,7 @@ fun CodeCard(
             Text(
                 text = code,
                 fontFamily = MonoFont,
-                fontSize = 14.sp,
+                fontSize = PebbleFont.secondary,
                 lineHeight = 20.sp,
                 color = p.text,
             )

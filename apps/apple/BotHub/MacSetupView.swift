@@ -106,7 +106,7 @@ struct MacSetupView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 10) {
                 Image(systemName: "laptopcomputer")
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(.system(size: AppFont.title, weight: .semibold))
                     .foregroundStyle(p.text)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(hub.t("macModeLocalTitle"))
@@ -145,7 +145,7 @@ struct MacSetupView: View {
             } label: {
                 HStack(spacing: 10) {
                     Image(systemName: "network")
-                        .font(.system(size: 18, weight: .semibold))
+                        .font(.system(size: AppFont.title, weight: .semibold))
                         .foregroundStyle(p.text)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(hub.t("macModeRemoteTitle"))
@@ -157,7 +157,7 @@ struct MacSetupView: View {
                     }
                     Spacer()
                     Image(systemName: remoteExpanded ? "chevron.up" : "chevron.down")
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.system(size: AppFont.caption, weight: .semibold))
                         .foregroundStyle(p.mute)
                 }
                 .contentShape(Rectangle())
@@ -244,7 +244,7 @@ struct MacSetupView: View {
                         }
                         Spacer()
                         Text(peer.dnsName ?? peer.ip ?? peer.address)
-                            .font(.system(size: 12, design: .monospaced))
+                            .font(.system(size: AppFont.caption, design: .monospaced))
                             .foregroundStyle(p.mute)
                             .lineLimit(1)
                     }

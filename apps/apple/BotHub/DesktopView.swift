@@ -12,6 +12,7 @@ struct DesktopView: View {
     var initialTab: StageKind = .desktop
     var initialPath: String? = nil
     var onTabChange: ((StageKind) -> Void)? = nil
+    var onClose: (() -> Void)? = nil
 
     @State private var activeTab: StageKind
     @State private var target: String
@@ -39,12 +40,13 @@ struct DesktopView: View {
     private let pillText = Color(hex: "#f3f1ee")
     private let pillMute = Color(hex: "#a6a09a")
 
-    init(initialTarget: String, initialBotId: String? = nil, initialTab: StageKind = .desktop, initialPath: String? = nil, onTabChange: ((StageKind) -> Void)? = nil) {
+    init(initialTarget: String, initialBotId: String? = nil, initialTab: StageKind = .desktop, initialPath: String? = nil, onTabChange: ((StageKind) -> Void)? = nil, onClose: (() -> Void)? = nil) {
         self.initialTarget = initialTarget
         self.initialBotId = initialBotId
         self.initialTab = initialTab
         self.initialPath = initialPath
         self.onTabChange = onTabChange
+        self.onClose = onClose
         _activeTab = State(initialValue: initialTab)
         _target = State(initialValue: initialTarget.isEmpty ? "local" : initialTarget)
         _chatBotId = State(initialValue: initialBotId ?? "")
@@ -203,9 +205,26 @@ struct DesktopView: View {
         .inlineNavTitle()
         .toolbar {
             #if os(iOS)
-            ToolbarItem(placement: .topBarLeading) {
+            ToolbarItemGroup(placement: .topBarLeading) {
                 Button { dismiss() } label: {
                     Label(hub.t("close"), systemImage: "xmark")
+                }
+                if !isWide {
+                    Button { showChatSheet = true } label: {
+                        Label(hub.t("deskChatSidebar"), systemImage: "bubble.left.and.bubble.right")
+                    }
+                }
+            }
+            #else
+            ToolbarItemGroup(placement: .navigation) {
+                Button {
+                    if let onClose { onClose() } else { dismiss() }
+                } label: {
+                    Label(hub.t("backToChat"), systemImage: "chevron.backward")
+                        .labelStyle(.titleAndIcon)
+                }
+                Button { showMacChatSidebar.toggle() } label: {
+                    Label(hub.t("deskChatSidebar"), systemImage: "bubble.left.and.bubble.right")
                 }
             }
             #endif
@@ -213,17 +232,6 @@ struct DesktopView: View {
                 stageModePicker
             }
             ToolbarItemGroup(placement: .hubTrailing) {
-                #if os(macOS)
-                Button { showMacChatSidebar.toggle() } label: {
-                    Label(hub.t("deskChatSidebar"), systemImage: "bubble.left.and.bubble.right")
-                }
-                #else
-                if !isWide {
-                    Button { showChatSheet = true } label: {
-                        Label(hub.t("deskChatSidebar"), systemImage: "bubble.left.and.bubble.right")
-                    }
-                }
-                #endif
                 if activeTab == .files {
                     Menu {
                         Toggle(isOn: $showHiddenFiles) {
@@ -303,7 +311,7 @@ struct DesktopView: View {
             if hub.activeDesktopTarget.temporary {
                 HStack(spacing: 10) {
                     Text(hub.t("tempDesktopBanner", ["name": hub.activeDesktopTarget.name ?? hub.activeDesktopTarget.target]))
-                        .font(.system(size: 13, weight: .semibold)).foregroundStyle(pillText)
+                        .font(.system(size: AppFont.secondary, weight: .semibold)).foregroundStyle(pillText)
                         .lineLimit(1)
                     Spacer(minLength: 4)
                     Button(hub.t("switchBackLocal")) {
@@ -320,7 +328,7 @@ struct DesktopView: View {
             if let to = activeTakeover {
                 HStack(spacing: 10) {
                     Label(hub.t("takeoverBanner", ["bot": to.botName ?? to.botId ?? "Bot", "reason": to.reason ?? ""]), systemImage: "hand.raised.fill")
-                        .font(.system(size: 14)).foregroundStyle(p.pinkInk)
+                        .font(.system(size: AppFont.body)).foregroundStyle(p.pinkInk)
                     Spacer(minLength: 4)
                     Button(hub.t("doneResumeAI")) { Task { try? await hub.resolveTakeover(to.id) } }
                         .buttonStyle(.borderedProminent).controlSize(.small)
@@ -351,7 +359,7 @@ struct DesktopView: View {
                 draftFocused = false
             } label: {
                 Image(systemName: "xmark")
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.system(size: AppFont.cardTitle, weight: .semibold))
                     .frame(width: 28, height: 28)
             }
             .composerGlassButton()
@@ -359,7 +367,7 @@ struct DesktopView: View {
 
             TextField(hub.t("typeDesktopPh"), text: $draft)
                 .textFieldStyle(.plain)
-                .font(.system(size: 16))
+                .font(.system(size: AppFont.body))
                 .focused($draftFocused)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 9)
@@ -368,7 +376,7 @@ struct DesktopView: View {
 
             Button { sendText() } label: {
                 Image(systemName: "arrow.up")
-                    .font(.system(size: 17, weight: .bold))
+                    .font(.system(size: AppFont.cardTitle, weight: .bold))
                     .frame(width: 28, height: 28)
             }
             .composerSendButton(accent: p.accent)
@@ -432,7 +440,7 @@ struct DesktopView: View {
                     VStack(spacing: 10) {
                         ProgressView().tint(p.accent)
                         Text(displayErr.isEmpty ? hub.t("deskH264Connecting") : displayErr)
-                            .font(.system(size: 15)).foregroundStyle(pillMute).multilineTextAlignment(.center)
+                            .font(.system(size: AppFont.body)).foregroundStyle(pillMute).multilineTextAlignment(.center)
                         if !displayErr.isEmpty {
                             Button(hub.t("retry")) {
                                 error = ""
@@ -450,7 +458,7 @@ struct DesktopView: View {
                 if streamCtrl.connected, !displayErr.isEmpty {
                     VStack {
                         Spacer()
-                        Text(displayErr).font(.system(size: 13)).foregroundStyle(pillText)
+                        Text(displayErr).font(.system(size: AppFont.secondary)).foregroundStyle(pillText)
                             .padding(.horizontal, 12).padding(.vertical, 6)
                             .background(pillBg, in: Capsule())
                             .padding(10)

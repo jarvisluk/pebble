@@ -99,21 +99,35 @@ struct WorkspaceFilesView: View {
                 ProgressView()
                 Spacer()
             } else if !listErr.isEmpty && listResult == nil {
-                ContentUnavailableView {
-                    Label(hub.t("workspaceFiles"), systemImage: "exclamationmark.triangle")
-                } description: {
+                VStack(spacing: 10) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(.system(size: 28))
+                        .foregroundStyle(p.mute)
+                    Text(hub.t("workspaceFiles"))
+                        .font(.system(size: AppFont.title, weight: .semibold))
+                        .foregroundStyle(p.text)
                     Text(listErr)
-                } actions: {
+                        .font(.system(size: AppFont.secondary))
+                        .foregroundStyle(p.text2)
+                        .multilineTextAlignment(.center)
                     Button(hub.t("retry")) {
                         Task { await loadDir(dirPath) }
                     }
                     .buttonStyle(.borderedProminent)
                 }
+                .padding(24)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if let entries = listResult?.entries, entries.isEmpty, dirPath.isEmpty {
-                ContentUnavailableView(
-                    hub.t("emptyFolder"),
-                    systemImage: "folder"
-                )
+                VStack(spacing: 8) {
+                    Image(systemName: "folder")
+                        .font(.system(size: 28))
+                        .foregroundStyle(p.mute)
+                    Text(hub.t("emptyFolder"))
+                        .font(.system(size: AppFont.secondary))
+                        .foregroundStyle(p.text2)
+                }
+                .padding(24)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 let entries = listResult?.entries ?? []
                 ScrollView {
@@ -123,7 +137,7 @@ struct WorkspaceFilesView: View {
                                 parentBackRow(isSplit: isSplit)
                             }
                             Text(hub.t("emptyFolder"))
-                                .font(.system(size: 15))
+                                .font(.system(size: AppFont.secondary))
                                 .foregroundStyle(.secondary)
                                 .frame(maxWidth: .infinity, alignment: .center)
                                 .padding(.vertical, 24)
@@ -176,11 +190,11 @@ struct WorkspaceFilesView: View {
         } label: {
             HStack(spacing: 12) {
                 Image(systemName: "arrow.uturn.backward")
-                    .font(.system(size: 16, weight: .medium))
+                    .font(.system(size: AppFont.body, weight: .medium))
                     .foregroundStyle(p.text2)
                     .frame(width: 24)
                 Text("..")
-                    .font(.system(size: 16, weight: .medium))
+                    .font(.system(size: AppFont.body, weight: .medium))
                     .foregroundStyle(p.text)
                 Spacer()
             }
@@ -206,21 +220,21 @@ struct WorkspaceFilesView: View {
                     Task { await loadDir("") }
                 } label: {
                     Label(hub.t("rootWorkspace"), systemImage: "folder")
-                        .font(.system(size: 13, weight: .medium))
+                        .font(.system(size: AppFont.secondary, weight: .medium))
                         .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
 
                 ForEach(Array(segments.enumerated()), id: \.offset) { idx, seg in
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.system(size: AppFont.caption, weight: .semibold))
                         .foregroundStyle(.tertiary)
                     let target = segments.prefix(idx + 1).joined(separator: "/")
                     Button(seg) {
                         Task { await loadDir(target) }
                     }
                     .buttonStyle(.plain)
-                    .font(.system(size: 13, weight: idx == segments.count - 1 ? .semibold : .medium))
+                    .font(.system(size: AppFont.secondary, weight: idx == segments.count - 1 ? .semibold : .medium))
                     .foregroundStyle(idx == segments.count - 1 ? p.text : .secondary)
                 }
             }
@@ -236,20 +250,20 @@ struct WorkspaceFilesView: View {
         let meta = fileSymbol(for: ent)
         return HStack(spacing: 12) {
             Image(systemName: meta.symbol)
-                .font(.system(size: 17, weight: .medium))
+                .font(.system(size: AppFont.cardTitle, weight: .medium))
                 .foregroundStyle(meta.color)
                 .frame(width: 24)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(ent.name)
-                    .font(.system(size: 16, weight: isSelected ? .semibold : .medium))
+                    .font(.system(size: AppFont.body, weight: isSelected ? .semibold : .medium))
                     .foregroundStyle(p.text)
                     .lineLimit(1)
                 if ent.isShared == true || !ent.isDir {
                     HStack(spacing: 6) {
                         if ent.isShared == true {
                             Text(hub.t("sharedBadge"))
-                                .font(.system(size: 11, weight: .semibold))
+                                .font(.system(size: AppFont.caption, weight: .semibold))
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 1)
                                 .background(botCollab.bg, in: Capsule())
@@ -257,7 +271,7 @@ struct WorkspaceFilesView: View {
                         }
                         if !ent.isDir {
                             Text(formatByteSize(ent.size))
-                                .font(.system(size: 13))
+                                .font(.system(size: AppFont.caption))
                                 .foregroundStyle(.secondary)
                         }
                     }
@@ -266,7 +280,7 @@ struct WorkspaceFilesView: View {
             Spacer(minLength: 4)
             if ent.isDir {
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(size: AppFont.caption, weight: .semibold))
                     .foregroundStyle(.tertiary)
             }
         }
@@ -305,11 +319,20 @@ struct WorkspaceFilesView: View {
         if let path = selectedPath {
             previewContent(path: path, isSplit: isSplit)
         } else {
-            ContentUnavailableView(
-                hub.t("workspaceFiles"),
-                systemImage: "doc.text",
-                description: Text(hub.t("selectFileHint"))
-            )
+            VStack(spacing: 8) {
+                Image(systemName: "doc.text")
+                    .font(.system(size: 28))
+                    .foregroundStyle(p.mute)
+                Text(hub.t("workspaceFiles"))
+                    .font(.system(size: AppFont.title, weight: .semibold))
+                    .foregroundStyle(p.text)
+                Text(hub.t("selectFileHint"))
+                    .font(.system(size: AppFont.secondary))
+                    .foregroundStyle(p.text2)
+                    .multilineTextAlignment(.center)
+            }
+            .padding(24)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
@@ -323,19 +346,19 @@ struct WorkspaceFilesView: View {
                         imageURL = nil
                     } label: {
                         Label(hub.t("back"), systemImage: "chevron.backward")
-                            .font(.system(size: 15, weight: .semibold))
+                            .font(.system(size: AppFont.body, weight: .semibold))
                     }
                     .buttonStyle(.plain)
                 }
 
                 VStack(alignment: .leading, spacing: 1) {
                     Text((path as NSString).lastPathComponent)
-                        .font(.system(size: 16, weight: .semibold))
+                        .font(.system(size: AppFont.cardTitle, weight: .semibold))
                         .foregroundStyle(p.text)
                         .lineLimit(1)
                     if path.contains("/") {
                         Text(path)
-                            .font(.system(size: 12, design: .monospaced))
+                            .font(.system(size: AppFont.caption, design: .monospaced))
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                             .truncationMode(.middle)
@@ -349,11 +372,11 @@ struct WorkspaceFilesView: View {
                 } label: {
                     if isSplit {
                         Label(hub.t("insertToChat"), systemImage: "quote.bubble")
-                            .font(.system(size: 13, weight: .semibold))
+                            .font(.system(size: AppFont.secondary, weight: .semibold))
                             .lineLimit(1)
                     } else {
                         Image(systemName: "quote.bubble")
-                            .font(.system(size: 14, weight: .semibold))
+                            .font(.system(size: AppFont.body, weight: .semibold))
                     }
                 }
                 .buttonStyle(.bordered)
@@ -368,7 +391,7 @@ struct WorkspaceFilesView: View {
                         Task { await downloadAndPreview(path: path, name: preview?.name ?? (path as NSString).lastPathComponent) }
                     } label: {
                         Image(systemName: "square.and.arrow.up")
-                            .font(.system(size: 15, weight: .semibold))
+                            .font(.system(size: AppFont.body, weight: .semibold))
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
@@ -383,7 +406,7 @@ struct WorkspaceFilesView: View {
 
             if !toastMsg.isEmpty {
                 Text(toastMsg)
-                    .font(.system(size: 13))
+                    .font(.system(size: AppFont.secondary))
                     .foregroundStyle(.secondary)
                     .padding(.top, 8)
             }
@@ -393,22 +416,30 @@ struct WorkspaceFilesView: View {
                 ProgressView()
                 Spacer()
             } else if !previewErr.isEmpty {
-                ContentUnavailableView {
-                    Label(hub.t("workspaceFiles"), systemImage: "exclamationmark.triangle")
-                } description: {
+                VStack(spacing: 10) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(.system(size: 28))
+                        .foregroundStyle(p.mute)
+                    Text(hub.t("workspaceFiles"))
+                        .font(.system(size: AppFont.title, weight: .semibold))
+                        .foregroundStyle(p.text)
                     Text(previewErr)
-                } actions: {
+                        .font(.system(size: AppFont.secondary))
+                        .foregroundStyle(p.text2)
+                        .multilineTextAlignment(.center)
                     Button(hub.t("retry")) {
                         Task { await openFile(path) }
                     }
                     .buttonStyle(.borderedProminent)
                 }
+                .padding(24)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if let doc = preview {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
                         if doc.truncated == true {
                             Text(hub.t("fileTruncatedHint", ["size": formatByteSize(Int64(doc.content?.utf8.count ?? 0))]))
-                                .font(.system(size: 13))
+                                .font(.system(size: AppFont.secondary))
                                 .padding(10)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .background(p.s1, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
@@ -430,21 +461,21 @@ struct WorkspaceFilesView: View {
                             MarkdownText(text: doc.content ?? "")
                         } else if doc.kind == "text" {
                             Text(doc.content ?? "")
-                                .font(.system(size: 14, design: .monospaced))
+                                .font(.system(size: AppFont.secondary, design: .monospaced))
                                 .textSelection(.enabled)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         } else {
                             VStack(spacing: 12) {
                                 Image(systemName: "doc.zipper")
-                                    .font(.system(size: 36))
+                                    .font(.system(size: 32))
                                     .foregroundStyle(.secondary)
                                 Text(doc.name)
-                                    .font(.system(size: 17, weight: .bold))
+                                    .font(.system(size: AppFont.title, weight: .bold))
                                 Text("\(doc.mimeType) · \(formatByteSize(doc.size))")
-                                    .font(.system(size: 13, design: .monospaced))
+                                    .font(.system(size: AppFont.caption, design: .monospaced))
                                     .foregroundStyle(.secondary)
                                 Text(hub.t("binaryFileHint"))
-                                    .font(.system(size: 14))
+                                    .font(.system(size: AppFont.secondary))
                                     .foregroundStyle(.secondary)
                                     .multilineTextAlignment(.center)
                                 Button(hub.t("openQuickLook")) {

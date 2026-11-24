@@ -55,7 +55,7 @@ struct BotDetailView: View {
                                     VStack(spacing: 6) {
                                         if !previewStream.error.isEmpty {
                                             Image(systemName: "display")
-                                                .font(.system(size: 20))
+                                                .font(.system(size: AppFont.hero))
                                                 .foregroundStyle(.secondary)
                                             Text(previewStream.error)
                                                 .font(.system(size: AppFont.caption))
@@ -75,7 +75,7 @@ struct BotDetailView: View {
                             .clipped()
 
                             Image(systemName: "arrow.up.left.and.arrow.down.right")
-                                .font(.system(size: 12, weight: .semibold))
+                                .font(.system(size: AppFont.caption, weight: .semibold))
                                 .foregroundStyle(.white)
                                 .padding(7)
                                 .background(.black.opacity(0.55), in: Circle())
@@ -369,19 +369,19 @@ struct MemoryRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
-                Text(item.kind ?? "memory").font(.system(size: 13, weight: .semibold)).foregroundStyle(p.sageInk)
+                Text(item.kind ?? "memory").font(.system(size: AppFont.secondary, weight: .semibold)).foregroundStyle(p.sageInk)
                 if showScope, let sc = item.scope, !sc.isEmpty {
                     Text(sc == "everywhere" || sc == "global" ? hub.t("memScopeEverywhere") : hub.t("memScopeProject"))
-                        .font(.system(size: 12))
+                        .font(.system(size: AppFont.caption))
                         .foregroundStyle(.secondary)
                 }
                 if showTags {
                     ForEach((item.tags ?? []).filter { !$0.hasPrefix("bot:") }, id: \.self) { tag in
-                        Text("#\(tag)").font(.system(size: 13)).foregroundStyle(.secondary)
+                        Text("#\(tag)").font(.system(size: AppFont.secondary)).foregroundStyle(.secondary)
                     }
                 }
             }
-            Text(item.text ?? "").font(.system(size: 15)).textSelection(.enabled)
+            Text(item.text ?? "").font(.system(size: AppFont.body)).textSelection(.enabled)
         }
         .swipeActions { Button(hub.t("delete"), role: .destructive, action: onDelete) }
         .contextMenu { Button(hub.t("delete"), systemImage: "trash", role: .destructive, action: onDelete) }
@@ -500,16 +500,16 @@ struct RoutinesSection: View {
             if open {
                 let l = runs[rt.id] ?? []
                 if l.isEmpty {
-                    Text(hub.t("rtRunsEmpty")).font(.system(size: 13)).foregroundStyle(.secondary)
+                    Text(hub.t("rtRunsEmpty")).font(.system(size: AppFont.secondary)).foregroundStyle(.secondary)
                 } else {
                     ForEach(l) { r in
                         VStack(alignment: .leading, spacing: 2) {
                             Text("\(statusText(r.status).isEmpty ? hub.t("rtStatusError") : statusText(r.status)) · \(r.trigger ?? "") · \(String(format: "%.1fs", (r.durationMs ?? 0) / 1000))")
-                                .font(.system(size: 13)).foregroundStyle(.secondary)
+                                .font(.system(size: AppFont.secondary)).foregroundStyle(.secondary)
                             if let e = r.error, !e.isEmpty {
-                                Text(e).font(.system(size: 13)).foregroundStyle(p.danger)
+                                Text(e).font(.system(size: AppFont.secondary)).foregroundStyle(p.danger)
                             } else if let o = r.output, !o.isEmpty {
-                                Text(o).font(.system(size: 13)).lineLimit(3)
+                                Text(o).font(.system(size: AppFont.secondary)).lineLimit(3)
                             }
                         }
                     }

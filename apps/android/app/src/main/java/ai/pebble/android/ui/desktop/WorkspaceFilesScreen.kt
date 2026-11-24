@@ -77,6 +77,7 @@ import ai.pebble.android.data.WorkspaceListResult
 import ai.pebble.android.data.errText
 import ai.pebble.android.ui.chat.MarkdownText
 import ai.pebble.android.ui.theme.BotAccent
+import ai.pebble.android.ui.theme.PebbleFont
 import ai.pebble.android.ui.theme.LocalPalette
 import ai.pebble.android.ui.theme.MonoFont
 import ai.pebble.android.ui.theme.PebbleDimens
@@ -280,8 +281,8 @@ fun WorkspaceFilesView(
                                 modifier = Modifier.padding(24.dp),
                             ) {
                                 Icon(Icons.Rounded.Description, contentDescription = null, tint = p.mute, modifier = Modifier.size(40.dp))
-                                Text(store.t("workspaceFiles"), color = p.text, fontSize = 17.sp, fontWeight = FontWeight.Bold)
-                                Text(store.t("selectFileHint"), color = p.text2, fontSize = 14.sp, textAlign = TextAlign.Center)
+                                Text(store.t("workspaceFiles"), color = p.text, fontSize = PebbleFont.title, fontWeight = FontWeight.Bold)
+                                Text(store.t("selectFileHint"), color = p.text2, fontSize = PebbleFont.secondary, textAlign = TextAlign.Center)
                             }
                         }
                     }
@@ -371,7 +372,7 @@ private fun WorkspaceListPanel(
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     Icon(Icons.Rounded.Folder, contentDescription = null, tint = p.text2, modifier = Modifier.size(15.dp))
-                    Text(store.t("rootWorkspace"), color = p.text2, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                    Text(store.t("rootWorkspace"), color = p.text2, fontSize = PebbleFont.secondary, fontWeight = FontWeight.Medium)
                 }
                 segments.forEachIndexed { idx, seg ->
                     Icon(
@@ -385,7 +386,7 @@ private fun WorkspaceListPanel(
                     Text(
                         text = seg,
                         color = if (isLast) p.text else p.text2,
-                        fontSize = 13.sp,
+                        fontSize = PebbleFont.secondary,
                         fontWeight = if (isLast) FontWeight.SemiBold else FontWeight.Medium,
                         modifier = Modifier
                             .clip(RoundedCornerShape(6.dp))
@@ -416,7 +417,7 @@ private fun WorkspaceListPanel(
                             modifier = Modifier.padding(24.dp),
                         ) {
                             Icon(Icons.Rounded.Warning, contentDescription = null, tint = p.danger, modifier = Modifier.size(32.dp))
-                            Text(listErr, color = p.text2, fontSize = 14.sp, textAlign = TextAlign.Center)
+                            Text(listErr, color = p.text2, fontSize = PebbleFont.secondary, textAlign = TextAlign.Center)
                             Button(
                                 onClick = { onLoadDir(dirPath) },
                                 colors = ButtonDefaults.buttonColors(containerColor = p.accent, contentColor = p.onAccent),
@@ -435,7 +436,7 @@ private fun WorkspaceListPanel(
                                 verticalArrangement = Arrangement.spacedBy(8.dp),
                             ) {
                                 Icon(Icons.Rounded.Folder, contentDescription = null, tint = p.mute, modifier = Modifier.size(36.dp))
-                                Text(store.t("emptyFolder"), color = p.text2, fontSize = 15.sp)
+                                Text(store.t("emptyFolder"), color = p.text2, fontSize = PebbleFont.body)
                             }
                         }
                     } else {
@@ -460,7 +461,7 @@ private fun WorkspaceListPanel(
                                                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                                             ) {
                                                 Icon(Icons.AutoMirrored.Rounded.Reply, contentDescription = null, tint = p.text2, modifier = Modifier.size(18.dp))
-                                                Text("..", color = p.text, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                                                Text("..", color = p.text, fontSize = PebbleFont.body, fontWeight = FontWeight.Medium)
                                             }
                                             HorizontalDivider(
                                                 modifier = Modifier.padding(horizontal = 14.dp),
@@ -472,7 +473,7 @@ private fun WorkspaceListPanel(
                                             Text(
                                                 text = store.t("emptyFolder"),
                                                 color = p.mute,
-                                                fontSize = 15.sp,
+                                                fontSize = PebbleFont.body,
                                                 textAlign = TextAlign.Center,
                                                 modifier = Modifier
                                                     .fillMaxWidth()
@@ -509,7 +510,7 @@ private fun WorkspaceListPanel(
                                     Text(
                                         text = store.t("filesTruncatedHint"),
                                         color = p.mute,
-                                        fontSize = 12.sp,
+                                        fontSize = PebbleFont.caption,
                                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 8.dp),
                                     )
                                 }
@@ -562,7 +563,7 @@ private fun WorkspaceEntryRow(
             Text(
                 text = entry.name,
                 color = p.text,
-                fontSize = 16.sp,
+                fontSize = PebbleFont.cardTitle,
                 fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -576,7 +577,7 @@ private fun WorkspaceEntryRow(
                         TagPill(store.t("sharedBadge"), botPal.collabBg, botPal.collabInk)
                     }
                     if (!entry.isDir) {
-                        Text(formatByteSize(entry.size), color = p.text2, fontSize = 13.sp)
+                        Text(formatByteSize(entry.size), color = p.text2, fontSize = PebbleFont.secondary)
                     }
                 }
             }
@@ -628,7 +629,7 @@ private fun WorkspacePreviewPanel(
                 Text(
                     text = path.substringAfterLast('/'),
                     color = p.text,
-                    fontSize = 16.sp,
+                    fontSize = PebbleFont.cardTitle,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -637,7 +638,7 @@ private fun WorkspacePreviewPanel(
                     Text(
                         text = path,
                         color = p.text2,
-                        fontSize = 12.sp,
+                        fontSize = PebbleFont.caption,
                         fontFamily = MonoFont,
                         maxLines = 1,
                         overflow = TextOverflow.MiddleEllipsis,
@@ -651,7 +652,7 @@ private fun WorkspacePreviewPanel(
                 Icon(Icons.Rounded.FormatQuote, contentDescription = store.t("insertToChat"), tint = p.accent, modifier = Modifier.size(16.dp))
                 if (isSplit) {
                     Spacer(Modifier.width(4.dp))
-                    Text(store.t("insertToChat"), color = p.text, fontSize = 13.sp, maxLines = 1)
+                    Text(store.t("insertToChat"), color = p.text, fontSize = PebbleFont.secondary, maxLines = 1)
                 }
             }
             if (downloading) {
@@ -668,7 +669,7 @@ private fun WorkspacePreviewPanel(
             Text(
                 text = toastMsg,
                 color = p.text2,
-                fontSize = 13.sp,
+                fontSize = PebbleFont.secondary,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
             )
         }
@@ -687,7 +688,7 @@ private fun WorkspacePreviewPanel(
                         modifier = Modifier.padding(24.dp),
                     ) {
                         Icon(Icons.Rounded.Warning, contentDescription = null, tint = p.danger, modifier = Modifier.size(32.dp))
-                        Text(error, color = p.text2, fontSize = 14.sp, textAlign = TextAlign.Center)
+                        Text(error, color = p.text2, fontSize = PebbleFont.secondary, textAlign = TextAlign.Center)
                         Button(
                             onClick = onRetry,
                             colors = ButtonDefaults.buttonColors(containerColor = p.accent, contentColor = p.onAccent),
@@ -711,7 +712,7 @@ private fun WorkspacePreviewPanel(
                             Text(
                                 text = store.t("fileTruncatedHint", mapOf("size" to sizeStr)),
                                 color = p.text2,
-                                fontSize = 13.sp,
+                                fontSize = PebbleFont.secondary,
                                 modifier = Modifier.padding(10.dp),
                             )
                         }
@@ -733,7 +734,7 @@ private fun WorkspacePreviewPanel(
                                     }
                                 },
                                 error = {
-                                    Text(store.t("downloadFailed"), color = p.pinkInk, fontSize = 14.sp)
+                                    Text(store.t("downloadFailed"), color = p.pinkInk, fontSize = PebbleFont.secondary)
                                 },
                             )
                         }
@@ -746,7 +747,7 @@ private fun WorkspacePreviewPanel(
                                     Text(
                                         text = preview.content.orEmpty(),
                                         fontFamily = MonoFont,
-                                        fontSize = 14.sp,
+                                        fontSize = PebbleFont.secondary,
                                         lineHeight = 20.sp,
                                         color = p.text,
                                     )
@@ -762,17 +763,17 @@ private fun WorkspacePreviewPanel(
                                 verticalArrangement = Arrangement.spacedBy(10.dp),
                             ) {
                                 Icon(Icons.Rounded.FolderZip, contentDescription = null, tint = p.mute, modifier = Modifier.size(40.dp))
-                                Text(preview.name, color = p.text, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                                Text(preview.name, color = p.text, fontSize = PebbleFont.title, fontWeight = FontWeight.Bold)
                                 Text(
                                     text = "${preview.mimeType} · ${formatByteSize(preview.size)}",
                                     color = p.text2,
-                                    fontSize = 13.sp,
+                                    fontSize = PebbleFont.secondary,
                                     fontFamily = MonoFont,
                                 )
                                 Text(
                                     text = store.t("binaryFileHint"),
                                     color = p.text2,
-                                    fontSize = 14.sp,
+                                    fontSize = PebbleFont.secondary,
                                     textAlign = TextAlign.Center,
                                 )
                                 Button(

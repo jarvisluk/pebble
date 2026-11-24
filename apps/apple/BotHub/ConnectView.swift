@@ -138,10 +138,10 @@ struct ConnectView: View {
                     VStack(spacing: 16) {
                         BotAvatar(id: "assistant", size: 104, color: pebbleColor, busy: submitting)
                         Text("Pebble")
-                            .font(.system(size: 22, weight: .bold))
+                            .font(.system(size: AppFont.hero, weight: .bold))
                             .foregroundStyle(p.text)
                         Text(hub.t("onboardHeroSub"))
-                            .font(.system(size: 15))
+                            .font(.system(size: AppFont.body))
                             .foregroundStyle(p.text2)
                             .multilineTextAlignment(.center)
                     }
@@ -167,9 +167,9 @@ struct ConnectView: View {
                         } label: {
                             HStack(spacing: 8) {
                                 Image(systemName: "qrcode.viewfinder")
-                                    .font(.system(size: 16, weight: .semibold))
+                                    .font(.system(size: AppFont.cardTitle, weight: .semibold))
                                 Text(scanning ? hub.t("collapse") : hub.t("scanConnect"))
-                                    .font(.system(size: 15, weight: .semibold))
+                                    .font(.system(size: AppFont.body, weight: .semibold))
                             }
                             .frame(maxWidth: .infinity)
                             .frame(height: 48)
@@ -186,7 +186,7 @@ struct ConnectView: View {
                             }
                         } label: {
                             Text(hub.t("manualPairingBtn"))
-                                .font(.system(size: 15, weight: .medium))
+                                .font(.system(size: AppFont.body, weight: .medium))
                                 .frame(maxWidth: .infinity)
                                 .frame(height: 48)
                                 .background(p.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
@@ -197,13 +197,13 @@ struct ConnectView: View {
 
                     if !err.isEmpty {
                         Text(err)
-                            .font(.system(size: 13))
+                            .font(.system(size: AppFont.secondary))
                             .foregroundStyle(p.danger)
                             .multilineTextAlignment(.center)
                             .padding(.top, 12)
                     } else if !infoHint.isEmpty {
                         Text(infoHint)
-                            .font(.system(size: 13))
+                            .font(.system(size: AppFont.secondary))
                             .foregroundStyle(p.sageInk)
                             .multilineTextAlignment(.center)
                             .padding(.top, 12)
@@ -211,7 +211,7 @@ struct ConnectView: View {
 
                     VStack(spacing: 6) {
                         Text(hub.t("noDesktopYet"))
-                            .font(.system(size: 12))
+                            .font(.system(size: AppFont.caption))
                             .foregroundStyle(p.mute)
                         HStack(spacing: 10) {
                             Button(hub.t("downloadDesktop")) { openURL(desktopDownloadURL) }
@@ -220,7 +220,7 @@ struct ConnectView: View {
                                 Text(hub.t("sendToComputer"))
                             }
                         }
-                        .font(.system(size: 12, weight: .medium))
+                        .font(.system(size: AppFont.caption, weight: .medium))
                         .foregroundStyle(p.text2)
                         .buttonStyle(.plain)
                     }
@@ -302,7 +302,7 @@ struct ConnectView: View {
                             HStack {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(s.label).foregroundStyle(.primary)
-                                    Text(s.address).font(.system(size: 13, design: .monospaced)).foregroundStyle(.secondary)
+                                    Text(s.address).font(.system(size: AppFont.secondary, design: .monospaced)).foregroundStyle(.secondary)
                                         .lineLimit(1).truncationMode(.middle)
                                 }
                                 Spacer()
@@ -409,10 +409,10 @@ struct ConnectView: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(hub.t("tsBoundReady", ["tailnet": ts?.tailnet ?? "Tailscale"]))
-                            .font(.system(size: 15, weight: .semibold))
+                            .font(.system(size: AppFont.body, weight: .semibold))
                             .foregroundStyle(p.sageInk)
                         if let ip = ts?.ip, !ip.isEmpty {
-                            Text(ip).font(.system(size: 13, design: .monospaced)).foregroundStyle(.secondary)
+                            Text(ip).font(.system(size: AppFont.secondary, design: .monospaced)).foregroundStyle(.secondary)
                         }
                     }
                     Spacer()
@@ -429,7 +429,7 @@ struct ConnectView: View {
                 }
                 let peers = (ts?.peers ?? []).filter { $0.online }
                 if peers.isEmpty {
-                    Text(hub.t("tsNoPeers")).font(.system(size: 14)).foregroundStyle(.secondary)
+                    Text(hub.t("tsNoPeers")).font(.system(size: AppFont.secondary)).foregroundStyle(.secondary)
                 } else {
                     ForEach(peers) { peer in
                         Button {
@@ -444,7 +444,7 @@ struct ConnectView: View {
                                         }
                                     }
                                     Text(peer.dnsName ?? peer.ip ?? peer.address)
-                                        .font(.system(size: 12, design: .monospaced))
+                                        .font(.system(size: AppFont.caption, design: .monospaced))
                                         .foregroundStyle(.secondary)
                                         .lineLimit(1).truncationMode(.middle)
                                 }

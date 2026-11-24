@@ -105,6 +105,7 @@ import ai.pebble.android.data.errText
 import ai.pebble.android.data.formatStamp
 import ai.pebble.android.data.parseIsoInstant
 import ai.pebble.android.ui.theme.BotAvatar
+import ai.pebble.android.ui.theme.PebbleFont
 import ai.pebble.android.ui.theme.LocalPalette
 import ai.pebble.android.ui.theme.MonoFont
 import ai.pebble.android.ui.theme.PebbleDimens
@@ -398,7 +399,7 @@ fun ChatScreen(
                         )
                         Text(
                             text = botName,
-                            fontSize = 17.sp,
+                            fontSize = PebbleFont.title,
                             fontWeight = FontWeight.Bold,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -473,12 +474,12 @@ fun ChatScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Icon(Icons.Rounded.SyncProblem, contentDescription = null, tint = p.text2, modifier = Modifier.size(16.dp))
-                Text(store.t("standbyActiveBanner"), color = p.text, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                Text(store.t("standbyActiveBanner"), color = p.text, fontSize = PebbleFont.secondary, modifier = Modifier.weight(1f))
                 TextButton(
                     onClick = { scope.launch { store.reconnect() } },
                     contentPadding = PaddingValues(horizontal = 8.dp),
                 ) {
-                    Text(store.t("retryPrimary"), fontSize = 13.sp, color = p.accent)
+                    Text(store.t("retryPrimary"), fontSize = PebbleFont.secondary, color = p.accent)
                 }
             }
         }
@@ -498,7 +499,7 @@ fun ChatScreen(
                         mapOf("name" to (store.activeDesktopTarget.name ?: store.activeDesktopTarget.target)),
                     ),
                     color = p.text,
-                    fontSize = 13.sp,
+                    fontSize = PebbleFont.secondary,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
@@ -507,13 +508,13 @@ fun ChatScreen(
                     onClick = { onOpenDesktop(store.activeDesktopTarget.target) },
                     contentPadding = PaddingValues(horizontal = 6.dp),
                 ) {
-                    Text(store.t("desktopShort"), fontSize = 13.sp, color = p.accent)
+                    Text(store.t("desktopShort"), fontSize = PebbleFont.secondary, color = p.accent)
                 }
                 TextButton(
                     onClick = { scope.launch { runCatching { store.setActiveDesktopTarget("local") } } },
                     contentPadding = PaddingValues(horizontal = 6.dp),
                 ) {
-                    Text(store.t("switchBackLocal"), fontSize = 13.sp, color = p.accent)
+                    Text(store.t("switchBackLocal"), fontSize = PebbleFont.secondary, color = p.accent)
                 }
             }
         }
@@ -531,7 +532,7 @@ fun ChatScreen(
                 Text(
                     text = store.t("takeoverInline", mapOf("reason" to to.reason.orEmpty())),
                     color = p.pinkInk,
-                    fontSize = 14.sp,
+                    fontSize = PebbleFont.body,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
@@ -540,14 +541,14 @@ fun ChatScreen(
                     onClick = { onOpenDesktop(to.target ?: "local") },
                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
                 ) {
-                    Text(store.t("handleAction"), fontSize = 13.sp, color = p.pinkInk)
+                    Text(store.t("handleAction"), fontSize = PebbleFont.secondary, color = p.pinkInk)
                 }
                 Button(
                     onClick = { scope.launch { runCatching { store.resolveTakeover(to.id) } } },
                     colors = ButtonDefaults.buttonColors(containerColor = pal.accent, contentColor = pal.onAccent),
                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
                 ) {
-                    Text(store.t("resumeShort"), fontSize = 13.sp)
+                    Text(store.t("resumeShort"), fontSize = PebbleFont.secondary)
                 }
             }
         }
@@ -589,11 +590,11 @@ fun ChatScreen(
                                 color = bot?.color,
                                 interactive = true,
                             )
-                            Text(botName, color = p.text, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                            Text(botName, color = p.text, fontSize = PebbleFont.hero, fontWeight = FontWeight.Bold)
                             Text(
                                 text = bot?.description?.takeIf { it.isNotEmpty() } ?: store.t("emptyChatHint"),
                                 color = p.text2,
-                                fontSize = 15.sp,
+                                fontSize = PebbleFont.body,
                                 textAlign = TextAlign.Center,
                             )
                         }
@@ -613,7 +614,7 @@ fun ChatScreen(
                             Text(
                                 text = formatStamp(entry.createdAt),
                                 color = p.mute,
-                                fontSize = 13.sp,
+                                fontSize = PebbleFont.secondary,
                                 textAlign = TextAlign.Center,
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -650,7 +651,7 @@ fun ChatScreen(
                                         Text(
                                             text = "${store.t("collabWith", mapOf("peer" to peerName))} · ${store.t("collabCount", mapOf("count" to entry.items.size))}",
                                             color = peerPal.collabInk,
-                                            fontSize = 13.sp,
+                                            fontSize = PebbleFont.secondary,
                                             fontWeight = FontWeight.SemiBold,
                                         )
                                         Icon(
@@ -697,7 +698,7 @@ fun ChatScreen(
                             Text(
                                 text = if (tool.isNotEmpty()) store.t("callingTool", mapOf("tool" to tool)) else store.t("processing"),
                                 color = p.busy,
-                                fontSize = 15.sp,
+                                fontSize = PebbleFont.body,
                             )
                         }
                     }
@@ -772,12 +773,12 @@ fun ChatScreen(
                                             Text(
                                                 text = "/${cmd.name}$hint",
                                                 fontFamily = MonoFont,
-                                                fontSize = 15.sp,
+                                                fontSize = PebbleFont.body,
                                                 fontWeight = FontWeight.Medium,
                                                 color = p.text,
                                             )
                                             if (!cmd.description.isNullOrEmpty()) {
-                                                Text(cmd.description, color = p.mute, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                                Text(cmd.description, color = p.mute, fontSize = PebbleFont.caption, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                             }
                                         }
                                         TagPill(
@@ -812,14 +813,14 @@ fun ChatScreen(
                                             Text(
                                                 text = if (item.kind == "file") item.value else "@${item.value}",
                                                 fontFamily = MonoFont,
-                                                fontSize = 15.sp,
+                                                fontSize = PebbleFont.body,
                                                 fontWeight = FontWeight.Medium,
                                                 color = p.text,
                                                 maxLines = 1,
                                                 overflow = TextOverflow.Ellipsis,
                                             )
                                             if (!item.description.isNullOrEmpty() && item.description != item.value) {
-                                                Text(item.description, color = p.mute, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                                Text(item.description, color = p.mute, fontSize = PebbleFont.caption, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                             }
                                         }
                                         TagPill(
@@ -875,7 +876,7 @@ fun ChatScreen(
                                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                                     ) {
                                         Icon(Icons.Rounded.Description, contentDescription = null, tint = p.text2, modifier = Modifier.size(15.dp))
-                                        Text(att.name, color = p.text, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                                        Text(att.name, color = p.text, fontSize = PebbleFont.secondary, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
                                         if (att.uploading) {
                                             CircularProgressIndicator(modifier = Modifier.size(12.dp), strokeWidth = 1.5.dp, color = p.accent)
                                         }
@@ -959,7 +960,7 @@ fun ChatScreen(
                                 Text(
                                     text = store.t("msgBotPh", mapOf("name" to botName)),
                                     color = p.mute,
-                                    fontSize = 16.sp,
+                                    fontSize = PebbleFont.body,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                 )
@@ -967,7 +968,7 @@ fun ChatScreen(
                             BasicTextField(
                                 value = input,
                                 onValueChange = { onInputChange(it) },
-                                textStyle = TextStyle(color = p.text, fontSize = 16.sp, lineHeight = 22.sp),
+                                textStyle = TextStyle(color = p.text, fontSize = PebbleFont.body, lineHeight = 22.sp),
                                 cursorBrush = SolidColor(pal.accent),
                                 maxLines = 6,
                                 modifier = Modifier.fillMaxWidth(),

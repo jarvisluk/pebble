@@ -1,5 +1,6 @@
 package ai.pebble.android.ui.theme
 
+import ai.pebble.android.ui.theme.PebbleFont
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -75,8 +76,8 @@ fun ConfirmAlertDialog(
         containerColor = p.card,
         titleContentColor = p.text,
         textContentColor = p.text2,
-        title = { Text(item.title, fontSize = 17.sp, fontWeight = FontWeight.Bold) },
-        text = { Text(item.message, fontSize = 15.sp) },
+        title = { Text(item.title, fontSize = PebbleFont.title, fontWeight = FontWeight.Bold) },
+        text = { Text(item.message, fontSize = PebbleFont.body) },
         confirmButton = {
             TextButton(
                 onClick = {
@@ -114,7 +115,7 @@ fun TagPill(
         Text(
             text = text,
             color = fg,
-            fontSize = 13.sp,
+            fontSize = PebbleFont.secondary,
             fontWeight = FontWeight.SemiBold,
             maxLines = 1,
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
@@ -144,7 +145,7 @@ fun StatusTextBanner(
         Text(
             text = text,
             color = fg,
-            fontSize = 15.sp,
+            fontSize = PebbleFont.body,
         )
     }
 }
@@ -165,7 +166,7 @@ fun SectionHeader(
         Text(
             text = title,
             color = p.text2,
-            fontSize = 13.sp,
+            fontSize = PebbleFont.secondary,
             fontWeight = FontWeight.SemiBold,
             modifier = Modifier.weight(1f),
         )
@@ -183,7 +184,7 @@ fun SectionFooter(
     Text(
         text = text,
         color = color ?: p.mute,
-        fontSize = 13.sp,
+        fontSize = PebbleFont.secondary,
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 4.dp),
@@ -263,14 +264,14 @@ fun BotAppearancePicker(
             Text(
                 text = L.t("avatarShape"),
                 color = p.text2,
-                fontSize = 13.sp,
+                fontSize = PebbleFont.secondary,
                 modifier = Modifier.weight(1f),
             )
             if (hasCustom) {
                 Text(
                     text = L.t("resetDefault"),
                     color = ring,
-                    fontSize = 13.sp,
+                    fontSize = PebbleFont.secondary,
                     fontWeight = FontWeight.Medium,
                     modifier = Modifier
                         .clip(RoundedCornerShape(6.dp))
@@ -321,7 +322,7 @@ fun BotAppearancePicker(
         Text(
             text = L.t("botColorLabel"),
             color = p.text2,
-            fontSize = 13.sp,
+            fontSize = PebbleFont.secondary,
         )
 
         FlowRow(
@@ -356,10 +357,10 @@ fun BotAppearancePicker(
                 val clean = next.trim()
                 if (clean.length <= 7) onColorChange(clean)
             },
-            label = { Text(L.t("customColorHex"), fontSize = 13.sp) },
+            label = { Text(L.t("customColorHex"), fontSize = PebbleFont.secondary) },
             placeholder = { Text(effectiveHex, fontFamily = MonoFont) },
             singleLine = true,
-            textStyle = androidx.compose.ui.text.TextStyle(fontFamily = MonoFont, fontSize = 15.sp),
+            textStyle = androidx.compose.ui.text.TextStyle(fontFamily = MonoFont, fontSize = PebbleFont.body),
             shape = PebbleDimens.rowShape,
             colors = pebbleFieldColors(),
             modifier = Modifier.fillMaxWidth(),

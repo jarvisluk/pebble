@@ -237,16 +237,25 @@ object PebbleDimens {
     val composerShape = RoundedCornerShape(composerRadius)
 }
 
+object PebbleFont {
+    val caption = 12.sp
+    val secondary = 13.sp
+    val body = 15.sp
+    val cardTitle = 16.sp
+    val title = 17.sp
+    val hero = 20.sp
+}
+
 private val PebbleTypography = Typography(
-    titleLarge = TextStyle(fontSize = 20.sp, fontWeight = FontWeight.Bold),
-    titleMedium = TextStyle(fontSize = 17.sp, fontWeight = FontWeight.Bold),
-    titleSmall = TextStyle(fontSize = 16.sp, fontWeight = FontWeight.SemiBold),
-    bodyLarge = TextStyle(fontSize = 16.sp, fontWeight = FontWeight.Normal, lineHeight = 24.sp),
-    bodyMedium = TextStyle(fontSize = 15.sp, fontWeight = FontWeight.Normal, lineHeight = 21.sp),
-    bodySmall = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.Normal, lineHeight = 18.sp),
-    labelLarge = TextStyle(fontSize = 15.sp, fontWeight = FontWeight.SemiBold),
-    labelMedium = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.SemiBold),
-    labelSmall = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Normal),
+    titleLarge = TextStyle(fontSize = PebbleFont.hero, fontWeight = FontWeight.Bold),
+    titleMedium = TextStyle(fontSize = PebbleFont.title, fontWeight = FontWeight.Bold),
+    titleSmall = TextStyle(fontSize = PebbleFont.cardTitle, fontWeight = FontWeight.SemiBold),
+    bodyLarge = TextStyle(fontSize = PebbleFont.body, fontWeight = FontWeight.Normal, lineHeight = 22.sp),
+    bodyMedium = TextStyle(fontSize = PebbleFont.secondary, fontWeight = FontWeight.Normal, lineHeight = 19.sp),
+    bodySmall = TextStyle(fontSize = PebbleFont.caption, fontWeight = FontWeight.Normal, lineHeight = 16.sp),
+    labelLarge = TextStyle(fontSize = PebbleFont.body, fontWeight = FontWeight.SemiBold),
+    labelMedium = TextStyle(fontSize = PebbleFont.secondary, fontWeight = FontWeight.SemiBold),
+    labelSmall = TextStyle(fontSize = PebbleFont.caption, fontWeight = FontWeight.Normal),
 )
 
 val MonoFont = FontFamily.Monospace

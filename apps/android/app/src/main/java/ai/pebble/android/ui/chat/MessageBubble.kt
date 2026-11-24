@@ -64,6 +64,7 @@ import ai.pebble.android.data.countToolCalls
 import ai.pebble.android.data.formatClockTime
 import ai.pebble.android.data.formatDurationMs
 import ai.pebble.android.ui.theme.LocalPalette
+import ai.pebble.android.ui.theme.PebbleFont
 import ai.pebble.android.ui.theme.MonoFont
 import ai.pebble.android.ui.theme.PebbleDimens
 import android.graphics.BitmapFactory
@@ -108,8 +109,8 @@ fun MessageBubble(
                                 Text(
                                     text = msg.body,
                                     color = p.text,
-                                    fontSize = 16.sp,
-                                    lineHeight = 23.sp,
+                                    fontSize = PebbleFont.body,
+                                    lineHeight = 22.sp,
                                 )
                             }
                         }
@@ -146,7 +147,7 @@ fun MessageBubble(
                         Text(
                             text = store.t("routineReceiptFrom", mapOf("name" to from.removePrefix("routine:"))),
                             color = p.accent,
-                            fontSize = 13.sp,
+                            fontSize = PebbleFont.secondary,
                             fontWeight = FontWeight.SemiBold,
                         )
                     }
@@ -158,7 +159,7 @@ fun MessageBubble(
                         Text(
                             text = meta.joinToString(" · "),
                             color = p.mute,
-                            fontSize = 13.sp,
+                            fontSize = PebbleFont.secondary,
                         )
                     }
                 }
@@ -195,7 +196,7 @@ fun MessageBubble(
                         Text(
                             text = label,
                             color = senderPal.collabInk,
-                            fontSize = 13.sp,
+                            fontSize = PebbleFont.secondary,
                             fontWeight = FontWeight.SemiBold,
                         )
                     }
@@ -219,7 +220,7 @@ fun MessageBubble(
                         Text(
                             text = msg.body,
                             fontFamily = MonoFont,
-                            fontSize = 15.sp,
+                            fontSize = PebbleFont.body,
                             color = p.text,
                             modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
                         )
@@ -230,7 +231,7 @@ fun MessageBubble(
                     Text(
                         text = msg.body,
                         color = if (msg.from == "error") p.danger else p.mute,
-                        fontSize = 13.sp,
+                        fontSize = PebbleFont.secondary,
                         textAlign = TextAlign.Center,
                         modifier = modifier.fillMaxWidth(),
                     )
@@ -380,13 +381,13 @@ private fun FileAttachmentRow(
                 Text(
                     text = displayName,
                     color = p.text,
-                    fontSize = 14.sp,
+                    fontSize = PebbleFont.secondary,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
                 if (sizeLabel.isNotEmpty()) {
-                    Text(sizeLabel, color = p.mute, fontSize = 12.sp)
+                    Text(sizeLabel, color = p.mute, fontSize = PebbleFont.caption)
                 }
             }
             if (loading) {
@@ -396,7 +397,7 @@ private fun FileAttachmentRow(
             }
         }
         if (errMsg.isNotEmpty()) {
-            Text(errMsg, color = p.danger, fontSize = 12.sp)
+            Text(errMsg, color = p.danger, fontSize = PebbleFont.caption)
         }
     }
 }
@@ -426,7 +427,7 @@ fun MediaPreviewDialog(
                     title = {
                         Text(
                             text = media.name ?: store.t("imageAltFallback"),
-                            fontSize = 15.sp,
+                            fontSize = PebbleFont.body,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )

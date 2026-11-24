@@ -78,6 +78,7 @@ import ai.pebble.android.data.TailscalePeer
 import ai.pebble.android.data.errText
 import ai.pebble.android.data.normalizeAddress
 import ai.pebble.android.ui.theme.BotAvatar
+import ai.pebble.android.ui.theme.PebbleFont
 import ai.pebble.android.ui.theme.CardDivider
 import ai.pebble.android.ui.theme.ConfirmAlertDialog
 import ai.pebble.android.ui.theme.ConfirmItem
@@ -249,7 +250,7 @@ fun ConnectScreen(
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
                 CircularProgressIndicator(color = p.accent)
-                Text(store.t("connectingHost"), color = p.text2, fontSize = 15.sp)
+                Text(store.t("connectingHost"), color = p.text2, fontSize = PebbleFont.body)
                 OutlinedButton(onClick = { showFormWhileConnecting = true }) {
                     Text(store.t("switchHost"), color = p.text)
                 }
@@ -302,13 +303,13 @@ fun ConnectScreen(
                         Text(
                             text = "Pebble",
                             color = p.text,
-                            fontSize = 22.sp,
+                            fontSize = PebbleFont.hero,
                             fontWeight = FontWeight.Bold,
                         )
                         Text(
                             text = store.t("onboardHeroSub"),
                             color = p.text2,
-                            fontSize = 15.sp,
+                            fontSize = PebbleFont.body,
                             textAlign = TextAlign.Center,
                         )
                     }
@@ -348,7 +349,7 @@ fun ConnectScreen(
                             Spacer(Modifier.size(8.dp))
                             Text(
                                 text = if (scanning) store.t("collapse") else store.t("scanConnect"),
-                                fontSize = 15.sp,
+                                fontSize = PebbleFont.body,
                                 fontWeight = FontWeight.SemiBold,
                             )
                         }
@@ -369,7 +370,7 @@ fun ConnectScreen(
                         ) {
                             Text(
                                 text = store.t("manualPairingBtn"),
-                                fontSize = 15.sp,
+                                fontSize = PebbleFont.body,
                                 fontWeight = FontWeight.Medium,
                             )
                         }
@@ -380,7 +381,7 @@ fun ConnectScreen(
                         Text(
                             text = err,
                             color = p.danger,
-                            fontSize = 13.sp,
+                            fontSize = PebbleFont.secondary,
                             textAlign = TextAlign.Center,
                         )
                     } else if (infoHint.isNotEmpty()) {
@@ -388,7 +389,7 @@ fun ConnectScreen(
                         Text(
                             text = infoHint,
                             color = p.sageInk,
-                            fontSize = 13.sp,
+                            fontSize = PebbleFont.secondary,
                             textAlign = TextAlign.Center,
                         )
                     }
@@ -399,7 +400,7 @@ fun ConnectScreen(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
-                        Text(store.t("noDesktopYet"), color = p.mute, fontSize = 12.sp)
+                        Text(store.t("noDesktopYet"), color = p.mute, fontSize = PebbleFont.caption)
                         Row(
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                             verticalAlignment = Alignment.CenterVertically,
@@ -407,7 +408,7 @@ fun ConnectScreen(
                             Text(
                                 text = store.t("downloadDesktop"),
                                 color = p.text2,
-                                fontSize = 12.sp,
+                                fontSize = PebbleFont.caption,
                                 fontWeight = FontWeight.Medium,
                                 modifier = Modifier.clickable {
                                     runCatching {
@@ -415,11 +416,11 @@ fun ConnectScreen(
                                     }
                                 },
                             )
-                            Text("·", color = p.mute, fontSize = 12.sp)
+                            Text("·", color = p.mute, fontSize = PebbleFont.caption)
                             Text(
                                 text = store.t("sendToComputer"),
                                 color = p.text2,
-                                fontSize = 12.sp,
+                                fontSize = PebbleFont.caption,
                                 fontWeight = FontWeight.Medium,
                                 modifier = Modifier.clickable {
                                     val share = Intent(Intent.ACTION_SEND).apply {
@@ -451,7 +452,7 @@ fun ConnectScreen(
                 title = {
                     Text(
                         text = if (isGate) "Pebble" else store.t("connectHost"),
-                        fontSize = 17.sp,
+                        fontSize = PebbleFont.title,
                         fontWeight = FontWeight.Bold,
                     )
                 },
@@ -480,7 +481,7 @@ fun ConnectScreen(
                             Text(
                                 text = store.t("connect"),
                                 color = p.accent,
-                                fontSize = 15.sp,
+                                fontSize = PebbleFont.body,
                                 fontWeight = FontWeight.SemiBold,
                             )
                         }
@@ -522,7 +523,7 @@ fun ConnectScreen(
                                     store.t("onboardDesc")
                                 },
                                 color = p.text2,
-                                fontSize = 15.sp,
+                                fontSize = PebbleFont.body,
                             )
                             OutlinedButton(
                                 onClick = {
@@ -557,7 +558,7 @@ fun ConnectScreen(
                             Text(
                                 text = if (scanning) store.t("collapse") else store.t("scanConnect"),
                                 color = p.text,
-                                fontSize = 16.sp,
+                                fontSize = PebbleFont.cardTitle,
                                 fontWeight = FontWeight.Medium,
                             )
                         }
@@ -585,7 +586,7 @@ fun ConnectScreen(
                             value = address,
                             onValueChange = { address = it },
                             placeholder = { Text(store.t("pairingLinkPh"), fontFamily = MonoFont) },
-                            textStyle = TextStyle(fontFamily = MonoFont, fontSize = 15.sp),
+                            textStyle = TextStyle(fontFamily = MonoFont, fontSize = PebbleFont.body),
                             minLines = 2,
                             maxLines = 5,
                             shape = PebbleDimens.rowShape,
@@ -602,7 +603,7 @@ fun ConnectScreen(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
                             Icon(Icons.Rounded.ContentPaste, contentDescription = null, tint = p.accent, modifier = Modifier.size(18.dp))
-                            Text(store.t("pasteLinkBtn"), color = p.accent, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                            Text(store.t("pasteLinkBtn"), color = p.accent, fontSize = PebbleFont.body, fontWeight = FontWeight.Medium)
                         }
 
                         CardDivider()
@@ -618,7 +619,7 @@ fun ConnectScreen(
                             Text(
                                 text = store.t("moreOptions"),
                                 color = p.text2,
-                                fontSize = 14.sp,
+                                fontSize = PebbleFont.secondary,
                                 modifier = Modifier.weight(1f),
                             )
                             Icon(
@@ -633,7 +634,7 @@ fun ConnectScreen(
                                 OutlinedTextField(
                                     value = label,
                                     onValueChange = { label = it },
-                                    label = { Text(store.t("labelOptional"), fontSize = 13.sp) },
+                                    label = { Text(store.t("labelOptional"), fontSize = PebbleFont.secondary) },
                                     placeholder = { Text(store.t("labelExamplePh")) },
                                     singleLine = true,
                                     shape = PebbleDimens.rowShape,
@@ -643,7 +644,7 @@ fun ConnectScreen(
                                 OutlinedTextField(
                                     value = token,
                                     onValueChange = { token = it },
-                                    label = { Text(store.t("tokenOptionalLbl"), fontSize = 13.sp) },
+                                    label = { Text(store.t("tokenOptionalLbl"), fontSize = PebbleFont.secondary) },
                                     placeholder = { Text(store.t("tokenFillHint")) },
                                     singleLine = true,
                                     visualTransformation = PasswordVisualTransformation(),
@@ -654,10 +655,10 @@ fun ConnectScreen(
                                 OutlinedTextField(
                                     value = standbyAddress,
                                     onValueChange = { standbyAddress = it },
-                                    label = { Text(store.t("standbyAddress"), fontSize = 13.sp) },
+                                    label = { Text(store.t("standbyAddress"), fontSize = PebbleFont.secondary) },
                                     placeholder = { Text("tailcat://… / 192.168.x.x:3789", fontFamily = MonoFont) },
                                     singleLine = true,
-                                    textStyle = TextStyle(fontFamily = MonoFont, fontSize = 15.sp),
+                                    textStyle = TextStyle(fontFamily = MonoFont, fontSize = PebbleFont.body),
                                     shape = PebbleDimens.rowShape,
                                     colors = pebbleFieldColors(),
                                     modifier = Modifier.fillMaxWidth(),
@@ -665,7 +666,7 @@ fun ConnectScreen(
                                 OutlinedTextField(
                                     value = standbyToken,
                                     onValueChange = { standbyToken = it },
-                                    label = { Text(store.t("standbyToken"), fontSize = 13.sp) },
+                                    label = { Text(store.t("standbyToken"), fontSize = PebbleFont.secondary) },
                                     placeholder = { Text(store.t("tokenFillHint")) },
                                     singleLine = true,
                                     visualTransformation = PasswordVisualTransformation(),
@@ -713,19 +714,19 @@ fun ConnectScreen(
                                         Text(
                                             text = store.t("tsBoundReady", mapOf("tailnet" to (ts?.tailnet ?: "Tailscale"))),
                                             color = p.sageInk,
-                                            fontSize = 15.sp,
+                                            fontSize = PebbleFont.body,
                                             fontWeight = FontWeight.SemiBold,
                                         )
                                         val ip = ts?.ip
                                         if (!ip.isNullOrEmpty()) {
-                                            Text(ip, color = p.text2, fontSize = 13.sp, fontFamily = MonoFont)
+                                            Text(ip, color = p.text2, fontSize = PebbleFont.secondary, fontFamily = MonoFont)
                                         }
                                     }
                                     TextButton(
                                         onClick = { scope.launch { store.refreshMobileTailscale(includePeers = true) } },
                                         contentPadding = PaddingValues(horizontal = 8.dp),
                                     ) {
-                                        Text(store.t("tsRefreshPeers"), fontSize = 13.sp, color = p.accent)
+                                        Text(store.t("tsRefreshPeers"), fontSize = PebbleFont.secondary, color = p.accent)
                                     }
                                     TextButton(
                                         onClick = {
@@ -738,13 +739,13 @@ fun ConnectScreen(
                                         },
                                         contentPadding = PaddingValues(horizontal = 8.dp),
                                     ) {
-                                        Text(store.t("tsUnlink"), fontSize = 13.sp, color = p.danger)
+                                        Text(store.t("tsUnlink"), fontSize = PebbleFont.secondary, color = p.danger)
                                     }
                                 }
 
                                 val peers = ts?.peers.orEmpty().filter { it.online }
                                 if (peers.isEmpty()) {
-                                    Text(store.t("tsNoPeers"), color = p.text2, fontSize = 14.sp)
+                                    Text(store.t("tsNoPeers"), color = p.text2, fontSize = PebbleFont.secondary)
                                 } else {
                                     peers.forEachIndexed { idx, peer ->
                                         if (idx > 0) CardDivider()
@@ -761,7 +762,7 @@ fun ConnectScreen(
                                                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                                                     verticalAlignment = Alignment.CenterVertically,
                                                 ) {
-                                                    Text(peer.hostname, color = p.text, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                                                    Text(peer.hostname, color = p.text, fontSize = PebbleFont.body, fontWeight = FontWeight.Medium)
                                                     if (peer.isBotHub) {
                                                         TagPill(store.t("tsBotHubBadge"), p.lilac, p.lilacInk)
                                                     }
@@ -769,7 +770,7 @@ fun ConnectScreen(
                                                 Text(
                                                     text = peer.dnsName ?: peer.ip ?: peer.address,
                                                     color = p.text2,
-                                                    fontSize = 12.sp,
+                                                    fontSize = PebbleFont.caption,
                                                     fontFamily = MonoFont,
                                                     maxLines = 1,
                                                     overflow = TextOverflow.Ellipsis,
@@ -787,7 +788,7 @@ fun ConnectScreen(
                                 ) {
                                     Icon(Icons.Rounded.VpnKey, contentDescription = null, tint = p.accent, modifier = Modifier.size(18.dp))
                                     Spacer(Modifier.size(8.dp))
-                                    Text(store.t("tsNeedsLogin"), color = p.text, fontSize = 15.sp, modifier = Modifier.weight(1f))
+                                    Text(store.t("tsNeedsLogin"), color = p.text, fontSize = PebbleFont.body, modifier = Modifier.weight(1f))
                                     val auth = ts?.authUrl
                                     if (!auth.isNullOrBlank()) {
                                         Button(
@@ -798,7 +799,7 @@ fun ConnectScreen(
                                             },
                                             colors = ButtonDefaults.buttonColors(containerColor = p.accent, contentColor = p.onAccent),
                                         ) {
-                                            Text(store.t("tsOpenLogin"), fontSize = 13.sp)
+                                            Text(store.t("tsOpenLogin"), fontSize = PebbleFont.secondary)
                                         }
                                     }
                                 }
@@ -809,7 +810,7 @@ fun ConnectScreen(
                                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                                 ) {
                                     CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = p.accent)
-                                    Text(store.t("tsBinding"), color = p.text2, fontSize = 15.sp)
+                                    Text(store.t("tsBinding"), color = p.text2, fontSize = PebbleFont.body)
                                 }
                             }
                             else -> {
@@ -832,7 +833,7 @@ fun ConnectScreen(
                                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                                 ) {
                                     Icon(Icons.Rounded.Hub, contentDescription = null, tint = p.accent, modifier = Modifier.size(18.dp))
-                                    Text(store.t("tsBindAccount"), color = p.text, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                                    Text(store.t("tsBindAccount"), color = p.text, fontSize = PebbleFont.body, fontWeight = FontWeight.Medium)
                                 }
                                 CardDivider()
                                 Row(
@@ -843,7 +844,7 @@ fun ConnectScreen(
                                         .padding(vertical = 6.dp, horizontal = 4.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
-                                    Text(store.t("tsAdvanced"), color = p.text2, fontSize = 14.sp, modifier = Modifier.weight(1f))
+                                    Text(store.t("tsAdvanced"), color = p.text2, fontSize = PebbleFont.secondary, modifier = Modifier.weight(1f))
                                     Icon(
                                         imageVector = if (tsAdvOpen) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
                                         contentDescription = null,
@@ -858,7 +859,7 @@ fun ConnectScreen(
                                             placeholder = { Text(store.t("tsAuthKeyPh"), fontFamily = MonoFont) },
                                             singleLine = true,
                                             visualTransformation = PasswordVisualTransformation(),
-                                            textStyle = TextStyle(fontFamily = MonoFont, fontSize = 14.sp),
+                                            textStyle = TextStyle(fontFamily = MonoFont, fontSize = PebbleFont.secondary),
                                             shape = PebbleDimens.rowShape,
                                             colors = pebbleFieldColors(),
                                             modifier = Modifier.fillMaxWidth(),
@@ -868,7 +869,7 @@ fun ConnectScreen(
                                             onValueChange = { tsControlUrl = it },
                                             placeholder = { Text(store.t("tsControlUrlPh"), fontFamily = MonoFont) },
                                             singleLine = true,
-                                            textStyle = TextStyle(fontFamily = MonoFont, fontSize = 14.sp),
+                                            textStyle = TextStyle(fontFamily = MonoFont, fontSize = PebbleFont.secondary),
                                             shape = PebbleDimens.rowShape,
                                             colors = pebbleFieldColors(),
                                             modifier = Modifier.fillMaxWidth(),
@@ -925,11 +926,11 @@ private fun SavedHostRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(server.label, color = p.text, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+            Text(server.label, color = p.text, fontSize = PebbleFont.cardTitle, fontWeight = FontWeight.Medium)
             Text(
                 text = server.address,
                 color = p.text2,
-                fontSize = 13.sp,
+                fontSize = PebbleFont.secondary,
                 fontFamily = MonoFont,
                 maxLines = 1,
                 overflow = TextOverflow.MiddleEllipsis,

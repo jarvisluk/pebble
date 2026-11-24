@@ -115,7 +115,7 @@ struct ChatView: View {
                             HStack(spacing: 6) {
                                 titleView
                                 Image(systemName: "chevron.down")
-                                    .font(.system(size: 11, weight: .semibold))
+                                    .font(.system(size: AppFont.caption, weight: .semibold))
                                     .foregroundStyle(.secondary)
                             }
                         }
@@ -127,7 +127,7 @@ struct ChatView: View {
                     if let onCloseSidebar {
                         Button { onCloseSidebar() } label: {
                             Image(systemName: "xmark")
-                                .font(.system(size: 12, weight: .semibold))
+                                .font(.system(size: AppFont.caption, weight: .semibold))
                         }
                         .buttonStyle(.borderless)
                         .accessibilityLabel(hub.t("close"))
@@ -213,7 +213,7 @@ struct ChatView: View {
                             HStack(spacing: 6) {
                                 titleView
                                 Image(systemName: "chevron.down")
-                                    .font(.system(size: 11, weight: .semibold))
+                                    .font(.system(size: AppFont.caption, weight: .semibold))
                                     .foregroundStyle(.secondary)
                             }
                         }
@@ -352,7 +352,7 @@ struct ChatView: View {
                         ForEach(Array(timelineEntries.enumerated()), id: \.element.id) { i, entry in
                             let prevAt = i > 0 ? timelineEntries[i - 1].createdAt : nil
                             if showStamp(entry.createdAt, prevAt) {
-                                Text(formatStamp(entry.createdAt)).font(.system(size: 13)).foregroundStyle(p.mute)
+                                Text(formatStamp(entry.createdAt)).font(.system(size: AppFont.caption)).foregroundStyle(p.mute)
                                     .frame(maxWidth: .infinity).padding(.top, 4)
                             }
                             switch entry {
@@ -367,10 +367,10 @@ struct ChatView: View {
                                     HStack(spacing: 8) {
                                         BotAvatar(id: peerId, size: 16, index: peerIdx, avatar: peerBot?.avatar, color: peerBot?.color)
                                         Text("\(hub.t("collabWith", ["peer": peerName])) · \(hub.t("collabCount", ["count": "\(items.count)"]))")
-                                            .font(.system(size: 13, weight: .semibold))
+                                            .font(.system(size: AppFont.caption, weight: .semibold))
                                             .foregroundStyle(peerCollab.ink)
                                         Image(systemName: "chevron.right")
-                                            .font(.system(size: 11, weight: .semibold))
+                                            .font(.system(size: AppFont.caption, weight: .semibold))
                                             .foregroundStyle(peerCollab.ink.opacity(0.75))
                                     }
                                     .padding(.horizontal, 12).padding(.vertical, 7)
@@ -475,15 +475,15 @@ struct ChatView: View {
                                     HStack(spacing: 10) {
                                         VStack(alignment: .leading, spacing: 2) {
                                             Text("/\(cmd.name)" + ((cmd.argumentHint ?? "").isEmpty ? "" : " \(cmd.argumentHint!)"))
-                                                .font(.system(size: 15, weight: .medium, design: .monospaced))
+                                                .font(.system(size: AppFont.body, weight: .medium, design: .monospaced))
                                                 .foregroundStyle(p.text)
                                             if let d = cmd.description, !d.isEmpty {
-                                                Text(d).font(.system(size: 12)).foregroundStyle(p.mute).lineLimit(1)
+                                                Text(d).font(.system(size: AppFont.caption)).foregroundStyle(p.mute).lineLimit(1)
                                             }
                                         }
                                         Spacer()
                                         Text(sourceLabel(cmd.source))
-                                            .font(.system(size: 11, weight: .semibold))
+                                            .font(.system(size: AppFont.caption, weight: .semibold))
                                             .foregroundStyle(p.text2)
                                             .padding(.horizontal, 8).padding(.vertical, 3)
                                             .background(p.s1, in: Capsule())
@@ -502,16 +502,16 @@ struct ChatView: View {
                                     HStack(spacing: 10) {
                                         VStack(alignment: .leading, spacing: 2) {
                                             Text(item.kind == "file" ? item.value : "@\(item.value)")
-                                                .font(.system(size: 15, weight: .medium, design: .monospaced))
+                                                .font(.system(size: AppFont.body, weight: .medium, design: .monospaced))
                                                 .foregroundStyle(p.text)
                                                 .lineLimit(1)
                                             if let d = item.description, !d.isEmpty, d != item.value {
-                                                Text(d).font(.system(size: 12)).foregroundStyle(p.mute).lineLimit(1)
+                                                Text(d).font(.system(size: AppFont.caption)).foregroundStyle(p.mute).lineLimit(1)
                                             }
                                         }
                                         Spacer()
                                         Text(mentionLabel(item.kind))
-                                            .font(.system(size: 11, weight: .semibold))
+                                            .font(.system(size: AppFont.caption, weight: .semibold))
                                             .foregroundStyle(p.text2)
                                             .padding(.horizontal, 8).padding(.vertical, 3)
                                             .background(p.s1, in: Capsule())
@@ -544,10 +544,10 @@ struct ChatView: View {
                                     } else {
                                         HStack(spacing: 6) {
                                             Image(systemName: "doc")
-                                                .font(.system(size: 14))
+                                                .font(.system(size: AppFont.secondary))
                                                 .foregroundStyle(p.text2)
                                             Text(att.name)
-                                                .font(.system(size: 13))
+                                                .font(.system(size: AppFont.secondary))
                                                 .foregroundStyle(p.text)
                                                 .lineLimit(1)
                                             if att.uploading {
@@ -567,7 +567,7 @@ struct ChatView: View {
                                     pendingAttachments.removeAll { $0.id == att.id }
                                 } label: {
                                     Image(systemName: "xmark.circle.fill")
-                                        .font(.system(size: 16))
+                                        .font(.system(size: AppFont.cardTitle))
                                         .foregroundStyle(p.text, p.card)
                                 }
                                 .offset(x: 5, y: -5)
@@ -599,7 +599,7 @@ struct ChatView: View {
                 Button { showFileImporter = true } label: { Label(hub.t("chooseFile"), systemImage: "doc") }
             } label: {
                 Image(systemName: "plus")
-                    .font(.system(size: 17, weight: .semibold))
+                    .font(.system(size: AppFont.cardTitle, weight: .semibold))
                     .frame(width: 28, height: 28)
             }
             .composerGlassButton()
@@ -607,7 +607,7 @@ struct ChatView: View {
             #else
             Button { showFileImporter = true } label: {
                 Image(systemName: "plus")
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.system(size: AppFont.cardTitle, weight: .semibold))
                     .frame(width: 28, height: 28)
             }
             .composerGlassButton()
@@ -658,7 +658,7 @@ struct ChatView: View {
                 showStop ? interrupt() : submit()
             } label: {
                 Image(systemName: showStop ? "stop.fill" : "arrow.up")
-                    .font(.system(size: showStop ? 13 : 17, weight: .bold))
+                    .font(.system(size: showStop ? AppFont.secondary : AppFont.cardTitle, weight: .bold))
                     .frame(width: 28, height: 28)
             }
             .composerSendButton(accent: showStop ? p.danger : pal.accent)
@@ -773,7 +773,7 @@ struct MessageBubble: View {
                 Spacer(minLength: 48)
                 VStack(alignment: .trailing, spacing: 6) {
                     if !msg.body.isEmpty {
-                        Text(msg.body).font(.system(size: 16)).textSelection(.enabled)
+                        Text(msg.body).font(.system(size: AppFont.body)).textSelection(.enabled)
                     }
                     mediaGrid
                 }
@@ -793,14 +793,14 @@ struct MessageBubble: View {
             VStack(alignment: .leading, spacing: 6) {
                 if let from = msg.from, from.hasPrefix("routine:") {
                     Text(hub.t("routineReceiptFrom", ["name": String(from.dropFirst(8))]))
-                        .font(.system(size: 13, weight: .semibold)).foregroundStyle(p.accent)
+                        .font(.system(size: AppFont.caption, weight: .semibold)).foregroundStyle(p.accent)
                 }
                 if !msg.body.isEmpty {
                     MarkdownText(text: msg.body)
                 }
                 mediaGrid
                 if !meta.isEmpty {
-                    Text(meta.joined(separator: " · ")).font(.system(size: 13)).foregroundStyle(p.mute)
+                    Text(meta.joined(separator: " · ")).font(.system(size: AppFont.caption)).foregroundStyle(p.mute)
                 }
             }
             .padding(.horizontal, 16).padding(.vertical, 10)
@@ -818,7 +818,7 @@ struct MessageBubble: View {
                 if showCollabHeader {
                     let peerDisplay = hub.bots.first { $0.id == peerId }?.displayName ?? peerId
                     Text(isOut ? hub.t("delegateTo", ["peer": peerDisplay]) : hub.t("fromPeer", ["peer": peerDisplay]))
-                        .font(.system(size: 13, weight: .semibold)).foregroundStyle(senderCollab.ink)
+                        .font(.system(size: AppFont.caption, weight: .semibold)).foregroundStyle(senderCollab.ink)
                 }
                 if !msg.body.isEmpty {
                     MarkdownText(text: msg.body)
@@ -832,7 +832,7 @@ struct MessageBubble: View {
         default:
             if msg.from == "command" {
                 Text(msg.body)
-                    .font(.system(size: 15, design: .monospaced))
+                    .font(.system(size: AppFont.secondary, design: .monospaced))
                     .foregroundStyle(p.text)
                     .textSelection(.enabled)
                     .padding(.horizontal, 16).padding(.vertical, 10)
@@ -840,7 +840,7 @@ struct MessageBubble: View {
                     .padding(.trailing, 24)
             } else {
                 Text(msg.body)
-                    .font(.system(size: 13))
+                    .font(.system(size: AppFont.caption))
                     .foregroundStyle(msg.from == "error" ? p.danger : p.mute)
                     .multilineTextAlignment(.center)
                     .textSelection(.enabled)
@@ -913,16 +913,16 @@ struct FileAttachmentRow: View {
             } label: {
                 HStack(spacing: 10) {
                     Image(systemName: "doc.fill")
-                        .font(.system(size: 16))
+                        .font(.system(size: AppFont.cardTitle))
                         .foregroundStyle(p.text2)
                     VStack(alignment: .leading, spacing: 1) {
                         Text(displayName)
-                            .font(.system(size: 14, weight: .semibold))
+                            .font(.system(size: AppFont.secondary, weight: .semibold))
                             .foregroundStyle(p.text)
                             .lineLimit(1)
                         if !sizeLabel.isEmpty {
                             Text(sizeLabel)
-                                .font(.system(size: 12))
+                                .font(.system(size: AppFont.caption))
                                 .foregroundStyle(p.mute)
                         }
                     }
@@ -931,7 +931,7 @@ struct FileAttachmentRow: View {
                         ProgressView().controlSize(.small)
                     } else {
                         Image(systemName: "arrow.down.circle")
-                            .font(.system(size: 17))
+                            .font(.system(size: AppFont.cardTitle))
                             .foregroundStyle(p.mute)
                     }
                 }
@@ -943,7 +943,7 @@ struct FileAttachmentRow: View {
             .disabled(loading)
 
             if !errMsg.isEmpty {
-                Text(errMsg).font(.system(size: 12)).foregroundStyle(p.danger)
+                Text(errMsg).font(.system(size: AppFont.caption)).foregroundStyle(p.danger)
             }
         }
         #if os(iOS)
@@ -1097,7 +1097,7 @@ struct CollabSheetView: View {
                     ProgressView().frame(maxWidth: .infinity).padding(.top, 40)
                 } else if items.isEmpty {
                     Text(hub.t("collabEmpty"))
-                        .font(.system(size: 15))
+                        .font(.system(size: AppFont.body))
                         .foregroundStyle(p.mute)
                         .frame(maxWidth: .infinity)
                         .padding(.top, 40)
@@ -1114,7 +1114,7 @@ struct CollabSheetView: View {
                                     BotAvatar(id: senderId, size: 18, index: senderIdx, avatar: senderObj?.avatar, color: senderObj?.color)
                                 }
                                 Text(isOut ? hub.t("delegateTo", ["peer": peerName]) : hub.t("fromPeer", ["peer": peerName]))
-                                    .font(.system(size: 12, weight: .semibold))
+                                    .font(.system(size: AppFont.caption, weight: .semibold))
                                     .foregroundStyle(collab.ink)
                                 if isOut {
                                     BotAvatar(id: senderId, size: 18, index: senderIdx, avatar: senderObj?.avatar, color: senderObj?.color)
@@ -1134,7 +1134,7 @@ struct CollabSheetView: View {
                 HStack(spacing: 8) {
                     BotAvatar(id: peerId, size: 22, index: peerIdx, avatar: peerObj?.avatar, color: peerObj?.color)
                     Text(hub.t("collabTitle", ["bot": botName, "peer": peerName]))
-                        .font(.system(size: 17, weight: .bold))
+                        .font(.system(size: AppFont.title, weight: .bold))
                         .lineLimit(1)
                 }
             }
@@ -1173,10 +1173,10 @@ struct QuestionCardView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text((question.title ?? "").isEmpty ? hub.t("questionTitle") : question.title!)
-                    .font(.system(size: 16, weight: .bold)).foregroundStyle(p.text)
+                    .font(.system(size: AppFont.cardTitle, weight: .bold)).foregroundStyle(p.text)
                 Spacer()
                 Text(hub.t("questionWaitingBadge"))
-                    .font(.system(size: 12, weight: .semibold)).foregroundStyle(p.busy)
+                    .font(.system(size: AppFont.caption, weight: .semibold)).foregroundStyle(p.busy)
                     .padding(.horizontal, 8).padding(.vertical, 3)
                     .background(p.s1, in: Capsule())
             }
@@ -1208,16 +1208,16 @@ struct QuestionCardView: View {
             if !(f.title ?? "").isEmpty || isMulti {
                 HStack {
                     if let title = f.title, !title.isEmpty {
-                        Text(title).font(.system(size: 15, weight: .semibold)).foregroundStyle(p.text)
+                        Text(title).font(.system(size: AppFont.body, weight: .semibold)).foregroundStyle(p.text)
                     }
                     Spacer()
                     if isMulti {
-                        Text(hub.t("questionMultiHint")).font(.system(size: 12)).foregroundStyle(p.mute)
+                        Text(hub.t("questionMultiHint")).font(.system(size: AppFont.caption)).foregroundStyle(p.mute)
                     }
                 }
             }
             if let desc = f.description, !desc.isEmpty {
-                Text(desc).font(.system(size: 14)).foregroundStyle(p.text2)
+                Text(desc).font(.system(size: AppFont.secondary)).foregroundStyle(p.text2)
             }
 
             if f.type == "boolean" {
@@ -1244,9 +1244,9 @@ struct QuestionCardView: View {
                         } label: {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text((opt.label ?? "").isEmpty ? opt.value : opt.label!)
-                                    .font(.system(size: 15, weight: .semibold)).foregroundStyle(p.text)
+                                    .font(.system(size: AppFont.body, weight: .semibold)).foregroundStyle(p.text)
                                 if let d = opt.description, !d.isEmpty {
-                                    Text(d).font(.system(size: 12)).foregroundStyle(p.text2)
+                                    Text(d).font(.system(size: AppFont.caption)).foregroundStyle(p.text2)
                                 }
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -1267,7 +1267,7 @@ struct QuestionCardView: View {
                             }
                         ))
                         .textFieldStyle(.plain)
-                        .font(.system(size: 14))
+                        .font(.system(size: AppFont.secondary))
                         .padding(.horizontal, 12).padding(.vertical, 9)
                         .background(p.s1, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                         .disabled(submitting)
@@ -1279,7 +1279,7 @@ struct QuestionCardView: View {
                     set: { singles[f.key] = $0 }
                 ))
                 .textFieldStyle(.plain)
-                .font(.system(size: 14))
+                .font(.system(size: AppFont.secondary))
                 .padding(.horizontal, 12).padding(.vertical, 9)
                 .background(p.s1, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .disabled(submitting)
@@ -1293,7 +1293,7 @@ struct QuestionCardView: View {
             bools[key] = value
         } label: {
             Text(label)
-                .font(.system(size: 15, weight: .semibold)).foregroundStyle(p.text)
+                .font(.system(size: AppFont.body, weight: .semibold)).foregroundStyle(p.text)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 10)
                 .background(active ? pal.soft : p.s1, in: RoundedRectangle(cornerRadius: 12, style: .continuous))

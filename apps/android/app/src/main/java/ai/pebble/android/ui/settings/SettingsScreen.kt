@@ -98,6 +98,7 @@ import ai.pebble.android.data.resolveDefaultModel
 import ai.pebble.android.notify.NotificationHelper
 import ai.pebble.android.ui.bots.MemoryItemRow
 import ai.pebble.android.ui.theme.BotAvatar
+import ai.pebble.android.ui.theme.PebbleFont
 import ai.pebble.android.ui.theme.CardDivider
 import ai.pebble.android.ui.theme.ConfirmAlertDialog
 import ai.pebble.android.ui.theme.ConfirmItem
@@ -149,7 +150,7 @@ fun SettingsSidebar(
                 }
             },
             title = {
-                Text(store.t("settings"), fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                Text(store.t("settings"), fontSize = PebbleFont.title, fontWeight = FontWeight.Bold)
             },
         )
 
@@ -177,7 +178,7 @@ fun SettingsSidebar(
                         Text(
                             text = store.t(tab.titleKey),
                             color = p.text,
-                            fontSize = 16.sp,
+                            fontSize = PebbleFont.cardTitle,
                             fontWeight = FontWeight.Medium,
                             modifier = Modifier.weight(1f),
                         )
@@ -462,7 +463,7 @@ fun SettingsDetailScreen(
                     }
                 },
                 title = {
-                    Text(store.t(tab.titleKey), fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                    Text(store.t(tab.titleKey), fontSize = PebbleFont.title, fontWeight = FontWeight.Bold)
                 },
                 actions = {
                     if (saving) {
@@ -472,7 +473,7 @@ fun SettingsDetailScreen(
                             Text(
                                 text = store.t("save"),
                                 color = if (dirty) p.accent else p.mute,
-                                fontSize = 15.sp,
+                                fontSize = PebbleFont.body,
                                 fontWeight = FontWeight.SemiBold,
                             )
                         }
@@ -527,7 +528,7 @@ fun SettingsDetailScreen(
                                             selected = store.themePref == key,
                                             onClick = { store.updateThemePref(key) },
                                             shape = SegmentedButtonDefaults.itemShape(idx, themes.size),
-                                            label = { Text(lbl, fontSize = 13.sp, maxLines = 1) },
+                                            label = { Text(lbl, fontSize = PebbleFont.secondary, maxLines = 1) },
                                         )
                                     }
                                 }
@@ -537,14 +538,14 @@ fun SettingsDetailScreen(
                                     "zh-CN" to "简体中文",
                                     "en" to "English",
                                 )
-                                Text(store.t("language"), color = p.text2, fontSize = 13.sp)
+                                Text(store.t("language"), color = p.text2, fontSize = PebbleFont.secondary)
                                 SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
                                     langs.forEachIndexed { idx, (key, lbl) ->
                                         SegmentedButton(
                                             selected = store.langPref == key,
                                             onClick = { store.updateLangPref(key) },
                                             shape = SegmentedButtonDefaults.itemShape(idx, langs.size),
-                                            label = { Text(lbl, fontSize = 13.sp, maxLines = 1) },
+                                            label = { Text(lbl, fontSize = PebbleFont.secondary, maxLines = 1) },
                                         )
                                     }
                                 }
@@ -558,9 +559,9 @@ fun SettingsDetailScreen(
                                 verticalArrangement = Arrangement.spacedBy(10.dp),
                             ) {
                                 Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                    Text(store.t("pushSystemPerm"), color = p.text, fontSize = 15.sp, modifier = Modifier.weight(1f))
+                                    Text(store.t("pushSystemPerm"), color = p.text, fontSize = PebbleFont.body, modifier = Modifier.weight(1f))
                                     if (notifGranted) {
-                                        Text(store.t("pushGranted"), color = p.sageInk, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                                        Text(store.t("pushGranted"), color = p.sageInk, fontSize = PebbleFont.body, fontWeight = FontWeight.SemiBold)
                                     } else {
                                         TextButton(
                                             onClick = {
@@ -577,17 +578,17 @@ fun SettingsDetailScreen(
                                             },
                                             contentPadding = PaddingValues(horizontal = 8.dp),
                                         ) {
-                                            Text(store.t("pushEnable"), color = p.accent, fontSize = 14.sp)
+                                            Text(store.t("pushEnable"), color = p.accent, fontSize = PebbleFont.body)
                                         }
                                     }
                                 }
                                 CardDivider()
                                 Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                    Text(store.t("pushAndroidChannel"), color = p.text2, fontSize = 14.sp, modifier = Modifier.weight(1f))
+                                    Text(store.t("pushAndroidChannel"), color = p.text2, fontSize = PebbleFont.secondary, modifier = Modifier.weight(1f))
                                     Text(
                                         text = if (notifGranted) store.t("pushEnabled") else store.t("pushDisabled"),
                                         color = if (notifGranted) p.sageInk else p.mute,
-                                        fontSize = 14.sp,
+                                        fontSize = PebbleFont.secondary,
                                     )
                                 }
                             }
@@ -599,7 +600,7 @@ fun SettingsDetailScreen(
                                 modifier = Modifier.padding(14.dp),
                                 verticalArrangement = Arrangement.spacedBy(10.dp),
                             ) {
-                                Text(store.t("openSourceDesc"), color = p.text2, fontSize = 14.sp)
+                                Text(store.t("openSourceDesc"), color = p.text2, fontSize = PebbleFont.secondary)
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -614,7 +615,7 @@ fun SettingsDetailScreen(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 ) {
                                     Icon(Icons.Rounded.Star, contentDescription = null, tint = p.accent, modifier = Modifier.size(18.dp))
-                                    Text(store.t("openSourceLinkBtn"), color = p.accent, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                                    Text(store.t("openSourceLinkBtn"), color = p.accent, fontSize = PebbleFont.body, fontWeight = FontWeight.Medium)
                                 }
                             }
                         }
@@ -647,7 +648,7 @@ fun SettingsDetailScreen(
                             ) {
                                 when {
                                     !installed -> {
-                                        Text(store.t("hostNoMagpieGlobal"), color = p.text2, fontSize = 15.sp)
+                                        Text(store.t("hostNoMagpieGlobal"), color = p.text2, fontSize = PebbleFont.body)
                                         OutlinedButton(
                                             onClick = {
                                                 runOp("magpie:install", "opFailed") {
@@ -667,7 +668,7 @@ fun SettingsDetailScreen(
                                         }
                                     }
                                     connectedHarnesses.isEmpty() -> {
-                                        Text(store.t("mpNoConnected"), color = p.text2, fontSize = 15.sp)
+                                        Text(store.t("mpNoConnected"), color = p.text2, fontSize = PebbleFont.body)
                                     }
                                     else -> {
                                         connectedHarnesses.forEachIndexed { idx, h ->
@@ -679,9 +680,9 @@ fun SettingsDetailScreen(
                                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                                             ) {
                                                 Column(modifier = Modifier.weight(1f)) {
-                                                    Text(h.title, color = p.text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                                                    Text(h.title, color = p.text, fontSize = PebbleFont.cardTitle, fontWeight = FontWeight.SemiBold)
                                                     val m = h.magpie?.model?.takeIf { it.isNotEmpty() } ?: store.t("mpConnected")
-                                                    Text("Magpie · $m", color = p.sageInk, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                                    Text("Magpie · $m", color = p.sageInk, fontSize = PebbleFont.secondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                                 }
                                                 OutlinedButton(
                                                     onClick = {
@@ -698,7 +699,7 @@ fun SettingsDetailScreen(
                                                     enabled = busy != key,
                                                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
                                                 ) {
-                                                    Text(store.t("mpRestore"), color = p.danger, fontSize = 13.sp)
+                                                    Text(store.t("mpRestore"), color = p.danger, fontSize = PebbleFont.secondary)
                                                 }
                                             }
                                         }
@@ -715,7 +716,7 @@ fun SettingsDetailScreen(
                                 Text(
                                     text = if (webUrl.isNotEmpty() && !local) store.t("mpOpenWeb") else store.t("mpOpenApp"),
                                     color = p.accent,
-                                    fontSize = 15.sp,
+                                    fontSize = PebbleFont.body,
                                     fontWeight = FontWeight.Medium,
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -749,9 +750,9 @@ fun SettingsDetailScreen(
                                         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                                                 Column(modifier = Modifier.weight(1f)) {
-                                                    Text(h.title, color = p.text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                                                    Text(h.title, color = p.text, fontSize = PebbleFont.cardTitle, fontWeight = FontWeight.SemiBold)
                                                     val nm = h.magpie?.nativeModel?.takeIf { it.isNotEmpty() }?.let { " · $it" }.orEmpty()
-                                                    Text(store.t("mpNative") + nm, color = p.text2, fontSize = 13.sp, maxLines = 1)
+                                                    Text(store.t("mpNative") + nm, color = p.text2, fontSize = PebbleFont.secondary, maxLines = 1)
                                                 }
                                                 if (installed) {
                                                     OutlinedButton(
@@ -759,7 +760,7 @@ fun SettingsDetailScreen(
                                                         enabled = busy != key,
                                                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
                                                     ) {
-                                                        Text(store.t("mpConnectAction"), color = p.accent, fontSize = 13.sp)
+                                                        Text(store.t("mpConnectAction"), color = p.accent, fontSize = PebbleFont.secondary)
                                                     }
                                                 }
                                             }
@@ -802,8 +803,8 @@ fun SettingsDetailScreen(
                                             .padding(vertical = 8.dp),
                                         verticalAlignment = Alignment.CenterVertically,
                                     ) {
-                                        Text(store.t("defaultHarness"), color = p.text2, fontSize = 15.sp, modifier = Modifier.weight(1f))
-                                        Text(harnesses.firstOrNull { it.id == defaultHarness }?.title ?: defaultHarness, color = p.text, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                                        Text(store.t("defaultHarness"), color = p.text2, fontSize = PebbleFont.body, modifier = Modifier.weight(1f))
+                                        Text(harnesses.firstOrNull { it.id == defaultHarness }?.title ?: defaultHarness, color = p.text, fontSize = PebbleFont.body, fontWeight = FontWeight.Medium)
                                         Icon(Icons.Rounded.ArrowDropDown, contentDescription = null, tint = p.mute)
                                     }
                                     DropdownMenu(expanded = defHarnessOpen, onDismissRequest = { defHarnessOpen = false }, containerColor = p.card) {
@@ -849,13 +850,13 @@ fun SettingsDetailScreen(
                                         .padding(vertical = 6.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
-                                    Text(store.t("perHarnessTitle"), color = p.text2, fontSize = 14.sp, modifier = Modifier.weight(1f))
+                                    Text(store.t("perHarnessTitle"), color = p.text2, fontSize = PebbleFont.secondary, modifier = Modifier.weight(1f))
                                     Icon(if (perOpen) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore, contentDescription = null, tint = p.mute)
                                 }
                                 AnimatedVisibility(visible = perOpen) {
                                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                         harnesses.forEach { h ->
-                                            Text(h.title, color = p.text2, fontSize = 13.sp)
+                                            Text(h.title, color = p.text2, fontSize = PebbleFont.secondary)
                                             ModelInputWithMenu(
                                                 value = perHarness[h.id].orEmpty(),
                                                 placeholder = store.t("followGlobalPh"),
@@ -885,7 +886,7 @@ fun SettingsDetailScreen(
                                 verticalArrangement = Arrangement.spacedBy(10.dp),
                             ) {
                                 if (store.bots.isEmpty()) {
-                                    Text(store.t("noBotsInSettings"), color = p.mute, fontSize = 15.sp)
+                                    Text(store.t("noBotsInSettings"), color = p.mute, fontSize = PebbleFont.body)
                                 } else {
                                     store.bots.forEachIndexed { idx, b ->
                                         if (idx > 0) CardDivider()
@@ -898,12 +899,12 @@ fun SettingsDetailScreen(
                                             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                                                 BotAvatar(id = b.id, size = 28.dp, index = idx, avatar = b.avatar, color = b.color)
                                                 Column(modifier = Modifier.weight(1f)) {
-                                                    Text(b.displayName, color = p.text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-                                                    Text("@${b.id}", color = p.text2, fontSize = 12.sp, fontFamily = MonoFont)
+                                                    Text(b.displayName, color = p.text, fontSize = PebbleFont.cardTitle, fontWeight = FontWeight.SemiBold)
+                                                    Text("@${b.id}", color = p.text2, fontSize = PebbleFont.caption, fontFamily = MonoFont)
                                                 }
                                                 Box {
                                                     TextButton(onClick = { botHarnessMenu = true }) {
-                                                        Text(d.harness.ifEmpty { "-" }, color = p.accent, fontSize = 14.sp)
+                                                        Text(d.harness.ifEmpty { "-" }, color = p.accent, fontSize = PebbleFont.secondary)
                                                         Icon(Icons.Rounded.ArrowDropDown, contentDescription = null, tint = p.accent, modifier = Modifier.size(18.dp))
                                                     }
                                                     DropdownMenu(expanded = botHarnessMenu, onDismissRequest = { botHarnessMenu = false }, containerColor = p.card) {
@@ -953,7 +954,7 @@ fun SettingsDetailScreen(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 ) {
                                     Icon(Icons.Rounded.Add, contentDescription = null, tint = p.accent, modifier = Modifier.size(18.dp))
-                                    Text(store.t("newBot"), color = p.accent, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                                    Text(store.t("newBot"), color = p.accent, fontSize = PebbleFont.body, fontWeight = FontWeight.Medium)
                                 }
                             }
                         }
@@ -1000,12 +1001,12 @@ fun SettingsDetailScreen(
                                         Spacer(Modifier.weight(1f))
                                         if (sem.active != true) {
                                             TextButton(onClick = { runOp("magpie:open", "opFailed") { store.openMagpie(); null } }) {
-                                                Text(store.t("openMagpie"), color = p.accent, fontSize = 13.sp)
+                                                Text(store.t("openMagpie"), color = p.accent, fontSize = PebbleFont.secondary)
                                             }
                                         }
                                     }
                                     if (sem.active != true) {
-                                        Text(store.t("memSemanticHintOff"), color = p.text2, fontSize = 13.sp)
+                                        Text(store.t("memSemanticHintOff"), color = p.text2, fontSize = PebbleFont.secondary)
                                     }
                                 }
 
@@ -1019,7 +1020,7 @@ fun SettingsDetailScreen(
                                                 scope.launch { loadMem(memQuery, scopeVal = sc) }
                                             },
                                             shape = SegmentedButtonDefaults.itemShape(idx, scopes.size),
-                                            label = { Text(lbl, fontSize = 13.sp) },
+                                            label = { Text(lbl, fontSize = PebbleFont.secondary) },
                                         )
                                     }
                                 }
@@ -1034,8 +1035,8 @@ fun SettingsDetailScreen(
                                             .padding(vertical = 6.dp),
                                         verticalAlignment = Alignment.CenterVertically,
                                     ) {
-                                        Text(store.t("memType"), color = p.text2, fontSize = 14.sp, modifier = Modifier.weight(1f))
-                                        Text(memFilterKind.ifEmpty { store.t("memKindAll") }, color = p.text, fontSize = 14.sp)
+                                        Text(store.t("memType"), color = p.text2, fontSize = PebbleFont.secondary, modifier = Modifier.weight(1f))
+                                        Text(memFilterKind.ifEmpty { store.t("memKindAll") }, color = p.text, fontSize = PebbleFont.secondary)
                                         Icon(Icons.Rounded.ArrowDropDown, contentDescription = null, tint = p.mute)
                                     }
                                     DropdownMenu(expanded = kindMenuOpen, onDismissRequest = { kindMenuOpen = false }, containerColor = p.card) {
@@ -1081,7 +1082,7 @@ fun SettingsDetailScreen(
                                 val m = mem
                                 when {
                                     m?.installed != true -> {
-                                        Text(store.t("hostNoMagpieGlobal"), color = p.text2, fontSize = 14.sp)
+                                        Text(store.t("hostNoMagpieGlobal"), color = p.text2, fontSize = PebbleFont.secondary)
                                         OutlinedButton(
                                             onClick = {
                                                 runOp("magpie:install", "opFailed") {
@@ -1097,10 +1098,10 @@ fun SettingsDetailScreen(
                                     }
                                     m.available != true -> {
                                         val detailErr = m.error?.takeIf { it.isNotEmpty() }?.let { ": $it" }.orEmpty()
-                                        Text(store.t("magpieNoResp") + detailErr, color = p.danger, fontSize = 14.sp)
+                                        Text(store.t("magpieNoResp") + detailErr, color = p.danger, fontSize = PebbleFont.secondary)
                                     }
                                     m.items.isNullOrEmpty() -> {
-                                        Text(store.t("noGlobalMem"), color = p.mute, fontSize = 14.sp)
+                                        Text(store.t("noGlobalMem"), color = p.mute, fontSize = PebbleFont.secondary)
                                     }
                                     else -> {
                                         m.items.forEachIndexed { idx, it ->
@@ -1137,7 +1138,7 @@ fun SettingsDetailScreen(
                                         .padding(vertical = 6.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
-                                    Text(store.t("addShort"), color = p.accent, fontSize = 15.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+                                    Text(store.t("addShort"), color = p.accent, fontSize = PebbleFont.body, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
                                     Icon(if (memAdd) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore, contentDescription = null, tint = p.mute)
                                 }
                                 AnimatedVisibility(visible = memAdd) {
@@ -1149,7 +1150,7 @@ fun SettingsDetailScreen(
                                                     selected = memKind == k,
                                                     onClick = { memKind = k },
                                                     shape = SegmentedButtonDefaults.itemShape(idx, kinds.size),
-                                                    label = { Text(k, fontSize = 12.sp, maxLines = 1) },
+                                                    label = { Text(k, fontSize = PebbleFont.caption, maxLines = 1) },
                                                 )
                                             }
                                         }
@@ -1216,7 +1217,7 @@ fun SettingsDetailScreen(
                                     if (deskPermsLoading) {
                                         CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = p.accent)
                                     } else {
-                                        Text(store.t("deskPermsDesc"), color = p.text2, fontSize = 14.sp)
+                                        Text(store.t("deskPermsDesc"), color = p.text2, fontSize = PebbleFont.secondary)
                                     }
                                 } else {
                                     deskPerms.forEachIndexed { idx, item ->
@@ -1241,10 +1242,10 @@ fun SettingsDetailScreen(
                                         val permDesc = store.t("deskPermDesc_${item.id}").let { if (it == "deskPermDesc_${item.id}") item.description else it }
                                         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                                Text(permName, color = p.text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                                                Text(permName, color = p.text, fontSize = PebbleFont.body, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                                                 TagPill(stLabel, bg, fg)
                                             }
-                                            Text(permDesc, color = p.text2, fontSize = 13.sp)
+                                            Text(permDesc, color = p.text2, fontSize = PebbleFont.secondary)
                                             if ((item.canPrompt == true && item.status != "granted") || item.canOpenSettings == true) {
                                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                                     if (item.canPrompt == true && item.status != "granted") {
@@ -1261,7 +1262,7 @@ fun SettingsDetailScreen(
                                                             colors = ButtonDefaults.buttonColors(containerColor = p.accent, contentColor = p.onAccent),
                                                             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
                                                         ) {
-                                                            Text(store.t("deskPermRequest"), fontSize = 13.sp)
+                                                            Text(store.t("deskPermRequest"), fontSize = PebbleFont.secondary)
                                                         }
                                                     }
                                                     if (item.canOpenSettings == true) {
@@ -1276,7 +1277,7 @@ fun SettingsDetailScreen(
                                                             enabled = busy != "perm:${item.id}",
                                                             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
                                                         ) {
-                                                            Text(store.t("deskPermOpenSettings"), fontSize = 13.sp, color = p.text)
+                                                            Text(store.t("deskPermOpenSettings"), fontSize = PebbleFont.secondary, color = p.text)
                                                         }
                                                     }
                                                 }
@@ -1295,7 +1296,7 @@ fun SettingsDetailScreen(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 ) {
                                     Icon(Icons.Rounded.DesktopWindows, contentDescription = null, tint = p.accent, modifier = Modifier.size(18.dp))
-                                    Text(store.t("openDesktop"), color = p.accent, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                                    Text(store.t("openDesktop"), color = p.accent, fontSize = PebbleFont.body, fontWeight = FontWeight.Medium)
                                 }
                             }
                         }
@@ -1317,11 +1318,11 @@ fun SettingsDetailScreen(
                                             .padding(vertical = 6.dp),
                                         verticalAlignment = Alignment.CenterVertically,
                                     ) {
-                                        Text(store.t("deskWorkerHarnessLabel"), color = p.text2, fontSize = 14.sp, modifier = Modifier.weight(1f))
+                                        Text(store.t("deskWorkerHarnessLabel"), color = p.text2, fontSize = PebbleFont.secondary, modifier = Modifier.weight(1f))
                                         Text(
                                             text = deskHarness.ifEmpty { store.t("deskWorkerFollowBot") },
                                             color = p.text,
-                                            fontSize = 14.sp,
+                                            fontSize = PebbleFont.secondary,
                                             fontWeight = FontWeight.Medium,
                                         )
                                         Icon(Icons.Rounded.ArrowDropDown, contentDescription = null, tint = p.mute)
@@ -1347,10 +1348,10 @@ fun SettingsDetailScreen(
                                     OutlinedTextField(
                                         value = deskModel,
                                         onValueChange = { deskModel = it; deskTouched = true },
-                                        label = { Text(store.t("deskWorkerModelLabel"), fontSize = 12.sp) },
+                                        label = { Text(store.t("deskWorkerModelLabel"), fontSize = PebbleFont.caption) },
                                         placeholder = { Text(store.t("deskWorkerModelPh"), fontFamily = MonoFont) },
                                         singleLine = true,
-                                        textStyle = TextStyle(fontFamily = MonoFont, fontSize = 14.sp),
+                                        textStyle = TextStyle(fontFamily = MonoFont, fontSize = PebbleFont.secondary),
                                         shape = PebbleDimens.rowShape,
                                         colors = pebbleFieldColors(),
                                         modifier = Modifier.weight(1f),
@@ -1401,8 +1402,8 @@ fun SettingsDetailScreen(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 ) {
                                     Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(hostColor))
-                                    Text(hostText, color = p.text, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                                    Text(store.t("switchHost"), color = p.mute, fontSize = 14.sp)
+                                    Text(hostText, color = p.text, fontSize = PebbleFont.body, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                                    Text(store.t("switchHost"), color = p.mute, fontSize = PebbleFont.secondary)
                                 }
                                 CardDivider()
                                 Row(
@@ -1415,7 +1416,7 @@ fun SettingsDetailScreen(
                                 ) {
                                     Icon(Icons.Rounded.DesktopWindows, contentDescription = null, tint = p.accent, modifier = Modifier.size(18.dp))
                                     val lbl = if (store.takeovers.isEmpty()) store.t("remoteDesktop") else "${store.t("remoteDesktop")} (${store.takeovers.size})"
-                                    Text(lbl, color = p.text, fontSize = 15.sp)
+                                    Text(lbl, color = p.text, fontSize = PebbleFont.body)
                                 }
                                 CardDivider()
                                 Row(
@@ -1429,7 +1430,7 @@ fun SettingsDetailScreen(
                                     Icon(Icons.Rounded.Devices, contentDescription = null, tint = p.accent, modifier = Modifier.size(18.dp))
                                     val n = store.nodes.count { it.connected == true }
                                     val lbl = if (n > 0) "${store.t("devicesTunnel")} ($n)" else store.t("devicesTunnel")
-                                    Text(lbl, color = p.text, fontSize = 15.sp)
+                                    Text(lbl, color = p.text, fontSize = PebbleFont.body)
                                 }
                             }
                         }
@@ -1463,9 +1464,9 @@ private fun ModelInputWithMenu(
         OutlinedTextField(
             value = value,
             onValueChange = onValueChange,
-            placeholder = { Text(placeholder, fontFamily = MonoFont, fontSize = 13.sp) },
+            placeholder = { Text(placeholder, fontFamily = MonoFont, fontSize = PebbleFont.secondary) },
             singleLine = true,
-            textStyle = TextStyle(fontFamily = MonoFont, fontSize = 14.sp),
+            textStyle = TextStyle(fontFamily = MonoFont, fontSize = PebbleFont.secondary),
             shape = PebbleDimens.rowShape,
             colors = pebbleFieldColors(),
             modifier = Modifier.weight(1f),
@@ -1491,7 +1492,7 @@ private fun ModelInputWithMenu(
                 } else {
                     candidates.take(40).forEach { m ->
                         DropdownMenuItem(
-                            text = { Text(m, fontFamily = MonoFont, fontSize = 13.sp, color = p.text) },
+                            text = { Text(m, fontFamily = MonoFont, fontSize = PebbleFont.secondary, color = p.text) },
                             onClick = { onValueChange(m); menuOpen = false },
                         )
                     }
