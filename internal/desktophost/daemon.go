@@ -337,7 +337,11 @@ func RunDaemon(ctx context.Context, opts DaemonOptions) error {
 	host.Load()
 
 	channel.DesktopResetFunc = func() { go host.Reset() }
-	defer func() { channel.DesktopResetFunc = nil }()
+	channel.OnAPITokenChanged = func(tok string) { host.SetLocalToken(tok) }
+	defer func() {
+		channel.DesktopResetFunc = nil
+		channel.OnAPITokenChanged = nil
+	}()
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

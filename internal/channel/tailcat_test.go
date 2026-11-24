@@ -238,3 +238,86 @@ func TestNodesHTTPHandlers(t *testing.T) {
 	}
 	<-done
 }
+
+func TestTailcatTokenCallbackAndSSEReset(t *testing.T) {
+	srv, _ := newTestServer(t, `{"bots":[{"id":"a","name":"A"}]}`)
+
+	var gotTokens []string
+	OnAPITokenChanged = func(tok string) {
+		gotTokens = append(gotTokens, tok)
+	}
+	t.Cleanup(func() { OnAPITokenChanged = nil })
+
+	// 1. Enabling tailcat when token is empty generates a token and notifies callback.
+	req := httptest.NewRequest("POST", "/api/tailcat", strings.NewReader(`{"enabled":true}`))
+	req.Host = "127.0.0.1:3789"
+	rec := httptest.NewRecorder()
+	srv.srv.Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /api/tailcat enable status %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp1 map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &resp1)
+	tok1, _ := resp1["apiToken"].(string)
+	if tok1 == "" || len(gotTokens) != 1 || gotTokens[0] != tok1 {
+		t.Fatalf("expected OnAPITokenChanged(%q), got %v", tok1, gotTokens)
+	}
+
+	// Turn off tailcat cleanly so no background tunnel goroutine lingers.
+	reqOff := httptest.NewRequest("POST", "/api/tailcat", strings.NewReader(`{"enabled":false}`))
+	reqOff.Host = "127.0.0.1:3789"
+	reqOff.Header.Set("Authorization", "Bearer "+tok1)
+	recOff := httptest.NewRecorder()
+	srv.srv.Handler.ServeHTTP(recOff, reqOff)
+	if recOff.Code != http.StatusOK {
+		t.Fatalf("POST /api/tailcat disable status %d: %s", recOff.Code, recOff.Body.String())
+	}
+
+	// 2. Open SSE stream closes when resetToken triggers notifyTokenChanged.
+	ts := httptest.NewServer(srv.srv.Handler)
+	defer ts.Close()
+
+	sseCtx, sseCancel := context.WithCancel(context.Background())
+	defer sseCancel()
+	sseReq, _ := http.NewRequestWithContext(sseCtx, "GET", ts.URL+"/api/events", nil)
+	sseReq.Header.Set("Authorization", "Bearer "+tok1)
+	sseResp, err := http.DefaultClient.Do(sseReq)
+	if err != nil {
+		t.Fatalf("GET /api/events error: %v", err)
+	}
+	defer sseResp.Body.Close()
+	if sseResp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /api/events status %d", sseResp.StatusCode)
+	}
+
+	sseDone := make(chan struct{})
+	go func() {
+		defer close(sseDone)
+		buf := make([]byte, 1024)
+		for {
+			if _, rerr := sseResp.Body.Read(buf); rerr != nil {
+				return
+			}
+		}
+	}()
+
+	resetReq, _ := http.NewRequest("POST", ts.URL+"/api/tailcat", strings.NewReader(`{"resetToken":true}`))
+	resetReq.Header.Set("Authorization", "Bearer "+tok1)
+	resetRec, err := http.DefaultClient.Do(resetReq)
+	if err != nil {
+		t.Fatalf("POST /api/tailcat resetToken error: %v", err)
+	}
+	var resp2 map[string]any
+	_ = json.NewDecoder(resetRec.Body).Decode(&resp2)
+	resetRec.Body.Close()
+	tok2, _ := resp2["apiToken"].(string)
+	if tok2 == "" || tok2 == tok1 || len(gotTokens) != 2 || gotTokens[1] != tok2 {
+		t.Fatalf("expected rotated token callback (%q -> %q), got %v", tok1, tok2, gotTokens)
+	}
+
+	select {
+	case <-sseDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected SSE /api/events stream to close after token rotation")
+	}
+}

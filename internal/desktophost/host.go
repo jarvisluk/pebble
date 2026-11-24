@@ -310,11 +310,23 @@ func (h *Host) startLocal(ctx context.Context, done chan struct{}) (string, stri
 		default:
 		}
 		if r, err := warmClient.Get(base + "/healthz"); err == nil {
-			r.Body.Close()
-			if sr, serr := warmClient.Get(base + "/api/settings"); serr == nil {
-				sr.Body.Close()
+			var hz struct {
+				OK  bool `json:"ok"`
+				PID int  `json:"pid"`
 			}
-			return base + "/", cfg.HTTP.APIToken, nil
+			_ = json.NewDecoder(r.Body).Decode(&hz)
+			r.Body.Close()
+			if r.StatusCode == http.StatusOK && (hz.PID == 0 || hz.PID == os.Getpid()) {
+				if req, rerr := http.NewRequestWithContext(ctx, http.MethodGet, base+"/api/settings", nil); rerr == nil {
+					if cfg.HTTP.APIToken != "" {
+						req.Header.Set("Authorization", "Bearer "+cfg.HTTP.APIToken)
+					}
+					if sr, serr := warmClient.Do(req); serr == nil {
+						sr.Body.Close()
+					}
+				}
+				return base + "/", cfg.HTTP.APIToken, nil
+			}
 		}
 	}
 	return "", "", errors.New("本机服务没有响应")
@@ -717,6 +729,20 @@ func (h *Host) setRemoteToken(tok string) {
 	}
 	if agent != nil {
 		agent.SetToken(tok)
+	}
+}
+
+// SetLocalToken updates the active token when running in local mode and notifies UI shells.
+func (h *Host) SetLocalToken(tok string) {
+	tok = strings.TrimSpace(tok)
+	h.mu.Lock()
+	changed := h.prefs.Mode == "local" && h.activeToken != tok
+	if changed {
+		h.activeToken = tok
+	}
+	h.mu.Unlock()
+	if changed {
+		h.notify()
 	}
 }
 
