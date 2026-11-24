@@ -18,18 +18,17 @@ struct SettingsSidebarView: View {
                     tabLabel(tab)
                         .font(.system(size: AppFont.body, weight: active ? .semibold : .regular))
                         .foregroundStyle(active ? p.text : p.text2)
-                        .padding(.horizontal, 10)
                         .padding(.vertical, 7)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(
-                            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .fill(active ? Color.primary.opacity(p.dark ? 0.14 : 0.08) : Color.clear)
-                        )
-                        .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .listRowInsets(EdgeInsets(top: 2, leading: 6, bottom: 2, trailing: 6))
-                .listRowBackground(Color.clear)
+                .listRowBackground(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(active ? Color.primary.opacity(p.dark ? 0.14 : 0.08) : Color.clear)
+                        .padding(.horizontal, 11)
+                )
                 .listRowSeparator(.hidden)
             }
         }
@@ -51,7 +50,7 @@ struct SettingsSidebarView: View {
                 .buttonStyle(.borderless)
                 Spacer()
             }
-            .padding(.horizontal, 14)
+            .padding(.horizontal, 12)
             .padding(.vertical, 8)
         }
         .navigationTitle("")

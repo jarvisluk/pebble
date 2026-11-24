@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -24,6 +25,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.ArrowDownward
 import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.Check
@@ -85,6 +87,7 @@ fun BotListScreen(
     onDeletedBot: (String) -> Unit,
     onOpenSettings: () -> Unit,
     onOpenDesktop: (String) -> Unit,
+    onCreateBot: (() -> Unit)? = null,
 ) {
     val p = LocalPalette.current
     val scope = rememberCoroutineScope()
@@ -149,15 +152,111 @@ fun BotListScreen(
             .fillMaxSize()
             .background(if (compact) p.page else p.card),
     ) {
-        TopAppBar(
-            colors = TopAppBarDefaults.topAppBarColors(
-                containerColor = if (compact) p.page else p.card,
-                titleContentColor = p.text,
-            ),
-            navigationIcon = {
+        if (compact) {
+            TopAppBar(
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = p.page,
+                    titleContentColor = p.text,
+                ),
+                navigationIcon = {
+                    Box {
+                        IconButton(onClick = { sortMenuOpen = true }) {
+                            Icon(Icons.Rounded.SwapVert, contentDescription = store.t("sortBots"), tint = p.text)
+                        }
+                        DropdownMenu(
+                            expanded = sortMenuOpen,
+                            onDismissRequest = { sortMenuOpen = false },
+                            containerColor = p.card,
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text(store.t("sortByRecent"), color = p.text) },
+                                trailingIcon = {
+                                    if (store.sortMode == BotSortMode.RECENT) {
+                                        Icon(Icons.Rounded.Check, contentDescription = null, tint = p.accent, modifier = Modifier.size(16.dp))
+                                    }
+                                },
+                                onClick = {
+                                    store.updateSortMode(BotSortMode.RECENT)
+                                    sortMenuOpen = false
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(store.t("sortManual"), color = p.text) },
+                                trailingIcon = {
+                                    if (store.sortMode == BotSortMode.MANUAL) {
+                                        Icon(Icons.Rounded.Check, contentDescription = null, tint = p.accent, modifier = Modifier.size(16.dp))
+                                    }
+                                },
+                                onClick = {
+                                    store.updateSortMode(BotSortMode.MANUAL)
+                                    sortMenuOpen = false
+                                },
+                            )
+                        }
+                    }
+                },
+                title = {},
+                actions = {
+                    IconButton(onClick = onOpenSettings) {
+                        Icon(Icons.Rounded.Settings, contentDescription = store.t("settings"), tint = p.text)
+                    }
+                },
+            )
+        } else {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .statusBarsPadding()
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Surface(
+                    color = p.s1,
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(36.dp),
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Icon(Icons.Rounded.Search, contentDescription = null, tint = p.mute, modifier = Modifier.size(17.dp))
+                        Box(modifier = Modifier.weight(1f)) {
+                            if (query.isEmpty()) {
+                                Text(store.t("searchBot"), color = p.mute, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                            BasicTextField(
+                                value = query,
+                                onValueChange = { query = it },
+                                singleLine = true,
+                                textStyle = TextStyle(color = p.text, fontSize = 14.sp),
+                                cursorBrush = SolidColor(p.accent),
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                        if (query.isNotEmpty()) {
+                            Icon(
+                                imageVector = Icons.Rounded.Close,
+                                contentDescription = store.t("clear"),
+                                tint = p.mute,
+                                modifier = Modifier
+                                    .size(16.dp)
+                                    .clickable { query = "" },
+                            )
+                        }
+                    }
+                }
                 Box {
-                    IconButton(onClick = { sortMenuOpen = true }) {
-                        Icon(Icons.Rounded.SwapVert, contentDescription = store.t("sortBots"), tint = p.text)
+                    IconButton(
+                        onClick = { sortMenuOpen = true },
+                        modifier = Modifier.size(34.dp),
+                    ) {
+                        Icon(Icons.Rounded.SwapVert, contentDescription = store.t("sortBots"), tint = p.text2, modifier = Modifier.size(19.dp))
                     }
                     DropdownMenu(
                         expanded = sortMenuOpen,
@@ -190,14 +289,8 @@ fun BotListScreen(
                         )
                     }
                 }
-            },
-            title = {},
-            actions = {
-                IconButton(onClick = onOpenSettings) {
-                    Icon(Icons.Rounded.Settings, contentDescription = store.t("settings"), tint = p.text)
-                }
-            },
-        )
+            }
+        }
 
         PullToRefreshBox(
             isRefreshing = refreshing,
@@ -210,54 +303,56 @@ fun BotListScreen(
                     refreshing = false
                 }
             },
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.weight(1f).fillMaxWidth(),
         ) {
             LazyColumn(
                 modifier = Modifier
                     .fillMaxSize()
-                    .navigationBarsPadding(),
+                    .let { if (compact) it.navigationBarsPadding() else it },
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                // Search bar
-                item(key = "search") {
-                    Surface(
-                        color = if (compact) p.card else p.s1,
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(40.dp),
-                    ) {
-                        Row(
+                if (compact) {
+                    // Search bar
+                    item(key = "search") {
+                        Surface(
+                            color = p.card,
+                            shape = RoundedCornerShape(12.dp),
                             modifier = Modifier
-                                .fillMaxSize()
-                                .padding(horizontal = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                .fillMaxWidth()
+                                .height(40.dp),
                         ) {
-                            Icon(Icons.Rounded.Search, contentDescription = null, tint = p.mute, modifier = Modifier.size(18.dp))
-                            Box(modifier = Modifier.weight(1f)) {
-                                if (query.isEmpty()) {
-                                    Text(store.t("searchBot"), color = p.mute, fontSize = 15.sp)
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(horizontal = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                Icon(Icons.Rounded.Search, contentDescription = null, tint = p.mute, modifier = Modifier.size(18.dp))
+                                Box(modifier = Modifier.weight(1f)) {
+                                    if (query.isEmpty()) {
+                                        Text(store.t("searchBot"), color = p.mute, fontSize = 15.sp)
+                                    }
+                                    BasicTextField(
+                                        value = query,
+                                        onValueChange = { query = it },
+                                        singleLine = true,
+                                        textStyle = TextStyle(color = p.text, fontSize = 15.sp),
+                                        cursorBrush = SolidColor(p.accent),
+                                        modifier = Modifier.fillMaxWidth(),
+                                    )
                                 }
-                                BasicTextField(
-                                    value = query,
-                                    onValueChange = { query = it },
-                                    singleLine = true,
-                                    textStyle = TextStyle(color = p.text, fontSize = 15.sp),
-                                    cursorBrush = SolidColor(p.accent),
-                                    modifier = Modifier.fillMaxWidth(),
-                                )
-                            }
-                            if (query.isNotEmpty()) {
-                                Icon(
-                                    imageVector = Icons.Rounded.Close,
-                                    contentDescription = store.t("clear"),
-                                    tint = p.mute,
-                                    modifier = Modifier
-                                        .size(18.dp)
-                                        .clickable { query = "" },
-                                )
+                                if (query.isNotEmpty()) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Close,
+                                        contentDescription = store.t("clear"),
+                                        tint = p.mute,
+                                        modifier = Modifier
+                                            .size(18.dp)
+                                            .clickable { query = "" },
+                                    )
+                                }
                             }
                         }
                     }
@@ -372,6 +467,39 @@ fun BotListScreen(
 
                 item(key = "bottom_spacer") {
                     Spacer(Modifier.height(12.dp))
+                }
+            }
+        }
+        if (!compact) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { onCreateBot?.invoke() }
+                        .padding(horizontal = 6.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                ) {
+                    Icon(Icons.Rounded.Add, contentDescription = null, tint = p.text, modifier = Modifier.size(17.dp))
+                    Text(store.t("newBot"), color = p.text, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                }
+                Spacer(Modifier.weight(1f))
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { onOpenSettings() }
+                        .padding(horizontal = 6.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                ) {
+                    Icon(Icons.Rounded.Settings, contentDescription = null, tint = p.text2, modifier = Modifier.size(17.dp))
+                    Text(store.t("settings"), color = p.text2, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                 }
             }
         }
