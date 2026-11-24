@@ -249,3 +249,103 @@ func TestVirtualManagerForcedVirtualOverNativeAndSetup(t *testing.T) {
 		t.Fatalf("expected virtual display started once, got %d", mb.started)
 	}
 }
+
+func TestEnginePoolMultiSlotLifecycle(t *testing.T) {
+	var seq int
+	var mu sync.Mutex
+	factory := func() virtualBackend {
+		mu.Lock()
+		seq++
+		disp := ":10" + string(rune('0'+seq))
+		mu.Unlock()
+		return &mockVirtualBackendWithDisp{
+			disp: disp,
+			probe: ProbeInfo{
+				HasNativeDisplay: false,
+				DisplayServer:    "none",
+				VirtualSupported: true,
+				VirtualReady:     true,
+			},
+		}
+	}
+
+	pool := NewEnginePoolWithFactory(VirtualConfig{}, factory)
+	defer pool.Close()
+
+	if !pool.VirtualSupported() {
+		t.Fatal("expected VirtualSupported=true")
+	}
+	engA, err := pool.ForSlot("bot-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	engB, err := pool.ForSlot("bot-b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if engA == engB || engA == pool.Default() {
+		t.Fatal("expected distinct engine instances per slot")
+	}
+	if err := engA.PrepareForTask(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := engB.PrepareForTask(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	envA := pool.SlotEnv("bot-a")
+	envB := pool.SlotEnv("bot-b")
+	if len(envA) == 0 || len(envB) == 0 || envA[0] == envB[0] {
+		t.Fatalf("expected distinct slot DISPLAY envs, got envA=%v envB=%v", envA, envB)
+	}
+	slots := pool.ListSlots()
+	if len(slots) != 2 || slots[0].Target != "virtual:bot-a" || slots[1].Target != "virtual:bot-b" {
+		t.Fatalf("unexpected slot snapshots: %+v", slots)
+	}
+	pool.RemoveSlot("bot-a")
+	if pool.PeekSlot("bot-a") != nil {
+		t.Fatal("expected bot-a slot removed")
+	}
+
+	unsupportedPool := NewEnginePoolWithFactory(VirtualConfig{}, func() virtualBackend {
+		return &mockVirtualBackend{probe: ProbeInfo{VirtualSupported: false}}
+	})
+	defer unsupportedPool.Close()
+	if _, err := unsupportedPool.ForSlot("bot-x"); err == nil {
+		t.Fatal("expected error for virtual slot on unsupported host")
+	}
+}
+
+type mockVirtualBackendWithDisp struct {
+	mu      sync.Mutex
+	disp    string
+	probe   ProbeInfo
+	started bool
+}
+
+func (m *mockVirtualBackendWithDisp) Probe() ProbeInfo { return m.probe }
+func (m *mockVirtualBackendWithDisp) Start(context.Context, string) error {
+	m.mu.Lock()
+	m.started = true
+	m.mu.Unlock()
+	return nil
+}
+func (m *mockVirtualBackendWithDisp) Freeze() error { return nil }
+func (m *mockVirtualBackendWithDisp) Resume() error { return nil }
+func (m *mockVirtualBackendWithDisp) Stop() error {
+	m.mu.Lock()
+	m.started = false
+	m.mu.Unlock()
+	return nil
+}
+func (m *mockVirtualBackendWithDisp) Env() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !m.started {
+		return nil
+	}
+	return []string{"DISPLAY=" + m.disp}
+}
+func (m *mockVirtualBackendWithDisp) HasWindows(context.Context) (bool, error) { return false, nil }
+func (m *mockVirtualBackendWithDisp) Install(context.Context) (*SetupResult, error) {
+	return &SetupResult{OK: true}, nil
+}

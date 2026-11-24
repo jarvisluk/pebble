@@ -151,9 +151,14 @@ fun DesktopScreen(
         }
     }
 
-    val targets = remember(store.desktopTargets) {
-        store.desktopTargets.ifEmpty {
+    val targets = remember(store.desktopTargets, target) {
+        val base = store.desktopTargets.ifEmpty {
             listOf(DesktopTarget(id = "local", name = store.t("localDesktopName"), local = true, supported = true))
+        }
+        if (target.isNotEmpty() && base.none { it.id == target }) {
+            base + DesktopTarget(id = target, name = target, local = !target.contains(":virtual:") || target.startsWith("virtual:"), supported = true)
+        } else {
+            base
         }
     }
 
@@ -168,11 +173,17 @@ fun DesktopScreen(
         }
     }
 
+    val hasBoundTarget = remember(resolvedBotId, store.bots) {
+        val bid = resolvedBotId
+        bid != null && !store.bots.firstOrNull { it.id == bid }?.desktopTarget.isNullOrEmpty()
+    }
+
     LaunchedEffect(Unit) {
         runCatching { store.refreshDesktopTargets() }
     }
 
-    LaunchedEffect(store.activeDesktopTarget.target) {
+    LaunchedEffect(store.activeDesktopTarget.target, hasBoundTarget) {
+        if (hasBoundTarget) return@LaunchedEffect
         val next = store.activeDesktopTarget.target.ifEmpty { "local" }
         if (target != next) target = next
     }

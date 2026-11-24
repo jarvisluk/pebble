@@ -53,7 +53,7 @@ type HTTPServer struct {
 	fallbackNodes  *node.Registry
 	deskOnce       sync.Once
 	fallbackDesk   *desktop.Coordinator
-	fallbackEngine *desktop.Engine
+	fallbackEngine *desktop.EnginePool
 	syncOnce       sync.Once
 	syncSvc        *syncer.Syncer
 

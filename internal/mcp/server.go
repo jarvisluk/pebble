@@ -292,7 +292,7 @@ func toolDefinitions() []map[string]any {
 					},
 					"nodeId": map[string]any{
 						"type":        "string",
-						"description": "Target desktop ('local' or remote node ID). Omit to auto-select.",
+						"description": "Target desktop ('local', 'virtual:<slot>', remote node ID, or '<nodeId>:virtual:<slot>'). Omit to use this bot's bound screen or the active desktop target.",
 					},
 					"app": map[string]any{
 						"type":        "string",
@@ -318,7 +318,7 @@ func toolDefinitions() []map[string]any {
 					},
 					"nodeId": map[string]any{
 						"type":        "string",
-						"description": "Optional target desktop ('local' by default, or remote node ID).",
+						"description": "Optional target desktop ('local', 'virtual:<slot>', or remote node ID). Omit to use this bot's bound screen.",
 					},
 					"app": map[string]any{
 						"type":        "string",

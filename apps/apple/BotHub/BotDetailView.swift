@@ -11,8 +11,22 @@ struct BotDetailView: View {
 
     @State private var previewStream = H264StreamController()
 
-    private var previewTarget: String {
-        hub.takeovers.first?.target ?? "local"
+    private var effectiveTarget: String {
+        if let to = hub.takeovers.first(where: { $0.botId == botId }), let t = to.target, !t.isEmpty {
+            return t
+        }
+        if let bound = hub.bots.first(where: { $0.id == botId })?.desktopTarget, !bound.isEmpty {
+            return bound
+        }
+        let active = hub.activeDesktopTarget.target
+        return active.isEmpty ? "local" : active
+    }
+
+    private var targetBadgeLabel: String {
+        if let matched = hub.desktopTargets.first(where: { $0.id == effectiveTarget }), let name = matched.name, !name.isEmpty {
+            return name
+        }
+        return effectiveTarget
     }
 
     var body: some View {
@@ -35,11 +49,14 @@ struct BotDetailView: View {
             .background(p.page.ignoresSafeArea())
         }
         .task(id: botId) {
+            if hub.isConnected && hub.desktopTargets.isEmpty {
+                _ = try? await hub.refreshDesktopTargets()
+            }
             try? await hub.fetchRoutines(botId)
         }
-        .task(id: "\(botId)-\(hub.isConnected)-\(windowVisible)-\(previewTarget)") {
+        .task(id: "\(botId)-\(hub.isConnected)-\(windowVisible)-\(effectiveTarget)") {
             guard windowVisible, hub.isConnected,
-                  let req = hub.makeDesktopWSRequest(target: previewTarget, preset: "preview") else {
+                  let req = hub.makeDesktopWSRequest(target: effectiveTarget, preset: "preview") else {
                 previewStream.stop()
                 return
             }
@@ -50,7 +67,7 @@ struct BotDetailView: View {
 
     private var desktopPreviewCard: some View {
         Button {
-            router.openDesktop(hub.takeovers.first?.target ?? "local")
+            router.openDesktop(effectiveTarget)
         } label: {
             ZStack(alignment: .topTrailing) {
                 ZStack {
@@ -78,6 +95,18 @@ struct BotDetailView: View {
                 .frame(minWidth: 0, maxWidth: .infinity)
                 .aspectRatio(16.0 / 10.0, contentMode: .fit)
                 .clipped()
+
+                if effectiveTarget != "local" {
+                    Text(targetBadgeLabel)
+                        .font(.system(size: AppFont.caption, weight: .medium))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 4)
+                        .background(.black.opacity(0.60), in: Capsule())
+                        .padding(10)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                }
 
                 Image(systemName: "arrow.up.left.and.arrow.down.right")
                     .font(.system(size: AppFont.caption, weight: .semibold))
@@ -109,6 +138,8 @@ struct BotInfoSheet: View {
     @State private var appearOpen = false
     @State private var editInst = ""
     @State private var editPrivate = false
+    @State private var editDesktopTarget = ""
+    @State private var editBrowserMode = ""
     @State private var saving = false
     @State private var err = ""
     @State private var confirm: ConfirmItem?
@@ -126,7 +157,48 @@ struct BotInfoSheet: View {
         guard let a = active else { return false }
         return editName != (a.name ?? botId) || editDesc != (a.description ?? "")
             || editAvatar != (a.avatar ?? "") || editColor != (a.color ?? "")
-            || editPrivate != (a.privateSessions ?? false) || editInst != (detail?.instructions ?? "")
+            || editPrivate != (a.privateSessions ?? false)
+            || editDesktopTarget != (a.desktopTarget ?? "")
+            || editBrowserMode != (a.browserMode ?? "")
+            || editInst != (detail?.instructions ?? "")
+    }
+
+    private var desktopTargetOptions: [(String, String)] {
+        var opts: [(String, String)] = [
+            ("", hub.t("deskBindDefault")),
+            ("local", hub.t("localDesktopName")),
+        ]
+        var seen: Set<String> = ["", "local"]
+        if hub.desktopTargets.first(where: { $0.id == "local" })?.virtualSupported == true {
+            let vid = "virtual:\(botId)"
+            seen.insert(vid)
+            opts.append((vid, hub.t("deskBindLocalVirtual")))
+        }
+        for tr in hub.desktopTargets where tr.id != "local" {
+            if !seen.contains(tr.id) {
+                seen.insert(tr.id)
+                opts.append((tr.id, tr.name ?? tr.id))
+            }
+            if tr.virtual != true, tr.virtualSupported == true {
+                let rvid = "\(tr.id):virtual:\(botId)"
+                if !seen.contains(rvid) {
+                    seen.insert(rvid)
+                    opts.append((rvid, hub.t("deskBindRemoteVirtual", ["name": tr.name ?? tr.id])))
+                }
+            }
+        }
+        if !editDesktopTarget.isEmpty, !seen.contains(editDesktopTarget) {
+            opts.append((editDesktopTarget, hub.t("deskBindOfflineTag", ["id": editDesktopTarget])))
+        }
+        return opts
+    }
+
+    private var browserModeOptions: [(String, String)] {
+        [
+            ("", hub.t("browserModeAuto")),
+            ("isolated", hub.t("browserModeIsolated")),
+            ("attach", hub.t("browserModeAttach")),
+        ]
     }
 
     var body: some View {
@@ -179,6 +251,8 @@ struct BotInfoSheet: View {
                             }
                             .buttonStyle(.plain)
                         }
+                        HubMenuPicker(title: hub.t("botDesktopTarget"), selection: $editDesktopTarget, options: desktopTargetOptions)
+                        HubMenuPicker(title: hub.t("botBrowserMode"), selection: $editBrowserMode, options: browserModeOptions)
                         Toggle(hub.t("privateSessions"), isOn: $editPrivate).tint(pal.accent)
                         VStack(alignment: .leading, spacing: 6) {
                             Text("AGENTS.md").font(.system(size: AppFont.secondary)).foregroundStyle(.secondary)
@@ -244,8 +318,11 @@ struct BotInfoSheet: View {
         editColor = src?.color ?? ""
         editInst = detail?.instructions ?? ""
         editPrivate = src?.privateSessions ?? false
+        editDesktopTarget = src?.desktopTarget ?? ""
+        editBrowserMode = src?.browserMode ?? ""
         loading = true
         Task { await loadMem() }
+        Task { _ = try? await hub.refreshDesktopTargets() }
         if let d = try? await hub.botDetail(botId) { apply(d) }
         loading = false
     }
@@ -258,6 +335,8 @@ struct BotInfoSheet: View {
         editColor = d.color ?? ""
         editInst = d.instructions ?? ""
         editPrivate = d.privateSessions ?? false
+        editDesktopTarget = d.desktopTarget ?? ""
+        editBrowserMode = d.browserMode ?? ""
     }
 
     private func save() {
@@ -269,7 +348,8 @@ struct BotInfoSheet: View {
             do {
                 try await hub.updateBot(botId, ["name": n, "description": editDesc.trimmingCharacters(in: .whitespaces),
                                                 "avatar": editAvatar, "color": editColor,
-                                                "instructions": editInst, "privateSessions": editPrivate])
+                                                "instructions": editInst, "privateSessions": editPrivate,
+                                                "desktopTarget": editDesktopTarget, "browserMode": editBrowserMode])
                 apply(try await hub.botDetail(botId))
             } catch { err = errText(error, hub.t("saveFailed")) }
             saving = false

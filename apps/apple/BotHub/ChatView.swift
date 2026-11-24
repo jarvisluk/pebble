@@ -203,7 +203,13 @@ struct ChatView: View {
                         Button { router.openFiles(botId: botId) } label: {
                             Label(hub.t("workspaceFiles"), systemImage: "folder")
                         }
-                        Button { router.openDesktop(hub.takeovers.first?.target ?? "local") } label: {
+                        Button {
+                            let toTarget = hub.takeovers.first(where: { $0.botId == botId })?.target
+                                ?? bot?.desktopTarget.flatMap { $0.isEmpty ? nil : $0 }
+                                ?? hub.takeovers.first?.target
+                                ?? (hub.activeDesktopTarget.target.isEmpty ? "local" : hub.activeDesktopTarget.target)
+                            router.openDesktop(toTarget)
+                        } label: {
                             Label(hub.t("remoteDesktop"), systemImage: hub.takeovers.isEmpty ? "display" : "exclamationmark.triangle")
                         }
                         Button { router.detailOpen.toggle() } label: {

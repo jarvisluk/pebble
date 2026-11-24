@@ -3,6 +3,7 @@ import type {
   BotDetail,
   BotStatus,
   ConfirmOptions,
+  DesktopTarget,
   MemoryResponse,
   ResolvedLang,
   RoutineItem,
@@ -66,6 +67,9 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
   const [editColor, setEditColor] = useState('');
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   const [editPrivate, setEditPrivate] = useState(false);
+  const [editDesktopTarget, setEditDesktopTarget] = useState('');
+  const [editBrowserMode, setEditBrowserMode] = useState('');
+  const [desktopTargets, setDesktopTargets] = useState<DesktopTarget[]>([]);
   const [editInst, setEditInst] = useState('');
   const [editErr, setEditErr] = useState('');
   const [editSaving, setEditSaving] = useState(false);
@@ -128,6 +132,13 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
     }
   };
 
+  const loadDesktopTargets = async () => {
+    try {
+      const d = await api<{ targets?: DesktopTarget[] }>('/api/desktop/targets');
+      setDesktopTargets(d.targets || []);
+    } catch {}
+  };
+
   useEffect(() => {
     if (!open || !detail) return;
     setTechOpen(false);
@@ -139,6 +150,7 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
     setRunsOpenId('');
     void loadMemories(detail.id);
     void loadRoutines(detail.id);
+    void loadDesktopTargets();
     if (detail.harness) void onLoadModels(detail.harness);
   }, [open, detail?.id]);
 
@@ -149,9 +161,22 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
     setEditAvatar(detail.avatar || '');
     setEditColor(detail.color || '');
     setEditPrivate(Boolean(detail.privateSessions));
+    setEditDesktopTarget(detail.desktopTarget || '');
+    setEditBrowserMode(detail.browserMode || '');
     setEditInst(detail.instructions || '');
     setEditErr('');
-  }, [open, detail?.id, detail?.name, detail?.description, detail?.avatar, detail?.color, detail?.privateSessions, detail?.instructions]);
+  }, [
+    open,
+    detail?.id,
+    detail?.name,
+    detail?.description,
+    detail?.avatar,
+    detail?.color,
+    detail?.privateSessions,
+    detail?.desktopTarget,
+    detail?.browserMode,
+    detail?.instructions,
+  ]);
 
   useEffect(() => {
     if (open && detail && routineRefreshSeq > 0) {
@@ -176,6 +201,8 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
         editAvatar !== (detail.avatar || '') ||
         editColor !== (detail.color || '') ||
         editPrivate !== Boolean(detail.privateSessions) ||
+        editDesktopTarget !== (detail.desktopTarget || '') ||
+        editBrowserMode !== (detail.browserMode || '') ||
         editInst !== (detail.instructions || ''))
   );
 
@@ -199,6 +226,8 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
           color: editColor,
           instructions: editInst,
           privateSessions: editPrivate,
+          desktopTarget: editDesktopTarget,
+          browserMode: editBrowserMode,
         },
       });
       onBotUpdated(st);
@@ -990,6 +1019,72 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
                     </dd>
                   </div>
                 </dl>
+                {(() => {
+                  const seenOpts = new Set<string>(['', 'local']);
+                  const screenOpts: Array<{ value: string; label: string }> = [
+                    { value: '', label: t('deskBindDefault') },
+                    { value: 'local', label: t('localDesktopName') },
+                  ];
+                  const localEntry = desktopTargets.find((tr) => tr.id === 'local');
+                  if (localEntry?.virtualSupported) {
+                    const vId = `virtual:${detail.id}`;
+                    seenOpts.add(vId);
+                    screenOpts.push({ value: vId, label: t('deskBindLocalVirtual') });
+                  }
+                  for (const tr of desktopTargets) {
+                    if (tr.id === 'local') continue;
+                    if (!seenOpts.has(tr.id)) {
+                      seenOpts.add(tr.id);
+                      screenOpts.push({ value: tr.id, label: tr.name || tr.id });
+                    }
+                    if (!tr.virtual && tr.virtualSupported) {
+                      const rvId = `${tr.id}:virtual:${detail.id}`;
+                      if (!seenOpts.has(rvId)) {
+                        seenOpts.add(rvId);
+                        screenOpts.push({
+                          value: rvId,
+                          label: t('deskBindRemoteVirtual', { name: tr.name || tr.id }),
+                        });
+                      }
+                    }
+                  }
+                  if (editDesktopTarget && !seenOpts.has(editDesktopTarget)) {
+                    screenOpts.push({
+                      value: editDesktopTarget,
+                      label: t('deskBindOfflineTag', { id: editDesktopTarget }),
+                    });
+                  }
+                  return (
+                    <div className="stack6 mt-10">
+                      <div className="fld">
+                        <label htmlFor="peDesktopTarget">{t('botDesktopTarget')}</label>
+                        <select
+                          id="peDesktopTarget"
+                          value={editDesktopTarget}
+                          onChange={(e) => setEditDesktopTarget(e.target.value)}
+                        >
+                          {screenOpts.map((opt) => (
+                            <option key={opt.value || '_default'} value={opt.value}>
+                              {opt.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="fld">
+                        <label htmlFor="peBrowserMode">{t('botBrowserMode')}</label>
+                        <select
+                          id="peBrowserMode"
+                          value={editBrowserMode}
+                          onChange={(e) => setEditBrowserMode(e.target.value)}
+                        >
+                          <option value="">{t('browserModeAuto')}</option>
+                          <option value="isolated">{t('browserModeIsolated')}</option>
+                          <option value="attach">{t('browserModeAttach')}</option>
+                        </select>
+                      </div>
+                    </div>
+                  );
+                })()}
                 <label className="perm self-start mt-10">
                   <input
                     type="checkbox"

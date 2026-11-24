@@ -53,7 +53,20 @@ struct DesktopView: View {
     }
 
     private var targets: [DesktopTarget] {
-        hub.desktopTargets.isEmpty ? [DesktopTarget(id: "local", name: hub.t("localDesktopName"), local: true, supported: true)] : hub.desktopTargets
+        var list = hub.desktopTargets.isEmpty ? [DesktopTarget(id: "local", name: hub.t("localDesktopName"), local: true, supported: true)] : hub.desktopTargets
+        if !target.isEmpty, !list.contains(where: { $0.id == target }) {
+            list.append(DesktopTarget(id: target, name: target, local: !target.contains(":virtual:") || target.hasPrefix("virtual:"), supported: true))
+        }
+        return list
+    }
+
+    private var hasBoundTarget: Bool {
+        guard let bid = resolvedBotId,
+              let bound = hub.bots.first(where: { $0.id == bid })?.desktopTarget,
+              !bound.isEmpty else {
+            return false
+        }
+        return true
     }
 
     private var activeTakeover: TakeoverRequest? {
@@ -117,6 +130,7 @@ struct DesktopView: View {
             activeTab = next
         }
         .onChange(of: hub.activeDesktopTarget.target) { _, newTarget in
+            guard !hasBoundTarget else { return }
             let next = newTarget.isEmpty ? "local" : newTarget
             if target != next {
                 target = next

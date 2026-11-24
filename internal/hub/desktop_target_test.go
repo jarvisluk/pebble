@@ -2,7 +2,10 @@ package hub
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -115,5 +118,160 @@ func TestActiveDesktopTargetLifecycle(t *testing.T) {
 	h.Nodes().Disconnect("macbook")
 	if got := h.ActiveDesktopTarget(); got.Target != "local" || got.Temporary {
 		t.Fatalf("expected fallback to local after disconnect, got %+v", got)
+	}
+}
+
+type desktopTestHarness struct {
+	mu      sync.Mutex
+	prompts []string
+	envs    []map[string]string
+	delay   time.Duration
+	active  atomic.Int32
+	maxConc atomic.Int32
+}
+
+func (f *desktopTestHarness) Kind() string                             { return "desktest" }
+func (f *desktopTestHarness) Label() string                            { return "DeskTest" }
+func (f *desktopTestHarness) Models(context.Context) ([]string, error) { return nil, nil }
+func (f *desktopTestHarness) Close()                                   {}
+func (f *desktopTestHarness) RunTurn(_ context.Context, opts harness.RunOptions) (*harness.TurnResult, error) {
+	cur := f.active.Add(1)
+	for {
+		prev := f.maxConc.Load()
+		if cur <= prev || f.maxConc.CompareAndSwap(prev, cur) {
+			break
+		}
+	}
+	f.mu.Lock()
+	f.prompts = append(f.prompts, opts.Prompt)
+	cp := make(map[string]string, len(opts.ExtraEnv))
+	for k, v := range opts.ExtraEnv {
+		cp[k] = v
+	}
+	f.envs = append(f.envs, cp)
+	f.mu.Unlock()
+	if f.delay > 0 {
+		time.Sleep(f.delay)
+	}
+	f.active.Add(-1)
+	return &harness.TurnResult{Text: "ok"}, nil
+}
+
+func TestPerBotDesktopBindingOfflineProtectionAndConcurrency(t *testing.T) {
+	tmp := t.TempDir()
+	store, err := state.NewStore(filepath.Join(tmp, "sessions.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	msgStore, err := state.NewMessageStore(filepath.Join(tmp, "messages"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dh := &desktopTestHarness{delay: 60 * time.Millisecond}
+	reg := harness.NewRegistry()
+	reg.Register(dh)
+	cfg := &config.HubConfig{
+		ProjectRoot:    tmp,
+		SharedDir:      filepath.Join(tmp, "workspaces", "_shared"),
+		StateFile:      filepath.Join(tmp, "sessions.json"),
+		MessagesDir:    filepath.Join(tmp, "messages"),
+		DesktopHarness: "desktest",
+		Bots: []config.BotConfig{
+			{ID: "bot-a", Name: "Bot A", Workspace: filepath.Join(tmp, "workspaces", "bot-a"), Harness: "desktest", DesktopTarget: "node-a"},
+			{ID: "bot-b", Name: "Bot B", Workspace: filepath.Join(tmp, "workspaces", "bot-b"), Harness: "desktest", DesktopTarget: "node-b"},
+		},
+	}
+	h := New(cfg, store, msgStore, reg)
+	defer h.Close()
+
+	// Offline bound target must return ErrBoundDesktopOffline (never silently fall back to local).
+	if _, err := h.ResolveBotDesktopTarget("bot-a", ""); !errors.Is(err, ErrBoundDesktopOffline) {
+		t.Fatalf("expected ErrBoundDesktopOffline for offline bound node, got %v", err)
+	}
+	if _, err := h.RunDesktopTask(context.Background(), DesktopTaskRequest{BotID: "bot-a", Goal: "open app"}); !errors.Is(err, ErrBoundDesktopOffline) {
+		t.Fatalf("expected RunDesktopTask to fail with ErrBoundDesktopOffline, got %v", err)
+	}
+
+	// Bring both remote nodes online and verify concurrent execution across different bound screens.
+	cancelA := startFakeNodePoll(t, h, "node-a", "Node A", []string{node.PermDesktop})
+	defer cancelA()
+	cancelB := startFakeNodePoll(t, h, "node-b", "Node B", []string{node.PermDesktop})
+	defer cancelB()
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 2)
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		_, err := h.RunDesktopTask(context.Background(), DesktopTaskRequest{BotID: "bot-a", Goal: "task A"})
+		errs <- err
+	}()
+	go func() {
+		defer wg.Done()
+		_, err := h.RunDesktopTask(context.Background(), DesktopTaskRequest{BotID: "bot-b", Goal: "task B"})
+		errs <- err
+	}()
+	wg.Wait()
+	close(errs)
+	for e := range errs {
+		if e != nil {
+			t.Fatalf("concurrent RunDesktopTask failed: %v", e)
+		}
+	}
+	if dh.maxConc.Load() < 2 {
+		t.Fatalf("expected bot-a and bot-b on different bound nodes to run concurrently, maxConc=%d", dh.maxConc.Load())
+	}
+
+	// Running two tasks on the same bound target concurrently must return ErrDesktopTaskBusy.
+	doneFirst := make(chan error, 1)
+	go func() {
+		_, err := h.RunDesktopTask(context.Background(), DesktopTaskRequest{BotID: "bot-a", Goal: "hold"})
+		doneFirst <- err
+	}()
+	time.Sleep(15 * time.Millisecond)
+	if _, err := h.RunDesktopTask(context.Background(), DesktopTaskRequest{BotID: "bot-a", Goal: "collide"}); !errors.Is(err, ErrDesktopTaskBusy) {
+		t.Fatalf("expected ErrDesktopTaskBusy on same bound target, got %v", err)
+	}
+	if err := <-doneFirst; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPerBotBrowserEnvIsolation(t *testing.T) {
+	h := newTestHubForDesktop(t)
+
+	// Default auto mode injects AGENT_BROWSER_SESSION=bot-<id> without profile.
+	envAuto := h.botBrowserEnv(config.BotConfig{ID: "alpha"})
+	if envAuto["AGENT_BROWSER_SESSION"] != "bot-alpha" {
+		t.Fatalf("expected AGENT_BROWSER_SESSION=bot-alpha, got %+v", envAuto)
+	}
+	if _, hasProf := envAuto["AGENT_BROWSER_PROFILE"]; hasProf {
+		t.Fatalf("did not expect AGENT_BROWSER_PROFILE in auto mode: %+v", envAuto)
+	}
+
+	// Isolated mode creates and injects AGENT_BROWSER_PROFILE.
+	envIso := h.botBrowserEnv(config.BotConfig{ID: "beta", BrowserMode: "isolated"})
+	if envIso["AGENT_BROWSER_SESSION"] != "bot-beta" {
+		t.Fatalf("expected AGENT_BROWSER_SESSION=bot-beta, got %+v", envIso)
+	}
+	wantProf := h.BrowserProfileDir("beta")
+	if envIso["AGENT_BROWSER_PROFILE"] != wantProf {
+		t.Fatalf("expected AGENT_BROWSER_PROFILE=%q, got %q", wantProf, envIso["AGENT_BROWSER_PROFILE"])
+	}
+
+	// Explicit user override in bot.Env is preserved (extraEnv does not overwrite).
+	envCustom := h.botBrowserEnv(config.BotConfig{
+		ID:          "gamma",
+		BrowserMode: "isolated",
+		Env: map[string]string{
+			"AGENT_BROWSER_SESSION": "custom-sess",
+			"AGENT_BROWSER_PROFILE": "/tmp/custom-prof",
+		},
+	})
+	if _, exists := envCustom["AGENT_BROWSER_SESSION"]; exists {
+		t.Fatalf("expected explicit AGENT_BROWSER_SESSION override to prevent extraEnv overwrite, got %+v", envCustom)
+	}
+	if _, exists := envCustom["AGENT_BROWSER_PROFILE"]; exists {
+		t.Fatalf("expected explicit AGENT_BROWSER_PROFILE override to prevent extraEnv overwrite, got %+v", envCustom)
 	}
 }

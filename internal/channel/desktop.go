@@ -24,15 +24,19 @@ func (s *HTTPServer) desktopCoord() *desktop.Coordinator {
 	return s.fallbackDesk
 }
 
-func (s *HTTPServer) localDesk() *desktop.Engine {
-	if s.hub != nil && s.hub.LocalDesktop() != nil {
-		return s.hub.LocalDesktop()
+func (s *HTTPServer) localDeskPool() *desktop.EnginePool {
+	if s.hub != nil && s.hub.LocalDesktopPool() != nil {
+		return s.hub.LocalDesktopPool()
 	}
 	s.deskOnce.Do(func() {
 		s.fallbackDesk = desktop.NewCoordinator(nil, nil)
-		s.fallbackEngine = desktop.NewEngine()
+		s.fallbackEngine = desktop.NewEnginePool(desktop.VirtualConfig{})
 	})
 	return s.fallbackEngine
+}
+
+func (s *HTTPServer) localDesk() *desktop.Engine {
+	return s.localDeskPool().Default()
 }
 
 func (s *HTTPServer) resolveDesktopTarget(r *http.Request, bodyTarget string) string {
@@ -41,6 +45,34 @@ func (s *HTTPServer) resolveDesktopTarget(r *http.Request, bodyTarget string) st
 		t = strings.TrimSpace(r.URL.Query().Get("target"))
 	}
 	return desktop.NormalizeTarget(t)
+}
+
+func withSlotArg(args map[string]any, slot string) map[string]any {
+	if slot == "" {
+		return args
+	}
+	out := make(map[string]any, len(args)+1)
+	for k, v := range args {
+		out[k] = v
+	}
+	out["slot"] = slot
+	return out
+}
+
+func withSlotInput(ev desktop.UnifiedInput, slot string) any {
+	if slot == "" {
+		return ev
+	}
+	raw, err := json.Marshal(ev)
+	if err != nil {
+		return ev
+	}
+	var m map[string]any
+	if json.Unmarshal(raw, &m) != nil {
+		return ev
+	}
+	m["slot"] = slot
+	return m
 }
 
 func (s *HTTPServer) callRemoteDesktop(ctx context.Context, nodeID, action string, args any, timeout time.Duration, out any) error {
@@ -65,19 +97,22 @@ func (s *HTTPServer) handleDesktopTargets(w http.ResponseWriter, r *http.Request
 	defer cancel()
 	coord := s.desktopCoord()
 
-	localSt, _ := s.localDesk().Status(ctx)
+	pool := s.localDeskPool()
+	localSt, _ := pool.Default().Status(ctx)
 	backend := ""
 	if localSt != nil {
 		backend = localSt.Backend
 	}
+	localVirtualSupported := pool.VirtualSupported()
 	localEntry := map[string]any{
-		"id":              "local",
-		"name":            "本机桌面",
-		"local":           true,
-		"supported":       localSt == nil || localSt.Supported,
-		"webrtcAvailable": localSt != nil && localSt.WebRTCAvailable,
-		"backend":         backend,
-		"screen":          coord.ScreenState("local"),
+		"id":               "local",
+		"name":             "本机桌面",
+		"local":            true,
+		"supported":        localSt == nil || localSt.Supported,
+		"webrtcAvailable":  localSt != nil && localSt.WebRTCAvailable,
+		"backend":          backend,
+		"virtualSupported": localVirtualSupported,
+		"screen":           coord.ScreenState("local"),
 	}
 	if localSt != nil {
 		if localSt.Virtual {
@@ -91,6 +126,8 @@ func (s *HTTPServer) handleDesktopTargets(w http.ResponseWriter, r *http.Request
 		}
 	}
 	targets := []map[string]any{localEntry}
+	seenTargets := map[string]bool{"local": true}
+	remoteNodes := make(map[string]node.NodeInfo)
 
 	for _, n := range s.nodes().List() {
 		if !n.Connected {
@@ -106,15 +143,82 @@ func (s *HTTPServer) handleDesktopTargets(w http.ResponseWriter, r *http.Request
 		if !hasDesk {
 			continue
 		}
+		remoteNodes[n.ID] = n
+		seenTargets[n.ID] = true
 		targets = append(targets, map[string]any{
-			"id":        n.ID,
-			"name":      n.Name,
-			"local":     false,
-			"os":        n.OS,
-			"arch":      n.Arch,
-			"supported": true,
-			"screen":    coord.ScreenState(n.ID),
+			"id":               n.ID,
+			"name":             n.Name,
+			"local":            false,
+			"os":               n.OS,
+			"arch":             n.Arch,
+			"supported":        true,
+			"virtualSupported": n.OS == "linux",
+			"screen":           coord.ScreenState(n.ID),
 		})
+	}
+
+	if localVirtualSupported {
+		for _, slot := range pool.ListSlots() {
+			if seenTargets[slot.Target] {
+				continue
+			}
+			seenTargets[slot.Target] = true
+			targets = append(targets, map[string]any{
+				"id":         slot.Target,
+				"name":       "虚拟屏 · " + slot.Slot,
+				"local":      true,
+				"hostId":     "local",
+				"slot":       slot.Slot,
+				"virtual":    true,
+				"supported":  true,
+				"powerState": string(slot.PowerState),
+				"screen":     coord.ScreenState(slot.Target),
+			})
+		}
+	}
+
+	if s.hub != nil {
+		if bots, err := s.hub.Status(""); err == nil {
+			for _, b := range bots {
+				if strings.TrimSpace(b.DesktopTarget) == "" {
+					continue
+				}
+				spec := desktop.ParseTarget(b.DesktopTarget)
+				if !spec.IsVirtualSlot() || seenTargets[spec.Raw] {
+					continue
+				}
+				if spec.IsLocal() {
+					if !localVirtualSupported {
+						continue
+					}
+					seenTargets[spec.Raw] = true
+					targets = append(targets, map[string]any{
+						"id":        spec.Raw,
+						"name":      "虚拟屏 · " + spec.VirtualSlot,
+						"local":     true,
+						"hostId":    "local",
+						"slot":      spec.VirtualSlot,
+						"virtual":   true,
+						"supported": true,
+						"screen":    coord.ScreenState(spec.Raw),
+					})
+				} else if n, ok := remoteNodes[spec.NodeID]; ok && n.OS == "linux" {
+					seenTargets[spec.Raw] = true
+					targets = append(targets, map[string]any{
+						"id":        spec.Raw,
+						"name":      n.Name + " · 虚拟屏 " + spec.VirtualSlot,
+						"local":     false,
+						"hostId":    n.ID,
+						"slot":      spec.VirtualSlot,
+						"os":        n.OS,
+						"arch":      n.Arch,
+						"virtual":   true,
+						"supported": true,
+						"screen":    coord.ScreenState(spec.Raw),
+					})
+				}
+			}
+		}
 	}
 
 	activeTarget := hub.ActiveDesktopTarget{Target: "local", Temporary: false}
@@ -156,20 +260,25 @@ func (s *HTTPServer) handleDesktopTargetSet(w http.ResponseWriter, r *http.Reque
 
 func (s *HTTPServer) handleDesktopState(w http.ResponseWriter, r *http.Request) {
 	target := s.resolveDesktopTarget(r, "")
+	spec := desktop.ParseTarget(target)
 	coord := s.desktopCoord()
 	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
 	defer cancel()
 
 	var st desktop.HostStatus
 	var err error
-	if target == "local" {
-		var lp *desktop.HostStatus
-		lp, err = s.localDesk().Status(ctx)
-		if lp != nil {
-			st = *lp
+	if spec.IsLocal() {
+		var eng *desktop.Engine
+		eng, err = s.localDeskPool().ForSlot(spec.VirtualSlot)
+		if err == nil {
+			var lp *desktop.HostStatus
+			lp, err = eng.Status(ctx)
+			if lp != nil {
+				st = *lp
+			}
 		}
 	} else {
-		err = s.callRemoteDesktop(ctx, target, "desktop_status", map[string]any{}, 6*time.Second, &st)
+		err = s.callRemoteDesktop(ctx, spec.NodeID, "desktop_status", withSlotArg(map[string]any{}, spec.VirtualSlot), 6*time.Second, &st)
 	}
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{
@@ -190,12 +299,18 @@ func (s *HTTPServer) handleDesktopState(w http.ResponseWriter, r *http.Request) 
 
 func (s *HTTPServer) handleDesktopPermissions(w http.ResponseWriter, r *http.Request) {
 	target := s.resolveDesktopTarget(r, "")
+	spec := desktop.ParseTarget(target)
 	ctx, cancel := context.WithTimeout(r.Context(), 6*time.Second)
 	defer cancel()
 
 	var resp desktop.PermissionsResponse
-	if target == "local" {
-		lp, err := s.localDesk().Permissions(ctx)
+	if spec.IsLocal() {
+		eng, err := s.localDeskPool().ForSlot(spec.VirtualSlot)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
+		lp, err := eng.Permissions(ctx)
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
 			return
@@ -204,7 +319,7 @@ func (s *HTTPServer) handleDesktopPermissions(w http.ResponseWriter, r *http.Req
 			resp = *lp
 		}
 	} else {
-		if err := s.callRemoteDesktop(ctx, target, "desktop_permissions", map[string]any{}, 6*time.Second, &resp); err != nil {
+		if err := s.callRemoteDesktop(ctx, spec.NodeID, "desktop_permissions", withSlotArg(map[string]any{}, spec.VirtualSlot), 6*time.Second, &resp); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
 			return
 		}
@@ -227,12 +342,18 @@ func (s *HTTPServer) handleDesktopPermissionRequest(w http.ResponseWriter, r *ht
 		return
 	}
 	target := s.resolveDesktopTarget(r, body.Target)
+	spec := desktop.ParseTarget(target)
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 
 	var res desktop.PermissionRequestResult
-	if target == "local" {
-		rp, err := s.localDesk().RequestPermission(ctx, body.Permission, body.OpenSettings)
+	if spec.IsLocal() {
+		eng, err := s.localDeskPool().ForSlot(spec.VirtualSlot)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
+		rp, err := eng.RequestPermission(ctx, body.Permission, body.OpenSettings)
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
 			return
@@ -241,10 +362,10 @@ func (s *HTTPServer) handleDesktopPermissionRequest(w http.ResponseWriter, r *ht
 			res = *rp
 		}
 	} else {
-		if err := s.callRemoteDesktop(ctx, target, "desktop_permission_request", map[string]any{
+		if err := s.callRemoteDesktop(ctx, spec.NodeID, "desktop_permission_request", withSlotArg(map[string]any{
 			"permission":   body.Permission,
 			"openSettings": body.OpenSettings,
-		}, 10*time.Second, &res); err != nil {
+		}, spec.VirtualSlot), 10*time.Second, &res); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
 			return
 		}
@@ -257,11 +378,17 @@ func (s *HTTPServer) handleDesktopPermissionRequest(w http.ResponseWriter, r *ht
 
 func (s *HTTPServer) handleDesktopWindows(w http.ResponseWriter, r *http.Request) {
 	target := s.resolveDesktopTarget(r, "")
+	spec := desktop.ParseTarget(target)
 	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
 	defer cancel()
 
-	if target == "local" {
-		wins, err := s.localDesk().Windows(ctx)
+	if spec.IsLocal() {
+		eng, err := s.localDeskPool().ForSlot(spec.VirtualSlot)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
+		wins, err := eng.Windows(ctx)
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
 			return
@@ -276,7 +403,7 @@ func (s *HTTPServer) handleDesktopWindows(w http.ResponseWriter, r *http.Request
 	var out struct {
 		Windows []desktop.WindowInfo `json:"windows"`
 	}
-	if err := s.callRemoteDesktop(ctx, target, "desktop_windows", map[string]any{}, 6*time.Second, &out); err != nil {
+	if err := s.callRemoteDesktop(ctx, spec.NodeID, "desktop_windows", withSlotArg(map[string]any{}, spec.VirtualSlot), 6*time.Second, &out); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
 		return
 	}
@@ -297,13 +424,18 @@ func (s *HTTPServer) handleDesktopFocus(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	target := s.resolveDesktopTarget(r, body.Target)
+	spec := desktop.ParseTarget(target)
 	ctx, cancel := context.WithTimeout(r.Context(), 6*time.Second)
 	defer cancel()
 	var err error
-	if target == "local" {
-		err = s.localDesk().Focus(ctx, body.App, body.WindowID)
+	if spec.IsLocal() {
+		var eng *desktop.Engine
+		eng, err = s.localDeskPool().ForSlot(spec.VirtualSlot)
+		if err == nil {
+			err = eng.Focus(ctx, body.App, body.WindowID)
+		}
 	} else {
-		err = s.callRemoteDesktop(ctx, target, "desktop_focus", map[string]any{"app": body.App, "windowId": body.WindowID}, 6*time.Second, nil)
+		err = s.callRemoteDesktop(ctx, spec.NodeID, "desktop_focus", withSlotArg(map[string]any{"app": body.App, "windowId": body.WindowID}, spec.VirtualSlot), 6*time.Second, nil)
 	}
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
@@ -314,6 +446,7 @@ func (s *HTTPServer) handleDesktopFocus(w http.ResponseWriter, r *http.Request) 
 
 func (s *HTTPServer) handleDesktopFrame(w http.ResponseWriter, r *http.Request) {
 	target := s.resolveDesktopTarget(r, "")
+	spec := desktop.ParseTarget(target)
 	winID := strings.TrimSpace(r.URL.Query().Get("windowId"))
 	maxDim, _ := strconv.Atoi(r.URL.Query().Get("maxDim"))
 	quality, _ := strconv.Atoi(r.URL.Query().Get("quality"))
@@ -321,8 +454,13 @@ func (s *HTTPServer) handleDesktopFrame(w http.ResponseWriter, r *http.Request) 
 	ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
 	defer cancel()
 
-	if target == "local" {
-		fr, err := s.localDesk().Frame(ctx, winID, maxDim, quality)
+	if spec.IsLocal() {
+		eng, err := s.localDeskPool().ForSlot(spec.VirtualSlot)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
+		fr, err := eng.Frame(ctx, winID, maxDim, quality)
 		if err != nil {
 			status := http.StatusBadRequest
 			payload := map[string]any{"error": err.Error()}
@@ -338,11 +476,11 @@ func (s *HTTPServer) handleDesktopFrame(w http.ResponseWriter, r *http.Request) 
 	}
 
 	var fr desktop.FrameResult
-	err := s.callRemoteDesktop(ctx, target, "desktop_frame", map[string]any{
+	err := s.callRemoteDesktop(ctx, spec.NodeID, "desktop_frame", withSlotArg(map[string]any{
 		"windowId": winID,
 		"maxDim":   maxDim,
 		"quality":  quality,
-	}, 10*time.Second, &fr)
+	}, spec.VirtualSlot), 10*time.Second, &fr)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
 		return
@@ -360,15 +498,20 @@ func (s *HTTPServer) handleDesktopInput(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	target := s.resolveDesktopTarget(r, body.Target)
+	spec := desktop.ParseTarget(target)
 
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 
 	var err error
-	if target == "local" {
-		err = s.localDesk().SendInput(ctx, body.UnifiedInput)
+	if spec.IsLocal() {
+		var eng *desktop.Engine
+		eng, err = s.localDeskPool().ForSlot(spec.VirtualSlot)
+		if err == nil {
+			err = eng.SendInput(ctx, body.UnifiedInput)
+		}
 	} else {
-		err = s.callRemoteDesktop(ctx, target, "desktop_input", body.UnifiedInput, 8*time.Second, nil)
+		err = s.callRemoteDesktop(ctx, spec.NodeID, "desktop_input", withSlotInput(body.UnifiedInput, spec.VirtualSlot), 8*time.Second, nil)
 	}
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
@@ -391,25 +534,30 @@ func (s *HTTPServer) handleDesktopStreamOffer(w http.ResponseWriter, r *http.Req
 		return
 	}
 	target := s.resolveDesktopTarget(r, body.Target)
+	spec := desktop.ParseTarget(target)
 	ctx, cancel := context.WithTimeout(r.Context(), 22*time.Second)
 	defer cancel()
 
 	var res desktop.StreamOfferResult
 	var err error
-	if target == "local" {
-		var lp *desktop.StreamOfferResult
-		lp, err = s.localDesk().StreamOffer(ctx, body.SDP, body.Scope, body.FPS, body.MaxDim, body.Bitrate)
-		if lp != nil {
-			res = *lp
+	if spec.IsLocal() {
+		var eng *desktop.Engine
+		eng, err = s.localDeskPool().ForSlot(spec.VirtualSlot)
+		if err == nil {
+			var lp *desktop.StreamOfferResult
+			lp, err = eng.StreamOffer(ctx, body.SDP, body.Scope, body.FPS, body.MaxDim, body.Bitrate)
+			if lp != nil {
+				res = *lp
+			}
 		}
 	} else {
-		err = s.callRemoteDesktop(ctx, target, "desktop_stream_offer", map[string]any{
+		err = s.callRemoteDesktop(ctx, spec.NodeID, "desktop_stream_offer", withSlotArg(map[string]any{
 			"sdp":     body.SDP,
 			"target":  body.Scope,
 			"fps":     body.FPS,
 			"maxDim":  body.MaxDim,
 			"bitrate": body.Bitrate,
-		}, 20*time.Second, &res)
+		}, spec.VirtualSlot), 20*time.Second, &res)
 	}
 	if err != nil {
 		status := http.StatusServiceUnavailable
@@ -431,12 +579,15 @@ func (s *HTTPServer) handleDesktopStreamClose(w http.ResponseWriter, r *http.Req
 	}
 	_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body)
 	target := s.resolveDesktopTarget(r, body.Target)
+	spec := desktop.ParseTarget(target)
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
-	if target == "local" {
-		_ = s.localDesk().StreamClose(ctx, body.Session)
+	if spec.IsLocal() {
+		if eng, err := s.localDeskPool().ForSlot(spec.VirtualSlot); err == nil {
+			_ = eng.StreamClose(ctx, body.Session)
+		}
 	} else {
-		_, _, _ = s.nodes().Call(ctx, target, "desktop_stream_close", map[string]any{"session": body.Session}, 5*time.Second)
+		_, _, _ = s.nodes().Call(ctx, spec.NodeID, "desktop_stream_close", withSlotArg(map[string]any{"session": body.Session}, spec.VirtualSlot), 5*time.Second)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
@@ -447,13 +598,19 @@ func (s *HTTPServer) handleDesktopSetup(w http.ResponseWriter, r *http.Request) 
 	}
 	_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body)
 	target := s.resolveDesktopTarget(r, body.Target)
+	spec := desktop.ParseTarget(target)
 
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
 	defer cancel()
 
 	var res desktop.SetupResult
-	if target == "local" {
-		rp, err := s.localDesk().Setup(ctx)
+	if spec.IsLocal() {
+		eng, err := s.localDeskPool().ForSlot(spec.VirtualSlot)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
+		rp, err := eng.Setup(ctx)
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
 			return
@@ -462,7 +619,7 @@ func (s *HTTPServer) handleDesktopSetup(w http.ResponseWriter, r *http.Request) 
 			res = *rp
 		}
 	} else {
-		if err := s.callRemoteDesktop(ctx, target, "desktop_setup", map[string]any{}, 5*time.Minute, &res); err != nil {
+		if err := s.callRemoteDesktop(ctx, spec.NodeID, "desktop_setup", withSlotArg(map[string]any{}, spec.VirtualSlot), 5*time.Minute, &res); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
 			return
 		}
@@ -484,13 +641,19 @@ func (s *HTTPServer) handleDesktopPower(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	target := s.resolveDesktopTarget(r, body.Target)
+	spec := desktop.ParseTarget(target)
 
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 
 	var st desktop.HostStatus
-	if target == "local" {
-		sp, err := s.localDesk().Power(ctx, body.Action)
+	if spec.IsLocal() {
+		eng, err := s.localDeskPool().ForSlot(spec.VirtualSlot)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
+		sp, err := eng.Power(ctx, body.Action)
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
 			return
@@ -499,7 +662,7 @@ func (s *HTTPServer) handleDesktopPower(w http.ResponseWriter, r *http.Request) 
 			st = *sp
 		}
 	} else {
-		if err := s.callRemoteDesktop(ctx, target, "desktop_power", map[string]any{"action": body.Action}, 12*time.Second, &st); err != nil {
+		if err := s.callRemoteDesktop(ctx, spec.NodeID, "desktop_power", withSlotArg(map[string]any{"action": body.Action}, spec.VirtualSlot), 12*time.Second, &st); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
 			return
 		}
@@ -541,6 +704,11 @@ func (s *HTTPServer) handleDesktopTakeoverRequest(w http.ResponseWriter, r *http
 	botName := body.BotID
 	if s.hub != nil && body.BotID != "" {
 		botName = s.hub.BotName(body.BotID)
+		if strings.TrimSpace(body.Target) == "" {
+			if resolved, rerr := s.hub.ResolveBotDesktopTarget(body.BotID, ""); rerr == nil && resolved != "" {
+				body.Target = resolved
+			}
+		}
 	}
 	note, err := s.desktopCoord().RequestTakeover(ctx, body.Target, body.BotID, botName, body.Reason, body.App)
 	if err != nil {
@@ -597,6 +765,8 @@ func (s *HTTPServer) handleDesktopTask(w http.ResponseWriter, r *http.Request) {
 			status = http.StatusConflict
 		case errors.Is(err, hub.ErrLocalDesktopDisabled):
 			status = http.StatusForbidden
+		case errors.Is(err, hub.ErrBoundDesktopOffline):
+			status = http.StatusServiceUnavailable
 		case strings.Contains(err.Error(), "goal is required"):
 			status = http.StatusBadRequest
 		}

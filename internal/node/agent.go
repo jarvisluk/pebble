@@ -108,7 +108,7 @@ type Agent struct {
 	closed     bool
 
 	deskMu sync.Mutex
-	desk   *desktop.Engine
+	desk   *desktop.EnginePool
 }
 
 // NewAgent initializes a node Agent and starts polling if opts.Enabled is true.
@@ -278,13 +278,17 @@ func (a *Agent) Close() {
 	}
 }
 
-func (a *Agent) desktopEngine() *desktop.Engine {
+func (a *Agent) desktopPool() *desktop.EnginePool {
 	a.deskMu.Lock()
 	defer a.deskMu.Unlock()
 	if a.desk == nil {
-		a.desk = desktop.NewEngine()
+		a.desk = desktop.NewEnginePool(desktop.VirtualConfig{})
 	}
 	return a.desk
+}
+
+func (a *Agent) desktopEngine() *desktop.Engine {
+	return a.desktopPool().Default()
 }
 
 func (a *Agent) setState(status string, connected bool, errMsg string) {
@@ -496,7 +500,16 @@ func (a *Agent) execute(ctx context.Context, cmd Command) Result {
 }
 
 func (a *Agent) execDesktop(ctx context.Context, action string, raw json.RawMessage) Result {
-	eng := a.desktopEngine()
+	var slotArgs struct {
+		Slot string `json:"slot"`
+	}
+	if len(raw) > 0 {
+		_ = json.Unmarshal(raw, &slotArgs)
+	}
+	eng, err := a.desktopPool().ForSlot(slotArgs.Slot)
+	if err != nil {
+		return Result{OK: false, Error: err.Error()}
+	}
 	jsonOut := func(v any, err error) Result {
 		if err != nil {
 			return Result{OK: false, Error: err.Error()}
@@ -607,8 +620,11 @@ func (a *Agent) execDesktop(ctx context.Context, action string, raw json.RawMess
 
 func (a *Agent) execShell(ctx context.Context, raw json.RawMessage) Result {
 	var args struct {
-		Command string `json:"command"`
-		Cwd     string `json:"cwd"`
+		Command             string            `json:"command"`
+		Cwd                 string            `json:"cwd"`
+		Env                 map[string]string `json:"env"`
+		DesktopSlot         string            `json:"desktopSlot"`
+		BrowserProfileBotID string            `json:"browserProfileBotId"`
 	}
 	if err := json.Unmarshal(raw, &args); err != nil || strings.TrimSpace(args.Command) == "" {
 		return Result{OK: false, Error: "command is required"}
@@ -629,10 +645,44 @@ func (a *Agent) execShell(ctx context.Context, raw json.RawMessage) Result {
 	if cwd := expandHome(args.Cwd, a.homeDir); cwd != "" {
 		c.Dir = cwd
 	}
+	extraEnvMap := make(map[string]string)
 	if runtime.GOOS == "linux" {
-		if envs := a.desktopEngine().Env(); len(envs) > 0 {
-			c.Env = append(os.Environ(), envs...)
+		var dispEnvs []string
+		if slot := strings.TrimSpace(args.DesktopSlot); slot != "" {
+			if eng, err := a.desktopPool().ForSlot(slot); err == nil {
+				dispEnvs = eng.Env()
+			}
+		} else {
+			dispEnvs = a.desktopEngine().Env()
 		}
+		for _, kv := range dispEnvs {
+			if k, v, ok := strings.Cut(kv, "="); ok && v != "" {
+				extraEnvMap[k] = v
+			}
+		}
+	}
+	for k, v := range args.Env {
+		if v == "" {
+			continue
+		}
+		if (strings.HasPrefix(k, "AGENT_BROWSER_") && k != "AGENT_BROWSER_EXECUTABLE_PATH") || k == "BOT_HUB_BOT_ID" {
+			extraEnvMap[k] = v
+		}
+	}
+	if bid := strings.TrimSpace(args.BrowserProfileBotID); bid != "" && validNodeIDRe.MatchString(bid) && a.homeDir != "" {
+		if extraEnvMap["AGENT_BROWSER_PROFILE"] == "" {
+			dir := filepath.Join(a.homeDir, ".bot-hub", "browsers", bid)
+			if os.MkdirAll(dir, 0o700) == nil {
+				extraEnvMap["AGENT_BROWSER_PROFILE"] = dir
+			}
+		}
+	}
+	if len(extraEnvMap) > 0 {
+		env := append([]string(nil), os.Environ()...)
+		for k, v := range extraEnvMap {
+			env = setShellEnvVar(env, k, v)
+		}
+		c.Env = env
 	}
 	buf := &limitedBuffer{limit: maxExecOutputBytes}
 	c.Stdout = buf
@@ -986,6 +1036,17 @@ func OpenTarget(ctx context.Context, target, app, homeDir string) error {
 		return errors.New(msg)
 	}
 	return nil
+}
+
+func setShellEnvVar(env []string, key, val string) []string {
+	prefix := key + "="
+	for i, item := range env {
+		if strings.HasPrefix(item, prefix) {
+			env[i] = prefix + val
+			return env
+		}
+	}
+	return append(env, prefix+val)
 }
 
 func expandHome(p, home string) string {

@@ -127,8 +127,19 @@ func detectLinuxPackageInstall(missing []string) (pkgMgr string, cmd string) {
 	return "", ""
 }
 
-func pickFreeDisplay() string {
+var (
+	reservedDisplayMu sync.Mutex
+	reservedDisplays  = map[string]bool{}
+)
+
+func reserveFreeDisplay() string {
+	reservedDisplayMu.Lock()
+	defer reservedDisplayMu.Unlock()
 	for n := 99; n < 199; n++ {
+		disp := fmt.Sprintf(":%d", n)
+		if reservedDisplays[disp] {
+			continue
+		}
 		sock := fmt.Sprintf("/tmp/.X11-unix/X%d", n)
 		lock := fmt.Sprintf("/tmp/.X%d-lock", n)
 		if _, err := os.Stat(sock); err == nil {
@@ -137,9 +148,19 @@ func pickFreeDisplay() string {
 		if _, err := os.Stat(lock); err == nil {
 			continue
 		}
-		return fmt.Sprintf(":%d", n)
+		reservedDisplays[disp] = true
+		return disp
 	}
 	return ":99"
+}
+
+func releaseDisplay(disp string) {
+	if disp == "" {
+		return
+	}
+	reservedDisplayMu.Lock()
+	delete(reservedDisplays, disp)
+	reservedDisplayMu.Unlock()
 }
 
 func parseResolution(res string) (int, int) {
@@ -162,7 +183,7 @@ func (b *linuxVirtualBackend) Start(ctx context.Context, resolution string) erro
 	}
 	b.mu.Unlock()
 
-	disp := pickFreeDisplay()
+	disp := reserveFreeDisplay()
 	w, h := parseResolution(resolution)
 	screenArg := fmt.Sprintf("%dx%dx24", w, h)
 
@@ -216,6 +237,7 @@ wait $XVFB_PID`,
 	if !ready {
 		_ = syscall.Kill(-pgid, syscall.SIGKILL)
 		_ = cmd.Wait()
+		releaseDisplay(disp)
 		return errors.New("Xvfb 启动超时，虚拟显示未能就绪")
 	}
 
@@ -225,7 +247,7 @@ wait $XVFB_PID`,
 	b.display = disp
 	b.mu.Unlock()
 
-	go func(c *exec.Cmd) {
+	go func(c *exec.Cmd, d string) {
 		_ = c.Wait()
 		b.mu.Lock()
 		if b.cmd == c {
@@ -234,7 +256,8 @@ wait $XVFB_PID`,
 			b.display = ""
 		}
 		b.mu.Unlock()
-	}(cmd)
+		releaseDisplay(d)
+	}(cmd, disp)
 
 	return nil
 }
@@ -263,9 +286,11 @@ func (b *linuxVirtualBackend) Stop() error {
 	b.mu.Lock()
 	pgid := b.pgid
 	cmd := b.cmd
+	disp := b.display
 	b.mu.Unlock()
 
 	if pgid <= 0 {
+		releaseDisplay(disp)
 		return nil
 	}
 	_ = syscall.Kill(-pgid, syscall.SIGTERM)
@@ -291,6 +316,7 @@ func (b *linuxVirtualBackend) Stop() error {
 		b.display = ""
 	}
 	b.mu.Unlock()
+	releaseDisplay(disp)
 	return nil
 }
 

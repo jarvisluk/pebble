@@ -277,6 +277,8 @@ func runBotCmd(ctx context.Context, args []string, cwd string, stdout, stderr io
 		model := fs.String("model", "", "model override")
 		harnessName := fs.String("harness", "", "agent runtime (opencode|pi|dsh|claude|agy)")
 		priv := fs.Bool("private-sessions", false, "enable private sessions")
+		deskTarget := fs.String("desktop-target", "", "bound desktop screen target (e.g. local, virtual:<slot>, <nodeId>, <nodeId>:virtual:<slot>)")
+		browserMode := fs.String("browser-mode", "", "browser isolation mode (auto|isolated|attach)")
 		if err := fs.Parse(rest); err != nil {
 			return err
 		}
@@ -314,6 +316,12 @@ func runBotCmd(ctx context.Context, args []string, cwd string, stdout, stderr io
 		if visited["private-sessions"] {
 			payload["privateSessions"] = *priv
 		}
+		if visited["desktop-target"] {
+			payload["desktopTarget"] = *deskTarget
+		}
+		if visited["browser-mode"] {
+			payload["browserMode"] = *browserMode
+		}
 		c := resolveClient(co, cwd)
 		body, err := c.DoJSON(ctx, http.MethodPost, "/api/bots", payload)
 		if err != nil {
@@ -333,6 +341,8 @@ func runBotCmd(ctx context.Context, args []string, cwd string, stdout, stderr io
 		model := fs.String("model", "", "model override (empty string inherits hub default)")
 		harnessName := fs.String("harness", "", "agent runtime (opencode|pi|dsh|claude|agy)")
 		priv := fs.Bool("private-sessions", false, "enable private sessions")
+		deskTarget := fs.String("desktop-target", "", "bound desktop screen target (empty string follows default)")
+		browserMode := fs.String("browser-mode", "", "browser isolation mode (auto|isolated|attach)")
 		if err := fs.Parse(rest); err != nil {
 			return err
 		}
@@ -367,8 +377,14 @@ func runBotCmd(ctx context.Context, args []string, cwd string, stdout, stderr io
 		if visited["private-sessions"] {
 			payload["privateSessions"] = *priv
 		}
+		if visited["desktop-target"] {
+			payload["desktopTarget"] = *deskTarget
+		}
+		if visited["browser-mode"] {
+			payload["browserMode"] = *browserMode
+		}
 		if len(payload) == 0 {
-			return errors.New("specify at least one field to update (--name, --description, --avatar, --color, --instructions, --instructions-file, --model, --harness, --private-sessions)")
+			return errors.New("specify at least one field to update (--name, --description, --avatar, --color, --instructions, --instructions-file, --model, --harness, --private-sessions, --desktop-target, --browser-mode)")
 		}
 		c := resolveClient(co, cwd)
 		target := c.ResolveBotID(*id)

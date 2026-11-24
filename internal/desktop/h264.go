@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"runtime"
 	"strconv"
@@ -546,7 +547,7 @@ func envValue(env []string, key string) string {
 func runFFmpegH264(ctx context.Context, ffmpegPath string, env, args []string, emit func(H264Chunk) error) error {
 	cmd := exec.CommandContext(ctx, ffmpegPath, args...)
 	if len(env) > 0 {
-		cmd.Env = env
+		cmd.Env = mergeEnv(os.Environ(), env)
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

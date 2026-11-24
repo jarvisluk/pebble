@@ -19,6 +19,8 @@ struct BotStatus: Codable, Identifiable, Hashable {
     var model: String?
     var modelInherited: Bool?
     var privateSessions: Bool?
+    var desktopTarget: String?
+    var browserMode: String?
     var archivedSessions: Int?
     var busy: Bool?
     var queued: Int?
@@ -226,9 +228,14 @@ struct DesktopTarget: Codable, Identifiable, Hashable {
     var id: String
     var name: String?
     var local: Bool?
+    var hostId: String?
+    var slot: String?
     var os: String?
     var arch: String?
     var supported: Bool?
+    var virtual: Bool?
+    var virtualSupported: Bool?
+    var powerState: String?
     var backend: String?
     var screen: ScreenState?
 }
