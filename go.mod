@@ -9,7 +9,6 @@ require (
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/tailscale/tailcat v0.7.1-0.20261007201807-52fbad323e9d
 	github.com/wailsapp/wails/v3 v3.1.0
-	github.com/wlynxg/anet v0.0.5
 	modernc.org/sqlite v1.62.0
 	rsc.io/qr v0.2.0
 	tailscale.com v1.103.0-pre.0.20260929142145-a0e471a35b8f
@@ -70,6 +69,7 @@ require (
 	github.com/tailscale/web-client-prebuilt v0.0.0-20260917222731-e0ed2d0d0fea // indirect
 	github.com/tailscale/wireguard-go v0.0.0-20260924224943-0a83b87f7908 // indirect
 	github.com/u-root/u-root v0.16.0 // indirect
+	github.com/wlynxg/anet v0.0.5 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	go4.org/mem v0.0.0-20240501181205-ae6ca9944745 // indirect
 	go4.org/netipx v0.0.0-20260823151212-3075585bcbeb // indirect
