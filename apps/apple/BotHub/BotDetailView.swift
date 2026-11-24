@@ -1,11 +1,93 @@
 import SwiftUI
 
+/// 右侧工作面板 Inspector：仅保留无外框电脑屏幕实时预览与定时任务（Routines）。
 struct BotDetailView: View {
     @Environment(HubStore.self) private var hub
     @Environment(Router.self) private var router
     @Environment(\.palette) private var p
     var botId: String
     @Binding var isPresented: Bool
+
+    @State private var previewStream = H264StreamController()
+
+    var body: some View {
+        HubSheetScaffold(
+            title: hub.t("rightPanelTitle"),
+            onClose: { isPresented = false },
+            enableCancelShortcut: false
+        ) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    desktopPreviewCard
+                    RoutinesSection(botId: botId)
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 6)
+                .padding(.bottom, 24)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .scrollDismissesKeyboard(.interactively)
+            .background(p.page.ignoresSafeArea())
+        }
+        .task(id: botId) {
+            if hub.isConnected, let req = hub.makeDesktopWSRequest(target: hub.takeovers.first?.target ?? "local") {
+                previewStream.start(request: req)
+            }
+            try? await hub.fetchRoutines(botId)
+        }
+        .onDisappear { previewStream.stop() }
+    }
+
+    private var desktopPreviewCard: some View {
+        Button {
+            router.openDesktop(hub.takeovers.first?.target ?? "local")
+        } label: {
+            ZStack(alignment: .topTrailing) {
+                ZStack {
+                    Color.black
+                    H264DisplayView(controller: previewStream)
+                    if !previewStream.connected {
+                        VStack(spacing: 6) {
+                            if !previewStream.error.isEmpty {
+                                Image(systemName: "display")
+                                    .font(.system(size: AppFont.hero))
+                                    .foregroundStyle(.secondary)
+                                Text(previewStream.error)
+                                    .font(.system(size: AppFont.caption))
+                                    .foregroundStyle(.secondary)
+                                    .multilineTextAlignment(.center)
+                                    .lineLimit(2)
+                                    .padding(.horizontal, 12)
+                            } else {
+                                ProgressView()
+                                    .tint(.white)
+                            }
+                        }
+                    }
+                }
+                .frame(minWidth: 0, maxWidth: .infinity)
+                .aspectRatio(16.0 / 10.0, contentMode: .fit)
+                .clipped()
+
+                Image(systemName: "arrow.up.left.and.arrow.down.right")
+                    .font(.system(size: AppFont.caption, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .padding(7)
+                    .background(.black.opacity(0.55), in: Circle())
+                    .padding(10)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// 顶栏中间 Bot 名称点开的信息与编辑表单 Sheet。
+struct BotInfoSheet: View {
+    @Environment(HubStore.self) private var hub
+    @Environment(Router.self) private var router
+    @Environment(\.palette) private var p
+    var botId: String
 
     @State private var detail: BotStatus?
     @State private var loading = false
@@ -25,7 +107,6 @@ struct BotDetailView: View {
     @State private var memLoading = false
     @State private var memText = ""
     @State private var memSaving = false
-    @State private var previewStream = H264StreamController()
 
     private var index: Int { hub.bots.firstIndex { $0.id == botId } ?? -1 }
     private var bot: BotStatus? { index >= 0 ? hub.bots[index] : nil }
@@ -43,48 +124,6 @@ struct BotDetailView: View {
         let formContent = Form {
             Group {
                 if !err.isEmpty { Section { StatusText(text: err) } }
-                Section {
-                    Button {
-                        router.openDesktop(hub.takeovers.first?.target ?? "local")
-                    } label: {
-                        ZStack(alignment: .topTrailing) {
-                            ZStack {
-                                Color.black
-                                H264DisplayView(controller: previewStream)
-                                if !previewStream.connected {
-                                    VStack(spacing: 6) {
-                                        if !previewStream.error.isEmpty {
-                                            Image(systemName: "display")
-                                                .font(.system(size: AppFont.hero))
-                                                .foregroundStyle(.secondary)
-                                            Text(previewStream.error)
-                                                .font(.system(size: AppFont.caption))
-                                                .foregroundStyle(.secondary)
-                                                .multilineTextAlignment(.center)
-                                                .lineLimit(2)
-                                                .padding(.horizontal, 12)
-                                        } else {
-                                            ProgressView()
-                                                .tint(.white)
-                                        }
-                                    }
-                                }
-                            }
-                            .frame(minWidth: 0, maxWidth: .infinity)
-                            .aspectRatio(16.0 / 10.0, contentMode: .fit)
-                            .clipped()
-
-                            Image(systemName: "arrow.up.left.and.arrow.down.right")
-                                .font(.system(size: AppFont.caption, weight: .semibold))
-                                .foregroundStyle(.white)
-                                .padding(7)
-                                .background(.black.opacity(0.55), in: Circle())
-                                .padding(10)
-                        }
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    }
-                    .buttonStyle(.plain)
-                }
                 Section {
                     HStack(spacing: 14) {
                         BotAvatar(id: botId, size: 56, index: index, avatar: editAvatar, color: editColor)
@@ -114,7 +153,7 @@ struct BotDetailView: View {
                             + ((active?.privateSessions ?? false) ? hub.t("privateTag") : ""))
                         LabeledContent(hub.t("workspaceDir")) {
                             Button {
-                                isPresented = false
+                                router.sheet = nil
                                 router.openFiles(botId: botId)
                             } label: {
                                 HStack(spacing: 4) {
@@ -144,14 +183,12 @@ struct BotDetailView: View {
                     }
                 }
 
-                RoutinesSection(botId: botId)
-
                 Section {
                     Button(hub.t("resetSessionBtn")) {
                         confirm = ConfirmItem(title: hub.t("resetSessionTitle"), message: hub.t("resetSessionDesc", ["name": bot?.displayName ?? botId])) {
                             do {
                                 try await hub.resetBot(botId)
-                                isPresented = false
+                                router.sheet = nil
                                 try? await hub.loadMessages(botId)
                             } catch { err = errText(error, hub.t("resetFailed")) }
                         }
@@ -161,7 +198,7 @@ struct BotDetailView: View {
                             confirm = ConfirmItem(title: hub.t("deleteBotTitle", ["name": bot?.displayName ?? botId]), message: hub.t("deleteBotDesc")) {
                                 do {
                                     try await hub.deleteBot(botId)
-                                    isPresented = false
+                                    router.sheet = nil
                                     router.closeBot()
                                 } catch { err = errText(error, hub.t("delFailed")) }
                             }
@@ -174,8 +211,7 @@ struct BotDetailView: View {
 
         HubSheetScaffold(
             title: hub.t("botDetails"),
-            onClose: { isPresented = false },
-            enableCancelShortcut: false,
+            onClose: { router.sheet = nil },
             actionTitle: hub.t("save"),
             actionDisabled: !dirty || editName.trimmingCharacters(in: .whitespaces).isEmpty,
             loading: saving,
@@ -183,14 +219,11 @@ struct BotDetailView: View {
         ) {
             formContent
         }
+        .hubClearInitialFocus()
         .confirmAlert($confirm)
-            .task(id: botId) {
-                if hub.isConnected, let req = hub.makeDesktopWSRequest(target: hub.takeovers.first?.target ?? "local") {
-                    previewStream.start(request: req)
-                }
-                await open()
-            }
-            .onDisappear { previewStream.stop() }
+        .task(id: botId) {
+            await open()
+        }
     }
 
     private func open() async {
@@ -203,7 +236,6 @@ struct BotDetailView: View {
         editPrivate = src?.privateSessions ?? false
         loading = true
         Task { await loadMem() }
-        Task { try? await hub.fetchRoutines(botId) }
         if let d = try? await hub.botDetail(botId) { apply(d) }
         loading = false
     }
@@ -355,11 +387,8 @@ struct RoutinesSection: View {
     private var list: [RoutineItem] { hub.routines[botId] ?? [] }
 
     var body: some View {
-        Section {
-            if !err.isEmpty { StatusText(text: err) }
-            if list.isEmpty { Text(hub.t("rtEmpty")).foregroundStyle(.secondary) }
-            ForEach(list) { rt in row(rt) }
-        } header: {
+        let cardFill = p.dark ? Color(hex: "#1c1c1e") : p.card
+        VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text(hub.t("routines"))
                 Spacer()
@@ -367,6 +396,39 @@ struct RoutinesSection: View {
                     .labelStyle(.iconOnly)
                     .buttonStyle(.borderless)
             }
+            .font(.system(size: AppFont.secondary))
+            .foregroundStyle(p.mute)
+            .padding(.horizontal, 16)
+
+            VStack(alignment: .leading, spacing: 0) {
+                if !err.isEmpty {
+                    StatusText(text: err)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                }
+                if list.isEmpty {
+                    Text(hub.t("rtEmpty"))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                } else {
+                    ForEach(Array(list.enumerated()), id: \.element.id) { idx, rt in
+                        if idx > 0 {
+                            Rectangle()
+                                .fill(Color.primary.opacity(p.dark ? 0.10 : 0.08))
+                                .frame(height: 0.5)
+                                .padding(.leading, 16)
+                        }
+                        row(rt)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 12)
+                    }
+                }
+            }
+            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+            .background(cardFill, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         }
         .confirmAlert($confirm)
         .sheet(isPresented: $creating) {

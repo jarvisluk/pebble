@@ -39,6 +39,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.FormatListBulleted
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.Check
@@ -48,7 +49,6 @@ import androidx.compose.material.icons.rounded.Computer
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.DesktopWindows
 import androidx.compose.material.icons.rounded.Folder
-import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.PanTool
 import androidx.compose.material.icons.rounded.PhotoLibrary
@@ -147,6 +147,7 @@ fun ChatScreen(
     onOpenDesktop: (String) -> Unit = {},
     onOpenFiles: (String) -> Unit = {},
     onToggleDetail: (() -> Unit)? = null,
+    onOpenBotInfo: (() -> Unit)? = null,
     onSelectBot: ((String) -> Unit)? = null,
     onCloseSidebar: (() -> Unit)? = null,
 ) {
@@ -380,9 +381,11 @@ fun ChatScreen(
                         modifier = Modifier
                             .clip(RoundedCornerShape(10.dp))
                             .then(
-                                if (inDesktopSidebar && store.bots.size > 1) {
-                                    Modifier.clickable { botSwitcherOpen = true }
-                                } else Modifier
+                                when {
+                                    inDesktopSidebar && store.bots.size > 1 -> Modifier.clickable { botSwitcherOpen = true }
+                                    !inDesktopSidebar && onOpenBotInfo != null -> Modifier.clickable { onOpenBotInfo() }
+                                    else -> Modifier
+                                },
                             )
                             .padding(vertical = 4.dp, horizontal = 2.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -456,7 +459,7 @@ fun ChatScreen(
                     }
                     if (onToggleDetail != null) {
                         IconButton(onClick = onToggleDetail) {
-                            Icon(Icons.Rounded.Info, contentDescription = store.t("botDetails"), tint = p.text)
+                            Icon(Icons.AutoMirrored.Rounded.FormatListBulleted, contentDescription = store.t("rightPanelTitle"), tint = p.text)
                         }
                     }
                 }

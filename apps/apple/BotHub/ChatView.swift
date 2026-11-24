@@ -207,18 +207,26 @@ struct ChatView: View {
                 .macSeamlessWindowToolbar()
                 .toolbar {
                     ToolbarItem(placement: .principal) {
-                        titleView
+                        Button {
+                            router.sheet = .botInfo(botId)
+                        } label: {
+                            titleView
+                        }
+                        .buttonStyle(.plain)
+                        .contentShape(Capsule())
+                        .help(hub.t("botDetails"))
+                        .accessibilityLabel(hub.t("botDetails"))
                     }
                     ToolbarItemGroup(placement: .hubTrailing) {
-                        if !router.detailOpen {
-                            Button { router.openFiles(botId: botId) } label: {
-                                Label(hub.t("workspaceFiles"), systemImage: "folder")
-                            }
-                            Button { router.openDesktop(hub.takeovers.first?.target ?? "local") } label: {
-                                Label(hub.t("remoteDesktop"), systemImage: hub.takeovers.isEmpty ? "display" : "exclamationmark.triangle")
-                            }
+                        Button { router.openFiles(botId: botId) } label: {
+                            Label(hub.t("workspaceFiles"), systemImage: "folder")
                         }
-                        Button { router.detailOpen.toggle() } label: { Label(hub.t("botDetails"), systemImage: "info.circle") }
+                        Button { router.openDesktop(hub.takeovers.first?.target ?? "local") } label: {
+                            Label(hub.t("remoteDesktop"), systemImage: hub.takeovers.isEmpty ? "display" : "exclamationmark.triangle")
+                        }
+                        Button { router.detailOpen.toggle() } label: {
+                            Label(hub.t("rightPanelTitle"), systemImage: "list.bullet")
+                        }
                     }
                 }
         }
