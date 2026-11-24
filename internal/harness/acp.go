@@ -6,25 +6,33 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
+
+	"bot-hub/internal/config"
 )
 
 // ACPOptions configures a generic ACP (Agent Client Protocol) stdio harness.
 type ACPOptions struct {
-	Kind          string
-	Label         string
-	Binaries      []string
-	Args          []string
-	EnvPrefix     string
-	DefaultModels []string
+	Kind            string
+	Label           string
+	Binaries        []string
+	Args            []string
+	EnvPrefix       string
+	ConfigDir       string
+	DefaultModels   []string
+	BuiltinCommands []SlashCommand
 }
 
 // ACPHarness runs an Agent Client Protocol (JSON-RPC 2.0 over stdio) agent CLI.
 type ACPHarness struct {
-	opts ACPOptions
-	pool procPool[*acpProc]
+	opts        ACPOptions
+	pool        procPool[*acpProc]
+	cmdMu       sync.Mutex
+	botCommands map[string][]SlashCommand
 }
 
 type acpProc struct {
@@ -56,6 +64,7 @@ func NewCodeBuddyHarness() *ACPHarness {
 		Binaries:      []string{"codebuddy"},
 		Args:          []string{"--acp"},
 		EnvPrefix:     "CODEBUDDY",
+		ConfigDir:     ".codebuddy",
 		DefaultModels: []string{"deepseek-v3", "deepseek-r1", "hunyuan-turbos"},
 	})
 }
@@ -67,6 +76,7 @@ func NewQoderHarness() *ACPHarness {
 		Binaries:      []string{"qoderclicn", "qoder"},
 		Args:          []string{"acp"},
 		EnvPrefix:     "QODER",
+		ConfigDir:     ".qoder",
 		DefaultModels: []string{"auto", "qwen3-coder-plus"},
 	})
 }
@@ -78,6 +88,7 @@ func NewTraeHarness() *ACPHarness {
 		Binaries:      []string{"traecli"},
 		Args:          []string{"acp", "serve"},
 		EnvPrefix:     "TRAE",
+		ConfigDir:     ".trae",
 		DefaultModels: []string{"auto"},
 	})
 }
@@ -89,16 +100,96 @@ func NewGrokHarness() *ACPHarness {
 		Binaries:      []string{"grok"},
 		Args:          []string{"agent", "stdio"},
 		EnvPrefix:     "GROK",
+		ConfigDir:     ".grok",
 		DefaultModels: []string{"grok-4", "grok-code-fast-1"},
 	})
 }
 
 func NewACPHarness(opts ACPOptions) *ACPHarness {
-	return &ACPHarness{opts: opts}
+	return &ACPHarness{
+		opts:        opts,
+		botCommands: make(map[string][]SlashCommand),
+	}
 }
 
 func (h *ACPHarness) Kind() string  { return h.opts.Kind }
 func (h *ACPHarness) Label() string { return h.opts.Label }
+
+func (h *ACPHarness) ListCommands(_ context.Context, bot config.BotConfig) ([]SlashCommand, error) {
+	builtins := h.opts.BuiltinCommands
+	if len(builtins) == 0 {
+		builtins = []SlashCommand{
+			{Name: "compact", Description: "压缩当前会话上下文", Source: "harness"},
+			{Name: "clear", Description: "清空会话历史", Source: "harness"},
+			{Name: "plan", Description: "切换计划模式", Source: "harness"},
+			{Name: "review", Description: "代码评审", Source: "harness"},
+			{Name: "init", Description: "初始化项目配置", Source: "harness"},
+			{Name: "help", Description: "查看可用命令帮助", Source: "harness"},
+		}
+	}
+
+	h.cmdMu.Lock()
+	cached := append([]SlashCommand(nil), h.botCommands[bot.ID]...)
+	h.cmdMu.Unlock()
+
+	var local []SlashCommand
+	if dir := strings.TrimSpace(h.opts.ConfigDir); dir != "" {
+		if bot.Workspace != "" {
+			local = append(local, scanMarkdownCommands(filepath.Join(bot.Workspace, dir, "commands"), "harness")...)
+			local = append(local, scanSkillDirs(filepath.Join(bot.Workspace, dir, "skills"))...)
+		}
+		if home, err := os.UserHomeDir(); err == nil {
+			local = append(local, scanMarkdownCommands(filepath.Join(home, dir, "commands"), "harness")...)
+			local = append(local, scanSkillDirs(filepath.Join(home, dir, "skills"))...)
+		}
+	}
+	local = append(local, scanSharedSkills(bot.Workspace)...)
+	return mergeSlashCommands(cached, builtins, local), nil
+}
+
+func (h *ACPHarness) ListAgents(_ context.Context, bot config.BotConfig) ([]AgentInfo, error) {
+	var local []AgentInfo
+	if dir := strings.TrimSpace(h.opts.ConfigDir); dir != "" {
+		if bot.Workspace != "" {
+			local = append(local, scanAgentsDir(filepath.Join(bot.Workspace, dir, "agents"))...)
+		}
+		if home, err := os.UserHomeDir(); err == nil {
+			local = append(local, scanAgentsDir(filepath.Join(home, dir, "agents"))...)
+		}
+	}
+	return mergeAgents(local), nil
+}
+
+func (h *ACPHarness) handleAvailableCommands(botID string, raw []struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Input       *struct {
+		Hint string `json:"hint"`
+	} `json:"input"`
+}) {
+	if botID == "" {
+		return
+	}
+	list := make([]SlashCommand, 0, len(raw))
+	for _, c := range raw {
+		hint := ""
+		if c.Input != nil {
+			hint = c.Input.Hint
+		}
+		list = append(list, SlashCommand{
+			Name:         c.Name,
+			Description:  c.Description,
+			ArgumentHint: hint,
+			Source:       "harness",
+		})
+	}
+	h.cmdMu.Lock()
+	if h.botCommands == nil {
+		h.botCommands = make(map[string][]SlashCommand)
+	}
+	h.botCommands[botID] = list
+	h.cmdMu.Unlock()
+}
 
 func (h *ACPHarness) Models(context.Context) ([]string, error) {
 	return append([]string(nil), h.opts.DefaultModels...), nil
@@ -168,7 +259,9 @@ func (h *ACPHarness) startProc(ctx context.Context, opts RunOptions) (*acpProc, 
 		ap.kill()
 		return nil, err
 	}
-	sid, err := ap.newSession(ctx, bot.Workspace, opts)
+	sid, err := ap.newSession(ctx, bot.Workspace, opts, func(msg rpcMessage) {
+		h.captureUpdateCommands(bot.ID, msg)
+	})
 	if err != nil {
 		ap.kill()
 		return nil, err
@@ -294,7 +387,7 @@ func (p *acpProc) initialize(ctx context.Context) error {
 	return err
 }
 
-func (p *acpProc) newSession(ctx context.Context, workspace string, opts RunOptions) (string, error) {
+func (p *acpProc) newSession(ctx context.Context, workspace string, opts RunOptions, onMsg func(rpcMessage)) (string, error) {
 	sessCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	cwd := workspace
@@ -304,7 +397,7 @@ func (p *acpProc) newSession(ctx context.Context, workspace string, opts RunOpti
 	res, err := p.call(sessCtx, "session/new", map[string]any{
 		"cwd":        cwd,
 		"mcpServers": acpMCPServers(opts),
-	}, nil)
+	}, onMsg)
 	if err != nil {
 		return "", err
 	}
@@ -368,17 +461,26 @@ func (h *ACPHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnResult,
 		}
 		var params struct {
 			Update struct {
-				SessionUpdate string `json:"sessionUpdate"`
-				Title         string `json:"title"`
-				Kind          string `json:"kind"`
-				ToolName      string `json:"toolName"`
-				Content       json.RawMessage `json:"content"`
+				SessionUpdate     string          `json:"sessionUpdate"`
+				Title             string          `json:"title"`
+				Kind              string          `json:"kind"`
+				ToolName          string          `json:"toolName"`
+				Content           json.RawMessage `json:"content"`
+				AvailableCommands []struct {
+					Name        string `json:"name"`
+					Description string `json:"description"`
+					Input       *struct {
+						Hint string `json:"hint"`
+					} `json:"input"`
+				} `json:"availableCommands"`
 			} `json:"update"`
 		}
 		if json.Unmarshal(msg.Params, &params) != nil {
 			return
 		}
 		switch params.Update.SessionUpdate {
+		case "available_commands_update":
+			h.handleAvailableCommands(bot.ID, params.Update.AvailableCommands)
 		case "agent_message_chunk":
 			chunk := extractACPChunkText(params.Update.Content)
 			if chunk != "" {
@@ -450,6 +552,27 @@ func extractACPChunkText(raw json.RawMessage) string {
 		return sb.String()
 	}
 	return ""
+}
+
+func (h *ACPHarness) captureUpdateCommands(botID string, msg rpcMessage) {
+	if msg.Method != "session/update" {
+		return
+	}
+	var params struct {
+		Update struct {
+			SessionUpdate     string `json:"sessionUpdate"`
+			AvailableCommands []struct {
+				Name        string `json:"name"`
+				Description string `json:"description"`
+				Input       *struct {
+					Hint string `json:"hint"`
+				} `json:"input"`
+			} `json:"availableCommands"`
+		} `json:"update"`
+	}
+	if json.Unmarshal(msg.Params, &params) == nil && params.Update.SessionUpdate == "available_commands_update" {
+		h.handleAvailableCommands(botID, params.Update.AvailableCommands)
+	}
 }
 
 var _ Harness = (*ACPHarness)(nil)

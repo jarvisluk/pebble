@@ -651,9 +651,39 @@ func (h *OpenCodeHarness) Models(ctx context.Context) ([]string, error) {
 	return append([]string(nil), ids...), nil
 }
 
+func decodeOpenCodeDataList[T any](raw json.RawMessage) ([]T, bool) {
+	if len(raw) == 0 {
+		return nil, false
+	}
+	var wrapped struct {
+		Data []T `json:"data"`
+	}
+	if json.Unmarshal(raw, &wrapped) == nil && wrapped.Data != nil {
+		return wrapped.Data, true
+	}
+	var arr []T
+	if json.Unmarshal(raw, &arr) == nil {
+		return arr, true
+	}
+	return nil, false
+}
+
 func (h *OpenCodeHarness) ListCommands(ctx context.Context, bot config.BotConfig) ([]SlashCommand, error) {
 	builtins := []SlashCommand{
 		{Name: "compact", Description: "压缩当前会话上下文", Source: "harness"},
+		{Name: "init", Description: "初始化项目 AGENTS.md", Source: "harness"},
+		{Name: "review", Description: "评审当前代码变更", Source: "harness"},
+		{Name: "undo", Description: "撤销上一轮更改", Source: "harness"},
+		{Name: "redo", Description: "重做已撤销的更改", Source: "harness"},
+		{Name: "new", Description: "开启新会话", Source: "harness"},
+		{Name: "share", Description: "分享当前会话", Source: "harness"},
+		{Name: "unshare", Description: "取消分享当前会话", Source: "harness"},
+		{Name: "models", Description: "查看或切换模型", Source: "harness"},
+		{Name: "agents", Description: "查看或切换 Agent", Source: "harness"},
+		{Name: "mcp", Description: "查看 MCP 服务状态", Source: "harness"},
+		{Name: "sessions", Description: "列出历史会话", Source: "harness"},
+		{Name: "export", Description: "导出当前会话", Source: "harness"},
+		{Name: "help", Description: "查看可用命令帮助", Source: "harness"},
 	}
 	h.mu.Lock()
 	ready := h.baseURL != "" || h.external != ""
@@ -671,37 +701,39 @@ func (h *OpenCodeHarness) ListCommands(ctx context.Context, bot config.BotConfig
 			wg.Add(2)
 			go func() {
 				defer wg.Done()
-				var cmdOut struct {
-					Data []struct {
-						Name        string `json:"name"`
-						Description string `json:"description"`
-					} `json:"data"`
+				var raw json.RawMessage
+				type ocCmd struct {
+					Name        string `json:"name"`
+					Description string `json:"description"`
 				}
-				if _, err := api.do(ctx, http.MethodGet, "/api/command"+q, nil, &cmdOut); err == nil {
-					for _, c := range cmdOut.Data {
-						remoteCmds = append(remoteCmds, SlashCommand{
-							Name:        c.Name,
-							Description: c.Description,
-							Source:      "harness",
-						})
+				if _, err := api.do(ctx, http.MethodGet, "/api/command"+q, nil, &raw); err == nil {
+					if items, ok := decodeOpenCodeDataList[ocCmd](raw); ok {
+						for _, c := range items {
+							remoteCmds = append(remoteCmds, SlashCommand{
+								Name:        c.Name,
+								Description: c.Description,
+								Source:      "harness",
+							})
+						}
 					}
 				}
 			}()
 			go func() {
 				defer wg.Done()
-				var skillOut struct {
-					Data []struct {
-						Name        string `json:"name"`
-						Description string `json:"description"`
-					} `json:"data"`
+				var raw json.RawMessage
+				type ocSkill struct {
+					Name        string `json:"name"`
+					Description string `json:"description"`
 				}
-				if _, err := api.do(ctx, http.MethodGet, "/api/skill"+q, nil, &skillOut); err == nil {
-					for _, s := range skillOut.Data {
-						remoteSkills = append(remoteSkills, SlashCommand{
-							Name:        s.Name,
-							Description: s.Description,
-							Source:      "skill",
-						})
+				if _, err := api.do(ctx, http.MethodGet, "/api/skill"+q, nil, &raw); err == nil {
+					if items, ok := decodeOpenCodeDataList[ocSkill](raw); ok {
+						for _, s := range items {
+							remoteSkills = append(remoteSkills, SlashCommand{
+								Name:        s.Name,
+								Description: s.Description,
+								Source:      "skill",
+							})
+						}
 					}
 				}
 			}()
@@ -713,11 +745,14 @@ func (h *OpenCodeHarness) ListCommands(ctx context.Context, bot config.BotConfig
 	if bot.Workspace != "" {
 		localCmds = append(localCmds, scanMarkdownCommands(filepath.Join(bot.Workspace, ".opencode", "commands"), "harness")...)
 		localSkills = append(localSkills, scanSkillDirs(filepath.Join(bot.Workspace, ".opencode", "skills"))...)
+		localSkills = append(localSkills, scanSkillDirs(filepath.Join(bot.Workspace, ".claude", "skills"))...)
 	}
 	if home, err := os.UserHomeDir(); err == nil {
 		localCmds = append(localCmds, scanMarkdownCommands(filepath.Join(home, ".config", "opencode", "commands"), "harness")...)
 		localSkills = append(localSkills, scanSkillDirs(filepath.Join(home, ".config", "opencode", "skills"))...)
+		localSkills = append(localSkills, scanSkillDirs(filepath.Join(home, ".claude", "skills"))...)
 	}
+	localSkills = append(localSkills, scanSharedSkills(bot.Workspace)...)
 
 	return mergeSlashCommands(builtins, remoteCmds, remoteSkills, localCmds, localSkills), nil
 }
@@ -726,31 +761,42 @@ func (h *OpenCodeHarness) ListAgents(ctx context.Context, bot config.BotConfig) 
 	h.mu.Lock()
 	base, pw := h.baseURL, h.password
 	h.mu.Unlock()
-	if base == "" {
-		return nil, nil
-	}
-	q := ""
-	if bot.Workspace != "" {
-		q = "?location[directory]=" + url.QueryEscape(bot.Workspace)
-	}
-	var out struct {
-		Data []struct {
+
+	var remote []AgentInfo
+	if base != "" {
+		q := ""
+		if bot.Workspace != "" {
+			q = "?location[directory]=" + url.QueryEscape(bot.Workspace)
+		}
+		var raw json.RawMessage
+		type ocAgent struct {
 			Name        string `json:"name"`
 			Description string `json:"description"`
 			Hidden      bool   `json:"hidden"`
-		} `json:"data"`
-	}
-	if _, err := h.apiClient(base, pw).do(ctx, http.MethodGet, "/api/agent"+q, nil, &out); err != nil {
-		return nil, err
-	}
-	var agents []AgentInfo
-	for _, a := range out.Data {
-		if a.Hidden || a.Name == "" {
-			continue
 		}
-		agents = append(agents, AgentInfo{Name: a.Name, Description: a.Description})
+		if _, err := h.apiClient(base, pw).do(ctx, http.MethodGet, "/api/agent"+q, nil, &raw); err == nil {
+			if items, ok := decodeOpenCodeDataList[ocAgent](raw); ok {
+				for _, a := range items {
+					if a.Hidden || a.Name == "" {
+						continue
+					}
+					remote = append(remote, AgentInfo{Name: a.Name, Description: a.Description})
+				}
+			}
+		}
 	}
-	return agents, nil
+
+	var local []AgentInfo
+	if bot.Workspace != "" {
+		local = append(local, scanAgentsDir(filepath.Join(bot.Workspace, ".opencode", "agents"))...)
+		local = append(local, scanAgentsDir(filepath.Join(bot.Workspace, ".claude", "agents"))...)
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		local = append(local, scanAgentsDir(filepath.Join(home, ".config", "opencode", "agents"))...)
+		local = append(local, scanAgentsDir(filepath.Join(home, ".claude", "agents"))...)
+	}
+
+	return mergeAgents(remote, local), nil
 }
 
 // modelRef splits "provider/model/id" into opencode's {providerID, id}.

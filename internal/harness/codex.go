@@ -6,10 +6,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
+
+	"bot-hub/internal/config"
 )
 
 // CodexHarness runs OpenAI Codex CLI in non-interactive JSONL mode (`codex exec --json --full-auto`).
@@ -31,6 +35,45 @@ func (h *CodexHarness) Models(context.Context) ([]string, error) {
 }
 
 func (h *CodexHarness) Close() {}
+
+func (h *CodexHarness) ListCommands(_ context.Context, bot config.BotConfig) ([]SlashCommand, error) {
+	builtins := []SlashCommand{
+		{Name: "compact", Description: "压缩当前会话上下文", Source: "harness"},
+		{Name: "new", Description: "开启新会话", Source: "harness"},
+		{Name: "clear", Description: "清空会话历史", Source: "harness"},
+		{Name: "review", Description: "评审当前代码变更", Source: "harness"},
+		{Name: "plan", Description: "进入计划模式", Source: "harness"},
+		{Name: "model", Description: "查看或切换模型", Source: "harness"},
+		{Name: "diff", Description: "查看工作区变更", Source: "harness"},
+		{Name: "mention", Description: "引用文件或目录", Source: "harness"},
+		{Name: "mcp", Description: "查看 MCP 服务状态", Source: "harness"},
+		{Name: "init", Description: "初始化项目 AGENTS.md", Source: "harness"},
+		{Name: "status", Description: "查看当前会话状态", Source: "harness"},
+		{Name: "help", Description: "查看可用命令帮助", Source: "harness"},
+	}
+	var local []SlashCommand
+	if bot.Workspace != "" {
+		local = append(local, scanMarkdownCommands(filepath.Join(bot.Workspace, ".codex", "prompts"), "harness")...)
+		local = append(local, scanSkillDirs(filepath.Join(bot.Workspace, ".codex", "skills"))...)
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		local = append(local, scanMarkdownCommands(filepath.Join(home, ".codex", "prompts"), "harness")...)
+		local = append(local, scanSkillDirs(filepath.Join(home, ".codex", "skills"))...)
+	}
+	local = append(local, scanSharedSkills(bot.Workspace)...)
+	return mergeSlashCommands(builtins, local), nil
+}
+
+func (h *CodexHarness) ListAgents(_ context.Context, bot config.BotConfig) ([]AgentInfo, error) {
+	var local []AgentInfo
+	if bot.Workspace != "" {
+		local = append(local, scanAgentsDir(filepath.Join(bot.Workspace, ".codex", "agents"))...)
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		local = append(local, scanAgentsDir(filepath.Join(home, ".codex", "agents"))...)
+	}
+	return mergeAgents(local), nil
+}
 
 type codexEvent struct {
 	Type     string `json:"type"`

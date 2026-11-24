@@ -85,16 +85,38 @@ func (h *AgyHarness) ListCommands(_ context.Context, bot config.BotConfig) ([]Sl
 		{Name: "compact", Description: "压缩当前会话上下文", Source: "harness"},
 		{Name: "plan", Description: "切换计划模式", Source: "harness"},
 		{Name: "clear", Description: "清空会话上下文", Source: "harness"},
+		{Name: "goal", Description: "开启长程目标执行", Source: "harness"},
+		{Name: "schedule", Description: "创建定时任务或提醒", Source: "harness"},
+		{Name: "browser", Description: "启用浏览器交互任务", Source: "harness"},
+		{Name: "grill-me", Description: "通过问答访谈对齐方案", Source: "harness"},
+		{Name: "teamwork", Description: "启动多代理协作", Source: "harness"},
+		{Name: "learn", Description: "沉淀本次经验到配置", Source: "harness"},
+		{Name: "boost", Description: "启用深度思考与严格验证", Source: "harness"},
+		{Name: "plugin", Description: "管理或创建插件", Source: "harness"},
+		{Name: "automation", Description: "配置后台自动化任务", Source: "harness"},
+		{Name: "help", Description: "查看可用命令帮助", Source: "harness"},
 	}
 	var local []SlashCommand
 	if bot.Workspace != "" {
 		local = append(local, scanMarkdownCommands(filepath.Join(bot.Workspace, ".agents", "workflows"), "workflow")...)
-		local = append(local, scanSkillDirs(filepath.Join(bot.Workspace, ".agents", "skills"))...)
 	}
 	if home, err := os.UserHomeDir(); err == nil {
 		local = append(local, scanSkillDirs(filepath.Join(home, ".gemini", "config", "skills"))...)
+		local = append(local, scanSkillDirs(filepath.Join(home, ".gemini", "antigravity", "builtin", "skills"))...)
 	}
+	local = append(local, scanSharedSkills(bot.Workspace)...)
 	return mergeSlashCommands(builtins, local), nil
+}
+
+func (h *AgyHarness) ListAgents(_ context.Context, bot config.BotConfig) ([]AgentInfo, error) {
+	var local []AgentInfo
+	if bot.Workspace != "" {
+		local = append(local, scanAgentsDir(filepath.Join(bot.Workspace, ".agents", "agents"))...)
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		local = append(local, scanAgentsDir(filepath.Join(home, ".gemini", "config", "agents"))...)
+	}
+	return mergeAgents(local), nil
 }
 
 // Models lists model slugs from `agy models` (cached on success).
