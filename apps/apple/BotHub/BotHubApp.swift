@@ -10,6 +10,7 @@ struct BotHubApp: App {
     var body: some Scene {
         WindowGroup {
             RootView()
+                .hubTrackWindowVisibility()
                 .environment(hub)
                 .environment(router)
         }
@@ -116,6 +117,7 @@ private struct MacWindowRootView: View {
         .tint(effectivePalette.accent)
         .font(.system(size: AppFont.body))
         .preferredColorScheme(isMacDesktopStage ? .dark : scheme0)
+        .hubTrackWindowVisibility()
         .macSeamlessWindowToolbar()
         .onAppear {
             appDelegate.onReopenWindow = {
@@ -347,6 +349,7 @@ struct RootView: View {
     @Environment(\.colorScheme) private var scheme
     @Environment(\.horizontalSizeClass) private var hsc
     @Environment(\.scenePhase) private var phase
+    @Environment(\.hubWindowVisible) private var windowVisible
 
     private var scheme0: ColorScheme? { hub.themePref == "light" ? .light : hub.themePref == "dark" ? .dark : nil }
 
@@ -456,6 +459,7 @@ struct RootView: View {
                         }
                         .environment(\.palette, palette)
                         .environment(\.hubCompact, compact)
+                        .environment(\.hubWindowVisible, windowVisible)
                         .environment(router)
                         .environment(hub)
                         .tint(palette.accent)
@@ -476,6 +480,7 @@ struct RootView: View {
             SheetHost(route: route)
                 .environment(\.palette, palette)
                 .environment(\.hubCompact, compact)
+                .environment(\.hubWindowVisible, windowVisible)
                 .environment(router)
                 .environment(hub)
                 .tint(palette.accent)
@@ -496,6 +501,7 @@ struct RootView: View {
             )
             .environment(\.palette, palette)
             .environment(\.hubCompact, compact)
+            .environment(\.hubWindowVisible, windowVisible)
             .environment(router)
             .environment(hub)
             .tint(palette.accent)

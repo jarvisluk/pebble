@@ -188,10 +188,24 @@ private struct PebbleParams {
     var bob: Double
 }
 
+private final class PebbleParamsBox {
+    let value: PebbleParams
+    init(_ value: PebbleParams) { self.value = value }
+}
+
+private let pebbleParamsCache: NSCache<NSString, PebbleParamsBox> = {
+    let c = NSCache<NSString, PebbleParamsBox>()
+    c.countLimit = 256
+    return c
+}()
+
 private func pebbleLerp(_ a: Double, _ b: Double, _ t: Double) -> Double { a + (b - a) * t }
 
 private func pebbleParams(for id: String) -> PebbleParams {
     let key = id.isEmpty ? "?" : id
+    if let cached = pebbleParamsCache.object(forKey: key as NSString) {
+        return cached.value
+    }
     var r = Mulberry32(seed: fnv1a(key))
     let q = r.next()
     let n: Int = q < 0.6 ? 4 : (q < 0.85 ? 5 : 6)
@@ -208,7 +222,7 @@ private func pebbleParams(for id: String) -> PebbleParams {
     let sign: Double = r.next() < 0.5 ? -1 : 1
     let tilt = sign * pebbleLerp(6, 12, r.next()) / 57.3
     _ = r.next() // sideR
-    return PebbleParams(
+    let built = PebbleParams(
         n: n,
         verts: verts,
         rot0: .pi / 2 - .pi / Double(n),
@@ -224,6 +238,8 @@ private func pebbleParams(for id: String) -> PebbleParams {
         lookSeed: fnv1a(key + "#l"),
         bob: r.next() * 6.28
     )
+    pebbleParamsCache.setObject(PebbleParamsBox(built), forKey: key as NSString)
+    return built
 }
 
 private struct PebblePressFX {
@@ -241,8 +257,12 @@ private func drawPebble(in ctx: inout GraphicsContext, size: CGSize, params P: P
         ctx.scaleBy(x: fx.sx, y: fx.sy)
         ctx.translateBy(x: -50 * k, y: -90 * k)
     }
-    let circMap: [Int: Double] = [3: 54, 4: 49, 5: 46, 6: 45]
-    let circ = circMap[P.n] ?? 49
+    let circ: Double = switch P.n {
+    case 3: 54
+    case 4: 49
+    case 5: 46
+    default: 45
+    }
     let breathe = 1.0 + 0.018 * sin(t * P.breath * .pi * (busy ? 2.6 : 1.0))
     let bobY = sin(t * 1.2 + P.bob) * (busy ? 1.2 : 0.6)
     let asym = 0.35
@@ -341,6 +361,7 @@ private func drawPebble(in ctx: inout GraphicsContext, size: CGSize, params P: P
 struct BotAvatar: View {
     @Environment(\.palette) private var p
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.hubWindowVisible) private var windowVisible
     var id: String
     var size: CGFloat
     var index: Int = -1
@@ -366,30 +387,42 @@ struct BotAvatar: View {
         }
     }
 
+    private func pressEffect(at now: TimeInterval) -> PebblePressFX? {
+        guard pressActive else { return nil }
+        let d = pressDown ? min(1.0, max(0.0, (now - pressT0) / 0.08)) : 0.0
+        let r = pressDown ? 0.0 : max(0.0, now - pressT1)
+        if !pressDown && r > 1.4 { return nil }
+        let b = pressDown ? 0.0 : exp(-5.0 * r) * sin(r * 22.0)
+        let hop = (!pressDown && r < 0.32) ? sin((r / 0.32) * .pi) : 0.0
+        let eye = pressDown ? 0.0 : (r < 0.14 ? r / 0.14 : 1.0)
+        return PebblePressFX(
+            sx: 1.0 + 0.08 * d - 0.07 * b,
+            sy: 1.0 - 0.10 * d + 0.09 * b,
+            dy: -5.0 * hop,
+            eye: eye
+        )
+    }
+
     var body: some View {
         let blob = Color(hex: botColorHex(id, index, custom: color))
         let seed = resolvePebbleSeed(id: id, avatar: avatar)
         let params = pebbleParams(for: seed)
-        TimelineView(.animation(minimumInterval: pressActive ? (1.0 / 60.0) : (1.0 / 30.0), paused: reduceMotion && !pressActive)) { timeline in
-            let t = reduceMotion ? 0.0 : max(0.0, timeline.date.timeIntervalSince(startTime))
-            let fx: PebblePressFX? = {
-                guard pressActive else { return nil }
-                let now = timeline.date.timeIntervalSinceReferenceDate
-                let d = pressDown ? min(1.0, max(0.0, (now - pressT0) / 0.08)) : 0.0
-                let r = pressDown ? 0.0 : max(0.0, now - pressT1)
-                if !pressDown && r > 1.4 { return nil }
-                let b = pressDown ? 0.0 : exp(-5.0 * r) * sin(r * 22.0)
-                let hop = (!pressDown && r < 0.32) ? sin((r / 0.32) * .pi) : 0.0
-                let eye = pressDown ? 0.0 : (r < 0.14 ? r / 0.14 : 1.0)
-                return PebblePressFX(
-                    sx: 1.0 + 0.08 * d - 0.07 * b,
-                    sy: 1.0 - 0.10 * d + 0.09 * b,
-                    dy: -5.0 * hop,
-                    eye: eye
-                )
-            }()
-            Canvas { ctx, sz in
-                drawPebble(in: &ctx, size: sz, params: params, color: blob, eye: p.eye, t: t, busy: busy, fx: fx)
+        let animating = windowVisible && (pressActive || (busy && !reduceMotion))
+        let shouldPulse = busy && windowVisible && !reduceMotion
+
+        Group {
+            if animating {
+                TimelineView(.animation(minimumInterval: pressActive ? (1.0 / 60.0) : (1.0 / 20.0), paused: false)) { timeline in
+                    let t = reduceMotion ? 0.0 : max(0.0, timeline.date.timeIntervalSince(startTime))
+                    let fx = pressEffect(at: timeline.date.timeIntervalSinceReferenceDate)
+                    Canvas { ctx, sz in
+                        drawPebble(in: &ctx, size: sz, params: params, color: blob, eye: p.eye, t: t, busy: busy, fx: fx)
+                    }
+                }
+            } else {
+                Canvas { ctx, sz in
+                    drawPebble(in: &ctx, size: sz, params: params, color: blob, eye: p.eye, t: 0, busy: busy, fx: nil)
+                }
             }
         }
         .frame(width: size, height: size)
@@ -419,14 +452,32 @@ struct BotAvatar: View {
             pressActive = true
             scheduleStopPress()
         }
+        .onChange(of: windowVisible) { _, vis in
+            if !vis {
+                clearTask?.cancel()
+                pressDown = false
+                pressActive = false
+            }
+        }
         .overlay(alignment: .bottomTrailing) {
             if busy {
                 let d = max(9, (size * 0.24).rounded())
                 Circle().fill(p.busy)
                     .frame(width: d, height: d)
                     .overlay(Circle().stroke(p.page, lineWidth: 2))
-                    .opacity(pulse ? 0.65 : 1)
-                    .onAppear { withAnimation(.easeInOut(duration: 0.6).repeatForever()) { pulse = true } }
+                    .opacity(shouldPulse && pulse ? 0.65 : 1)
+                    .task(id: shouldPulse) {
+                        if shouldPulse {
+                            pulse = false
+                            withAnimation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true)) {
+                                pulse = true
+                            }
+                        } else {
+                            withAnimation(.linear(duration: 0.01)) {
+                                pulse = false
+                            }
+                        }
+                    }
             }
         }
         .accessibilityHidden(true)

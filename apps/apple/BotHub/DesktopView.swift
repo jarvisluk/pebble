@@ -7,6 +7,7 @@ struct DesktopView: View {
     @Environment(\.colorScheme) private var scheme
     @Environment(\.dismiss) private var dismiss
     @Environment(\.hubCompact) private var compact
+    @Environment(\.hubWindowVisible) private var windowVisible
 
     private static let chatSidebarAnimation = Animation.spring(response: 0.28, dampingFraction: 0.88)
 
@@ -127,19 +128,19 @@ struct DesktopView: View {
                 Task { try? await hub.setActiveDesktopTarget(next) }
             }
         }
-        .task(id: "\(target)-\(streaming)-\(activeTab.rawValue)") {
-            guard activeTab == .desktop else { return }
+        .task(id: "\(target)-\(streaming)-\(activeTab.rawValue)-\(windowVisible)") {
+            guard activeTab == .desktop, windowVisible else { return }
             try? await Task.sleep(nanoseconds: 80_000_000)
-            guard !Task.isCancelled, activeTab == .desktop else { return }
+            guard !Task.isCancelled, activeTab == .desktop, windowVisible else { return }
             await pollState()
         }
-        .task(id: "\(target)-\(streaming)-ws-\(activeTab.rawValue)") {
-            if activeTab != .desktop || !streaming {
+        .task(id: "\(target)-\(streaming)-ws-\(activeTab.rawValue)-\(windowVisible)") {
+            if activeTab != .desktop || !streaming || !windowVisible {
                 streamCtrl.stop()
                 return
             }
             try? await Task.sleep(nanoseconds: 80_000_000)
-            guard !Task.isCancelled, activeTab == .desktop, streaming else { return }
+            guard !Task.isCancelled, activeTab == .desktop, streaming, windowVisible else { return }
             if let req = hub.makeDesktopWSRequest(target: target) {
                 streamCtrl.start(request: req)
             } else {
@@ -530,7 +531,7 @@ struct DesktopView: View {
     }
 
     private func pollState() async {
-        while !Task.isCancelled && streaming {
+        while !Task.isCancelled && streaming && windowVisible {
             if let st = try? await hub.fetchDesktopState(target) {
                 if st.status?.screenRecording == "denied" {
                     streaming = false
@@ -539,7 +540,8 @@ struct DesktopView: View {
                     error = ""
                 }
             }
-            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            let interval: UInt64 = streamCtrl.connected ? 10_000_000_000 : 2_000_000_000
+            try? await Task.sleep(nanoseconds: interval)
         }
     }
 }

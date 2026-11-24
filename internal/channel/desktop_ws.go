@@ -44,16 +44,25 @@ func (s *HTTPServer) handleDesktopStreamWS(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	reqPreset := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("preset")))
 	curPreset := "high"
+	maxPreset := "ultra"
+	if reqPreset != "" && reqPreset != "auto" {
+		resolved, _ := desktop.ResolveVideoPreset(reqPreset)
+		curPreset = resolved
+		maxPreset = resolved
+	}
 	reqCodec := desktop.NormalizeVideoCodec(r.URL.Query().Get("codec"))
 
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 
 	var (
-		mu         sync.Mutex
-		streamCtrl desktop.StreamControl
-		writeMu    sync.Mutex
+		mu           sync.Mutex
+		streamCtrl   desktop.StreamControl
+		streamCancel context.CancelFunc
+		reconfigure  bool
+		writeMu      sync.Mutex
 	)
 	congestionCh := make(chan struct{}, 4)
 
@@ -132,6 +141,25 @@ func (s *HTTPServer) handleDesktopStreamWS(w http.ResponseWriter, r *http.Reques
 						ctrl.SetBitrate(msg.BitrateKbps)
 					}
 				}
+			case "profile":
+				want := strings.ToLower(strings.TrimSpace(msg.Preset))
+				var cancelFn context.CancelFunc
+				mu.Lock()
+				if want == "" || want == "auto" {
+					maxPreset = "ultra"
+				} else {
+					resolved, _ := desktop.ResolveVideoPreset(want)
+					maxPreset = resolved
+					if curPreset != resolved {
+						curPreset = resolved
+						reconfigure = true
+						cancelFn = streamCancel
+					}
+				}
+				mu.Unlock()
+				if cancelFn != nil {
+					cancelFn()
+				}
 			}
 		}
 	}()
@@ -152,7 +180,9 @@ func (s *HTTPServer) handleDesktopStreamWS(w http.ResponseWriter, r *http.Reques
 		mu.Lock()
 		preset := curPreset
 		sctx, scancel := context.WithCancel(ctx)
+		streamCancel = scancel
 		streamCtrl = nil
+		reconfigure = false
 		mu.Unlock()
 
 		_, baseCfg := desktop.ResolveVideoPreset(preset)
@@ -290,9 +320,10 @@ func (s *HTTPServer) handleDesktopStreamWS(w http.ResponseWriter, r *http.Reques
 							ctrl.SetBitrate(curBitrateKbps)
 							notifyBitrate(curBitrateKbps)
 							lastSmoothAt = time.Now()
-						} else if preset != "ultra" && time.Since(lastSmoothAt) >= 8*time.Second {
+						} else if preset != "preview" && preset != "ultra" && time.Since(lastSmoothAt) >= 8*time.Second {
 							mu.Lock()
-							if next, ok := desktop.StepUpPreset(curPreset); ok {
+							maxP := maxPreset
+							if next, ok := desktop.StepUpPreset(curPreset); ok && desktop.PresetRank(next) <= desktop.PresetRank(maxP) {
 								curPreset = next
 								steppedForCongestion = true
 								mu.Unlock()
@@ -389,6 +420,10 @@ func (s *HTTPServer) handleDesktopStreamWS(w http.ResponseWriter, r *http.Reques
 		)
 		scancel()
 		<-writerDone
+		mu.Lock()
+		needRestart := steppedForCongestion || reconfigure
+		streamCancel = nil
+		mu.Unlock()
 		select {
 		case werr := <-writeErrCh:
 			if err == nil || errors.Is(err, context.Canceled) {
@@ -400,8 +435,8 @@ func (s *HTTPServer) handleDesktopStreamWS(w http.ResponseWriter, r *http.Reques
 		if ctx.Err() != nil {
 			break
 		}
-		// Restart triggered by auto-adaptation.
-		if steppedForCongestion {
+		// Restart triggered by auto-adaptation or client profile change.
+		if needRestart {
 			continue
 		}
 		if err != nil {

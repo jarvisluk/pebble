@@ -30,6 +30,16 @@ func TestDesktopStreamWSAuthAndUpgrade(t *testing.T) {
 		t.Fatalf("expected 401, got %d", resp.StatusCode)
 	}
 
+	// Authenticated upgrade with explicit preview preset must also succeed.
+	previewURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/api/desktop/stream/ws?target=local&preset=preview"
+	conn2, resp2, err := websocket.Dial(ctx, previewURL, &websocket.DialOptions{
+		HTTPHeader: http.Header{"Authorization": []string{"Bearer ws-secret"}},
+	})
+	if err != nil {
+		t.Fatalf("authenticated preview WS dial failed (resp=%v): %v", resp2, err)
+	}
+	_ = conn2.Close(websocket.StatusNormalClosure, "test done")
+
 	// Authenticated upgrade must succeed.
 	conn, resp, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{
 		HTTPHeader: http.Header{"Authorization": []string{"Bearer ws-secret"}},

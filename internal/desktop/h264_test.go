@@ -99,12 +99,25 @@ func TestPresetStepping(t *testing.T) {
 	if next, ok := StepUpPreset("ultra"); ok || next != "ultra" {
 		t.Fatalf("StepUpPreset(ultra) = (%q, %v)", next, ok)
 	}
+	if next, ok := StepDownPreset("preview"); ok || next != "preview" {
+		t.Fatalf("StepDownPreset(preview) = (%q, %v)", next, ok)
+	}
+	if next, ok := StepUpPreset("preview"); ok || next != "preview" {
+		t.Fatalf("StepUpPreset(preview) = (%q, %v)", next, ok)
+	}
 }
 
 func TestHighBitratePresetsAndCodec(t *testing.T) {
 	name, cfg := ResolveVideoPreset("ultra")
 	if name != "ultra" || cfg.FPS != 60 || cfg.MaxDim != 3840 || cfg.BitrateKbps < 30000 {
 		t.Fatalf("unexpected ultra preset: %s %+v", name, cfg)
+	}
+	pname, pcfg := ResolveVideoPreset("preview")
+	if pname != "preview" || pcfg.FPS != 4 || pcfg.MaxDim != 640 || pcfg.BitrateKbps != 600 {
+		t.Fatalf("unexpected preview preset: %s %+v", pname, pcfg)
+	}
+	if PresetRank("preview") >= PresetRank("low") || PresetRank("low") >= PresetRank("ultra") {
+		t.Fatalf("unexpected preset ranking")
 	}
 	if NormalizeVideoCodec("hevc") != "hevc" || NormalizeVideoCodec("H.265") != "hevc" {
 		t.Fatalf("expected hevc normalization")

@@ -5,10 +5,15 @@ struct BotDetailView: View {
     @Environment(HubStore.self) private var hub
     @Environment(Router.self) private var router
     @Environment(\.palette) private var p
+    @Environment(\.hubWindowVisible) private var windowVisible
     var botId: String
     @Binding var isPresented: Bool
 
     @State private var previewStream = H264StreamController()
+
+    private var previewTarget: String {
+        hub.takeovers.first?.target ?? "local"
+    }
 
     var body: some View {
         HubSheetScaffold(
@@ -30,10 +35,15 @@ struct BotDetailView: View {
             .background(p.page.ignoresSafeArea())
         }
         .task(id: botId) {
-            if hub.isConnected, let req = hub.makeDesktopWSRequest(target: hub.takeovers.first?.target ?? "local") {
-                previewStream.start(request: req)
-            }
             try? await hub.fetchRoutines(botId)
+        }
+        .task(id: "\(botId)-\(hub.isConnected)-\(windowVisible)-\(previewTarget)") {
+            guard windowVisible, hub.isConnected,
+                  let req = hub.makeDesktopWSRequest(target: previewTarget, preset: "preview") else {
+                previewStream.stop()
+                return
+            }
+            previewStream.start(request: req, trackFPS: false)
         }
         .onDisappear { previewStream.stop() }
     }

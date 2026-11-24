@@ -195,44 +195,41 @@ final class H264StreamController {
     var error: String = ""
     var screenRecordingDenied: Bool = false
 
-    @ObservationIgnored private weak var displayLayer: AVSampleBufferDisplayLayer?
+    @ObservationIgnored private let decoder = H264DecoderWorker()
     @ObservationIgnored private var task: URLSessionWebSocketTask?
     @ObservationIgnored private var receiveLoop: Task<Void, Never>?
     @ObservationIgnored private var fpsTimer: Task<Void, Never>?
-    @ObservationIgnored private var frameCounter = 0
-    @ObservationIgnored private var formatDesc: CMVideoFormatDescription?
-    @ObservationIgnored private var vpsData: Data?
-    @ObservationIgnored private var spsData: Data?
-    @ObservationIgnored private var ppsData: Data?
-    @ObservationIgnored private var needKeyframe = true
-    @ObservationIgnored private var ptsCounter: Int64 = 0
     @ObservationIgnored private var generation: Int = 0
 
     func attach(layer: AVSampleBufferDisplayLayer) {
-        displayLayer = layer
+        decoder.attach(layer: layer)
     }
 
-    func start(request: URLRequest) {
+    func start(request: URLRequest, trackFPS: Bool = true) {
         stop()
         generation += 1
         let gen = generation
         error = ""
         screenRecordingDenied = false
-        needKeyframe = true
+        decoder.reset(generation: gen, fpsScale: 60)
         let ws = URLSession.shared.webSocketTask(with: request)
         task = ws
         ws.resume()
 
-        fpsTimer = Task { [weak self] in
-            while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
-                guard let self, !Task.isCancelled, self.generation == gen else { break }
-                self.fps = self.frameCounter
-                self.frameCounter = 0
+        if trackFPS {
+            fpsTimer = Task { [weak self] in
+                while !Task.isCancelled {
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                    guard let self, !Task.isCancelled, self.generation == gen else { break }
+                    let nextFps = self.decoder.drainFrameCount()
+                    if self.fps != nextFps {
+                        self.fps = nextFps
+                    }
+                }
             }
         }
 
-        receiveLoop = Task { [weak self] in
+        receiveLoop = Task.detached { [weak self] in
             await self?.runReceive(ws: ws, gen: gen)
         }
     }
@@ -245,15 +242,9 @@ final class H264StreamController {
         fpsTimer = nil
         task?.cancel(with: .goingAway, reason: nil)
         task = nil
-        connected = false
-        fps = 0
-        frameCounter = 0
-        formatDesc = nil
-        vpsData = nil
-        spsData = nil
-        ppsData = nil
-        needKeyframe = true
-        displayLayer?.sampleBufferRenderer.flush(removingDisplayedImage: true, completionHandler: nil)
+        if connected { connected = false }
+        if fps != 0 { fps = 0 }
+        decoder.stopAndFlush(generation: generation)
     }
 
     func setPreset(_ preset: String) {
@@ -265,7 +256,7 @@ final class H264StreamController {
     }
 
     func requestKeyframe() {
-        needKeyframe = true
+        decoder.requestKeyframe()
         guard let ws = task else { return }
         ws.send(.string("{\"type\":\"keyframe\"}")) { _ in }
     }
@@ -278,24 +269,41 @@ final class H264StreamController {
         }
     }
 
-    private func runReceive(ws: URLSessionWebSocketTask, gen: Int) async {
-        while !Task.isCancelled && gen == generation {
+    private nonisolated func runReceive(ws: URLSessionWebSocketTask, gen: Int) async {
+        while !Task.isCancelled {
             do {
                 let msg = try await ws.receive()
-                if Task.isCancelled || gen != generation { break }
+                if Task.isCancelled { break }
                 switch msg {
                 case let .string(text):
-                    handleText(text)
+                    await handleText(text, gen: gen)
                 case let .data(data):
-                    handleBinary(data)
+                    decoder.enqueuePacket(
+                        data,
+                        generation: gen,
+                        onFirstFrame: { [weak self] in
+                            Task { @MainActor [weak self] in
+                                guard let self, self.generation == gen, !self.connected else { return }
+                                self.connected = true
+                            }
+                        },
+                        onNeedKeyframe: { [weak self] in
+                            Task { @MainActor [weak self] in
+                                guard let self, self.generation == gen else { return }
+                                self.requestKeyframe()
+                            }
+                        }
+                    )
                 @unknown default:
                     break
                 }
             } catch {
-                if !Task.isCancelled && gen == generation && task === ws {
-                    connected = false
-                    if self.error.isEmpty {
-                        self.error = error.localizedDescription
+                if !Task.isCancelled {
+                    let msg = error.localizedDescription
+                    await MainActor.run { [weak self] in
+                        guard let self, self.generation == gen, self.task === ws else { return }
+                        if self.connected { self.connected = false }
+                        if self.error.isEmpty { self.error = msg }
                     }
                 }
                 break
@@ -303,12 +311,13 @@ final class H264StreamController {
         }
     }
 
-    private func handleText(_ text: String) {
-        guard let data = text.data(using: .utf8),
+    private func handleText(_ text: String, gen: Int) {
+        guard gen == generation,
+              let data = text.data(using: .utf8),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let type = obj["type"] as? String else { return }
         if type == "meta" {
-            meta = H264StreamMeta(
+            let newMeta = H264StreamMeta(
                 imageWidth: (obj["imageWidth"] as? NSNumber)?.doubleValue ?? 0,
                 imageHeight: (obj["imageHeight"] as? NSNumber)?.doubleValue ?? 0,
                 logicalX: (obj["logicalX"] as? NSNumber)?.doubleValue ?? 0,
@@ -320,20 +329,116 @@ final class H264StreamController {
                 preset: obj["preset"] as? String ?? "",
                 bitrateKbps: (obj["bitrateKbps"] as? NSNumber)?.intValue ?? 0
             )
-            needKeyframe = true
-            error = ""
+            meta = newMeta
+            decoder.updateFPSScale(Int32(newMeta.fps))
+            decoder.requestKeyframe()
+            if !error.isEmpty { error = "" }
         } else if type == "error" {
             let code = obj["code"] as? String ?? ""
             let msg = obj["error"] as? String ?? ""
-            if code == "screen_recording_denied" {
+            if code == "screen_recording_denied" && !screenRecordingDenied {
                 screenRecordingDenied = true
             }
-            error = msg
-            connected = false
+            if error != msg { error = msg }
+            if connected { connected = false }
+        }
+    }
+}
+
+private final class H264DecoderWorker: @unchecked Sendable {
+    private let queue = DispatchQueue(label: "bothub.h264.decode", qos: .userInteractive)
+    private let counterLock = NSLock()
+    private var frameCounter = 0
+
+    private weak var displayLayer: AVSampleBufferDisplayLayer?
+    private var activeGeneration = 0
+    private var formatDesc: CMVideoFormatDescription?
+    private var vpsData: Data?
+    private var spsData: Data?
+    private var ppsData: Data?
+    private var needKeyframe = true
+    private var reportedConnected = false
+    private var ptsCounter: Int64 = 0
+    private var fpsScale: Int32 = 60
+
+    func attach(layer: AVSampleBufferDisplayLayer) {
+        queue.async { [weak self] in
+            self?.displayLayer = layer
         }
     }
 
-    private func handleBinary(_ packet: Data) {
+    func reset(generation: Int, fpsScale: Int32) {
+        counterLock.lock()
+        frameCounter = 0
+        counterLock.unlock()
+        queue.async { [weak self] in
+            guard let self else { return }
+            self.activeGeneration = generation
+            self.fpsScale = max(1, fpsScale)
+            self.formatDesc = nil
+            self.vpsData = nil
+            self.spsData = nil
+            self.ppsData = nil
+            self.needKeyframe = true
+            self.reportedConnected = false
+            self.ptsCounter = 0
+        }
+    }
+
+    func stopAndFlush(generation: Int) {
+        counterLock.lock()
+        frameCounter = 0
+        counterLock.unlock()
+        queue.async { [weak self] in
+            guard let self else { return }
+            self.activeGeneration = generation
+            self.formatDesc = nil
+            self.vpsData = nil
+            self.spsData = nil
+            self.ppsData = nil
+            self.needKeyframe = true
+            self.reportedConnected = false
+            self.displayLayer?.sampleBufferRenderer.flush(removingDisplayedImage: true, completionHandler: nil)
+        }
+    }
+
+    func updateFPSScale(_ fps: Int32) {
+        queue.async { [weak self] in
+            self?.fpsScale = max(1, fps)
+        }
+    }
+
+    func requestKeyframe() {
+        queue.async { [weak self] in
+            self?.needKeyframe = true
+        }
+    }
+
+    func drainFrameCount() -> Int {
+        counterLock.lock()
+        let c = frameCounter
+        frameCounter = 0
+        counterLock.unlock()
+        return c
+    }
+
+    func enqueuePacket(
+        _ packet: Data,
+        generation: Int,
+        onFirstFrame: @escaping @Sendable () -> Void,
+        onNeedKeyframe: @escaping @Sendable () -> Void
+    ) {
+        queue.async { [weak self] in
+            guard let self, self.activeGeneration == generation else { return }
+            self.handleBinary(packet, onFirstFrame: onFirstFrame, onNeedKeyframe: onNeedKeyframe)
+        }
+    }
+
+    private func handleBinary(
+        _ packet: Data,
+        onFirstFrame: @escaping @Sendable () -> Void,
+        onNeedKeyframe: @escaping @Sendable () -> Void
+    ) {
         guard packet.count > 2 else { return }
         let kind = packet[packet.startIndex]
         guard kind == 0x02 || kind == 0x03 || kind == 0x04 || kind == 0x05 else { return }
@@ -341,26 +446,33 @@ final class H264StreamController {
         let isHEVC = (kind == 0x04 || kind == 0x05)
         if needKeyframe && !isKey { return }
 
-        let nalus = parseAnnexBNALUs(packet.dropFirst())
-        if nalus.isEmpty { return }
+        let payload = packet.dropFirst()
+        let naluRanges = parseAnnexBNALURanges(payload)
+        if naluRanges.isEmpty { return }
 
-        var sliceNALUs: [Data] = []
+        var sliceRanges: [Range<Data.Index>] = []
+        sliceRanges.reserveCapacity(naluRanges.count)
         var vpsChanged = false
         var spsChanged = false
         var ppsChanged = false
-        for nalu in nalus {
-            guard let first = nalu.first else { continue }
+
+        for range in naluRanges {
+            guard !range.isEmpty else { continue }
+            let first = payload[range.lowerBound]
             if isHEVC {
                 let nalType = (first >> 1) & 0x3F
                 switch nalType {
                 case 32:
-                    if vpsData != nalu { vpsData = nalu; vpsChanged = true }
+                    let nalu = payload[range]
+                    if vpsData != nalu { vpsData = Data(nalu); vpsChanged = true }
                 case 33:
-                    if spsData != nalu { spsData = nalu; spsChanged = true }
+                    let nalu = payload[range]
+                    if spsData != nalu { spsData = Data(nalu); spsChanged = true }
                 case 34:
-                    if ppsData != nalu { ppsData = nalu; ppsChanged = true }
+                    let nalu = payload[range]
+                    if ppsData != nalu { ppsData = Data(nalu); ppsChanged = true }
                 case 0...9, 16...21:
-                    sliceNALUs.append(nalu)
+                    sliceRanges.append(range)
                 default:
                     break
                 }
@@ -368,16 +480,19 @@ final class H264StreamController {
                 let nalType = first & 0x1F
                 switch nalType {
                 case 7:
-                    if spsData != nalu { spsData = nalu; spsChanged = true }
+                    let nalu = payload[range]
+                    if spsData != nalu { spsData = Data(nalu); spsChanged = true }
                 case 8:
-                    if ppsData != nalu { ppsData = nalu; ppsChanged = true }
+                    let nalu = payload[range]
+                    if ppsData != nalu { ppsData = Data(nalu); ppsChanged = true }
                 case 5, 1:
-                    sliceNALUs.append(nalu)
+                    sliceRanges.append(range)
                 default:
                     break
                 }
             }
         }
+
         if isHEVC {
             if isKey, (formatDesc == nil || vpsChanged || spsChanged || ppsChanged),
                let vps = vpsData, let sps = spsData, let pps = ppsData {
@@ -387,18 +502,25 @@ final class H264StreamController {
                 rebuildHEVCFormatDesc(vps: vps, sps: sps, pps: pps)
             }
         } else {
-            if isKey, (formatDesc == nil || spsChanged || ppsChanged), let sps = spsData, let pps = ppsData {
+            if isKey, (formatDesc == nil || spsChanged || ppsChanged),
+               let sps = spsData, let pps = ppsData {
                 if formatDesc != nil {
                     displayLayer?.sampleBufferRenderer.flush()
                 }
                 rebuildFormatDesc(sps: sps, pps: pps)
             }
         }
-        guard !sliceNALUs.isEmpty, let fmt = formatDesc else { return }
-        if enqueueAVCC(nalus: sliceNALUs, formatDesc: fmt, isKey: isKey) {
+
+        guard !sliceRanges.isEmpty, let fmt = formatDesc else { return }
+        if enqueueAVCC(payload: payload, ranges: sliceRanges, formatDesc: fmt, isKey: isKey, onNeedKeyframe: onNeedKeyframe) {
             needKeyframe = false
-            connected = true
+            counterLock.lock()
             frameCounter += 1
+            counterLock.unlock()
+            if !reportedConnected {
+                reportedConnected = true
+                onFirstFrame()
+            }
         }
     }
 
@@ -464,15 +586,24 @@ final class H264StreamController {
         }
     }
 
-    private func enqueueAVCC(nalus: [Data], formatDesc: CMVideoFormatDescription, isKey: Bool) -> Bool {
-        var avcc = Data()
-        for nalu in nalus {
-            var lenBE = UInt32(nalu.count).bigEndian
+    private func enqueueAVCC(
+        payload: Data,
+        ranges: [Range<Data.Index>],
+        formatDesc: CMVideoFormatDescription,
+        isKey: Bool,
+        onNeedKeyframe: @escaping @Sendable () -> Void
+    ) -> Bool {
+        var totalLen = 0
+        for r in ranges { totalLen += 4 + r.count }
+
+        var avcc = Data(capacity: totalLen)
+        for r in ranges {
+            var lenBE = UInt32(r.count).bigEndian
             withUnsafeBytes(of: &lenBE) { avcc.append(contentsOf: $0) }
-            avcc.append(nalu)
+            avcc.append(payload[r])
         }
+
         var blockBuf: CMBlockBuffer?
-        let totalLen = avcc.count
         let bStatus = avcc.withUnsafeMutableBytes { raw -> OSStatus in
             var buf: CMBlockBuffer?
             let s1 = CMBlockBufferCreateWithMemoryBlock(
@@ -499,7 +630,6 @@ final class H264StreamController {
         guard bStatus == noErr, let blockBuf else { return false }
 
         ptsCounter += 1
-        let fpsScale = Int32(max(1, meta?.fps ?? 60))
         var timing = CMSampleTimingInfo(
             duration: CMTime(value: 1, timescale: fpsScale),
             presentationTimeStamp: CMTime(value: ptsCounter, timescale: fpsScale),
@@ -540,7 +670,8 @@ final class H264StreamController {
         let renderer = layer.sampleBufferRenderer
         if renderer.status == .failed {
             renderer.flush()
-            requestKeyframe()
+            needKeyframe = true
+            onNeedKeyframe()
             return false
         }
         renderer.enqueue(sampleBuf)
@@ -548,32 +679,34 @@ final class H264StreamController {
     }
 }
 
-private func parseAnnexBNALUs(_ data: Data) -> [Data] {
-    var out: [Data] = []
-    let bytes = [UInt8](data)
-    let n = bytes.count
-    var i = 0
-    var naluStart = -1
-
-    while i < n {
-        var scLen = 0
-        if i + 3 < n && bytes[i] == 0 && bytes[i + 1] == 0 && bytes[i + 2] == 0 && bytes[i + 3] == 1 {
-            scLen = 4
-        } else if i + 2 < n && bytes[i] == 0 && bytes[i + 1] == 0 && bytes[i + 2] == 1 {
-            scLen = 3
-        }
-        if scLen > 0 {
-            if naluStart >= 0 && i > naluStart {
-                out.append(Data(bytes[naluStart..<i]))
+private func parseAnnexBNALURanges(_ data: Data) -> [Range<Data.Index>] {
+    var out: [Range<Data.Index>] = []
+    let base = data.startIndex
+    data.withUnsafeBytes { raw in
+        guard let ptr = raw.bindMemory(to: UInt8.self).baseAddress else { return }
+        let n = raw.count
+        var i = 0
+        var naluStart = -1
+        while i < n {
+            var scLen = 0
+            if i + 3 < n && ptr[i] == 0 && ptr[i + 1] == 0 && ptr[i + 2] == 0 && ptr[i + 3] == 1 {
+                scLen = 4
+            } else if i + 2 < n && ptr[i] == 0 && ptr[i + 1] == 0 && ptr[i + 2] == 1 {
+                scLen = 3
             }
-            i += scLen
-            naluStart = i
-        } else {
-            i += 1
+            if scLen > 0 {
+                if naluStart >= 0 && i > naluStart {
+                    out.append((base + naluStart)..<(base + i))
+                }
+                i += scLen
+                naluStart = i
+            } else {
+                i += 1
+            }
         }
-    }
-    if naluStart >= 0 && n > naluStart {
-        out.append(Data(bytes[naluStart..<n]))
+        if naluStart >= 0 && n > naluStart {
+            out.append((base + naluStart)..<(base + n))
+        }
     }
     return out
 }

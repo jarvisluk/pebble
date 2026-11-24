@@ -51,6 +51,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -98,39 +99,34 @@ fun BotListScreen(
     var sortMenuOpen by remember { mutableStateOf(false) }
     var confirm by remember { mutableStateOf<ConfirmItem?>(null) }
 
-    val orderedBots = remember(
-        store.bots,
-        query,
-        store.pinnedIds,
-        store.sortMode,
-        store.manualOrder,
-        store.last.toMap(),
-    ) {
-        val q = query.trim().lowercase()
-        val indexed = store.bots.mapIndexed { idx, bot -> idx to bot }.filter { (_, b) ->
-            q.isEmpty() || b.displayName.lowercase().contains(q) || b.id.lowercase().contains(q) ||
-                b.description.orEmpty().lowercase().contains(q)
-        }
-        indexed.sortedWith { a, b ->
-            val aPinned = store.pinnedIds.indexOf(a.second.id).takeIf { it >= 0 }
-            val bPinned = store.pinnedIds.indexOf(b.second.id).takeIf { it >= 0 }
-            if (aPinned != null && bPinned != null) return@sortedWith aPinned.compareTo(bPinned)
-            if (aPinned != null) return@sortedWith -1
-            if (bPinned != null) return@sortedWith 1
-            when (store.sortMode) {
-                BotSortMode.RECENT -> {
-                    val ta = store.last[a.second.id]?.createdAt.orEmpty()
-                    val tb = store.last[b.second.id]?.createdAt.orEmpty()
-                    if (ta != tb) return@sortedWith tb.compareTo(ta)
-                    a.first.compareTo(b.first)
-                }
-                BotSortMode.MANUAL -> {
-                    val ma = store.manualOrder.indexOf(a.second.id).takeIf { it >= 0 }
-                    val mb = store.manualOrder.indexOf(b.second.id).takeIf { it >= 0 }
-                    if (ma != null && mb != null) return@sortedWith ma.compareTo(mb)
-                    if (ma != null) return@sortedWith -1
-                    if (mb != null) return@sortedWith 1
-                    a.first.compareTo(b.first)
+    val orderedBots by remember(store) {
+        derivedStateOf {
+            val q = query.trim().lowercase()
+            val indexed = store.bots.mapIndexed { idx, bot -> idx to bot }.filter { (_, b) ->
+                q.isEmpty() || b.displayName.lowercase().contains(q) || b.id.lowercase().contains(q) ||
+                    b.description.orEmpty().lowercase().contains(q)
+            }
+            indexed.sortedWith { a, b ->
+                val aPinned = store.pinnedIds.indexOf(a.second.id).takeIf { it >= 0 }
+                val bPinned = store.pinnedIds.indexOf(b.second.id).takeIf { it >= 0 }
+                if (aPinned != null && bPinned != null) return@sortedWith aPinned.compareTo(bPinned)
+                if (aPinned != null) return@sortedWith -1
+                if (bPinned != null) return@sortedWith 1
+                when (store.sortMode) {
+                    BotSortMode.RECENT -> {
+                        val ta = store.last[a.second.id]?.createdAt.orEmpty()
+                        val tb = store.last[b.second.id]?.createdAt.orEmpty()
+                        if (ta != tb) return@sortedWith tb.compareTo(ta)
+                        a.first.compareTo(b.first)
+                    }
+                    BotSortMode.MANUAL -> {
+                        val ma = store.manualOrder.indexOf(a.second.id).takeIf { it >= 0 }
+                        val mb = store.manualOrder.indexOf(b.second.id).takeIf { it >= 0 }
+                        if (ma != null && mb != null) return@sortedWith ma.compareTo(mb)
+                        if (ma != null) return@sortedWith -1
+                        if (mb != null) return@sortedWith 1
+                        a.first.compareTo(b.first)
+                    }
                 }
             }
         }

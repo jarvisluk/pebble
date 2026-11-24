@@ -84,6 +84,9 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -193,10 +196,22 @@ fun DesktopScreen(
         }
     }
 
-    LaunchedEffect(target, streaming, activeTab) {
-        if (activeTab != StageKind.DESKTOP) return@LaunchedEffect
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var isStarted by remember(lifecycleOwner) {
+        mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))
+    }
+    DisposableEffect(lifecycleOwner) {
+        val obs = LifecycleEventObserver { _, _ ->
+            isStarted = lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+        }
+        lifecycleOwner.lifecycle.addObserver(obs)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
+    }
+
+    LaunchedEffect(target, streaming, activeTab, isStarted) {
+        if (activeTab != StageKind.DESKTOP || !isStarted) return@LaunchedEffect
         delay(80)
-        while (isActive && streaming && activeTab == StageKind.DESKTOP) {
+        while (isActive && streaming && activeTab == StageKind.DESKTOP && isStarted) {
             runCatching { store.fetchDesktopState(target) }.getOrNull()?.let { st ->
                 if (st.status?.screenRecording == "denied") {
                     streaming = false
@@ -205,7 +220,7 @@ fun DesktopScreen(
                     error = ""
                 }
             }
-            delay(2000)
+            delay(if (streamConnected) 10_000 else 2000)
         }
     }
 
@@ -642,7 +657,7 @@ fun DesktopScreen(
                                                 url = wsUrl,
                                                 token = store.authToken,
                                                 preset = preset,
-                                                active = streaming && activeTab == StageKind.DESKTOP,
+                                                active = streaming && activeTab == StageKind.DESKTOP && isStarted,
                                                 controller = streamCtrl,
                                                 onMeta = { streamMeta = it },
                                                 onStatus = { conn, fps ->

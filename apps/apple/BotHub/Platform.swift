@@ -93,10 +93,19 @@ private struct HubCompactKey: EnvironmentKey {
     static let defaultValue = false
 }
 
+private struct HubWindowVisibleKey: EnvironmentKey {
+    static let defaultValue = true
+}
+
 extension EnvironmentValues {
     var hubCompact: Bool {
         get { self[HubCompactKey.self] }
         set { self[HubCompactKey.self] = newValue }
+    }
+
+    var hubWindowVisible: Bool {
+        get { self[HubWindowVisibleKey.self] }
+        set { self[HubWindowVisibleKey.self] = newValue }
     }
 }
 
@@ -181,6 +190,102 @@ private struct MacClearInitialFocusBridge: NSViewRepresentable {
                 window?.makeFirstResponder(nil)
             }
         }
+    }
+}
+
+private final class MacWindowObserverView: NSView {
+    var onVisibilityChange: ((Bool) -> Void)?
+    private weak var observedWindow: NSWindow?
+    private var tokens: [NSObjectProtocol] = []
+
+    deinit {
+        removeObservers()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        bindWindow(window)
+        evaluateVisibility()
+    }
+
+    private func removeObservers() {
+        let nc = NotificationCenter.default
+        for t in tokens { nc.removeObserver(t) }
+        tokens.removeAll()
+        observedWindow = nil
+    }
+
+    private func bindWindow(_ win: NSWindow?) {
+        guard win !== observedWindow || tokens.isEmpty else { return }
+        removeObservers()
+        observedWindow = win
+        let nc = NotificationCenter.default
+        tokens.append(nc.addObserver(forName: NSApplication.didHideNotification, object: NSApp, queue: .main) { [weak self] _ in
+            self?.evaluateVisibility()
+        })
+        tokens.append(nc.addObserver(forName: NSApplication.didUnhideNotification, object: NSApp, queue: .main) { [weak self] _ in
+            self?.evaluateVisibility()
+        })
+        guard let win else { return }
+        let names: [Notification.Name] = [
+            NSWindow.didChangeOcclusionStateNotification,
+            NSWindow.didMiniaturizeNotification,
+            NSWindow.didDeminiaturizeNotification,
+        ]
+        for name in names {
+            tokens.append(nc.addObserver(forName: name, object: win, queue: .main) { [weak self] _ in
+                self?.evaluateVisibility()
+            })
+        }
+        tokens.append(nc.addObserver(forName: NSWindow.willCloseNotification, object: win, queue: .main) { [weak self] _ in
+            self?.onVisibilityChange?(false)
+        })
+    }
+
+    func evaluateVisibility() {
+        guard let win = window else { return }
+        let isVisible = !(NSApp?.isHidden ?? false)
+            && win.isVisible
+            && !win.isMiniaturized
+            && win.occlusionState.contains(.visible)
+        onVisibilityChange?(isVisible)
+    }
+}
+
+private struct MacWindowVisibilityBridge: NSViewRepresentable {
+    @Binding var visible: Bool
+
+    func makeNSView(context: Context) -> MacWindowObserverView {
+        let view = MacWindowObserverView()
+        view.onVisibilityChange = { next in
+            if visible != next { visible = next }
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: MacWindowObserverView, context: Context) {
+        nsView.onVisibilityChange = { next in
+            if visible != next { visible = next }
+        }
+        nsView.evaluateVisibility()
+    }
+}
+
+private struct MacWindowVisibilityModifier: ViewModifier {
+    @State private var visible = true
+
+    func body(content: Content) -> some View {
+        content
+            .environment(\.hubWindowVisible, visible)
+            .background(MacWindowVisibilityBridge(visible: $visible))
+    }
+}
+#else
+private struct IOSWindowVisibilityModifier: ViewModifier {
+    @Environment(\.scenePhase) private var scenePhase
+
+    func body(content: Content) -> some View {
+        content.environment(\.hubWindowVisible, scenePhase == .active)
     }
 }
 #endif
@@ -364,6 +469,15 @@ extension View {
         self.background(MacClearInitialFocusBridge())
         #else
         self
+        #endif
+    }
+
+    @ViewBuilder
+    func hubTrackWindowVisibility() -> some View {
+        #if os(macOS)
+        modifier(MacWindowVisibilityModifier())
+        #else
+        modifier(IOSWindowVisibilityModifier())
         #endif
     }
 }

@@ -257,6 +257,7 @@ let listenersBound = false;
 let rafId = 0;
 let clock = 0;
 let lastNow = 0;
+let lastBusyDrawNow = 0;
 
 const reduceQuery = typeof window !== 'undefined' && window.matchMedia
   ? window.matchMedia('(prefers-reduced-motion: reduce)')
@@ -264,6 +265,10 @@ const reduceQuery = typeof window !== 'undefined' && window.matchMedia
 
 function isReducedMotion(): boolean {
   return Boolean(reduceQuery && reduceQuery.matches);
+}
+
+function isDocumentHidden(): boolean {
+  return typeof document !== 'undefined' && Boolean(document.hidden);
 }
 
 function hitZone(el: HTMLElement, x: number, y: number): boolean {
@@ -280,11 +285,28 @@ function bindGlobalListeners(): void {
     mouse.x = e.clientX;
     mouse.y = e.clientY;
     mouse.on = true;
-    ensureTick();
+    if (isReducedMotion() || isDocumentHidden()) return;
+    for (const a of live) {
+      if (a.g.k > 0.001 || hitZone(a.el, mouse.x, mouse.y)) {
+        ensureTick();
+        break;
+      }
+    }
   });
 
   document.documentElement.addEventListener('pointerleave', () => {
     mouse.on = false;
+  });
+
+  document.addEventListener('visibilitychange', () => {
+    if (isDocumentHidden()) {
+      if (rafId !== 0) {
+        cancelAnimationFrame(rafId);
+        rafId = 0;
+      }
+    } else {
+      ensureTick();
+    }
   });
 
   window.addEventListener('pointerdown', (e) => {
@@ -355,8 +377,9 @@ function updateGaze(dt: number): boolean {
     }
     const tk = hit ? 1 : 0;
     const nk = g.k + (tk - g.k) * Math.min(1, dt * 8);
-    if (Math.abs(nk - g.k) > 1e-3 || hit) moving = true;
-    g.k = nk;
+    const nextK = !hit && nk < 1e-3 ? 0 : nk;
+    if (nextK > 0 || g.k > 0 || hit) moving = true;
+    g.k = nextK;
   }
   return moving;
 }
@@ -389,8 +412,17 @@ function drawEntry(a: LiveEntry, t: number): void {
   applyEye(a.eyeR, f.eyes[1]);
 }
 
+function hasAnyActiveAnimation(reduce: boolean): boolean {
+  if (press.size > 0) return true;
+  if (reduce) return false;
+  for (const a of live) {
+    if (a.busy || a.g.k > 0) return true;
+  }
+  return false;
+}
+
 function tick(now: number): void {
-  if (live.size === 0) {
+  if (live.size === 0 || isDocumentHidden()) {
     rafId = 0;
     return;
   }
@@ -398,12 +430,33 @@ function tick(now: number): void {
   lastNow = now;
   const reduce = isReducedMotion();
   const gazing = !reduce && updateGaze(dt);
+  const hasHighRate = gazing || press.size > 0;
+  let anyBusy = false;
+  for (const a of live) {
+    if (a.busy) {
+      anyBusy = true;
+      break;
+    }
+  }
+
   if (!reduce) {
     clock += dt;
-    for (const a of live) drawEntry(a, clock);
-    rafId = requestAnimationFrame(tick);
-  } else if (gazing || press.size > 0) {
-    for (const a of live) drawEntry(a, 0);
+    const drawBusyThisFrame = anyBusy && (hasHighRate || now - lastBusyDrawNow >= 48);
+    if (drawBusyThisFrame) lastBusyDrawNow = now;
+    for (const a of live) {
+      const isGazingEntry = a.g.k > 0 || (mouse.on && hitZone(a.el, mouse.x, mouse.y));
+      const isPressedEntry = press.has(a.key);
+      if (isPressedEntry || isGazingEntry || (a.busy && drawBusyThisFrame)) {
+        drawEntry(a, clock);
+      }
+    }
+  } else if (press.size > 0) {
+    for (const a of live) {
+      if (press.has(a.key)) drawEntry(a, 0);
+    }
+  }
+
+  if (gazing || hasAnyActiveAnimation(reduce)) {
     rafId = requestAnimationFrame(tick);
   } else {
     rafId = 0;
@@ -411,8 +464,18 @@ function tick(now: number): void {
 }
 
 function ensureTick(): void {
-  if (rafId !== 0 || live.size === 0 || typeof requestAnimationFrame === 'undefined') return;
-  if (isReducedMotion() && press.size === 0) return;
+  if (rafId !== 0 || live.size === 0 || typeof requestAnimationFrame === 'undefined' || isDocumentHidden()) return;
+  const reduce = isReducedMotion();
+  let wantsTick = hasAnyActiveAnimation(reduce);
+  if (!wantsTick && !reduce && mouse.on) {
+    for (const a of live) {
+      if (hitZone(a.el, mouse.x, mouse.y)) {
+        wantsTick = true;
+        break;
+      }
+    }
+  }
+  if (!wantsTick) return;
   lastNow = performance.now();
   rafId = requestAnimationFrame(tick);
 }
@@ -430,15 +493,17 @@ export function registerPebbleAvatar(
     g: { k: 0, gx: 0, gy: 0, eye: 1 },
   };
   live.add(full);
-  drawEntry(full, isReducedMotion() ? 0 : clock);
+  drawEntry(full, !isReducedMotion() && full.busy ? clock : 0);
   ensureTick();
 
   return {
     update(params: PebbleParams, color: string, busy: boolean) {
+      const wasBusy = full.busy;
       full.params = params;
       full.color = color;
       full.busy = busy;
-      drawEntry(full, isReducedMotion() ? 0 : clock);
+      drawEntry(full, !isReducedMotion() && busy ? clock : 0);
+      if (!wasBusy && busy) ensureTick();
     },
     destroy() {
       live.delete(full);

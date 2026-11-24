@@ -32,22 +32,11 @@ struct ChatView: View {
     var onSelectBot: ((String) -> Void)? = nil
     var onCloseSidebar: (() -> Void)? = nil
 
-    @State private var input = ""
-    @State private var sending = false
     @State private var sendErr = ""
     @State private var collabPeer: CollabTarget?
     @State private var previewMedia: MessageMedia?
     @State private var commands: [SlashCommandItem] = []
-    @State private var mentions: [MentionCandidate] = []
-    @State private var mentionTask: Task<Void, Never>?
-    @State private var acDismissed = false
-    @State private var pendingAttachments: [PendingAttachment] = []
-    @State private var showPhotoPicker = false
-    #if os(iOS)
-    @State private var selectedPhotoItems: [PhotosPickerItem] = []
-    #endif
-    @State private var showFileImporter = false
-    @FocusState private var focused: Bool
+    @State private var pendingDrop: (seq: Int, urls: [URL])?
 
     private struct CollabTarget: Identifiable {
         let id: String
@@ -94,7 +83,6 @@ struct ChatView: View {
     private var name: String { bot?.displayName ?? botId }
     private var list: [ChatMessage] { hub.msgs[botId] ?? [] }
     private var botQuestions: [PendingQuestion] { hub.questions.filter { $0.botId == botId } }
-    private var showStop: Bool { (bot?.isBusy ?? false) && input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
     var body: some View {
         let pal = p.bot(botId, index, custom: bot?.color)
@@ -140,42 +128,32 @@ struct ChatView: View {
             }
             topBanners(pal)
             thread(pal)
-            composer(pal)
-                .background(inDesktopSidebar ? Color.clear : p.page)
-                .overlay(alignment: .top) {
-                    if inDesktopSidebar {
-                        Rectangle().fill(p.s2).frame(height: 0.5)
-                    }
+            ChatComposerView(
+                botId: botId,
+                name: name,
+                isBusy: bot?.isBusy ?? false,
+                inDesktopSidebar: inDesktopSidebar,
+                pal: pal,
+                commands: commands,
+                pendingDrop: pendingDrop,
+                sendErr: $sendErr
+            )
+            .background(inDesktopSidebar ? Color.clear : p.page)
+            .overlay(alignment: .top) {
+                if inDesktopSidebar {
+                    Rectangle().fill(p.s2).frame(height: 0.5)
                 }
+            }
         }
             .task(id: botId) {
-                pendingAttachments = []
-                mentions = []
-                acDismissed = false
                 if let list = try? await hub.fetchCommands(botId) {
                     commands = list
                 }
             }
-            #if os(iOS)
-            .photosPicker(isPresented: $showPhotoPicker, selection: $selectedPhotoItems, maxSelectionCount: 5, matching: .images)
-            .onChange(of: selectedPhotoItems) { _, items in
-                guard !items.isEmpty else { return }
-                let picked = items
-                selectedPhotoItems = []
-                for (idx, item) in picked.enumerated() {
-                    Task {
-                        if let data = try? await item.loadTransferable(type: Data.self) {
-                            await uploadData(data: data, filename: "photo_\(Int(Date().timeIntervalSince1970))_\(idx).jpg", mimeType: "image/jpeg", isImage: true)
-                        }
-                    }
-                }
+            .hubDropFileURLs { urls in
+                let seq = (pendingDrop?.seq ?? 0) + 1
+                pendingDrop = (seq, urls)
             }
-            #endif
-            .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
-                guard case .success(let urls) = result else { return }
-                importFileURLs(urls)
-            }
-            .hubDropFileURLs { importFileURLs($0) }
             .background {
                 if inDesktopSidebar {
                     p.card
@@ -194,12 +172,6 @@ struct ChatView: View {
             .task(id: botId) {
                 hub.setActiveChat(botId)
                 try? await hub.loadMessages(botId)
-            }
-            .onChange(of: hub.pendingChatInsert?.seq) { _, seq in
-                guard seq != nil, let insert = hub.pendingChatInsert, !insert.text.isEmpty else { return }
-                let needsSpace = !input.isEmpty && !(input.last?.isWhitespace ?? false)
-                input += (needsSpace ? " " : "") + insert.text
-                focused = true
             }
             .onDisappear { hub.setActiveChat(nil) }
             .onChange(of: hub.bots.map(\.id)) { _, ids in
@@ -408,6 +380,39 @@ struct ChatView: View {
         }
         .frame(maxWidth: .infinity)
     }
+}
+
+/// 独立输入框与联想状态容器，避免打字时触发聊天记录区重建。
+private struct ChatComposerView: View {
+    @Environment(HubStore.self) private var hub
+    @Environment(\.palette) private var p
+    @Environment(\.hubCompact) private var compact
+
+    var botId: String
+    var name: String
+    var isBusy: Bool
+    var inDesktopSidebar: Bool
+    var pal: (accent: Color, text: Color, soft: Color)
+    var commands: [SlashCommandItem]
+    var pendingDrop: (seq: Int, urls: [URL])?
+    @Binding var sendErr: String
+
+    @State private var input = ""
+    @State private var sending = false
+    @State private var mentions: [MentionCandidate] = []
+    @State private var mentionTask: Task<Void, Never>?
+    @State private var acDismissed = false
+    @State private var pendingAttachments: [PendingAttachment] = []
+    @State private var showPhotoPicker = false
+    #if os(iOS)
+    @State private var selectedPhotoItems: [PhotosPickerItem] = []
+    #endif
+    @State private var showFileImporter = false
+    @FocusState private var focused: Bool
+
+    private var showStop: Bool {
+        isBusy && input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
 
     private var slashQuery: String? {
         guard !acDismissed, input.hasPrefix("/") else { return nil }
@@ -436,7 +441,7 @@ struct ChatView: View {
         return (atIdx..<input.endIndex, String(after))
     }
 
-    private func composer(_ pal: (accent: Color, text: Color, soft: Color)) -> some View {
+    var body: some View {
         let readyMediaIds = pendingAttachments.compactMap { (!$0.uploading && $0.error == nil) ? $0.media?.id : nil }
         let hasUploading = pendingAttachments.contains { $0.uploading }
         let hasText = !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -444,7 +449,7 @@ struct ChatView: View {
         let showSlashAC = slashQuery != nil && !filteredCommands.isEmpty
         let showMentionAC = activeMentionRange != nil && !mentions.isEmpty
 
-        return VStack(spacing: 8) {
+        VStack(spacing: 8) {
             if showSlashAC || showMentionAC {
                 ScrollView {
                     LazyVStack(spacing: 2) {
@@ -563,19 +568,52 @@ struct ChatView: View {
                 }
             }
 
-            composerInputBar(pal)
+            composerInputBar(hasContent: hasContent, hasUploading: hasUploading)
         }
         .frame(maxWidth: 840)
         .padding(.horizontal, inDesktopSidebar ? 12 : (compact ? 10 : 14))
         .padding(.top, inDesktopSidebar ? 8 : 6)
         .padding(.bottom, inDesktopSidebar ? 10 : 8)
         .frame(maxWidth: .infinity)
+        .task(id: botId) {
+            pendingAttachments = []
+            mentions = []
+            acDismissed = false
+        }
+        .onChange(of: hub.pendingChatInsert?.seq) { _, seq in
+            guard seq != nil, let insert = hub.pendingChatInsert, !insert.text.isEmpty else { return }
+            let needsSpace = !input.isEmpty && !(input.last?.isWhitespace ?? false)
+            input += (needsSpace ? " " : "") + insert.text
+            focused = true
+        }
+        .onChange(of: pendingDrop?.seq) { _, _ in
+            if let urls = pendingDrop?.urls {
+                importFileURLs(urls)
+            }
+        }
+        #if os(iOS)
+        .photosPicker(isPresented: $showPhotoPicker, selection: $selectedPhotoItems, maxSelectionCount: 5, matching: .images)
+        .onChange(of: selectedPhotoItems) { _, items in
+            guard !items.isEmpty else { return }
+            let picked = items
+            selectedPhotoItems = []
+            for (idx, item) in picked.enumerated() {
+                Task {
+                    if let data = try? await item.loadTransferable(type: Data.self) {
+                        await uploadData(data: data, filename: "photo_\(Int(Date().timeIntervalSince1970))_\(idx).jpg", mimeType: "image/jpeg", isImage: true)
+                    }
+                }
+            }
+        }
+        #endif
+        .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
+            guard case .success(let urls) = result else { return }
+            importFileURLs(urls)
+        }
     }
 
     @ViewBuilder
-    private func composerInputBar(_ pal: (accent: Color, text: Color, soft: Color)) -> some View {
-        let hasContent = !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !pendingAttachments.isEmpty
-        let hasUploading = pendingAttachments.contains { $0.uploading }
+    private func composerInputBar(hasContent: Bool, hasUploading: Bool) -> some View {
         let row = HStack(alignment: .bottom, spacing: 10) {
             #if os(iOS)
             Menu {

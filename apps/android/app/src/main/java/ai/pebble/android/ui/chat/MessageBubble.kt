@@ -44,6 +44,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -295,19 +296,21 @@ fun AuthMediaImage(
     contentScale: ContentScale = ContentScale.Crop,
 ) {
     val p = LocalPalette.current
-    var bytes by remember(path) { mutableStateOf<ByteArray?>(null) }
+    var bitmap by remember(path) { mutableStateOf<ImageBitmap?>(null) }
 
     LaunchedEffect(path) {
-        bytes = runCatching { store.fetchMediaBytes(path) }.getOrNull()
+        bitmap = withContext(Dispatchers.IO) {
+            runCatching {
+                val bytes = store.fetchMediaBytes(path)
+                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+            }.getOrNull()
+        }
     }
 
-    val bitmap = remember(bytes) {
-        bytes?.let { runCatching { BitmapFactory.decodeByteArray(it, 0, it.size) }.getOrNull() }
-    }
-
-    if (bitmap != null) {
+    val loaded = bitmap
+    if (loaded != null) {
         Image(
-            bitmap = bitmap.asImageBitmap(),
+            bitmap = loaded,
             contentDescription = null,
             contentScale = contentScale,
             modifier = modifier,

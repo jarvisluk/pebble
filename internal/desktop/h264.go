@@ -21,10 +21,11 @@ type VideoPresetConfig struct {
 }
 
 var videoPresets = map[string]VideoPresetConfig{
-	"ultra":  {FPS: 60, MaxDim: 3840, BitrateKbps: 35000},
-	"high":   {FPS: 60, MaxDim: 2560, BitrateKbps: 16000},
-	"medium": {FPS: 30, MaxDim: 1600, BitrateKbps: 6000},
-	"low":    {FPS: 15, MaxDim: 1080, BitrateKbps: 2000},
+	"ultra":   {FPS: 60, MaxDim: 3840, BitrateKbps: 35000},
+	"high":    {FPS: 60, MaxDim: 2560, BitrateKbps: 16000},
+	"medium":  {FPS: 30, MaxDim: 1600, BitrateKbps: 6000},
+	"low":     {FPS: 15, MaxDim: 1080, BitrateKbps: 2000},
+	"preview": {FPS: 4, MaxDim: 640, BitrateKbps: 600},
 }
 
 // StreamControl allows live bitrate adaptation and on-demand IDR keyframe insertion.
@@ -33,7 +34,7 @@ type StreamControl interface {
 	ForceKeyframe()
 }
 
-// ResolveVideoPreset normalizes a preset name ("ultra", "high", "medium", "low") and returns its config.
+// ResolveVideoPreset normalizes a preset name ("ultra", "high", "medium", "low", "preview") and returns its config.
 func ResolveVideoPreset(name string) (string, VideoPresetConfig) {
 	key := strings.ToLower(strings.TrimSpace(name))
 	if cfg, ok := videoPresets[key]; ok {
@@ -42,9 +43,29 @@ func ResolveVideoPreset(name string) (string, VideoPresetConfig) {
 	return "high", videoPresets["high"]
 }
 
+// PresetRank returns an ordering rank for presets so WS adaptive stepping can enforce a ceiling.
+func PresetRank(name string) int {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "preview":
+		return 0
+	case "low":
+		return 1
+	case "medium":
+		return 2
+	case "high":
+		return 3
+	case "ultra":
+		return 4
+	default:
+		return 3
+	}
+}
+
 // StepDownPreset returns the next lower quality tier if available.
 func StepDownPreset(cur string) (string, bool) {
 	switch strings.ToLower(strings.TrimSpace(cur)) {
+	case "preview":
+		return "preview", false
 	case "ultra":
 		return "high", true
 	case "high", "":
@@ -59,6 +80,8 @@ func StepDownPreset(cur string) (string, bool) {
 // StepUpPreset returns the next higher quality tier if available.
 func StepUpPreset(cur string) (string, bool) {
 	switch strings.ToLower(strings.TrimSpace(cur)) {
+	case "preview":
+		return "preview", false
 	case "low":
 		return "medium", true
 	case "medium":

@@ -1256,8 +1256,9 @@ private fun RenderMarkdownBlock(
                 else -> PebbleFont.body
             }
             val headColor = if (block.level >= 5) p.text2 else fg
+            val inlineText = remember(block.text, p.dark, headColor) { buildInlineMarkdown(block.text, p, headColor) }
             Text(
-                text = buildInlineMarkdown(block.text, p, headColor),
+                text = inlineText,
                 fontSize = size,
                 fontWeight = FontWeight.Bold,
                 color = headColor,
@@ -1271,6 +1272,7 @@ private fun RenderMarkdownBlock(
             )
         }
         is MarkdownBlock.Quote -> {
+            val quoteText = remember(block.text, p.dark) { buildInlineMarkdown(block.text, p, p.text2) }
             Row(
                 modifier = Modifier.height(IntrinsicSize.Min),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1285,7 +1287,7 @@ private fun RenderMarkdownBlock(
                     )
                 }
                 Text(
-                    text = buildInlineMarkdown(block.text, p, p.text2),
+                    text = quoteText,
                     fontSize = PebbleFont.body,
                     lineHeight = 22.sp,
                     color = p.text2,
@@ -1319,8 +1321,9 @@ private fun RenderMarkdownBlock(
                             )
                         }
                         val itemColor = if (item.task && item.checked) p.text2 else fg
+                        val itemText = remember(item.text, p.dark, itemColor) { buildInlineMarkdown(item.text, p, itemColor) }
                         Text(
-                            text = buildInlineMarkdown(item.text, p, itemColor),
+                            text = itemText,
                             fontSize = PebbleFont.body,
                             lineHeight = 22.sp,
                             color = itemColor,
@@ -1331,6 +1334,7 @@ private fun RenderMarkdownBlock(
             }
         }
         is MarkdownBlock.Footnote -> {
+            val fnText = remember(block.text, p.dark) { buildInlineMarkdown(block.text, p, p.text2) }
             Row(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.Top,
@@ -1342,7 +1346,7 @@ private fun RenderMarkdownBlock(
                     color = p.mute,
                 )
                 Text(
-                    text = buildInlineMarkdown(block.text, p, p.text2),
+                    text = fnText,
                     fontSize = PebbleFont.secondary,
                     lineHeight = 19.sp,
                     color = p.text2,
@@ -1351,8 +1355,9 @@ private fun RenderMarkdownBlock(
         }
         is MarkdownBlock.ImageBlock -> MarkdownImageView(alt = block.alt, url = block.url)
         is MarkdownBlock.Para -> {
+            val paraText = remember(block.text, p.dark, fg) { buildInlineMarkdown(block.text, p, fg) }
             Text(
-                text = buildInlineMarkdown(block.text, p, fg),
+                text = paraText,
                 fontSize = PebbleFont.body,
                 lineHeight = 22.sp,
                 color = fg,
@@ -1551,8 +1556,9 @@ private fun TableBlockView(
                                 .padding(horizontal = 10.dp, vertical = 7.dp),
                             contentAlignment = align.boxAlign(),
                         ) {
+                            val cellInline = remember(cellText, p.dark, fg) { buildInlineMarkdown(cellText, p, fg) }
                             Text(
-                                text = buildInlineMarkdown(cellText, p, fg),
+                                text = cellInline,
                                 fontSize = PebbleFont.secondary,
                                 fontWeight = if (isHeader) FontWeight.SemiBold else FontWeight.Normal,
                                 color = fg,
