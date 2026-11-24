@@ -84,8 +84,12 @@ fun MessageBubble(
     showCollabHeader: Boolean = true,
     bubbleColor: Color? = null,
     botId: String = "",
+    inSidebar: Boolean = false,
 ) {
     val p = LocalPalette.current
+    val bubbleShape = if (inSidebar) RoundedCornerShape(16.dp) else PebbleDimens.bubbleShape
+    val hPad = if (inSidebar) 12.dp else 16.dp
+    val vPad = if (inSidebar) 9.dp else 10.dp
 
     when (msg.role) {
         "user" -> {
@@ -93,14 +97,14 @@ fun MessageBubble(
                 modifier = modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.End,
             ) {
-                Spacer(Modifier.weight(0.15f, fill = false))
+                Spacer(Modifier.weight(if (inSidebar) 0.1f else 0.15f, fill = false))
                 Surface(
-                    color = soft,
-                    shape = PebbleDimens.bubbleShape,
+                    color = if (inSidebar && p.dark) p.s2 else soft,
+                    shape = bubbleShape,
                     modifier = Modifier.widthIn(max = 560.dp),
                 ) {
                     Column(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                        modifier = Modifier.padding(horizontal = hPad, vertical = vPad),
                         horizontalAlignment = Alignment.End,
                         verticalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
@@ -133,13 +137,13 @@ fun MessageBubble(
 
             Surface(
                 modifier = modifier
-                    .padding(end = 24.dp)
+                    .padding(end = if (inSidebar) 8.dp else 24.dp)
                     .widthIn(max = 680.dp),
-                color = p.card,
-                shape = PebbleDimens.bubbleShape,
+                color = if (inSidebar) p.s1 else p.card,
+                shape = bubbleShape,
             ) {
                 Column(
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                    modifier = Modifier.padding(horizontal = hPad, vertical = vPad),
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     val from = msg.from.orEmpty()
@@ -211,10 +215,10 @@ fun MessageBubble(
             if (msg.from == "command") {
                 Surface(
                     modifier = modifier
-                        .padding(end = 24.dp)
+                        .padding(end = if (inSidebar) 8.dp else 24.dp)
                         .widthIn(max = 680.dp),
-                    color = p.card,
-                    shape = PebbleDimens.bubbleShape,
+                    color = if (inSidebar) p.s1 else p.card,
+                    shape = bubbleShape,
                 ) {
                     SelectionContainer {
                         Text(
@@ -222,7 +226,7 @@ fun MessageBubble(
                             fontFamily = MonoFont,
                             fontSize = PebbleFont.body,
                             color = p.text,
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                            modifier = Modifier.padding(horizontal = hPad, vertical = vPad),
                         )
                     }
                 }

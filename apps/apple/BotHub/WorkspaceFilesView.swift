@@ -9,6 +9,7 @@ struct WorkspaceFilesView: View {
     var initialPath: String? = nil
     @Binding var showHidden: Bool
     var refreshTrigger: Int = 0
+    var inWideStage: Bool = false
     var onQuotePath: (String) -> Void
 
     @State private var dirPath = ""
@@ -54,6 +55,18 @@ struct WorkspaceFilesView: View {
                             .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
                     }
                     .padding(12)
+                } else if inWideStage {
+                    Group {
+                        if let path = selectedPath {
+                            previewContent(path: path, isSplit: false, inCard: true)
+                        } else {
+                            listPanel(isSplit: false, inCard: true)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(p.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    .padding(12)
                 } else {
                     if let path = selectedPath {
                         previewContent(path: path, isSplit: false)
@@ -88,7 +101,8 @@ struct WorkspaceFilesView: View {
     }
 
     @ViewBuilder
-    private func listPanel(isSplit: Bool) -> some View {
+    private func listPanel(isSplit: Bool, inCard: Bool = false) -> some View {
+        let flatOnCard = isSplit || inCard
         VStack(spacing: 0) {
             if !dirPath.isEmpty {
                 inlineBreadcrumbs
@@ -134,7 +148,7 @@ struct WorkspaceFilesView: View {
                     if entries.isEmpty && !dirPath.isEmpty {
                         VStack(spacing: 0) {
                             if !dirPath.isEmpty {
-                                parentBackRow(isSplit: isSplit)
+                                parentBackRow(isSplit: flatOnCard)
                             }
                             Text(hub.t("emptyFolder"))
                                 .font(.system(size: AppFont.secondary))
@@ -142,13 +156,13 @@ struct WorkspaceFilesView: View {
                                 .frame(maxWidth: .infinity, alignment: .center)
                                 .padding(.vertical, 24)
                         }
-                        .padding(isSplit ? 8 : 0)
-                        .background(isSplit ? Color.clear : p.card, in: RoundedRectangle(cornerRadius: isSplit ? 0 : 18, style: .continuous))
-                        .padding(isSplit ? 0 : 12)
+                        .padding(flatOnCard ? 8 : 0)
+                        .background(flatOnCard ? Color.clear : p.card, in: RoundedRectangle(cornerRadius: flatOnCard ? 0 : 18, style: .continuous))
+                        .padding(flatOnCard ? 0 : 12)
                     } else {
                         LazyVStack(spacing: 0) {
                             if !dirPath.isEmpty {
-                                parentBackRow(isSplit: isSplit)
+                                parentBackRow(isSplit: flatOnCard)
                                 rowSeparator(inset: 14)
                             }
 
@@ -156,7 +170,7 @@ struct WorkspaceFilesView: View {
                                 let isSelected = isSplit && !ent.isDir && selectedPath == ent.path
                                 let prevSelected = idx > 0 && isSplit && !entries[idx - 1].isDir && selectedPath == entries[idx - 1].path
                                 if idx > 0 && !isSelected && !prevSelected {
-                                    rowSeparator(inset: isSplit ? 16 : 14)
+                                    rowSeparator(inset: flatOnCard ? 16 : 14)
                                 }
 
                                 Button {
@@ -166,14 +180,14 @@ struct WorkspaceFilesView: View {
                                         Task { await openFile(ent.path) }
                                     }
                                 } label: {
-                                    fileRow(ent, isSelected: isSelected, isSplit: isSplit)
+                                    fileRow(ent, isSelected: isSelected, isSplit: flatOnCard)
                                 }
                                 .buttonStyle(.plain)
                             }
                         }
-                        .padding(.vertical, isSplit ? 8 : 2)
-                        .background(isSplit ? Color.clear : p.card, in: RoundedRectangle(cornerRadius: isSplit ? 0 : 18, style: .continuous))
-                        .padding(isSplit ? 0 : 12)
+                        .padding(.vertical, flatOnCard ? 8 : 2)
+                        .background(flatOnCard ? Color.clear : p.card, in: RoundedRectangle(cornerRadius: flatOnCard ? 0 : 18, style: .continuous))
+                        .padding(flatOnCard ? 0 : 12)
                     }
                 }
                 .refreshable {
@@ -336,7 +350,7 @@ struct WorkspaceFilesView: View {
         }
     }
 
-    private func previewContent(path: String, isSplit: Bool) -> some View {
+    private func previewContent(path: String, isSplit: Bool, inCard: Bool = false) -> some View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
                 if !isSplit {
@@ -399,7 +413,7 @@ struct WorkspaceFilesView: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
-            .background(isSplit ? Color.clear : p.card)
+            .background((isSplit || inCard) ? Color.clear : p.card)
             .overlay(alignment: .bottom) {
                 Rectangle().fill(p.s2).frame(height: 0.5)
             }

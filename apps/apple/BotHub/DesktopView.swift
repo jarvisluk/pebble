@@ -4,8 +4,11 @@ struct DesktopView: View {
     @Environment(HubStore.self) private var hub
     @Environment(Router.self) private var router
     @Environment(\.palette) private var p
+    @Environment(\.colorScheme) private var scheme
     @Environment(\.dismiss) private var dismiss
     @Environment(\.hubCompact) private var compact
+
+    private static let chatSidebarAnimation = Animation.spring(response: 0.28, dampingFraction: 0.88)
 
     var initialTarget: String
     var initialBotId: String? = nil
@@ -64,29 +67,42 @@ struct DesktopView: View {
 
     private var isWide: Bool { !compact }
 
+    private func setChatSidebar(_ open: Bool) {
+        withAnimation(Self.chatSidebarAnimation) {
+            showChatSidebar = open
+        }
+    }
+
     var body: some View {
-        Group {
-            if isWide {
-                HStack(spacing: 0) {
-                    if showChatSidebar {
-                        sidebarChatView(closable: true)
-                            .frame(width: 340)
-                        Rectangle().fill(p.s2).frame(width: 0.5)
-                    }
-                    NavigationStack {
-                        stageContent
-                    }
+        let effectivePalette = activeTab == .desktop ? Palette(dark: true) : p
+        NavigationStack {
+            HStack(spacing: 0) {
+                if isWide && showChatSidebar {
+                    sidebarChatView(closable: false)
+                        .frame(width: 340)
+                        .background(effectivePalette.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                        .padding(.leading, 12)
+                        .padding(.vertical, 12)
+                        .padding(.trailing, activeTab == .desktop ? 12 : 0)
+                        .environment(\.palette, effectivePalette)
+                        .environment(\.colorScheme, activeTab == .desktop ? .dark : scheme)
+                        .transition(.move(edge: .leading).combined(with: .opacity))
+                }
+                stageContent
                     .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
-                }
-            } else {
-                NavigationStack {
-                    stageContent
-                }
-                .sheet(isPresented: $showChatSheet) {
-                    sidebarChatView(closable: true)
-                        .presentationDetents([.medium, .large])
-                }
             }
+            .clipped()
+            .background((activeTab == .desktop ? stage : p.page).ignoresSafeArea())
+            .macSeamlessWindowToolbar()
+            .navigationTitle("")
+            .inlineNavTitle()
+            .toolbar { stageToolbar }
+        }
+        .environment(\.colorScheme, activeTab == .desktop ? .dark : scheme)
+        .sheet(isPresented: $showChatSheet) {
+            sidebarChatView(closable: true)
+                .presentationDetents([.medium, .large])
         }
         .tint(activeTab == .desktop ? Color(hex: "#f3f1ee") : p.accent)
         .task { _ = try? await hub.refreshDesktopTargets() }
@@ -147,10 +163,11 @@ struct DesktopView: View {
                 initialPath: initialPath,
                 showHidden: $showHiddenFiles,
                 refreshTrigger: filesRefreshSeq,
+                inWideStage: isWide,
                 onQuotePath: { relPath in
                     hub.insertIntoChat("@\(relPath) ")
                     if isWide {
-                        showChatSidebar = true
+                        setChatSidebar(true)
                     } else {
                         showChatSheet = true
                     }
@@ -172,88 +189,108 @@ struct DesktopView: View {
                 .background(p.page)
             }
         }
-        .background((activeTab == .desktop ? stage : p.page).ignoresSafeArea())
-        .macSeamlessWindowToolbar()
-        .navigationTitle("")
-        .inlineNavTitle()
-        .toolbar {
-            ToolbarItemGroup(placement: .hubLeading) {
-                Button {
-                    if let onClose { onClose() } else { dismiss() }
-                } label: {
-                    Label(isWide ? hub.t("backToChat") : hub.t("close"), systemImage: isWide ? "chevron.backward" : "xmark")
-                        .labelStyle(.titleAndIcon)
-                }
-                Button {
-                    if isWide { showChatSidebar.toggle() } else { showChatSheet = true }
-                } label: {
-                    Label(hub.t("deskChatSidebar"), systemImage: "bubble.left.and.bubble.right")
-                }
+    }
+
+    @ToolbarContentBuilder
+    private var stageToolbar: some ToolbarContent {
+        HubSplitLeadingToolbar {
+            Button {
+                if let onClose { onClose() } else { dismiss() }
+            } label: {
+                Label(isWide ? hub.t("backToChat") : hub.t("close"), systemImage: isWide ? "chevron.backward" : "xmark")
+                    .labelStyle(.iconOnly)
             }
-            ToolbarItem(placement: .principal) {
-                stageModePicker
+            .help(isWide ? hub.t("backToChat") : hub.t("close"))
+            .accessibilityLabel(isWide ? hub.t("backToChat") : hub.t("close"))
+        } second: {
+            Button {
+                if isWide {
+                    setChatSidebar(!showChatSidebar)
+                } else {
+                    showChatSheet = true
+                }
+            } label: {
+                let isOpen = isWide ? showChatSidebar : showChatSheet
+                Label(
+                    hub.t("deskChatSidebar"),
+                    systemImage: isOpen ? "bubble.left.and.bubble.right.fill" : "bubble.left.and.bubble.right"
+                )
+                .labelStyle(.iconOnly)
             }
-            ToolbarItemGroup(placement: .hubTrailing) {
-                if activeTab == .files {
-                    Menu {
-                        Toggle(isOn: $showHiddenFiles) {
-                            Label(hub.t("showHiddenFiles"), systemImage: "eye")
-                        }
-                        Button {
-                            filesRefreshSeq += 1
-                        } label: {
-                            Label(hub.t("refreshFiles"), systemImage: "arrow.clockwise")
-                        }
-                    } label: {
-                        Label(hub.t("more"), systemImage: "ellipsis.circle").labelStyle(.iconOnly)
+            .help(hub.t("deskChatSidebar"))
+            .accessibilityLabel(hub.t("deskChatSidebar"))
+        }
+        ToolbarItem(placement: .principal) {
+            stageModePicker
+        }
+        ToolbarItemGroup(placement: .hubTrailing) {
+            if activeTab == .files {
+                Menu {
+                    Toggle(isOn: $showHiddenFiles) {
+                        Label(hub.t("showHiddenFiles"), systemImage: "eye")
                     }
-                    .menuIndicator(.hidden)
-                } else if activeTab == .desktop {
+                    Button {
+                        filesRefreshSeq += 1
+                    } label: {
+                        Label(hub.t("refreshFiles"), systemImage: "arrow.clockwise")
+                    }
+                } label: {
+                    Label(hub.t("more"), systemImage: "ellipsis.circle").labelStyle(.iconOnly)
+                }
+                .menuIndicator(.hidden)
+            } else if activeTab == .desktop {
+                if !compact {
                     Button { streaming.toggle() } label: {
                         Label(streaming ? hub.t("collapse") : hub.t("connect"), systemImage: streaming ? "pause.fill" : "play.fill")
                     }
-
-                    Menu {
-                        Toggle(isOn: Binding(
-                            get: { showText },
-                            set: { v in
-                                showText = v
-                                if v { draftFocused = true }
-                            }
-                        )) {
-                            Label(hub.t("aaInput"), systemImage: "keyboard")
-                        }
-                        Divider()
-                        Button(hub.t("keyEnter")) { send(["kind": "key", "key": "Return"]) }
-                        Button(hub.t("keyBackspace")) { send(["kind": "key", "key": "Backspace"]) }
-                        Button("Esc") { send(["kind": "key", "key": "Escape"]) }
-                        Button("Tab") { send(["kind": "key", "key": "Tab"]) }
-                        Divider()
-                        Button(hub.t("keyScrollUp")) { send(["kind": "scroll", "deltaY": 8]) }
-                        Button(hub.t("keyScrollDown")) { send(["kind": "scroll", "deltaY": -8]) }
-                    } label: {
-                        Label(hub.t("aaInput"), systemImage: "keyboard").labelStyle(.iconOnly)
-                    }
-                    .menuIndicator(.hidden)
-
-                    Menu {
-                        if streamCtrl.connected {
-                            Section {
-                                Text("H.264 · \(streamCtrl.fps) fps")
-                            }
-                        }
-                        if targets.count > 1 {
-                            Picker("", selection: $target) {
-                                ForEach(targets) { tr in
-                                    Text(tr.name ?? tr.id).tag(tr.id)
-                                }
-                            }
-                        }
-                    } label: {
-                        Label(hub.t("settings"), systemImage: "slider.horizontal.3").labelStyle(.iconOnly)
-                    }
-                    .menuIndicator(.hidden)
                 }
+
+                Menu {
+                    Toggle(isOn: Binding(
+                        get: { showText },
+                        set: { v in
+                            showText = v
+                            if v { draftFocused = true }
+                        }
+                    )) {
+                        Label(hub.t("aaInput"), systemImage: "keyboard")
+                    }
+                    Divider()
+                    Button(hub.t("keyEnter")) { send(["kind": "key", "key": "Return"]) }
+                    Button(hub.t("keyBackspace")) { send(["kind": "key", "key": "Backspace"]) }
+                    Button("Esc") { send(["kind": "key", "key": "Escape"]) }
+                    Button("Tab") { send(["kind": "key", "key": "Tab"]) }
+                    Divider()
+                    Button(hub.t("keyScrollUp")) { send(["kind": "scroll", "deltaY": 8]) }
+                    Button(hub.t("keyScrollDown")) { send(["kind": "scroll", "deltaY": -8]) }
+                } label: {
+                    Label(hub.t("aaInput"), systemImage: "keyboard").labelStyle(.iconOnly)
+                }
+                .menuIndicator(.hidden)
+
+                Menu {
+                    if compact {
+                        Button { streaming.toggle() } label: {
+                            Label(streaming ? hub.t("collapse") : hub.t("connect"), systemImage: streaming ? "pause.fill" : "play.fill")
+                        }
+                        Divider()
+                    }
+                    if streamCtrl.connected {
+                        Section {
+                            Text("H.264 · \(streamCtrl.fps) fps")
+                        }
+                    }
+                    if targets.count > 1 {
+                        Picker("", selection: $target) {
+                            ForEach(targets) { tr in
+                                Text(tr.name ?? tr.id).tag(tr.id)
+                            }
+                        }
+                    }
+                } label: {
+                    Label(hub.t("settings"), systemImage: "slider.horizontal.3").labelStyle(.iconOnly)
+                }
+                .menuIndicator(.hidden)
             }
         }
     }
@@ -265,7 +302,7 @@ struct DesktopView: View {
         }
         .pickerStyle(.segmented)
         .labelsHidden()
-        .frame(maxWidth: 200)
+        .fixedSize()
     }
 
     private var desktopStage: some View {
@@ -359,7 +396,7 @@ struct DesktopView: View {
                 },
                 onCloseSidebar: closable ? {
                     if isWide {
-                        showChatSidebar = false
+                        setChatSidebar(false)
                     } else {
                         showChatSheet = false
                     }
@@ -373,7 +410,7 @@ struct DesktopView: View {
                         ToolbarItem(placement: .cancellationAction) {
                             Button(hub.t("close")) {
                                 if isWide {
-                                    showChatSidebar = false
+                                    setChatSidebar(false)
                                 } else {
                                     showChatSheet = false
                                 }

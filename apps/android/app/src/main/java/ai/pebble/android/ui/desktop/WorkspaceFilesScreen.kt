@@ -95,6 +95,7 @@ fun WorkspaceFilesView(
     refreshTrigger: Int,
     onQuotePath: (String) -> Unit,
     modifier: Modifier = Modifier,
+    inWideStage: Boolean = false,
 ) {
     val p = LocalPalette.current
     val context = LocalContext.current
@@ -214,12 +215,18 @@ fun WorkspaceFilesView(
     ) {
         val isSplit = maxWidth >= 720.dp
         if (isSplit) {
-            Row(modifier = Modifier.fillMaxSize()) {
-                Box(
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Surface(
+                    color = p.card,
+                    shape = RoundedCornerShape(20.dp),
                     modifier = Modifier
-                        .width(300.dp)
-                        .fillMaxHeight()
-                        .background(p.card),
+                        .width(296.dp)
+                        .fillMaxHeight(),
                 ) {
                     WorkspaceListPanel(
                         store = store,
@@ -234,17 +241,12 @@ fun WorkspaceFilesView(
                         onOpenFile = { scope.launch { openFile(it) } },
                     )
                 }
-                Box(
-                    modifier = Modifier
-                        .width(0.5.dp)
-                        .fillMaxHeight()
-                        .background(p.s2),
-                )
-                Box(
+                Surface(
+                    color = p.card,
+                    shape = RoundedCornerShape(20.dp),
                     modifier = Modifier
                         .weight(1f)
-                        .fillMaxHeight()
-                        .background(p.page),
+                        .fillMaxHeight(),
                 ) {
                     val path = selectedPath
                     if (path != null) {
@@ -286,6 +288,58 @@ fun WorkspaceFilesView(
                             }
                         }
                     }
+                }
+            }
+        } else if (inWideStage) {
+            Surface(
+                color = p.card,
+                shape = RoundedCornerShape(20.dp),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(12.dp),
+            ) {
+                val path = selectedPath
+                if (path != null) {
+                    WorkspacePreviewPanel(
+                        store = store,
+                        path = path,
+                        preview = preview,
+                        imageUrl = imageUrl,
+                        loading = previewLoading,
+                        error = previewErr,
+                        downloading = downloading,
+                        toastMsg = toastMsg,
+                        isSplit = false,
+                        inCard = true,
+                        onBack = {
+                            selectedPath = null
+                            preview = null
+                            imageUrl = null
+                        },
+                        onRetry = { scope.launch { openFile(path) } },
+                        onQuotePath = { onQuotePath(path) },
+                        onShare = {
+                            downloadAndShare(
+                                path = path,
+                                fileName = preview?.name?.ifEmpty { null } ?: path.substringAfterLast('/'),
+                                mimeType = preview?.mimeType,
+                            )
+                        },
+                    )
+                } else {
+                    WorkspaceListPanel(
+                        store = store,
+                        botPal = botPal,
+                        dirPath = dirPath,
+                        listResult = listResult,
+                        listLoading = listLoading,
+                        listErr = listErr,
+                        selectedPath = null,
+                        isSplit = false,
+                        inCard = true,
+                        onLoadDir = { scope.launch { loadDir(it) } },
+                        onOpenFile = { scope.launch { openFile(it) } },
+                    )
                 }
             }
         } else {
@@ -347,6 +401,7 @@ private fun WorkspaceListPanel(
     isSplit: Boolean,
     onLoadDir: (String) -> Unit,
     onOpenFile: (String) -> Unit,
+    inCard: Boolean = false,
 ) {
     val p = LocalPalette.current
     val segments = remember(dirPath) {
@@ -442,12 +497,12 @@ private fun WorkspaceListPanel(
                     } else {
                         LazyColumn(
                             modifier = Modifier.fillMaxSize(),
-                            contentPadding = PaddingValues(if (isSplit) 8.dp else 12.dp),
+                            contentPadding = PaddingValues(if (isSplit || inCard) 8.dp else 12.dp),
                         ) {
                             item(key = "card") {
                                 Surface(
-                                    color = if (isSplit) Color.Transparent else p.card,
-                                    shape = if (isSplit) RoundedCornerShape(0.dp) else PebbleDimens.cardShape,
+                                    color = if (isSplit || inCard) Color.Transparent else p.card,
+                                    shape = if (isSplit || inCard) RoundedCornerShape(0.dp) else PebbleDimens.cardShape,
                                     modifier = Modifier.fillMaxWidth(),
                                 ) {
                                     Column(modifier = Modifier.fillMaxWidth()) {
@@ -608,6 +663,7 @@ private fun WorkspacePreviewPanel(
     onRetry: () -> Unit,
     onQuotePath: () -> Unit,
     onShare: () -> Unit,
+    inCard: Boolean = false,
 ) {
     val p = LocalPalette.current
 
@@ -615,7 +671,7 @@ private fun WorkspacePreviewPanel(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(if (isSplit) Color.Transparent else p.card)
+                .background(if (isSplit || inCard) Color.Transparent else p.card)
                 .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),

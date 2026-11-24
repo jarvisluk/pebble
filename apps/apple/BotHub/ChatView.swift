@@ -112,7 +112,7 @@ struct ChatView: View {
                             }
                         } label: {
                             HStack(spacing: 6) {
-                                titleView
+                                sidebarTitleView
                                 Image(systemName: "chevron.down")
                                     .font(.system(size: AppFont.caption, weight: .semibold))
                                     .foregroundStyle(.secondary)
@@ -120,7 +120,7 @@ struct ChatView: View {
                         }
                         .buttonStyle(.plain)
                     } else {
-                        titleView
+                        sidebarTitleView
                     }
                     Spacer()
                     if let onCloseSidebar {
@@ -132,9 +132,8 @@ struct ChatView: View {
                         .accessibilityLabel(hub.t("close"))
                     }
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
-                .background(p.card)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
                 .overlay(alignment: .bottom) {
                     Rectangle().fill(p.s2).frame(height: 0.5)
                 }
@@ -142,7 +141,12 @@ struct ChatView: View {
             topBanners(pal)
             thread(pal)
             composer(pal)
-                .background(p.page)
+                .background(inDesktopSidebar ? Color.clear : p.page)
+                .overlay(alignment: .top) {
+                    if inDesktopSidebar {
+                        Rectangle().fill(p.s2).frame(height: 0.5)
+                    }
+                }
         }
             .task(id: botId) {
                 pendingAttachments = []
@@ -172,7 +176,13 @@ struct ChatView: View {
                 importFileURLs(urls)
             }
             .hubDropFileURLs { importFileURLs($0) }
-            .background(p.page.ignoresSafeArea())
+            .background {
+                if inDesktopSidebar {
+                    p.card
+                } else {
+                    p.page.ignoresSafeArea()
+                }
+            }
             .sheet(item: $collabPeer) { target in
                 NavigationStack {
                     CollabSheetView(botId: botId, peerId: target.id)
@@ -302,6 +312,17 @@ struct ChatView: View {
         .fixedSize(horizontal: true, vertical: false)
     }
 
+    private var sidebarTitleView: some View {
+        HStack(spacing: 8) {
+            BotAvatar(id: botId, size: 24, index: index, avatar: bot?.avatar, color: bot?.color, busy: bot?.isBusy ?? false)
+            Text(name)
+                .font(.system(size: AppFont.cardTitle, weight: .semibold))
+                .foregroundStyle(p.text)
+                .lineLimit(1)
+        }
+        .fixedSize(horizontal: true, vertical: false)
+    }
+
     @ViewBuilder
     private func thread(_ pal: (accent: Color, text: Color, soft: Color)) -> some View {
         if list.isEmpty && bot?.isBusy != true && botQuestions.isEmpty && sendErr.isEmpty {
@@ -341,7 +362,7 @@ struct ChatView: View {
                                 }
                                 .buttonStyle(PressStyle())
                             case let .message(m):
-                                MessageBubble(msg: m, soft: pal.soft, botId: botId, onPreviewMedia: { previewMedia = $0 })
+                                MessageBubble(msg: m, soft: pal.soft, botId: botId, inSidebar: inDesktopSidebar, onPreviewMedia: { previewMedia = $0 })
                             }
                         }
                         if bot?.isBusy == true {
@@ -359,7 +380,7 @@ struct ChatView: View {
                         Color.clear.frame(height: 1).id("bottom")
                     }
                     .frame(maxWidth: 840)
-                    .padding(.horizontal, compact ? 10 : 14)
+                    .padding(.horizontal, inDesktopSidebar ? 12 : (compact ? 10 : 14))
                     .padding(.vertical, 12)
                     .frame(maxWidth: .infinity)
                 }
@@ -545,9 +566,9 @@ struct ChatView: View {
             composerInputBar(pal)
         }
         .frame(maxWidth: 840)
-        .padding(.horizontal, compact ? 10 : 14)
-        .padding(.top, 6)
-        .padding(.bottom, 8)
+        .padding(.horizontal, inDesktopSidebar ? 12 : (compact ? 10 : 14))
+        .padding(.top, inDesktopSidebar ? 8 : 6)
+        .padding(.bottom, inDesktopSidebar ? 10 : 8)
         .frame(maxWidth: .infinity)
     }
 
@@ -565,7 +586,7 @@ struct ChatView: View {
                     .font(.system(size: AppFont.cardTitle, weight: .semibold))
                     .frame(width: 28, height: 28)
             }
-            .composerGlassButton()
+            .composerGlassButton(onCard: inDesktopSidebar)
             .accessibilityLabel(hub.t("attachments"))
             #else
             Button { showFileImporter = true } label: {
@@ -573,7 +594,7 @@ struct ChatView: View {
                     .font(.system(size: AppFont.cardTitle, weight: .semibold))
                     .frame(width: 28, height: 28)
             }
-            .composerGlassButton()
+            .composerGlassButton(onCard: inDesktopSidebar)
             .help(hub.t("macChooseFileOrImage"))
             .accessibilityLabel(hub.t("attachments"))
             #endif
@@ -585,7 +606,7 @@ struct ChatView: View {
                 .focused($focused)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 9)
-                .composerGlassField()
+                .composerGlassField(onCard: inDesktopSidebar)
                 .hubSubmitOnReturn {
                     if showStop {
                         interrupt()
@@ -721,21 +742,25 @@ struct MessageBubble: View {
     var showCollabHeader: Bool = true
     var bubbleColor: Color? = nil
     var botId: String = ""
+    var inSidebar: Bool = false
     var onPreviewMedia: ((MessageMedia) -> Void)? = nil
 
     var body: some View {
+        let hPad: CGFloat = inSidebar ? 12 : 16
+        let vPad: CGFloat = inSidebar ? 9 : 10
+        let radius: CGFloat = inSidebar ? 16 : 20
         switch msg.role {
         case "user":
             HStack {
-                Spacer(minLength: 48)
+                Spacer(minLength: inSidebar ? 28 : 48)
                 VStack(alignment: .trailing, spacing: 6) {
                     if !msg.body.isEmpty {
                         Text(msg.body).font(.system(size: AppFont.body)).textSelection(.enabled)
                     }
                     mediaGrid
                 }
-                .padding(.horizontal, 16).padding(.vertical, 10)
-                .background(soft, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                .padding(.horizontal, hPad).padding(.vertical, vPad)
+                .background((inSidebar && p.dark) ? p.s2 : soft, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
             }
         case "assistant":
             let clock = formatClockTime(msg.createdAt)
@@ -760,9 +785,9 @@ struct MessageBubble: View {
                     Text(meta.joined(separator: " · ")).font(.system(size: AppFont.caption)).foregroundStyle(p.mute)
                 }
             }
-            .padding(.horizontal, 16).padding(.vertical, 10)
-            .background(p.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .padding(.trailing, 24)
+            .padding(.horizontal, hPad).padding(.vertical, vPad)
+            .background(inSidebar ? p.s1 : p.card, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
+            .padding(.trailing, inSidebar ? 8 : 24)
         case "bot_out", "bot_in":
             let isOut = msg.role == "bot_out"
             let rawPeer = (isOut ? msg.to : msg.from) ?? ""
@@ -782,8 +807,8 @@ struct MessageBubble: View {
                 }
                 mediaGrid
             }
-            .padding(.horizontal, 16).padding(.vertical, 10)
-            .background(bubbleColor ?? senderCollab.bg, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .padding(.horizontal, hPad).padding(.vertical, vPad)
+            .background(bubbleColor ?? senderCollab.bg, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
             .padding(.leading, isOut ? 24 : 0)
             .padding(.trailing, isOut ? 0 : 24)
         default:
@@ -792,9 +817,9 @@ struct MessageBubble: View {
                     .font(.system(size: AppFont.secondary, design: .monospaced))
                     .foregroundStyle(p.text)
                     .textSelection(.enabled)
-                    .padding(.horizontal, 16).padding(.vertical, 10)
-                    .background(p.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-                    .padding(.trailing, 24)
+                    .padding(.horizontal, hPad).padding(.vertical, vPad)
+                    .background(inSidebar ? p.s1 : p.card, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
+                    .padding(.trailing, inSidebar ? 8 : 24)
             } else {
                 Text(msg.body)
                     .font(.system(size: AppFont.caption))
