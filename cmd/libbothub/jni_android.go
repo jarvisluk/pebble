@@ -19,7 +19,35 @@ static jstring cStrToJStr(JNIEnv* env, const char* cs) {
 }
 */
 import "C"
-import "unsafe"
+import (
+	"net"
+	"unsafe"
+
+	"github.com/wlynxg/anet"
+	"tailscale.com/net/netmon"
+)
+
+func init() {
+	netmon.RegisterInterfaceGetter(func() ([]netmon.Interface, error) {
+		ifs, err := anet.Interfaces()
+		if err != nil {
+			return nil, err
+		}
+		ret := make([]netmon.Interface, 0, len(ifs))
+		for i := range ifs {
+			ifi := ifs[i]
+			addrs, _ := anet.InterfaceAddrsByInterface(&ifi)
+			if addrs == nil {
+				addrs = []net.Addr{}
+			}
+			ret = append(ret, netmon.Interface{
+				Interface: &ifi,
+				AltAddrs:  addrs,
+			})
+		}
+		return ret, nil
+	})
+}
 
 //export Java_bothub_tunnel_BothubTunnelModule_nativeStartTunnel
 func Java_bothub_tunnel_BothubTunnelModule_nativeStartTunnel(env *C.JNIEnv, obj C.jobject, jLink C.jstring, jToken C.jstring) C.jstring {
