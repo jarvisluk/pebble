@@ -17,6 +17,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"bot-hub/internal/config"
 )
 
 // lineProc is a long-lived child process speaking newline-delimited JSON on
@@ -223,7 +225,7 @@ func readImageAttachments(atts []Attachment) []imageAttachment {
 
 var mcpConfigMu sync.Mutex
 
-// upsertMCPConfig merges the bot-hub MCP server entry into path while preserving
+// upsertMCPConfig merges the pebble MCP server entry into path while preserving
 // any user-configured servers. It skips rewriting when the file is unchanged and
 // writes atomically with 0600 permissions because MCPEnv may hold API tokens.
 func upsertMCPConfig(path string, opts RunOptions) error {
@@ -244,6 +246,7 @@ func upsertMCPConfig(path string, opts RunOptions) error {
 	if servers == nil {
 		servers = map[string]any{}
 	}
+	delete(servers, config.LegacyMCPServerName)
 	server := map[string]any{
 		"command": opts.MCPCommand[0],
 		"args":    opts.MCPCommand[1:],
@@ -251,7 +254,7 @@ func upsertMCPConfig(path string, opts RunOptions) error {
 	if len(opts.MCPEnv) > 0 {
 		server["env"] = opts.MCPEnv
 	}
-	servers["bot-hub"] = server
+	servers[config.MCPServerName] = server
 	doc["mcpServers"] = servers
 	b, err := json.MarshalIndent(doc, "", "  ")
 	if err != nil {
@@ -279,7 +282,7 @@ const (
 )
 
 func configuredProcIdleTTL() time.Duration {
-	if raw := strings.TrimSpace(os.Getenv("BOT_HUB_HARNESS_IDLE_MINUTES")); raw != "" {
+	if raw := config.LookupEnv("PEBBLE_HARNESS_IDLE_MINUTES", "BOT_HUB_HARNESS_IDLE_MINUTES"); raw != "" {
 		if mins, err := strconv.Atoi(raw); err == nil && mins > 0 {
 			return time.Duration(mins) * time.Minute
 		}
@@ -300,7 +303,7 @@ type procEntry[P poolProc] struct {
 }
 
 // procPool manages long-lived per-bot CLI processes. Idle reaping is off by
-// default to preserve Prompt Caches, and can be enabled via BOT_HUB_HARNESS_IDLE_MINUTES.
+// default to preserve Prompt Caches, and can be enabled via PEBBLE_HARNESS_IDLE_MINUTES.
 type procPool[P poolProc] struct {
 	mu           sync.Mutex
 	entries      map[string]*procEntry[P]

@@ -343,6 +343,41 @@ fun BotListScreen(
                     }
                 }
 
+                // Compatibility notice banner
+                if (store.showCompatBanner) {
+                    item(key = "compat_notice") {
+                        val req = store.isClientUpgradeRequired
+                        Surface(
+                            color = if (req) p.pink else p.s1,
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            ) {
+                                Text(
+                                    text = store.t(if (req) "clientUpgradeRequired" else "clientUpdateHint"),
+                                    color = if (req) p.pinkInk else p.text2,
+                                    fontSize = PebbleFont.secondary,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                if (!req) {
+                                    TextButton(
+                                        onClick = { store.dismissCompatBanner() },
+                                        contentPadding = PaddingValues(horizontal = 8.dp),
+                                    ) {
+                                        Text(store.t("dismiss"), color = p.text2, fontSize = PebbleFont.caption, fontWeight = FontWeight.Medium)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // Active takeover alert banner
                 val to = store.takeovers.firstOrNull()
                 if (to != null) {

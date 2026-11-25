@@ -31,8 +31,10 @@ interface SidebarProps {
   questions: PendingQuestion[];
   filter: string;
   lang: ResolvedLang;
+  compatNotice?: { required: boolean; text: string } | null;
   filterInputRef: React.RefObject<HTMLInputElement | null>;
   onFilterChange: (v: string) => void;
+  onDismissCompatNotice?: () => void;
   onSelectBot: (id: string) => void;
   onOpenCreate: () => void;
   onCollapse: () => void;
@@ -59,8 +61,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
   questions,
   filter,
   lang,
+  compatNotice,
   filterInputRef,
   onFilterChange,
+  onDismissCompatNotice,
   onSelectBot,
   onOpenCreate,
   onCollapse,
@@ -148,6 +152,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
           />
         </label>
         <nav id="bots" className="list">
+          {compatNotice && (
+            <div className={`note compat-note${compatNotice.required ? ' compat-note-warn' : ''}`}>
+              <div className="compat-note-row">
+                <span>{compatNotice.text}</span>
+                {!compatNotice.required && onDismissCompatNotice && (
+                  <button type="button" className="mp" onClick={onDismissCompatNotice}>
+                    {t('dismiss')}
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
           {filteredBots.length === 0 ? (
             <div className="none">{q ? t('noMatchedBots') : t('noBotsYetSide')}</div>
           ) : (

@@ -1,6 +1,9 @@
 package ai.pebble.android.ui.bots
 
+import android.graphics.BitmapFactory
+import android.util.Base64
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -64,6 +67,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -74,6 +80,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ai.pebble.android.data.BotStatus
+import ai.pebble.android.data.HubException
 import ai.pebble.android.data.MemoryItem
 import ai.pebble.android.data.MemoryList
 import ai.pebble.android.data.PebbleStore
@@ -95,7 +102,11 @@ import ai.pebble.android.ui.theme.SectionHeader
 import ai.pebble.android.ui.theme.StatusTextBanner
 import ai.pebble.android.ui.theme.copyToClipboard
 import ai.pebble.android.ui.theme.pebbleFieldColors
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.Locale
 import androidx.compose.ui.res.painterResource
 import ai.pebble.android.ui.theme.PebbleIcons
@@ -113,6 +124,9 @@ fun BotDetailScreen(
     var err by remember(botId) { mutableStateOf("") }
     var previewConnected by remember(botId) { mutableStateOf(false) }
     var previewError by remember(botId) { mutableStateOf("") }
+    var previewUseFrame by remember(botId) { mutableStateOf(false) }
+    var previewBitmap by remember(botId) { mutableStateOf<ImageBitmap?>(null) }
+    var previewFrameError by remember(botId) { mutableStateOf("") }
     var editingRoutine by remember(botId) { mutableStateOf<RoutineItem?>(null) }
     var creatingRoutine by remember(botId) { mutableStateOf(false) }
 
@@ -150,7 +164,9 @@ fun BotDetailScreen(
         ?: "local"
     val previewBadgeLabel = store.desktopTargets.firstOrNull { it.id == previewTarget }?.name?.takeIf { it.isNotEmpty() }
         ?: previewTarget
-    val previewWsUrl = store.makeDesktopWsUrl(previewTarget, preset = "preview").orEmpty()
+    val shouldUsePreviewFrame = !PebbleStore.isLocalDesktopTarget(previewTarget) || !store.supports("desktop.ws_h264") || previewUseFrame
+    val previewCodec = if (store.supports("desktop.ws_hevc")) "hevc" else "h264"
+    val previewWsUrl = store.makeDesktopWsUrl(previewTarget, preset = "preview", codec = previewCodec).orEmpty()
     val lifecycleOwner = LocalLifecycleOwner.current
     var isStarted by remember(lifecycleOwner) {
         mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))
@@ -161,6 +177,44 @@ fun BotDetailScreen(
         }
         lifecycleOwner.lifecycle.addObserver(obs)
         onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
+    }
+
+    LaunchedEffect(previewTarget) {
+        previewUseFrame = false
+        previewConnected = false
+        previewError = ""
+        previewBitmap = null
+        previewFrameError = ""
+    }
+
+    LaunchedEffect(botId, previewTarget, store.isConnected, isStarted, shouldUsePreviewFrame) {
+        if (!store.isConnected || !isStarted || !shouldUsePreviewFrame) return@LaunchedEffect
+        while (isActive && store.isConnected && isStarted && shouldUsePreviewFrame) {
+            runCatching {
+                val fr = store.fetchDesktopFrame(previewTarget)
+                withContext(Dispatchers.IO) {
+                    if (fr.jpegBase64.isEmpty()) return@withContext null
+                    val raw = Base64.decode(fr.jpegBase64, Base64.DEFAULT)
+                    BitmapFactory.decodeByteArray(raw, 0, raw.size)?.asImageBitmap()
+                }
+            }.onSuccess { bmp ->
+                if (!isActive || !isStarted) return@onSuccess
+                if (bmp != null) {
+                    previewBitmap = bmp
+                    if (previewFrameError.isNotEmpty()) previewFrameError = ""
+                }
+            }.onFailure { err ->
+                if (!isActive) return@onFailure
+                if (err is HubException && err.code == "screen_recording_denied") {
+                    previewFrameError = store.t("deskScreenRecordingDenied")
+                    return@LaunchedEffect
+                }
+                if (previewBitmap == null) {
+                    previewFrameError = errText(err, store.t("connFailed"))
+                }
+            }
+            delay(2500L)
+        }
     }
 
     Scaffold(
@@ -201,7 +255,9 @@ fun BotDetailScreen(
             }
 
             // Borderless Live Remote Desktop Thumbnail Preview
-            if (store.isConnected && previewWsUrl.isNotEmpty()) {
+            if (store.isConnected && (shouldUsePreviewFrame || previewWsUrl.isNotEmpty())) {
+                val hasPreview = previewConnected || (shouldUsePreviewFrame && previewBitmap != null)
+                val displayPreviewErr = if (shouldUsePreviewFrame) previewFrameError else previewError
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -210,19 +266,36 @@ fun BotDetailScreen(
                         .background(Color.Black)
                         .clickable { onOpenDesktop(previewTarget) },
                 ) {
-                    key(previewTarget) {
-                        H264SurfaceView(
-                            url = previewWsUrl,
-                            token = store.authToken,
-                            preset = "preview",
-                            active = isStarted,
-                            trackFps = false,
-                            onStatus = { connected, _ -> previewConnected = connected },
-                            onStreamError = { _, msg -> previewError = msg },
-                            modifier = Modifier.fillMaxSize(),
-                        )
+                    if (shouldUsePreviewFrame) {
+                        previewBitmap?.let { bmp ->
+                            Image(
+                                bitmap = bmp,
+                                contentDescription = null,
+                                contentScale = ContentScale.Fit,
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        }
+                    } else {
+                        key(previewTarget, previewCodec) {
+                            H264SurfaceView(
+                                url = previewWsUrl,
+                                token = store.authToken,
+                                preset = "preview",
+                                active = isStarted,
+                                trackFps = false,
+                                onStatus = { connected, _ -> previewConnected = connected },
+                                onStreamError = { code, msg ->
+                                    if (!previewConnected && code != "screen_recording_denied") {
+                                        previewUseFrame = true
+                                    } else {
+                                        previewError = msg
+                                    }
+                                },
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        }
                     }
-                    if (!previewConnected) {
+                    if (!hasPreview) {
                         Column(
                             modifier = Modifier
                                 .align(Alignment.Center)
@@ -230,9 +303,9 @@ fun BotDetailScreen(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.spacedBy(6.dp),
                         ) {
-                            if (previewError.isNotEmpty()) {
+                            if (displayPreviewErr.isNotEmpty()) {
                                 Icon(painterResource(PebbleIcons.DesktopWindows), contentDescription = null, tint = Color.White.copy(alpha = 0.6f))
-                                Text(previewError, color = Color.White.copy(alpha = 0.7f), fontSize = PebbleFont.caption, textAlign = TextAlign.Center, maxLines = 2)
+                                Text(displayPreviewErr, color = Color.White.copy(alpha = 0.7f), fontSize = PebbleFont.caption, textAlign = TextAlign.Center, maxLines = 2)
                             } else {
                                 CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp, color = Color.White)
                             }
@@ -324,7 +397,10 @@ fun BotInfoSheet(
     val active = detail ?: bot
     val pal = p.bot(botId, index, editColor.ifEmpty { active?.color })
 
-    val dirty = remember(active, detail, editName, editDesc, editAvatar, editColor, editPrivate, editDesktopTarget, editBrowserMode, editPermMode, editInst) {
+    val canBindDesktop = store.supports("bot.desktop_binding")
+    val canIsolateBrowser = store.supports("bot.browser_isolation")
+
+    val dirty = remember(active, detail, editName, editDesc, editAvatar, editColor, editPrivate, editDesktopTarget, editBrowserMode, editPermMode, editInst, canBindDesktop, canIsolateBrowser) {
         val activePerm = store.clampPermissionMode(active?.permissionMode, active?.harness)
         active != null && (
             editName != (active.name ?: botId) ||
@@ -332,8 +408,8 @@ fun BotInfoSheet(
                 editAvatar != active.avatar.orEmpty() ||
                 editColor != active.color.orEmpty() ||
                 editPrivate != (active.privateSessions == true) ||
-                editDesktopTarget != active.desktopTarget.orEmpty() ||
-                editBrowserMode != active.browserMode.orEmpty() ||
+                (canBindDesktop && editDesktopTarget != active.desktopTarget.orEmpty()) ||
+                (canIsolateBrowser && editBrowserMode != active.browserMode.orEmpty()) ||
                 editPermMode != activePerm ||
                 editInst != detail?.instructions.orEmpty()
             )
@@ -423,20 +499,18 @@ fun BotInfoSheet(
         saving = true
         scope.launch {
             try {
-                store.updateBot(
-                    botId,
-                    mapOf(
-                        "name" to n,
-                        "description" to editDesc.trim(),
-                        "avatar" to editAvatar,
-                        "color" to editColor,
-                        "instructions" to editInst,
-                        "privateSessions" to editPrivate,
-                        "desktopTarget" to editDesktopTarget,
-                        "browserMode" to editBrowserMode,
-                        "permissionMode" to editPermMode,
-                    ),
+                val payload = mutableMapOf<String, Any?>(
+                    "name" to n,
+                    "description" to editDesc.trim(),
+                    "avatar" to editAvatar,
+                    "color" to editColor,
+                    "instructions" to editInst,
+                    "privateSessions" to editPrivate,
+                    "permissionMode" to editPermMode,
                 )
+                if (canBindDesktop) payload["desktopTarget"] = editDesktopTarget
+                if (canIsolateBrowser) payload["browserMode"] = editBrowserMode
+                store.updateBot(botId, payload)
                 apply(store.botDetail(botId))
             } catch (e: Throwable) {
                 err = errText(e, store.t("saveFailed"))
@@ -795,89 +869,93 @@ fun BotInfoSheet(
                                     )
                                 }
                             }
-                            Box(modifier = Modifier.fillMaxWidth()) {
-                                val currentScreenLabel = desktopTargetOptions.firstOrNull { it.first == editDesktopTarget }?.second ?: editDesktopTarget
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clip(PebbleDimens.rowShape)
-                                        .clickable { screenMenuOpen = true }
-                                        .padding(vertical = 8.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                ) {
-                                    Text(store.t("botDesktopTarget"), color = p.text, fontSize = PebbleFont.body, modifier = Modifier.weight(1f))
-                                    Text(
-                                        text = currentScreenLabel,
-                                        color = p.text2,
-                                        fontSize = PebbleFont.secondary,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.widthIn(max = 170.dp),
-                                    )
-                                    Icon(painterResource(PebbleIcons.ExpandMore), contentDescription = null, tint = p.mute, modifier = Modifier.size(18.dp))
-                                }
-                                DropdownMenu(
-                                    expanded = screenMenuOpen,
-                                    onDismissRequest = { screenMenuOpen = false },
-                                    containerColor = p.card,
-                                ) {
-                                    desktopTargetOptions.forEach { (id, label) ->
-                                        DropdownMenuItem(
-                                            text = { Text(label, color = p.text, fontSize = PebbleFont.body) },
-                                            trailingIcon = {
-                                                if (editDesktopTarget == id) {
-                                                    Icon(painterResource(PebbleIcons.Check), contentDescription = null, tint = pal.accent, modifier = Modifier.size(16.dp))
-                                                }
-                                            },
-                                            onClick = {
-                                                editDesktopTarget = id
-                                                screenMenuOpen = false
-                                            },
+                            if (canBindDesktop) {
+                                Box(modifier = Modifier.fillMaxWidth()) {
+                                    val currentScreenLabel = desktopTargetOptions.firstOrNull { it.first == editDesktopTarget }?.second ?: editDesktopTarget
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(PebbleDimens.rowShape)
+                                            .clickable { screenMenuOpen = true }
+                                            .padding(vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    ) {
+                                        Text(store.t("botDesktopTarget"), color = p.text, fontSize = PebbleFont.body, modifier = Modifier.weight(1f))
+                                        Text(
+                                            text = currentScreenLabel,
+                                            color = p.text2,
+                                            fontSize = PebbleFont.secondary,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.widthIn(max = 170.dp),
                                         )
+                                        Icon(painterResource(PebbleIcons.ExpandMore), contentDescription = null, tint = p.mute, modifier = Modifier.size(18.dp))
+                                    }
+                                    DropdownMenu(
+                                        expanded = screenMenuOpen,
+                                        onDismissRequest = { screenMenuOpen = false },
+                                        containerColor = p.card,
+                                    ) {
+                                        desktopTargetOptions.forEach { (id, label) ->
+                                            DropdownMenuItem(
+                                                text = { Text(label, color = p.text, fontSize = PebbleFont.body) },
+                                                trailingIcon = {
+                                                    if (editDesktopTarget == id) {
+                                                        Icon(painterResource(PebbleIcons.Check), contentDescription = null, tint = pal.accent, modifier = Modifier.size(16.dp))
+                                                    }
+                                                },
+                                                onClick = {
+                                                    editDesktopTarget = id
+                                                    screenMenuOpen = false
+                                                },
+                                            )
+                                        }
                                     }
                                 }
                             }
-                            Box(modifier = Modifier.fillMaxWidth()) {
-                                val currentBrowserLabel = browserModeOptions.firstOrNull { it.first == editBrowserMode }?.second ?: editBrowserMode
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clip(PebbleDimens.rowShape)
-                                        .clickable { browserMenuOpen = true }
-                                        .padding(vertical = 8.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                ) {
-                                    Text(store.t("botBrowserMode"), color = p.text, fontSize = PebbleFont.body, modifier = Modifier.weight(1f))
-                                    Text(
-                                        text = currentBrowserLabel,
-                                        color = p.text2,
-                                        fontSize = PebbleFont.secondary,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.widthIn(max = 170.dp),
-                                    )
-                                    Icon(painterResource(PebbleIcons.ExpandMore), contentDescription = null, tint = p.mute, modifier = Modifier.size(18.dp))
-                                }
-                                DropdownMenu(
-                                    expanded = browserMenuOpen,
-                                    onDismissRequest = { browserMenuOpen = false },
-                                    containerColor = p.card,
-                                ) {
-                                    browserModeOptions.forEach { (id, label) ->
-                                        DropdownMenuItem(
-                                            text = { Text(label, color = p.text, fontSize = PebbleFont.body) },
-                                            trailingIcon = {
-                                                if (editBrowserMode == id) {
-                                                    Icon(painterResource(PebbleIcons.Check), contentDescription = null, tint = pal.accent, modifier = Modifier.size(16.dp))
-                                                }
-                                            },
-                                            onClick = {
-                                                editBrowserMode = id
-                                                browserMenuOpen = false
-                                            },
+                            if (canIsolateBrowser) {
+                                Box(modifier = Modifier.fillMaxWidth()) {
+                                    val currentBrowserLabel = browserModeOptions.firstOrNull { it.first == editBrowserMode }?.second ?: editBrowserMode
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(PebbleDimens.rowShape)
+                                            .clickable { browserMenuOpen = true }
+                                            .padding(vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    ) {
+                                        Text(store.t("botBrowserMode"), color = p.text, fontSize = PebbleFont.body, modifier = Modifier.weight(1f))
+                                        Text(
+                                            text = currentBrowserLabel,
+                                            color = p.text2,
+                                            fontSize = PebbleFont.secondary,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.widthIn(max = 170.dp),
                                         )
+                                        Icon(painterResource(PebbleIcons.ExpandMore), contentDescription = null, tint = p.mute, modifier = Modifier.size(18.dp))
+                                    }
+                                    DropdownMenu(
+                                        expanded = browserMenuOpen,
+                                        onDismissRequest = { browserMenuOpen = false },
+                                        containerColor = p.card,
+                                    ) {
+                                        browserModeOptions.forEach { (id, label) ->
+                                            DropdownMenuItem(
+                                                text = { Text(label, color = p.text, fontSize = PebbleFont.body) },
+                                                trailingIcon = {
+                                                    if (editBrowserMode == id) {
+                                                        Icon(painterResource(PebbleIcons.Check), contentDescription = null, tint = pal.accent, modifier = Modifier.size(16.dp))
+                                                    }
+                                                },
+                                                onClick = {
+                                                    editBrowserMode = id
+                                                    browserMenuOpen = false
+                                                },
+                                            )
+                                        }
                                     }
                                 }
                             }

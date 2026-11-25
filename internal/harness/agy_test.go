@@ -17,12 +17,18 @@ func TestAgyHarnessRunTurnAndWorkspaceFiles(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(ws, ".agents"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	// Existing third-party server should be preserved.
-	if err := os.WriteFile(filepath.Join(ws, ".agents", "mcp_config.json"), []byte(`{"mcpServers":{"keep":{"command":"echo"}}}`), 0o644); err != nil {
+	// Existing third-party server should be preserved while legacy bot-hub server/rule migrate.
+	if err := os.MkdirAll(filepath.Join(ws, ".agents", "rules"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	instPath := filepath.Join(tmp, "BOT_HUB.md")
-	if err := os.WriteFile(instPath, []byte("# Bot Hub Guide\n- Stay focused.\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(ws, ".agents", "mcp_config.json"), []byte(`{"mcpServers":{"keep":{"command":"echo"},"bot-hub":{"command":"/old/bot-hub"}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ws, ".agents", "rules", "bot-hub.md"), []byte("legacy rule"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	instPath := filepath.Join(tmp, "PEBBLE.md")
+	if err := os.WriteFile(instPath, []byte("# Pebble Platform Guide\n- Stay focused.\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -74,8 +80,8 @@ done
 		Bot:                      config.BotConfig{ID: "dev", Workspace: ws, Model: "gemini-4-neon-medium"},
 		Prompt:                   "hi",
 		PlatformInstructionsPath: instPath,
-		MCPCommand:               []string{"/usr/local/bin/bot-hub", "mcp", "--bot-id", "dev"},
-		MCPEnv:                   map[string]string{"BOT_HUB_API_TOKEN": "tok-123"},
+		MCPCommand:               []string{"/usr/local/bin/pebble", "mcp", "--bot-id", "dev"},
+		MCPEnv:                   map[string]string{"PEBBLE_API_TOKEN": "tok-123"},
 		OnText:                   func(c string) { streamed.WriteString(c) },
 		OnToolUse:                func(name string) { tools = append(tools, name) },
 	})
@@ -105,7 +111,7 @@ done
 		t.Fatalf("unexpected turn 2 result: %+v", res2)
 	}
 
-	// Verify .agents/mcp_config.json and .agents/rules/bot-hub.md
+	// Verify .agents/mcp_config.json and .agents/rules/pebble.md (and legacy bot-hub removal)
 	mcpRaw, err := os.ReadFile(filepath.Join(ws, ".agents", "mcp_config.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -118,16 +124,19 @@ done
 	if err := json.Unmarshal(mcpRaw, &mcpDoc); err != nil {
 		t.Fatal(err)
 	}
-	if mcpDoc["mcpServers"]["keep"] == nil || mcpDoc["mcpServers"]["bot-hub"] == nil {
+	if mcpDoc["mcpServers"]["keep"] == nil || mcpDoc["mcpServers"]["pebble"] == nil || mcpDoc["mcpServers"]["bot-hub"] != nil {
 		t.Fatalf("unexpected mcp_config.json: %s", mcpRaw)
 	}
 
-	ruleRaw, err := os.ReadFile(filepath.Join(ws, ".agents", "rules", "bot-hub.md"))
+	ruleRaw, err := os.ReadFile(filepath.Join(ws, ".agents", "rules", "pebble.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(ruleRaw), "trigger: always_on") || !strings.Contains(string(ruleRaw), "Stay focused.") {
 		t.Fatalf("unexpected rule file:\n%s", ruleRaw)
+	}
+	if _, err := os.Stat(filepath.Join(ws, ".agents", "rules", "bot-hub.md")); !os.IsNotExist(err) {
+		t.Fatalf("expected legacy .agents/rules/bot-hub.md removed, got err=%v", err)
 	}
 }
 

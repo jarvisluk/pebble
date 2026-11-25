@@ -193,8 +193,18 @@ func saveIdentity(path string, id *tailcat.PrivateKey) error {
 	return os.Rename(path+".tmp", path)
 }
 
+func tunnelLookupEnv(primary, fallback string) string {
+	if v := strings.TrimSpace(os.Getenv(primary)); v != "" {
+		return v
+	}
+	if fallback != "" {
+		return strings.TrimSpace(os.Getenv(fallback))
+	}
+	return ""
+}
+
 func logf(format string, args ...any) {
-	if os.Getenv("BOT_HUB_TAILCAT_DEBUG") == "1" {
+	if tunnelLookupEnv("PEBBLE_TAILCAT_DEBUG", "BOT_HUB_TAILCAT_DEBUG") == "1" {
 		log.Printf("[tailcat] "+format, args...)
 	}
 }

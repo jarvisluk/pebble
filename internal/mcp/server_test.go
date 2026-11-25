@@ -42,6 +42,9 @@ func TestMCPStdioToolsFlow(t *testing.T) {
 	if len(lines) != 3 {
 		t.Fatalf("expected 3 JSON-RPC responses, got %d:\n%s", len(lines), out.String())
 	}
+	if !strings.Contains(lines[0], `"name":"pebble"`) {
+		t.Fatalf("expected serverInfo.name=pebble in initialize response:\n%s", lines[0])
+	}
 
 	var listResp struct {
 		Result struct {
@@ -144,7 +147,7 @@ func TestMCPNodeToolsAndTokenRotation(t *testing.T) {
 	}))
 	defer api.Close()
 
-	t.Setenv("BOT_HUB_API_TOKEN", "tok-v1")
+	t.Setenv("PEBBLE_API_TOKEN", "tok-v1")
 	input := strings.Join([]string{
 		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"node_exec","arguments":{"command":"uname"}}}`,
 		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"node_file","arguments":{"op":"read","path":"~/a.txt"}}}`,
@@ -209,8 +212,8 @@ func TestMCPDesktopTaskAndRoleFiltering(t *testing.T) {
 		t.Fatalf("expected desktop_task output, got %s", mainLines[1])
 	}
 
-	// 2. computer_use role exposes 3 tools and blocks nested desktop_task.
-	t.Setenv("BOT_HUB_MCP_ROLE", "computer_use")
+	// 2. computer_use role exposes 3 tools and blocks nested desktop_task (test PEBBLE_MCP_ROLE + legacy BOT_HUB_MCP_ROLE).
+	t.Setenv("PEBBLE_MCP_ROLE", "computer_use")
 	cuInput := strings.Join([]string{
 		`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`,
 		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"desktop_task","arguments":{"goal":"nested"}}}`,
@@ -240,6 +243,13 @@ func TestMCPDesktopTaskAndRoleFiltering(t *testing.T) {
 	}
 	if !strings.Contains(cuLines[1], `"isError":true`) {
 		t.Fatalf("expected nested desktop_task rejected, got %s", cuLines[1])
+	}
+
+	t.Setenv("PEBBLE_MCP_ROLE", "")
+	t.Setenv("BOT_HUB_MCP_ROLE", "computer_use")
+	legacySrv := NewServerWithConfig(api.URL, "assistant", cfgPath)
+	if legacySrv.role != "computer_use" {
+		t.Fatalf("expected legacy BOT_HUB_MCP_ROLE fallback, got %q", legacySrv.role)
 	}
 }
 

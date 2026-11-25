@@ -58,7 +58,7 @@ func TestAPNsSenderHeadersJWTAnd410(t *testing.T) {
 		KeyPEM:         generateTestP8PEM(t),
 		KeyID:          "KEY1234567",
 		TeamID:         "TEAM123456",
-		DefaultBundle:  "local.bothub.mobile",
+		DefaultBundle:  "local.pebble.mobile",
 		BaseURLProd:    srv.URL,
 		BaseURLSandbox: srv.URL,
 		HTTPClient:     srv.Client(),
@@ -97,7 +97,7 @@ func TestAPNsSenderHeadersJWTAnd410(t *testing.T) {
 	if gotPushType != "liveactivity" {
 		t.Fatalf("unexpected push-type: %s", gotPushType)
 	}
-	if gotTopic != "local.bothub.mobile.push-type.liveactivity" {
+	if gotTopic != "local.pebble.mobile.push-type.liveactivity" {
 		t.Fatalf("unexpected topic: %s", gotTopic)
 	}
 	if gotCollapse != "bot-alpha" {

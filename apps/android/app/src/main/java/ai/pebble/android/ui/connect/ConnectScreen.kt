@@ -3,7 +3,6 @@ package ai.pebble.android.ui.connect
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -32,6 +31,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
@@ -51,6 +51,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -258,6 +259,7 @@ fun ConnectScreen(
                 .navigationBarsPadding(),
         ) {
             val minH = maxHeight
+            val heroScannerHeight = (minH - 210.dp).coerceIn(380.dp, 600.dp)
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -266,45 +268,52 @@ fun ConnectScreen(
             ) {
                 Column(
                     modifier = Modifier
-                        .widthIn(max = 380.dp)
+                        .widthIn(max = if (scanning) 512.dp else 408.dp)
                         .fillMaxWidth()
                         .heightIn(min = minH)
-                        .padding(horizontal = 24.dp, vertical = 20.dp),
+                        .padding(
+                            horizontal = if (scanning) 16.dp else 24.dp,
+                            vertical = if (scanning) 12.dp else 20.dp,
+                        ),
                     horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = if (scanning) Arrangement.Center else Arrangement.Top,
                 ) {
-                    val heroAvatarSize by animateDpAsState(
-                        targetValue = if (scanning) 72.dp else 104.dp,
-                        label = "heroAvatarSize",
-                    )
-
-                    Spacer(Modifier.weight(1f))
-
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(14.dp),
-                    ) {
-                        BotAvatar(
-                            id = "assistant",
-                            size = heroAvatarSize,
-                            color = PEBBLE_COLOR_HEX,
-                            busy = submitting,
-                            interactive = true,
-                        )
-                        Text(
-                            text = "Pebble",
-                            color = p.text,
-                            fontSize = PebbleFont.hero,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Text(
-                            text = store.t("onboardHeroSub"),
-                            color = p.text2,
-                            fontSize = PebbleFont.body,
-                            textAlign = TextAlign.Center,
-                        )
+                    if (!scanning) {
+                        Spacer(Modifier.weight(1f))
+                    } else {
+                        Spacer(Modifier.height(4.dp))
                     }
 
-                    Spacer(Modifier.weight(1f))
+                    AnimatedVisibility(visible = !scanning) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(14.dp),
+                        ) {
+                            BotAvatar(
+                                id = "assistant",
+                                size = 104.dp,
+                                color = PEBBLE_COLOR_HEX,
+                                busy = submitting,
+                                interactive = true,
+                            )
+                            Text(
+                                text = "Pebble",
+                                color = p.text,
+                                fontSize = PebbleFont.hero,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            Text(
+                                text = store.t("onboardHeroSub"),
+                                color = p.text2,
+                                fontSize = PebbleFont.body,
+                                textAlign = TextAlign.Center,
+                            )
+                        }
+                    }
+
+                    if (!scanning) {
+                        Spacer(Modifier.weight(1f))
+                    }
 
                     AnimatedVisibility(visible = scanning) {
                         QrScannerBox(
@@ -312,8 +321,8 @@ fun ConnectScreen(
                             onMessage = { err = it },
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(300.dp)
-                                .padding(bottom = 16.dp),
+                                .height(heroScannerHeight)
+                                .padding(bottom = 14.dp),
                         )
                     }
 
@@ -384,7 +393,7 @@ fun ConnectScreen(
                         )
                     }
 
-                    Spacer(Modifier.height(22.dp))
+                    Spacer(Modifier.height(if (scanning) 14.dp else 22.dp))
 
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
@@ -531,34 +540,35 @@ fun ConnectScreen(
                 // Scan QR Section
                 SectionHeader(store.t("scanPairTitle"))
                 SectionCard {
-                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(PebbleDimens.rowShape)
-                                .clickable {
-                                    err = ""
-                                    scanning = !scanning
-                                }
-                                .padding(horizontal = 4.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        ) {
-                            Icon(painterResource(PebbleIcons.QrCodeScanner), contentDescription = null, tint = p.accent)
-                            Text(
-                                text = if (scanning) store.t("collapse") else store.t("scanConnect"),
-                                color = p.text,
-                                fontSize = PebbleFont.cardTitle,
-                                fontWeight = FontWeight.Medium,
-                            )
-                        }
-                        AnimatedVisibility(visible = scanning) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                err = ""
+                                scanning = !scanning
+                            }
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Icon(painterResource(PebbleIcons.QrCodeScanner), contentDescription = null, tint = p.accent)
+                        Text(
+                            text = if (scanning) store.t("collapse") else store.t("scanConnect"),
+                            color = p.text,
+                            fontSize = PebbleFont.cardTitle,
+                            fontWeight = FontWeight.Medium,
+                        )
+                    }
+                    AnimatedVisibility(visible = scanning) {
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            HorizontalDivider(thickness = 0.5.dp, color = p.s2)
                             QrScannerBox(
                                 onCode = { onScanned(it) },
                                 onMessage = { err = it },
+                                shape = RectangleShape,
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(300.dp),
+                                    .height(420.dp),
                             )
                         }
                     }

@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -81,7 +82,7 @@ fun CreateBotSheet(
     var permMode by remember { mutableStateOf("auto") }
     var permModeTouched by remember { mutableStateOf(false) }
     var model by remember { mutableStateOf("") }
-    var loadingModels by remember { mutableStateOf(false) }
+    var loadingModelsFor by remember { mutableStateOf(setOf<String>()) }
     var instructions by remember { mutableStateOf("") }
     var submitting by remember { mutableStateOf(false) }
     var err by remember { mutableStateOf("") }
@@ -93,7 +94,7 @@ fun CreateBotSheet(
     val harnesses = remember(store.settings?.harnesses) {
         val list = store.settings?.harnesses.orEmpty()
         list.ifEmpty {
-            listOf("opencode", "codebuddy", "qoder", "codex", "claude", "grok", "pi").map { HarnessInfo(id = it, label = it) }
+            listOf("opencode", "codebuddy", "qoder", "codex", "claude", "grok", "trae", "pi", "dsh", "agy").map { HarnessInfo(id = it, label = it) }
         }
     }
 
@@ -102,12 +103,13 @@ fun CreateBotSheet(
             .replace(Regex("[^a-z0-9_-]+"), "-")
             .replace(Regex("^-+|-+$"), "")
 
-    fun loadCands(target: String) {
-        if (loadingModels) return
-        loadingModels = true
+    fun loadCands(target: String, force: Boolean = false) {
+        if (target.isEmpty()) return
+        if (!force && target in loadingModelsFor) return
+        loadingModelsFor = loadingModelsFor + target
         scope.launch {
-            runCatching { store.loadModels(target) }
-            loadingModels = false
+            runCatching { store.loadModels(target, force = force) }
+            loadingModelsFor = loadingModelsFor - target
         }
     }
 
@@ -122,7 +124,7 @@ fun CreateBotSheet(
         }
     }
 
-    LaunchedEffect(harness) {
+    LaunchedEffect(harness, store.isConnected, store.modelsGeneration) {
         if (store.isConnected && store.models[harness].isNullOrEmpty()) {
             loadCands(harness)
         }
@@ -402,15 +404,21 @@ fun CreateBotSheet(
                                 modifier = Modifier.weight(1f),
                             )
                             Box {
-                                IconButton(onClick = { modelMenuOpen = true }) {
+                                val loadingModels = harness in loadingModelsFor
+                                val trimmedModel = model.trim()
+                                IconButton(onClick = {
+                                    modelMenuOpen = true
+                                    if (cands.isEmpty() && !loadingModels) loadCands(harness)
+                                }) {
                                     Icon(painterResource(PebbleIcons.List), contentDescription = store.t("optionalModels"), tint = p.accent)
                                 }
                                 DropdownMenu(
                                     expanded = modelMenuOpen,
                                     onDismissRequest = { modelMenuOpen = false },
                                     containerColor = p.card,
+                                    modifier = Modifier.heightIn(max = 360.dp),
                                 ) {
-                                    if (model.trim().isNotEmpty()) {
+                                    if (trimmedModel.isNotEmpty()) {
                                         DropdownMenuItem(
                                             text = { Text(store.t("clear"), color = p.danger) },
                                             onClick = {
@@ -422,20 +430,47 @@ fun CreateBotSheet(
                                     }
                                     if (cands.isEmpty()) {
                                         DropdownMenuItem(
-                                            text = { Text(if (loadingModels) store.t("loading") else store.t("optionalModels"), color = p.text) },
-                                            enabled = !loadingModels,
-                                            onClick = { loadCands(harness) },
+                                            text = { Text(if (loadingModels) store.t("loading") else store.t("noModels"), color = p.mute, fontSize = PebbleFont.secondary) },
+                                            enabled = false,
+                                            onClick = {},
                                         )
-                                    } else {
-                                        cands.take(40).forEach { m ->
+                                        if (!loadingModels) {
                                             DropdownMenuItem(
-                                                text = { Text(m, fontFamily = MonoFont, fontSize = PebbleFont.secondary, color = p.text) },
+                                                text = { Text(store.t("refresh"), color = p.accent, fontSize = PebbleFont.secondary) },
+                                                leadingIcon = { Icon(painterResource(PebbleIcons.Refresh), contentDescription = null, tint = p.accent, modifier = Modifier.size(18.dp)) },
+                                                onClick = { loadCands(harness, force = true) },
+                                            )
+                                        }
+                                    } else {
+                                        cands.forEach { m ->
+                                            val selected = m == trimmedModel
+                                            DropdownMenuItem(
+                                                text = {
+                                                    Text(
+                                                        text = m,
+                                                        fontFamily = MonoFont,
+                                                        fontSize = PebbleFont.secondary,
+                                                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                                                        color = if (selected) p.accent else p.text,
+                                                    )
+                                                },
+                                                trailingIcon = if (selected) {
+                                                    { Icon(painterResource(PebbleIcons.Check), contentDescription = null, tint = p.accent, modifier = Modifier.size(16.dp)) }
+                                                } else {
+                                                    null
+                                                },
                                                 onClick = {
                                                     model = m
                                                     modelMenuOpen = false
                                                 },
                                             )
                                         }
+                                        HorizontalDivider(color = p.s2)
+                                        DropdownMenuItem(
+                                            text = { Text(store.t("refresh"), color = p.accent, fontSize = PebbleFont.secondary) },
+                                            leadingIcon = { Icon(painterResource(PebbleIcons.Refresh), contentDescription = null, tint = p.accent, modifier = Modifier.size(18.dp)) },
+                                            onClick = { loadCands(harness, force = true) },
+                                        )
                                     }
                                 }
                             }

@@ -40,8 +40,8 @@
 
 ### iPhone & iPad 模拟器（`apps/apple` UI 改动）
 
-- 使用 `xcrun simctl list devices booted`、`xcrun simctl install`、`xcrun simctl launch` 安装并启动最新编译的 `BotHub.app`。
-- 可配合 `xcrun simctl openurl <udid> "bothub://..."` 直达指定页面，或通过 `agent-desktop` 语义操作 Simulator 窗口切换状态，使用 `xcrun simctl io <udid> screenshot <path>` 截屏。
+- 使用 `xcrun simctl list devices booted`、`xcrun simctl install`、`xcrun simctl launch` 安装并启动最新编译的 `Pebble.app`。
+- 可配合 `xcrun simctl openurl <udid> "pebble://..."` 直达指定页面，或通过 `agent-desktop` 语义操作 Simulator 窗口切换状态，使用 `xcrun simctl io <udid> screenshot <path>` 截屏。
 - 若连有 `xcrun devicectl list devices` 可见的 iOS 真机，同步通过 `xcrun devicectl device install app` 覆盖验证。
 - 涉及侧栏、表单、弹窗或顶栏改动时，必须执行 **macOS vs iPadOS 同页同主题并排核对**（核对选中气泡圆角、左右边距对齐、顶栏/弹窗壳层一致）。
 

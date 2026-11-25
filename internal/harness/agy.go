@@ -105,23 +105,24 @@ func resolveAgyBin() string {
 	if v := strings.TrimSpace(os.Getenv("AGY_BIN")); v != "" {
 		return v
 	}
-	if p, err := exec.LookPath("agy"); err == nil {
+	if p, ok := findBinary("agy"); ok {
 		return p
-	}
-	if home, err := os.UserHomeDir(); err == nil {
-		cand := filepath.Join(home, ".local", "bin", "agy")
-		if info, err := os.Stat(cand); err == nil && !info.IsDir() {
-			return cand
-		}
 	}
 	return "agy"
 }
 
 func (h *AgyHarness) effectiveBinary() string {
+	if bin, ok := h.resolveBinary(); ok {
+		return bin
+	}
 	if strings.TrimSpace(h.binary) != "" {
 		return h.binary
 	}
 	return resolveAgyBin()
+}
+
+func (h *AgyHarness) resolveBinary() (string, bool) {
+	return resolveBinaryFor("AGY_BIN", "agy", h.binary)
 }
 
 func (h *AgyHarness) Kind() string  { return "agy" }
@@ -222,9 +223,15 @@ func (h *AgyHarness) Models(ctx context.Context) ([]string, error) {
 	if len(h.models) > 0 {
 		return append([]string(nil), h.models...), nil
 	}
-	fctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	bin, ok := h.resolveBinary()
+	if !ok {
+		return nil, nil
+	}
+	fctx, cancel := context.WithTimeout(ctx, 25*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(fctx, h.effectiveBinary(), "models").Output()
+	cmd := exec.CommandContext(fctx, bin, "models")
+	cmd.Env = augmentedEnv(nil)
+	out, err := cmd.Output()
 	if err != nil {
 		return nil, nil
 	}
@@ -305,7 +312,7 @@ func (h *AgyHarness) setACPSupported(bin string, supported bool) {
 }
 
 // writeAgyWorkspaceFiles configures workspace-local .agents/mcp_config.json and
-// .agents/rules/bot-hub.md for Antigravity CLI without touching global configs.
+// .agents/rules/pebble.md for Antigravity CLI without touching global configs.
 func writeAgyWorkspaceFiles(workspace string, opts RunOptions) error {
 	agentsDir := filepath.Join(workspace, ".agents")
 	if err := upsertMCPConfig(filepath.Join(agentsDir, "mcp_config.json"), opts); err != nil {
@@ -319,14 +326,15 @@ func writeAgyWorkspaceFiles(workspace string, opts RunOptions) error {
 			if err := os.MkdirAll(rulesDir, 0o755); err != nil {
 				return err
 			}
-			const header = "---\ntrigger: always_on\ndescription: \"Bot Hub workspace, MCP, and session management guide\"\n---\n\n"
+			const header = "---\ntrigger: always_on\ndescription: \"Pebble workspace, MCP, and session management guide\"\n---\n\n"
 			content := header + strings.TrimSpace(string(raw)) + "\n"
-			rulePath := filepath.Join(rulesDir, "bot-hub.md")
+			rulePath := filepath.Join(rulesDir, "pebble.md")
 			if cur, err := os.ReadFile(rulePath); err != nil || string(cur) != content {
 				if err := os.WriteFile(rulePath, []byte(content), 0o644); err != nil {
 					return err
 				}
 			}
+			_ = os.Remove(filepath.Join(rulesDir, "bot-hub.md"))
 		}
 	}
 	return nil
@@ -588,7 +596,7 @@ func (p *agyACPProc) initialize(ctx context.Context) error {
 		"protocolVersion":    1,
 		"clientCapabilities": map[string]any{},
 		"clientInfo": map[string]any{
-			"name":    "bot-hub",
+			"name":    "pebble",
 			"version": "1.0.0",
 		},
 	}, nil)

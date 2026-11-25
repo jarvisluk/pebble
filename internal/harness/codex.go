@@ -287,7 +287,7 @@ func (p *codexAppProc) initialize(ctx context.Context) error {
 	defer cancel()
 	_, err := p.call(initCtx, "initialize", map[string]any{
 		"clientInfo": map[string]any{
-			"name":    "bot-hub",
+			"name":    "pebble",
 			"version": "1.0.0",
 		},
 	}, nil)

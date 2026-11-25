@@ -6,15 +6,37 @@ import type {
   WorkspaceListResult,
 } from '../types';
 
+export const CLIENT_PROTOCOL = 2;
+
 export class APIError extends Error {
   status: number;
   code?: string;
+  requiredCapability?: string;
+  minProtocol?: number;
 
-  constructor(message: string, status: number, code?: string) {
+  constructor(
+    message: string,
+    status: number,
+    code?: string,
+    requiredCapability?: string,
+    minProtocol?: number
+  ) {
     super(message);
     this.status = status;
     this.code = code;
+    this.requiredCapability = requiredCapability;
+    this.minProtocol = minProtocol;
   }
+}
+
+export function isUnsupportedCapabilityError(err: unknown): boolean {
+  return (
+    err instanceof APIError &&
+    (err.status === 404 ||
+      err.status === 405 ||
+      err.status === 501 ||
+      err.code === 'capability_unsupported')
+  );
 }
 
 let unauthorizedHandler: (() => void) | null = null;
@@ -25,11 +47,19 @@ export function setUnauthorizedHandler(fn: (() => void) | null): void {
 
 export async function api<T = unknown>(
   path: string,
-  opts: { method?: string; body?: unknown } = {}
+  opts: { method?: string; body?: unknown; signal?: AbortSignal } = {}
 ): Promise<T> {
+  const headers: Record<string, string> = {
+    'X-Pebble-Protocol': String(CLIENT_PROTOCOL),
+    'X-Pebble-Client': 'web',
+  };
+  if (opts.body !== undefined) {
+    headers['Content-Type'] = 'application/json';
+  }
   const res = await fetch(path, {
     method: opts.method,
-    headers: opts.body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
+    headers,
+    signal: opts.signal,
     body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
   });
   if (res.status === 401 && path !== '/api/login') {
@@ -38,7 +68,13 @@ export async function api<T = unknown>(
   }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new APIError(data.error || `HTTP ${res.status}`, res.status, data.code);
+    throw new APIError(
+      data.error || `HTTP ${res.status}`,
+      res.status,
+      data.code,
+      data.requiredCapability,
+      data.minProtocol
+    );
   }
   return data as T;
 }
@@ -80,6 +116,10 @@ export async function uploadBotAttachment(
   form.append('file', file);
   const res = await fetch(`/api/bots/${encodeURIComponent(botId)}/attachments`, {
     method: 'POST',
+    headers: {
+      'X-Pebble-Protocol': String(CLIENT_PROTOCOL),
+      'X-Pebble-Client': 'web',
+    },
     body: form,
   });
   if (res.status === 401) {
@@ -88,7 +128,13 @@ export async function uploadBotAttachment(
   }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new APIError(data.error || `HTTP ${res.status}`, res.status, data.code);
+    throw new APIError(
+      data.error || `HTTP ${res.status}`,
+      res.status,
+      data.code,
+      data.requiredCapability,
+      data.minProtocol
+    );
   }
   return data as { media: MessageMedia; workspacePath?: string };
 }

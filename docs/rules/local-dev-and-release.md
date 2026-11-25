@@ -11,12 +11,12 @@
 | Go 后端 / CLI / 协议（`cmd/`、`internal/`） | `make build && make test` |
 | Web 前端（`web/`） | 先 `make web`（产出 `internal/web/dist`），再按需 `make build`（或仅改 legacy 壳层时 `make app-wails`） |
 | macOS 原生应用（`apps/apple`） | `make app`（本地快速验证可用 `make app-fast`） |
-| iOS / iPadOS 原生应用（`apps/apple`） | 若改动隧道层先执行 `make ios-tunnel`；工程编译 `xcodebuild -project apps/apple/BotHub.xcodeproj -scheme BotHub -destination 'generic/platform=iOS Simulator' build` |
+| iOS / iPadOS 原生应用（`apps/apple`） | 若改动隧道层先执行 `make ios-tunnel`；工程编译 `xcodebuild -project apps/apple/Pebble.xcodeproj -scheme Pebble -destination 'generic/platform=iOS Simulator' build` |
 | Android 原生应用（`apps/android`） | `make android-native`（含 `make android-tunnel` + `:app:assembleRelease`）；单测与 Release 打包：`cd apps/android && ./gradlew :app:testDebugUnitTest :app:assembleRelease` |
 
 ## 2. 隔离运行实例（联调 / 性能基准 / 回归）
 
-- 本地拉起 `bot-hub` 做联调、性能压测或视觉回归时，**必须在临时目录使用独立配置与非默认端口**，严禁占用或污染宿主机默认常驻端口 `3789` 与真实运行数据（`config/`、`state/`、`workspaces/`）。
+- 本地拉起 `pebble` 做联调、性能压测或视觉回归时，**必须在临时目录使用独立配置与非默认端口**，严禁占用或污染宿主机默认常驻端口 `3789` 与真实运行数据（`config/`、`state/`、`workspaces/`）。
 - 验证完毕后，主动终止后台测试进程，删除临时目录并确认测试端口已释放。
 
 ## 3. 合并入 `main` 与按需换包重装

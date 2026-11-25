@@ -163,12 +163,24 @@ export interface SettingsData {
   harnesses: HarnessInfo[];
 }
 
+export interface ServerInfo {
+  protocolVersion: number;
+  minClientProtocol?: number;
+  minNodeProtocol?: number;
+  version?: string;
+  capabilities?: string[];
+}
+
 export interface NodeInfo {
   id: string;
   name?: string;
   os?: string;
   arch?: string;
+  hostname?: string;
   permissions?: string[];
+  protocolVersion?: number;
+  capabilities?: string[];
+  version?: string;
   connected: boolean;
 }
 
@@ -315,6 +327,8 @@ export interface DesktopTarget {
   webrtcAvailable?: boolean;
   virtual?: boolean;
   virtualSupported?: boolean;
+  protocolVersion?: number;
+  outdated?: boolean;
   powerState?: 'running' | 'frozen' | 'stopped' | string;
   installable?: boolean;
   screen?: ScreenState;

@@ -205,13 +205,17 @@ func (h *ClaudeHarness) startProc(opts RunOptions, ephemeral bool) (*claudeProc,
 	mode := EffectivePermissionMode(opts)
 	needPromptTool := mode != config.PermissionModeAuto
 
-	// Claude Code reads CLAUDE.md; bridge _shared/BOT_HUB.md and @AGENTS.md
-	// unless the user already customized CLAUDE.md.
+	// Claude Code reads CLAUDE.md; bridge _shared/PEBBLE.md and @AGENTS.md
+	// unless the user already customized CLAUDE.md (auto-migrating legacy BOT_HUB.md bridge).
 	claudeMD := filepath.Join(bot.Workspace, "CLAUDE.md")
-	const wantClaudeMD = "@_shared/BOT_HUB.md\n@AGENTS.md\n"
-	if cur, err := os.ReadFile(claudeMD); os.IsNotExist(err) || (err == nil && string(cur) == "@AGENTS.md\n") {
+	const (
+		wantClaudeMD   = "@_shared/" + config.PlatformInstructionsFilename + "\n@AGENTS.md\n"
+		legacyClaudeMD = "@_shared/" + config.LegacyPlatformInstructionsFilename + "\n@AGENTS.md\n"
+	)
+	if cur, err := os.ReadFile(claudeMD); os.IsNotExist(err) || (err == nil && (string(cur) == "@AGENTS.md\n" || string(cur) == legacyClaudeMD)) {
 		_ = os.WriteFile(claudeMD, []byte(wantClaudeMD), 0o644)
 	}
+	_ = config.EnsureClaudeWorkspaceSkill(bot.Workspace)
 
 	args := []string{"-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose"}
 	if bot.Model != "" {
@@ -228,7 +232,7 @@ func (h *ClaudeHarness) startProc(opts RunOptions, ephemeral bool) (*claudeProc,
 	}
 	if len(opts.MCPCommand) > 0 {
 		mcp, _ := json.Marshal(map[string]any{"mcpServers": map[string]any{
-			"bot-hub": map[string]any{"command": opts.MCPCommand[0], "args": opts.MCPCommand[1:], "env": opts.MCPEnv},
+			config.MCPServerName: map[string]any{"command": opts.MCPCommand[0], "args": opts.MCPCommand[1:], "env": opts.MCPEnv},
 		}})
 		args = append(args, "--mcp-config", string(mcp))
 	}

@@ -102,6 +102,10 @@ func (h *OpenCodeHarness) PermissionCapabilities() PermissionCapabilities {
 	}
 }
 
+func (h *OpenCodeHarness) resolveBinary() (string, bool) {
+	return resolveBinaryFor("OPENCODE_BIN", "opencode", h.binary)
+}
+
 // ensure returns a ready server (started on first use) with its event stream connected.
 func (h *OpenCodeHarness) ensure(ctx context.Context) (string, string, error) {
 	h.mu.Lock()
@@ -122,8 +126,12 @@ func (h *OpenCodeHarness) ensure(ctx context.Context) (string, string, error) {
 		}
 		pw = randHex(16)
 		base = fmt.Sprintf("http://127.0.0.1:%d", port)
-		cmd = exec.Command(h.binary, "serve", "--hostname", "127.0.0.1", "--port", fmt.Sprint(port))
-		cmd.Env = append(os.Environ(), "OPENCODE_SERVER_PASSWORD="+pw)
+		bin, ok := h.resolveBinary()
+		if !ok {
+			bin = h.binary
+		}
+		cmd = exec.Command(bin, "serve", "--hostname", "127.0.0.1", "--port", fmt.Sprint(port))
+		cmd.Env = augmentedEnv(map[string]string{"OPENCODE_SERVER_PASSWORD": pw})
 		// Own process group so Close also stops the MCP servers it spawns.
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 		if err := cmd.Start(); err != nil {
@@ -777,9 +785,31 @@ func (h *OpenCodeHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnRe
 func (h *OpenCodeHarness) Models(ctx context.Context) ([]string, error) {
 	var fetchErr error
 	ids := h.modelsCache.get(func() ([]string, bool) {
+		h.mu.Lock()
+		serverActive := h.external != "" || h.baseURL != ""
+		h.mu.Unlock()
+
+		if !serverActive {
+			bin, ok := h.resolveBinary()
+			if !ok {
+				return nil, false
+			}
+			fctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+			defer cancel()
+			cmd := exec.CommandContext(fctx, bin, "models")
+			cmd.Env = augmentedEnv(nil)
+			if out, err := cmd.Output(); err == nil {
+				if list := parseSlashModelLines(string(out)); len(list) > 0 {
+					return list, true
+				}
+			}
+		}
+
 		base, pw, err := h.ensure(ctx)
 		if err != nil {
-			fetchErr = err
+			if serverActive {
+				fetchErr = err
+			}
 			return nil, false
 		}
 		var out struct {
@@ -789,7 +819,9 @@ func (h *OpenCodeHarness) Models(ctx context.Context) ([]string, error) {
 			} `json:"data"`
 		}
 		if _, err := h.apiClient(base, pw).do(ctx, http.MethodGet, "/api/model", nil, &out); err != nil {
-			fetchErr = err
+			if serverActive {
+				fetchErr = err
+			}
 			return nil, false
 		}
 		list := make([]string, 0, len(out.Data))

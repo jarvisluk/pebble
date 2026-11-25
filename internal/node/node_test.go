@@ -11,6 +11,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"bot-hub/internal/protocol"
 )
 
 func TestRegistryAndAgentEndToEnd(t *testing.T) {
@@ -77,6 +79,14 @@ func TestRegistryAndAgentEndToEnd(t *testing.T) {
 	list := reg.List()
 	if len(list) != 1 || !list[0].Connected {
 		t.Fatalf("expected 1 connected node, got %+v", list)
+	}
+	if list[0].ProtocolVersion != protocol.CurrentProtocol || !list[0].HasCapability(protocol.CapNodeExecEnv) || !list[0].HasCapability(protocol.CapNodeDesktopPermissions) {
+		t.Fatalf("expected current protocol & capabilities on node, got %+v", list[0])
+	}
+	for _, act := range []string{"desktop_permissions", "desktop_permission_request"} {
+		if perm, err := RequiredPerm(act); err != nil || perm != PermDesktop {
+			t.Fatalf("RequiredPerm(%q) = (%q, %v), want (%q, nil)", act, perm, err, PermDesktop)
+		}
 	}
 
 	// Auto-select single connected node when nodeID is "".

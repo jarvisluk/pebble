@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"bot-hub/internal/desktop"
+	"bot-hub/internal/protocol"
 )
 
 const (
@@ -360,16 +361,32 @@ func (a *Agent) loop(ctx context.Context, done chan struct{}) {
 	}
 }
 
+func (a *Agent) capabilities() []string {
+	caps := []string{
+		protocol.CapNodeExecEnv,
+		protocol.CapNodeBrowserProfile,
+		protocol.CapNodeDesktopPermissions,
+		protocol.CapNodeDesktopPower,
+	}
+	if runtime.GOOS == "linux" && a.desktopPool().VirtualSupported() {
+		caps = append(caps, protocol.CapNodeVirtualSlots)
+	}
+	return protocol.NormalizeCapabilities(caps)
+}
+
 func (a *Agent) pollOnce(ctx context.Context) (*Command, int, error) {
 	name, perms, token := a.snapshot()
 	payload, _ := json.Marshal(PollRequest{
-		ID:          a.nodeID,
-		Name:        name,
-		OS:          runtime.GOOS,
-		Arch:        runtime.GOARCH,
-		Hostname:    a.hostname,
-		HomeDir:     a.homeDir,
-		Permissions: perms,
+		ID:              a.nodeID,
+		Name:            name,
+		OS:              runtime.GOOS,
+		Arch:            runtime.GOARCH,
+		Hostname:        a.hostname,
+		HomeDir:         a.homeDir,
+		Permissions:     perms,
+		ProtocolVersion: protocol.CurrentProtocol,
+		Capabilities:    a.capabilities(),
+		Version:         protocol.AppVersion,
 	})
 	reqCtx, cancel := context.WithTimeout(ctx, 35*time.Second)
 	defer cancel()
@@ -665,13 +682,19 @@ func (a *Agent) execShell(ctx context.Context, raw json.RawMessage) Result {
 		if v == "" {
 			continue
 		}
-		if (strings.HasPrefix(k, "AGENT_BROWSER_") && k != "AGENT_BROWSER_EXECUTABLE_PATH") || k == "BOT_HUB_BOT_ID" {
+		if (strings.HasPrefix(k, "AGENT_BROWSER_") && k != "AGENT_BROWSER_EXECUTABLE_PATH") || k == "PEBBLE_BOT_ID" || k == "BOT_HUB_BOT_ID" {
 			extraEnvMap[k] = v
 		}
 	}
 	if bid := strings.TrimSpace(args.BrowserProfileBotID); bid != "" && validNodeIDRe.MatchString(bid) && a.homeDir != "" {
 		if extraEnvMap["AGENT_BROWSER_PROFILE"] == "" {
-			dir := filepath.Join(a.homeDir, ".bot-hub", "browsers", bid)
+			dir := filepath.Join(a.homeDir, ".pebble", "browsers", bid)
+			if _, err := os.Stat(dir); err != nil {
+				legacyDir := filepath.Join(a.homeDir, ".bot-hub", "browsers", bid)
+				if info, lerr := os.Stat(legacyDir); lerr == nil && info.IsDir() {
+					dir = legacyDir
+				}
+			}
 			if os.MkdirAll(dir, 0o700) == nil {
 				extraEnvMap["AGENT_BROWSER_PROFILE"] = dir
 			}
@@ -826,7 +849,7 @@ func (a *Agent) takeScreenshot(ctx context.Context, raw json.RawMessage) Result 
 		maxWidth = 1920
 	}
 
-	tmpDir, err := os.MkdirTemp("", "bothub-shot-*")
+	tmpDir, err := os.MkdirTemp("", "pebble-shot-*")
 	if err != nil {
 		return Result{OK: false, Error: err.Error()}
 	}

@@ -591,7 +591,7 @@ func (p *acpProc) initialize(ctx context.Context) error {
 		"protocolVersion": 1,
 		"clientCapabilities": map[string]any{},
 		"clientInfo": map[string]any{
-			"name":    "bot-hub",
+			"name":    config.MCPServerName,
 			"version": "1.0.0",
 		},
 	}, nil)

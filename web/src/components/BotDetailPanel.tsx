@@ -26,6 +26,8 @@ interface BotDetailPanelProps {
   models: Record<string, string[]>;
   routineRefreshSeq: number;
   lang: ResolvedLang;
+  canBindDesktop?: boolean;
+  canIsolateBrowser?: boolean;
   onClose: () => void;
   onToast: (msg: string) => void;
   onConfirm: (opts: ConfirmOptions) => void;
@@ -46,6 +48,8 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
   models: _models,
   routineRefreshSeq,
   lang,
+  canBindDesktop = true,
+  canIsolateBrowser = true,
   onClose,
   onToast,
   onConfirm,
@@ -206,8 +210,8 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
         editAvatar !== (detail.avatar || '') ||
         editColor !== (detail.color || '') ||
         editPrivate !== Boolean(detail.privateSessions) ||
-        editDesktopTarget !== (detail.desktopTarget || '') ||
-        editBrowserMode !== (detail.browserMode || '') ||
+        (canBindDesktop && editDesktopTarget !== (detail.desktopTarget || '')) ||
+        (canIsolateBrowser && editBrowserMode !== (detail.browserMode || '')) ||
         editPermissionMode !== ((detail.permissionMode as PermissionMode) || 'auto') ||
         editInst !== (detail.instructions || ''))
   );
@@ -223,19 +227,20 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
     setEditSaving(true);
     setEditErr('');
     try {
+      const body: Record<string, unknown> = {
+        name,
+        description: editDesc.trim(),
+        avatar: editAvatar,
+        color: editColor,
+        instructions: editInst,
+        privateSessions: editPrivate,
+      };
+      if (canBindDesktop) body.desktopTarget = editDesktopTarget;
+      if (canIsolateBrowser) body.browserMode = editBrowserMode;
+      body.permissionMode = editPermissionMode;
       const st = await api<BotStatus>(`/api/bots/${encodeURIComponent(detail.id)}`, {
         method: 'PATCH',
-        body: {
-          name,
-          description: editDesc.trim(),
-          avatar: editAvatar,
-          color: editColor,
-          instructions: editInst,
-          privateSessions: editPrivate,
-          desktopTarget: editDesktopTarget,
-          browserMode: editBrowserMode,
-          permissionMode: editPermissionMode,
-        },
+        body,
       });
       onBotUpdated(st);
       await onRefreshDetail(detail.id);
@@ -1081,34 +1086,39 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
                       label: t('deskBindOfflineTag', { id: editDesktopTarget }),
                     });
                   }
+                  if (!canBindDesktop && !canIsolateBrowser) return null;
                   return (
                     <div className="stack6 mt-10">
-                      <div className="fld">
-                        <label htmlFor="peDesktopTarget">{t('botDesktopTarget')}</label>
-                        <select
-                          id="peDesktopTarget"
-                          value={editDesktopTarget}
-                          onChange={(e) => setEditDesktopTarget(e.target.value)}
-                        >
-                          {screenOpts.map((opt) => (
-                            <option key={opt.value || '_default'} value={opt.value}>
-                              {opt.label}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div className="fld">
-                        <label htmlFor="peBrowserMode">{t('botBrowserMode')}</label>
-                        <select
-                          id="peBrowserMode"
-                          value={editBrowserMode}
-                          onChange={(e) => setEditBrowserMode(e.target.value)}
-                        >
-                          <option value="">{t('browserModeAuto')}</option>
-                          <option value="isolated">{t('browserModeIsolated')}</option>
-                          <option value="attach">{t('browserModeAttach')}</option>
-                        </select>
-                      </div>
+                      {canBindDesktop && (
+                        <div className="fld">
+                          <label htmlFor="peDesktopTarget">{t('botDesktopTarget')}</label>
+                          <select
+                            id="peDesktopTarget"
+                            value={editDesktopTarget}
+                            onChange={(e) => setEditDesktopTarget(e.target.value)}
+                          >
+                            {screenOpts.map((opt) => (
+                              <option key={opt.value || '_default'} value={opt.value}>
+                                {opt.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+                      {canIsolateBrowser && (
+                        <div className="fld">
+                          <label htmlFor="peBrowserMode">{t('botBrowserMode')}</label>
+                          <select
+                            id="peBrowserMode"
+                            value={editBrowserMode}
+                            onChange={(e) => setEditBrowserMode(e.target.value)}
+                          >
+                            <option value="">{t('browserModeAuto')}</option>
+                            <option value="isolated">{t('browserModeIsolated')}</option>
+                            <option value="attach">{t('browserModeAttach')}</option>
+                          </select>
+                        </div>
+                      )}
                       {(() => {
                         const hCaps = settings?.harnesses.find((h) => h.id === detail.harness)?.permissions?.modes;
                         const supported: PermissionMode[] = hCaps && hCaps.length > 0 ? hCaps : ['auto', 'edit', 'ask', 'plan'];

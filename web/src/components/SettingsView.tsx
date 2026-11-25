@@ -18,7 +18,7 @@ import type {
   TailscaleStatus,
   ThemePref,
 } from '../types';
-import { api } from '../lib/api';
+import { api, CLIENT_PROTOCOL } from '../lib/api';
 import { translate } from '../lib/i18n';
 import { applyThemePref, getThemePref } from '../lib/theme';
 import type { ViewDir, ViewState } from '../lib/useViewTransition';
@@ -102,6 +102,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   // Magpie
   const [harnessModelsDraft, setHarnessModelsDraft] = useState<Record<string, string>>({});
   const [magpieModels, setMagpieModels] = useState<Record<string, string[]>>({});
+  const magpieModelsRef = useRef<Record<string, string[]>>({});
+  const magpieInFlightRef = useRef<Record<string, Promise<string[]> | undefined>>({});
   const [connectingHarnessId, setConnectingHarnessId] = useState('');
   const [magpieBusyId, setMagpieBusyId] = useState('');
   const [copiedKey, setCopiedKey] = useState('');
@@ -251,15 +253,55 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     if (!touchedFields.sharedUserMd) setSharedUserMd(baseline.sharedUserMd);
   }, [settings, baseline, touchedFields]);
 
+  const clearMagpieModels = useCallback(() => {
+    magpieModelsRef.current = {};
+    magpieInFlightRef.current = {};
+    setMagpieModels({});
+  }, []);
+
+  const loadMagpieModels = useCallback(async (hId: string, force = false): Promise<string[]> => {
+    if (!hId) return [];
+    const existing = magpieModelsRef.current[hId];
+    if (!force && existing && existing.length > 0) return existing;
+    const inflight = magpieInFlightRef.current[hId];
+    if (!force && inflight) return inflight;
+    const req = api<{ models?: string[] }>(
+      `/api/models?harness=${encodeURIComponent(hId)}&source=magpie`
+    )
+      .then((d) => {
+        const list = d.models || [];
+        if (list.length > 0) {
+          magpieModelsRef.current = { ...magpieModelsRef.current, [hId]: list };
+          setMagpieModels(magpieModelsRef.current);
+        }
+        return magpieModelsRef.current[hId] || list;
+      })
+      .catch(() => magpieModelsRef.current[hId] || [])
+      .finally(() => {
+        if (magpieInFlightRef.current[hId] === req) {
+          delete magpieInFlightRef.current[hId];
+        }
+      });
+    magpieInFlightRef.current[hId] = req;
+    return req;
+  }, []);
+
+  const preloadAllModels = useCallback(
+    (list: SettingsData['harnesses'] | undefined, force = false) => {
+      for (const h of list || []) {
+        void onLoadModels(h.id, force);
+      }
+    },
+    [onLoadModels]
+  );
+
   useEffect(() => {
     if (!settings) return;
     setDeskHarness(settings.desktopHarness || '');
     setDeskModel(settings.desktopModel || '');
     setMpWebUrl(settings.magpie?.webUrl || '');
-    settings.harnesses.forEach((h) => {
-      void onLoadModels(h.id);
-    });
-  }, [settings]);
+    preloadAllModels(settings.harnesses);
+  }, [settings, preloadAllModels]);
 
   useEffect(() => {
     setBotDrafts((prev) => {
@@ -483,27 +525,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   useEffect(() => {
     if (hidden || tab !== 'models') return;
-    for (const h of settings?.harnesses || []) {
-      if (models[h.id] === undefined) {
-        void onLoadModels(h.id);
-      }
-    }
-  }, [hidden, tab, settings?.harnesses, models, onLoadModels]);
+    preloadAllModels(settings?.harnesses);
+  }, [hidden, tab, settings?.harnesses, preloadAllModels]);
 
   useEffect(() => {
     if (hidden || tab !== 'models' || !settings?.magpie?.installed || !connectingHarnessId) return;
-    if (magpieModels[connectingHarnessId]) return;
-    let cancelled = false;
-    api<{ models?: string[] }>(`/api/models?harness=${encodeURIComponent(connectingHarnessId)}&source=magpie`)
-      .then((d) => {
-        if (cancelled) return;
-        setMagpieModels((prev) => ({ ...prev, [connectingHarnessId]: d.models || [] }));
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [hidden, tab, settings?.magpie?.installed, connectingHarnessId, magpieModels]);
+    void loadMagpieModels(connectingHarnessId);
+  }, [hidden, tab, settings?.magpie?.installed, connectingHarnessId, loadMagpieModels]);
 
   const connectedHarnesses = useMemo(
     () => (settings?.harnesses || []).filter((h) => Boolean(h.magpie?.connected)),
@@ -515,12 +543,38 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   );
 
   const globalModels = useMemo(() => {
-    const seen = new Set<string>();
-    for (const h of settings?.harnesses || []) {
-      for (const m of models[h.id] || []) seen.add(m);
+    const list = settings?.harnesses || [];
+    const anyInstalled = list.some((h) => h.installed === true);
+    const ordered: typeof list = [];
+    const seenH = new Set<string>();
+    const pushH = (h?: (typeof list)[number]) => {
+      if (!h || seenH.has(h.id)) return;
+      seenH.add(h.id);
+      ordered.push(h);
+    };
+    pushH(list.find((h) => h.id === defaultHarness));
+    for (const h of list) {
+      if ((!anyInstalled || h.installed) && !h.magpie?.connected) pushH(h);
     }
-    return [...seen];
-  }, [settings?.harnesses, models]);
+    for (const h of list) {
+      if ((!anyInstalled || h.installed) && h.magpie?.connected) pushH(h);
+    }
+    for (const h of list) {
+      if (!anyInstalled || (models[h.id]?.length ?? 0) > 0) pushH(h);
+    }
+
+    const seen = new Set<string>();
+    const out: { value: string; label: string }[] = [];
+    for (const h of ordered) {
+      const tag = h.magpie?.connected ? `${h.label} · Magpie` : h.label;
+      for (const m of models[h.id] || []) {
+        if (seen.has(m)) continue;
+        seen.add(m);
+        out.push({ value: m, label: `${m} (${tag})` });
+      }
+    }
+    return out;
+  }, [settings?.harnesses, defaultHarness, models]);
 
   const resolveDefaultModel = (g: string, h: string) => {
     if (!g) return '';
@@ -653,8 +707,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       });
       onSettingsUpdated(next);
       setConnectingHarnessId('');
+      clearMagpieModels();
       onResetModels();
-      void onLoadModels(hId, true);
+      preloadAllModels(next.harnesses, true);
       onToast(t('mpConnectedToast', { label: hLabel }));
     } catch (e) {
       if (e instanceof Error && e.message !== 'unauthorized') setSettingsErr(e.message);
@@ -703,8 +758,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       </div>
 
       <datalist id="models-global">
-        {globalModels.map((m) => (
-          <option key={m} value={m} />
+        {globalModels.map((item) => (
+          <option key={item.value} value={item.value} label={item.label} />
         ))}
       </datalist>
       {(settings?.harnesses || []).map((h) => (
@@ -747,7 +802,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     onInstalled={async () => {
                       const fresh = await api<SettingsData>('/api/settings?fresh=1');
                       onSettingsUpdated(fresh);
+                      clearMagpieModels();
                       onResetModels();
+                      preloadAllModels(fresh.harnesses, true);
                     }}
                   />
                 </div>
@@ -787,8 +844,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                                         { method: 'POST', body: { action: 'disconnect' } }
                                       );
                                       onSettingsUpdated(next);
+                                      clearMagpieModels();
                                       onResetModels();
-                                      void onLoadModels(h.id, true);
+                                      preloadAllModels(next.harnesses, true);
                                       onToast(t('mpRestoredToast', { label: h.label }));
                                     },
                                   })
@@ -923,6 +981,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                               spellCheck={false}
                               disabled={isBusy}
                               value={draftMagpie}
+                              onFocus={() => void loadMagpieModels(h.id)}
                               onChange={(e) => {
                                 const nextVal = e.target.value;
                                 setHarnessModelsDraft((prev) => ({ ...prev, [h.id]: nextVal }));
@@ -976,6 +1035,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       if (nextVal === defaultHarness) return;
                       setTouchedFields((prev) => ({ ...prev, defaultHarness: true }));
                       setDefaultHarness(nextVal);
+                      void onLoadModels(nextVal);
                     }}
                   >
                     {(settings?.harnesses || [{ id: 'opencode', label: 'opencode' }]).map((h) => (
@@ -1016,6 +1076,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   list="models-global"
                   placeholder={t('globalDefaultPh')}
                   value={defaultModel}
+                  onFocus={() => {
+                    void onLoadModels(defaultHarness);
+                    preloadAllModels(settings?.harnesses);
+                  }}
                   onChange={(e) => {
                     const nextVal = e.target.value;
                     if (nextVal === defaultModel) return;
@@ -1037,6 +1101,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                           placeholder={t('followGlobalPh')}
                           spellCheck={false}
                           value={defaultModelsDraft[h.id] || ''}
+                          onFocus={() => void onLoadModels(h.id)}
                           onChange={(e) => {
                             const nextVal = e.target.value;
                             if (nextVal === (defaultModelsDraft[h.id] || '')) return;
@@ -1098,6 +1163,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                           spellCheck={false}
                           placeholder={def ? t('defaultModelPh', { model: def }) : t('inheritGlobalPh')}
                           value={draft.model}
+                          onFocus={() => void onLoadModels(draft.harness)}
                           onChange={(e) => {
                             const nextVal = e.target.value;
                             if (nextVal === draft.model) return;
@@ -1692,13 +1758,21 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       .filter(Boolean)
                       .join(' · ');
                     const canDesk = n.connected && (n.permissions || []).includes('desktop');
+                    const isOutdated = typeof n.protocolVersion === 'number' && n.protocolVersion < CLIENT_PROTOCOL;
                     return (
                       <div key={n.id} className="node-row">
                         <div>
                           <div className="nm">{n.name || n.id}</div>
-                          <div className="meta">{meta}</div>
+                          <div className="meta" title={isOutdated ? t('nodeOutdatedHint') : undefined}>
+                            {isOutdated ? [meta, t('nodeOutdatedHint')].filter(Boolean).join(' · ') : meta}
+                          </div>
                         </div>
                         <div className="row-inline-sm">
+                          {isOutdated && (
+                            <span className="mp bad" title={t('nodeOutdatedHint')}>
+                              {t('nodeOutdatedTag')}
+                            </span>
+                          )}
                           {canDesk && (
                             <button type="button" className="mp" onClick={() => onOpenDesktopTarget(n.id)}>
                               {t('openDesktop')}
@@ -2028,7 +2102,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       onInstalled={async () => {
                         const fresh = await api<SettingsData>('/api/settings?fresh=1');
                         onSettingsUpdated(fresh);
+                        clearMagpieModels();
                         onResetModels();
+                        preloadAllModels(fresh.harnesses, true);
                         await loadGlobalMemories();
                       }}
                     />
@@ -2227,6 +2303,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   placeholder={t('rtModelPh')}
                   spellCheck={false}
                   value={deskModel}
+                  onFocus={() => {
+                    if (deskHarness) void onLoadModels(deskHarness);
+                    else preloadAllModels(settings?.harnesses);
+                  }}
                   onChange={(e) => setDeskModel(e.target.value)}
                 />
               </div>
