@@ -10,6 +10,7 @@ import type {
   PendingQuestion,
   ResolvedLang,
   ScreenState,
+  ServerInfo,
   SettingsData,
   SettingsTab,
   StageKind,
@@ -17,7 +18,7 @@ import type {
   StageTab,
   TakeoverRequest,
 } from './types';
-import { api, setUnauthorizedHandler } from './lib/api';
+import { api, CLIENT_PROTOCOL, setUnauthorizedHandler } from './lib/api';
 import { getLangPref, resolveLang, setLangPref, translate } from './lib/i18n';
 import { installMacWindowDragBridge } from './lib/macShell';
 import { botColor, contrastText } from './lib/theme';
@@ -58,6 +59,9 @@ export default function App() {
   const [questions, setQuestions] = useState<PendingQuestion[]>([]);
   const [liveScreen, setLiveScreen] = useState<ScreenState | null>(null);
   const [screenSeq, setScreenSeq] = useState(0);
+  const [serverInfo, setServerInfo] = useState<ServerInfo | null>(null);
+  const [unsupportedCaps, setUnsupportedCaps] = useState<Set<string>>(() => new Set());
+  const [compatDismissedProto, setCompatDismissedProto] = useState(0);
 
   const [view, setView] = useState<'chat' | 'settings'>('chat');
   const viewTx = useViewTransition(view, VIEW_ORDER);
@@ -146,6 +150,33 @@ export default function App() {
     toastTimerRef.current = window.setTimeout(() => setToastMsg(''), 2600);
   }, []);
 
+  const hasServerCap = useCallback(
+    (cap: string) => {
+      if (unsupportedCaps.has(cap)) return false;
+      if (serverInfo) return Array.isArray(serverInfo.capabilities) && serverInfo.capabilities.includes(cap);
+      return true;
+    },
+    [serverInfo, unsupportedCaps]
+  );
+
+  const markCapUnsupported = useCallback((cap: string) => {
+    setUnsupportedCaps((prev) => {
+      if (prev.has(cap)) return prev;
+      const next = new Set(prev);
+      next.add(cap);
+      return next;
+    });
+  }, []);
+
+  const canUseFiles = hasServerCap('stage.files');
+
+  useEffect(() => {
+    if (!canUseFiles && activeStageTabId === 'files') {
+      setStageKind('desktop');
+      setActiveStageTabId('desktop');
+    }
+  }, [activeStageTabId, canUseFiles]);
+
   useEffect(() => {
     document.documentElement.style.removeProperty('--accent');
     document.documentElement.style.removeProperty('--accent-text');
@@ -153,7 +184,11 @@ export default function App() {
       localStorage.removeItem('bothub.accent');
     } catch {}
     document.documentElement.lang = lang;
-    setUnauthorizedHandler(() => setLoginOpen(true));
+    setUnauthorizedHandler(() => {
+      setUnsupportedCaps(new Set());
+      setCompatDismissedProto(0);
+      setLoginOpen(true);
+    });
     const uninstallDrag = installMacWindowDragBridge();
     return () => {
       setUnauthorizedHandler(null);
@@ -213,7 +248,8 @@ export default function App() {
   );
 
   const loadBots = useCallback(async () => {
-    const data = await api<{ bots?: BotStatus[] }>('/api/bots');
+    const data = await api<{ bots?: BotStatus[]; server?: ServerInfo }>('/api/bots');
+    setServerInfo(data.server ?? null);
     const list = data.bots || [];
     setBots(list);
     let saved: string | null = null;
@@ -819,6 +855,18 @@ export default function App() {
     );
   }
 
+  const compatNotice =
+    serverInfo && serverInfo.protocolVersion > CLIENT_PROTOCOL
+      ? (() => {
+          const required = (serverInfo.minClientProtocol ?? 1) > CLIENT_PROTOCOL;
+          if (!required && compatDismissedProto === serverInfo.protocolVersion) return null;
+          return {
+            required,
+            text: t(required ? 'clientUpgradeRequired' : 'clientUpdateHint'),
+          };
+        })()
+      : null;
+
   return (
     <>
       <div
@@ -842,8 +890,14 @@ export default function App() {
           questions={questions}
           filter={filter}
           lang={lang}
+          compatNotice={compatNotice}
           filterInputRef={filterInputRef}
           onFilterChange={setFilter}
+          onDismissCompatNotice={
+            compatNotice && !compatNotice.required
+              ? () => setCompatDismissedProto(serverInfo?.protocolVersion ?? 0)
+              : undefined
+          }
           onSelectBot={(id) => void selectBot(id)}
           onOpenCreate={() => {
             closeAllOverlays();
@@ -1058,16 +1112,18 @@ export default function App() {
                 <span>{activeBot?.name || t('stageChatToggle')}</span>
               </button>
               <nav className="stage-tabs" aria-label="Stage tabs">
-                <button
-                  type="button"
-                  className={`stage-tab${activeStageTabId === 'files' ? ' active' : ''}`}
-                  onClick={() => {
-                    setStageKind('files');
-                    setActiveStageTabId('files');
-                  }}
-                >
-                  {t('stageFilesTab')}
-                </button>
+                {canUseFiles && (
+                  <button
+                    type="button"
+                    className={`stage-tab${activeStageTabId === 'files' ? ' active' : ''}`}
+                    onClick={() => {
+                      setStageKind('files');
+                      setActiveStageTabId('files');
+                    }}
+                  >
+                    {t('stageFilesTab')}
+                  </button>
+                )}
                 <button
                   type="button"
                   className={`stage-tab${activeStageTabId === 'desktop' ? ' active' : ''}`}
@@ -1098,8 +1154,9 @@ export default function App() {
                         onClick={() => {
                           setStageTabs((prev) => prev.filter((x) => x.id !== tab.id));
                           if (activeStageTabId === tab.id) {
-                            setStageKind('files');
-                            setActiveStageTabId('files');
+                            const nextTab = canUseFiles ? 'files' : 'desktop';
+                            setStageKind(nextTab);
+                            setActiveStageTabId(nextTab);
                           }
                         }}
                       >
@@ -1137,6 +1194,9 @@ export default function App() {
                   embeddedInStage
                   activeBotName={activeBot?.name}
                   lang={lang}
+                  supportsWS={hasServerCap('desktop.ws_h264')}
+                  supportsHEVC={hasServerCap('desktop.ws_hevc')}
+                  onUnsupportedCap={markCapUnsupported}
                   onChangeTarget={(next) => void selectDesktopTarget(next)}
                   onActiveTargetSync={(next) => applyActiveDesktopTarget(next)}
                   onTakeoversChange={setTakeovers}
@@ -1151,30 +1211,32 @@ export default function App() {
                   onClose={() => setDeskOpen(false)}
                 />
               </div>
-              <div
-                className="stage-pane-slot"
-                hidden={activeStageTabId !== 'files'}
-                style={
-                  activeBot
-                    ? ({
-                        '--bot-accent': botColor(activeBot.id, bots),
-                        '--bot-accent-text': contrastText(botColor(activeBot.id, bots)),
-                      } as React.CSSProperties)
-                    : undefined
-                }
-              >
-                <WorkspaceFilesPane
-                  botId={activeBotId || ''}
-                  initialPath={filesOpenPath}
-                  openSeq={filesOpenSeq}
-                  lang={lang}
-                  onQuotePath={(relPath) => {
-                    setDeskChatOpen(true);
-                    setStageInsert({ seq: Date.now(), text: `@${relPath} ` });
-                  }}
-                  onToast={showToast}
-                />
-              </div>
+              {canUseFiles && (
+                <div
+                  className="stage-pane-slot"
+                  hidden={activeStageTabId !== 'files'}
+                  style={
+                    activeBot
+                      ? ({
+                          '--bot-accent': botColor(activeBot.id, bots),
+                          '--bot-accent-text': contrastText(botColor(activeBot.id, bots)),
+                        } as React.CSSProperties)
+                      : undefined
+                  }
+                >
+                  <WorkspaceFilesPane
+                    botId={activeBotId || ''}
+                    initialPath={filesOpenPath}
+                    openSeq={filesOpenSeq}
+                    lang={lang}
+                    onQuotePath={(relPath) => {
+                      setDeskChatOpen(true);
+                      setStageInsert({ seq: Date.now(), text: `@${relPath} ` });
+                    }}
+                    onToast={showToast}
+                  />
+                </div>
+              )}
               {activeStageTabId !== 'desktop' && activeStageTabId !== 'files' && (
                 <div className="ws-preview-empty">
                   {t('stagePlaceholderDesc', { kind: stageKind })}
@@ -1195,6 +1257,8 @@ export default function App() {
         models={modelsMap}
         routineRefreshSeq={routineRefreshSeq}
         lang={lang}
+        canBindDesktop={hasServerCap('bot.desktop_binding')}
+        canIsolateBrowser={hasServerCap('bot.browser_isolation')}
         onClose={() => setPanelOpen(false)}
         onToast={showToast}
         onConfirm={setConfirmOpts}
@@ -1207,6 +1271,7 @@ export default function App() {
         onRefreshDetail={(id) => openPanel(id)}
         onSettingsUpdated={setSettings}
         onOpenFiles={(botId) => {
+          if (!canUseFiles) return;
           setPanelOpen(false);
           if (botId !== activeBotId) void selectBot(botId);
           setStageKind('files');
@@ -1250,6 +1315,8 @@ export default function App() {
         lang={lang}
         onSuccess={async () => {
           setLoginOpen(false);
+          setUnsupportedCaps(new Set());
+          setCompatDismissedProto(0);
           connectEvents();
           await loadBots();
           void refreshTakeovers();

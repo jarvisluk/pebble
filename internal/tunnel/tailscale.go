@@ -55,11 +55,11 @@ type TailscaleState struct {
 	Peers   []TailscalePeer `json:"peers,omitempty"`
 }
 
-// DefaultTailscaleHostname returns a sanitized Tailscale node name such as "bothub-mac-mini".
+// DefaultTailscaleHostname returns a sanitized Tailscale node name such as "pebble-mac-mini".
 func DefaultTailscaleHostname(prefix string) string {
 	p := sanitizeDNSLabel(prefix)
 	if p == "" {
-		p = "bothub"
+		p = "pebble"
 	}
 	host, err := os.Hostname()
 	if err != nil {
@@ -139,7 +139,7 @@ type TailscaleNode struct {
 // NewTailscaleNode constructs an unstarted TailscaleNode with opts.
 func NewTailscaleNode(opts TailscaleOptions) *TailscaleNode {
 	if strings.TrimSpace(opts.Hostname) == "" {
-		opts.Hostname = DefaultTailscaleHostname("bothub")
+		opts.Hostname = DefaultTailscaleHostname("pebble")
 	}
 	return &TailscaleNode{
 		opts: opts,
@@ -495,7 +495,7 @@ func buildTailscalePeers(raw *ipnstate.Status) []TailscalePeer {
 			host = target
 		}
 		lowerHost := strings.ToLower(host)
-		isBotHub := lowerHost == "bothub" || strings.HasPrefix(lowerHost, "bothub-")
+		isBotHub := isPebbleHostname(lowerHost)
 		peers = append(peers, TailscalePeer{
 			ID:       string(p.ID),
 			Hostname: host,
@@ -595,8 +595,13 @@ func (n *TailscaleNode) Close() error {
 	return err
 }
 
+func isPebbleHostname(lowerHost string) bool {
+	return lowerHost == "pebble" || strings.HasPrefix(lowerHost, "pebble-") ||
+		lowerHost == "bothub" || strings.HasPrefix(lowerHost, "bothub-")
+}
+
 func tsLogf(format string, args ...any) {
-	if os.Getenv("BOT_HUB_TAILSCALE_DEBUG") == "1" {
+	if tunnelLookupEnv("PEBBLE_TAILSCALE_DEBUG", "BOT_HUB_TAILSCALE_DEBUG") == "1" {
 		log.Printf("[tailscale] "+format, args...)
 	}
 }

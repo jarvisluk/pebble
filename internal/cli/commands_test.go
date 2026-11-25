@@ -47,15 +47,15 @@ func TestCLIBotCommandsAndPartialUpdate(t *testing.T) {
 	}))
 	defer api.Close()
 
-	// Simulate an opencode workspace with no per-turn env vars set.
+	// Simulate an opencode workspace with no per-turn env vars set (primary pebble MCP config).
 	ws := t.TempDir()
 	ocDoc := map[string]any{
 		"mcp": map[string]any{
 			"servers": map[string]any{
-				"bot-hub": map[string]any{
+				"pebble": map[string]any{
 					"type":        "local",
-					"command":     []string{"/usr/local/bin/bot-hub", "mcp", "--hub-url", api.URL, "--bot-id", "assistant"},
-					"environment": map[string]string{"BOT_HUB_API_TOKEN": "tok-ws"},
+					"command":     []string{"/usr/local/bin/pebble", "mcp", "--hub-url", api.URL, "--bot-id", "assistant"},
+					"environment": map[string]string{"PEBBLE_API_TOKEN": "tok-ws"},
 				},
 			},
 		},
@@ -101,7 +101,7 @@ func TestCLIBotCommandsAndPartialUpdate(t *testing.T) {
 		t.Fatalf("did not expect description in partial patch: %#v", gotPatch)
 	}
 
-	t.Setenv("BOT_HUB_HOP", "2")
+	t.Setenv("PEBBLE_HOP", "2")
 	if out, errOut, code := run("bot", "message", "writer", "hello", "world"); code != 0 || !strings.Contains(out, "ack") {
 		t.Fatalf("bot message failed: code=%d out=%s err=%s", code, out, errOut)
 	}
@@ -156,10 +156,10 @@ func TestCLISessionRoutineNodeDesktopAndAgyDiscovery(t *testing.T) {
 	}
 	agyDoc := map[string]any{
 		"mcpServers": map[string]any{
-			"bot-hub": map[string]any{
-				"command": "/usr/local/bin/bot-hub",
+			"pebble": map[string]any{
+				"command": "/usr/local/bin/pebble",
 				"args":    []string{"mcp", "--hub-url=" + api.URL, "--bot-id=coder"},
-				"env":     map[string]string{"BOT_HUB_API_TOKEN": "tok-agy"},
+				"env":     map[string]string{"PEBBLE_API_TOKEN": "tok-agy"},
 			},
 		},
 	}
@@ -194,10 +194,224 @@ func TestCLISessionRoutineNodeDesktopAndAgyDiscovery(t *testing.T) {
 		}
 	}
 
-	// computer_use role blocks nested desktop task.
-	t.Setenv("BOT_HUB_MCP_ROLE", "computer_use")
+	// computer_use role blocks nested desktop task (both PEBBLE_MCP_ROLE and legacy BOT_HUB_MCP_ROLE).
+	t.Setenv("PEBBLE_MCP_ROLE", "computer_use")
 	var out, errBuf bytes.Buffer
 	if code := runCommand(context.Background(), []string{"desktop", "task", "--goal", "nested"}, ws, &out, &errBuf); code == 0 {
 		t.Fatalf("expected computer_use role to reject nested desktop task")
+	}
+
+	// Backward compatibility: legacy BOT_HUB_URL / BOT_HUB_BOT_ID / BOT_HUB_API_TOKEN and servers["bot-hub"] fallback still work.
+	legacyWS := t.TempDir()
+	legacyOC := `{"mcp":{"servers":{"bot-hub":{"type":"local","command":["/usr/local/bin/bot-hub","mcp","--hub-url","` + api.URL + `","--bot-id","coder"],"environment":{"BOT_HUB_API_TOKEN":"tok-agy"}}}}}`
+	if err := os.WriteFile(filepath.Join(legacyWS, "opencode.json"), []byte(legacyOC), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PEBBLE_MCP_ROLE", "")
+	var legacyOut, legacyErr bytes.Buffer
+	if code := runCommand(context.Background(), []string{"routine", "list"}, legacyWS, &legacyOut, &legacyErr); code != 0 || !strings.Contains(legacyOut.String(), "Check") {
+		t.Fatalf("expected legacy bot-hub opencode.json fallback to work, got code=%d out=%s err=%s", code, legacyOut.String(), legacyErr.String())
+	}
+}
+
+func TestCLISettingsAndGuardrails(t *testing.T) {
+	var (
+		gotSettingsGetQuery string
+		gotModelsQuery      string
+		gotSettingsPatch    map[string]any
+		gotSettingsQuery    string
+		gotBotPatch         map[string]any
+		gotBotPatchQuery    string
+		gotBotCreateQuery   string
+		gotDeletedBotPath   string
+	)
+
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer tok-settings" {
+			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/bots/coder":
+			_, _ = w.Write([]byte(`{"id":"coder","harness":"claude"}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/bots":
+			gotBotCreateQuery = r.URL.RawQuery
+			_, _ = w.Write([]byte(`{"id":"newbot","name":"NewBot"}`))
+		case r.Method == http.MethodPatch && r.URL.Path == "/api/bots/coder":
+			gotBotPatchQuery = r.URL.RawQuery
+			gotBotPatch = map[string]any{}
+			_ = json.NewDecoder(r.Body).Decode(&gotBotPatch)
+			_, _ = w.Write([]byte(`{"id":"coder","model":"m1"}`))
+		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/api/bots/"):
+			gotDeletedBotPath = r.URL.Path
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/settings":
+			gotSettingsGetQuery = r.URL.RawQuery
+			_, _ = w.Write([]byte(`{"defaultHarness":"opencode","defaultModel":"m1"}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/models":
+			gotModelsQuery = r.URL.RawQuery
+			_, _ = w.Write([]byte(`{"models":["sonnet","opus"]}`))
+		case r.Method == http.MethodPatch && r.URL.Path == "/api/settings":
+			gotSettingsQuery = r.URL.RawQuery
+			gotSettingsPatch = map[string]any{}
+			_ = json.NewDecoder(r.Body).Decode(&gotSettingsPatch)
+			_, _ = w.Write([]byte(`{"dryRun":true,"valid":true}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/desktop/targets":
+			_, _ = w.Write([]byte(`{"targets":[{"id":"local","name":"本机桌面"}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer api.Close()
+
+	ws := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(ws, ".agents"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mcpDoc := map[string]any{
+		"mcpServers": map[string]any{
+			"pebble": map[string]any{
+				"command": "/usr/local/bin/pebble",
+				"args":    []string{"mcp", "--hub-url=" + api.URL, "--bot-id=coder"},
+				"env":     map[string]string{"PEBBLE_API_TOKEN": "tok-settings"},
+			},
+		},
+	}
+	b, _ := json.Marshal(mcpDoc)
+	if err := os.WriteFile(filepath.Join(ws, ".agents", "mcp_config.json"), b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	userMDPath := filepath.Join(ws, "user-prefs.md")
+	if err := os.WriteFile(userMDPath, []byte("# Prefs\nConcise.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	run := func(args ...string) (string, string, int) {
+		var out, errBuf bytes.Buffer
+		code := runCommand(context.Background(), args, ws, &out, &errBuf)
+		return out.String(), errBuf.String(), code
+	}
+
+	// settings get & --fresh
+	if out, errOut, code := run("settings", "get"); code != 0 || !strings.Contains(out, `"defaultHarness": "opencode"`) || gotSettingsGetQuery != "" {
+		t.Fatalf("settings get failed: code=%d query=%q out=%s err=%s", code, gotSettingsGetQuery, out, errOut)
+	}
+	if _, errOut, code := run("settings", "get", "--fresh"); code != 0 || gotSettingsGetQuery != "fresh=1" {
+		t.Fatalf("settings get --fresh failed: code=%d query=%q err=%s", code, gotSettingsGetQuery, errOut)
+	}
+
+	// settings models auto-detects current bot harness ("claude"), plus explicit --harness & --source.
+	if out, errOut, code := run("settings", "models"); code != 0 || !strings.Contains(out, `"harness": "claude"`) || !strings.Contains(out, `"sonnet"`) || gotModelsQuery != "harness=claude" {
+		t.Fatalf("settings models auto failed: code=%d query=%q out=%s err=%s", code, gotModelsQuery, out, errOut)
+	}
+	if out, errOut, code := run("settings", "models", "--harness", "opencode", "--source", "magpie"); code != 0 || !strings.Contains(out, `"source": "magpie"`) || gotModelsQuery != "harness=opencode&source=magpie" {
+		t.Fatalf("settings models explicit failed: code=%d query=%q out=%s err=%s", code, gotModelsQuery, out, errOut)
+	}
+
+	// settings set flags, defaultModelsPatch, --shared-user-md-file, --dry-run, --force.
+	if _, errOut, code := run(
+		"settings", "set",
+		"--default-harness", "opencode",
+		"--default-model", "m1",
+		"--harness-model", "opencode=m2",
+		"--clear-harness-model", "claude",
+		"--desktop-harness", "opencode",
+		"--desktop-model", "m-fast",
+		"--magpie-web-url", "https://magpie.local",
+		"--shared-user-md-file", "user-prefs.md",
+		"--dry-run",
+	); code != 0 {
+		t.Fatalf("settings set failed: code=%d err=%s", code, errOut)
+	}
+	if gotSettingsQuery != "dryRun=1&validate=1" {
+		t.Fatalf("unexpected settings query: %q", gotSettingsQuery)
+	}
+	if gotSettingsPatch["defaultHarness"] != "opencode" || gotSettingsPatch["defaultModel"] != "m1" ||
+		gotSettingsPatch["desktopHarness"] != "opencode" || gotSettingsPatch["desktopModel"] != "m-fast" ||
+		gotSettingsPatch["magpieWebUrl"] != "https://magpie.local" || gotSettingsPatch["sharedUserMd"] != "# Prefs\nConcise.\n" {
+		t.Fatalf("unexpected settings patch payload: %#v", gotSettingsPatch)
+	}
+	patchMap, _ := gotSettingsPatch["defaultModelsPatch"].(map[string]any)
+	if patchMap["opencode"] != "m2" || patchMap["claude"] != "" {
+		t.Fatalf("unexpected defaultModelsPatch: %#v", gotSettingsPatch["defaultModelsPatch"])
+	}
+
+	// settings set clear flags & --force.
+	if _, errOut, code := run(
+		"settings", "set",
+		"--clear-default-model",
+		"--clear-desktop-harness",
+		"--clear-desktop-model",
+		"--clear-magpie-web-url",
+		"--force",
+	); code != 0 {
+		t.Fatalf("settings set clear failed: code=%d err=%s", code, errOut)
+	}
+	if gotSettingsQuery != "" || gotSettingsPatch["defaultModel"] != "" || gotSettingsPatch["desktopHarness"] != "" || gotSettingsPatch["desktopModel"] != "" || gotSettingsPatch["magpieWebUrl"] != "" {
+		t.Fatalf("unexpected clear settings payload/query: query=%q payload=%#v", gotSettingsQuery, gotSettingsPatch)
+	}
+
+	// settings set rejects empty values and conflicting flags.
+	badSettingsCases := [][]string{
+		{"settings", "set"},
+		{"settings", "set", "--default-harness", ""},
+		{"settings", "set", "--default-model", ""},
+		{"settings", "set", "--default-model", "m1", "--clear-default-model"},
+		{"settings", "set", "--harness-model", "opencode="},
+		{"settings", "set", "--harness-model", "opencode=m1", "--clear-harness-model", "opencode"},
+		{"settings", "set", "--desktop-model", ""},
+		{"settings", "set", "--desktop-model", "m1", "--clear-desktop-model"},
+		{"settings", "set", "--magpie-web-url", ""},
+	}
+	for _, tc := range badSettingsCases {
+		if _, _, code := run(tc...); code == 0 {
+			t.Fatalf("expected %v to fail", tc)
+		}
+	}
+
+	// bot create validate vs --force.
+	if _, errOut, code := run("bot", "create", "--id", "b1", "--name", "B1"); code != 0 || gotBotCreateQuery != "validate=1" {
+		t.Fatalf("bot create validate failed: code=%d query=%q err=%s", code, gotBotCreateQuery, errOut)
+	}
+	if _, errOut, code := run("bot", "create", "--id", "b1", "--name", "B1", "--force"); code != 0 || gotBotCreateQuery != "" {
+		t.Fatalf("bot create --force failed: code=%d query=%q err=%s", code, gotBotCreateQuery, errOut)
+	}
+
+	// bot update --inherit-model, --dry-run, --force, and conflict guard.
+	if _, errOut, code := run("bot", "update", "--inherit-model"); code != 0 || gotBotPatch["model"] != "" || gotBotPatchQuery != "validate=1" {
+		t.Fatalf("bot update --inherit-model failed: code=%d query=%q patch=%#v err=%s", code, gotBotPatchQuery, gotBotPatch, errOut)
+	}
+	if _, errOut, code := run("bot", "update", "--model", "m2", "--dry-run", "--force"); code != 0 || gotBotPatchQuery != "dryRun=1" {
+		t.Fatalf("bot update --dry-run --force failed: code=%d query=%q err=%s", code, gotBotPatchQuery, errOut)
+	}
+	if _, _, code := run("bot", "update", "--inherit-model", "--model", "m1"); code == 0 {
+		t.Fatalf("expected --inherit-model with non-empty --model to fail")
+	}
+
+	// bot delete self-protection guard.
+	if _, errOut, code := run("bot", "delete", "--id", "coder"); code == 0 || !strings.Contains(errOut, "--confirm-self") {
+		t.Fatalf("expected self-delete refusal with --confirm-self hint, got code=%d err=%s", code, errOut)
+	}
+	if _, errOut, code := run("bot", "delete", "--id", "coder", "--confirm-self"); code != 0 || gotDeletedBotPath != "/api/bots/coder" {
+		t.Fatalf("expected self-delete with --confirm-self to succeed, got code=%d path=%q err=%s", code, gotDeletedBotPath, errOut)
+	}
+
+	// desktop targets.
+	if out, errOut, code := run("desktop", "targets"); code != 0 || !strings.Contains(out, `"id": "local"`) {
+		t.Fatalf("desktop targets failed: code=%d out=%s err=%s", code, out, errOut)
+	}
+
+	// computer_use role blocks mutating bot/settings commands.
+	t.Setenv("PEBBLE_MCP_ROLE", "computer_use")
+	for _, tc := range [][]string{
+		{"bot", "create", "--id", "x", "--name", "X"},
+		{"bot", "update", "--name", "X"},
+		{"bot", "delete", "--id", "other"},
+		{"settings", "set", "--default-model", "m1"},
+	} {
+		if _, _, code := run(tc...); code == 0 {
+			t.Fatalf("expected computer_use role to block %v", tc)
+		}
 	}
 }

@@ -1,4 +1,4 @@
-// Package cli holds bot-hub's commands, shared by the CLI and the desktop app.
+// Package cli holds Pebble's commands, shared by the CLI and the desktop app.
 package cli
 
 import (
@@ -29,7 +29,7 @@ import (
 	"bot-hub/internal/tunnel"
 )
 
-// Main runs a bot-hub command; args excludes the program name.
+// Main runs a pebble command; args excludes the program name.
 func Main(args []string) {
 	if len(args) < 1 {
 		printUsage()
@@ -50,7 +50,7 @@ func Main(args []string) {
 		return
 	}
 	switch sub {
-	case "bot", "session", "routine", "node", "desktop":
+	case "bot", "settings", "session", "routine", "node", "desktop":
 		cwd, _ := os.Getwd()
 		os.Exit(runCommand(context.Background(), args, cwd, os.Stdout, os.Stderr))
 	}
@@ -101,16 +101,17 @@ func Main(args []string) {
 
 func printUsage() {
 	fmt.Println(`Usage:
-  bot-hub serve  [-config path] [-auto-desktop]                   Start Web UI, HTTP API, and scheduler
-  bot-hub chat   [-config path] [bot]                             Interactive terminal chat with a bot
-  bot-hub status [-config path]                                   Show configured bots and persisted sessions
-  bot-hub mcp     [--hub-url url] [--bot-id id] [--config path]   Run stdio MCP server exposing core runtime primitives
-  bot-hub connect [-listen addr] [-node] <tailcat-link>           Reach a remote bot-hub over Tailcat (optionally register as a node)
-  bot-hub bot     <list|get|create|update|delete|message> [flags] Manage bots or send messages via running Hub API
-  bot-hub session <list|recall|rotate> [flags]                    Inspect, recall, or rotate bot sessions
-  bot-hub routine <list|upsert|delete|run> [flags]                Manage and trigger scheduled routines
-  bot-hub node    <list|exec|file> [flags]                        List or invoke remote computer nodes
-  bot-hub desktop <task|takeover|setup|power> [flags]             Delegate desktop GUI tasks, setup virtual desktop, or control power`)
+  pebble serve  [-config path] [-auto-desktop]                   Start Web UI, HTTP API, and scheduler
+  pebble chat   [-config path] [bot]                             Interactive terminal chat with a bot
+  pebble status [-config path]                                   Show configured bots and persisted sessions
+  pebble mcp     [--hub-url url] [--bot-id id] [--config path]   Run stdio MCP server exposing core runtime primitives
+  pebble connect [-listen addr] [-node] <tailcat-link>           Reach a remote Pebble hub over Tailcat (optionally register as a node)
+  pebble bot      <list|get|create|update|delete|message|send> [flags] Manage bots or send messages via running Hub API
+  pebble settings <get|models|set> [flags]                       Read or update global Pebble settings and list available models
+  pebble session  <list|recall|rotate> [flags]                   Inspect, recall, or rotate bot sessions
+  pebble routine  <list|upsert|delete|run> [flags]               Manage and trigger scheduled routines
+  pebble node     <list|exec|file> [flags]                       List or invoke remote computer nodes
+  pebble desktop  <task|takeover|setup|power|targets> [flags]    Delegate desktop GUI tasks, list targets, setup virtual desktop, or control power`)
 }
 
 func runHostDaemon(args []string) {
@@ -142,9 +143,9 @@ func runHostDaemon(args []string) {
 
 func runConnect(args []string) {
 	fs := flag.NewFlagSet("connect", flag.ExitOnError)
-	listen := fs.String("listen", "127.0.0.1:3790", "local address to serve the remote bot-hub on")
+	listen := fs.String("listen", "127.0.0.1:3790", "local address to serve the remote Pebble hub on")
 	asNode := fs.Bool("node", false, "also expose this computer as a remote device node")
-	token := fs.String("token", "", "hub apiToken for node registration (or BOT_HUB_API_TOKEN)")
+	token := fs.String("token", "", "hub apiToken for node registration (or PEBBLE_API_TOKEN)")
 	nodeID := fs.String("node-id", "", "node ID (defaults to hostname)")
 	perms := fs.String("perms", "files,exec,desktop", "comma-separated node permissions: files,exec,desktop")
 	_ = fs.Parse(args)
@@ -182,7 +183,7 @@ func runConnect(args []string) {
 
 	tok := strings.TrimSpace(*token)
 	if tok == "" {
-		tok = strings.TrimSpace(os.Getenv("BOT_HUB_API_TOKEN"))
+		tok = config.LookupEnv("PEBBLE_API_TOKEN", "BOT_HUB_API_TOKEN")
 	}
 	if tok == "" {
 		tok = linkTok
@@ -211,7 +212,7 @@ func runConnect(args []string) {
 
 func runMCP(args []string) {
 	fs := flag.NewFlagSet("mcp", flag.ExitOnError)
-	hubURL := fs.String("hub-url", "http://127.0.0.1:3789", "running bot-hub HTTP base URL")
+	hubURL := fs.String("hub-url", "http://127.0.0.1:3789", "running Pebble HTTP base URL")
 	botID := fs.String("bot-id", "", "caller bot ID")
 	cfgPath := fs.String("config", "", "path to bots.json config file")
 	_ = fs.Parse(args)
@@ -280,7 +281,7 @@ func maybeAutoSetupDesktop(ctx context.Context, eng *desktop.Engine) {
 }
 
 func runServe(parent context.Context, h *hub.Hub, cfgPath string) error {
-	ensureBotHubInPath(h.Config().ProjectRoot)
+	ensurePebbleInPath(h.Config().ProjectRoot)
 
 	ctx, stop := context.WithCancel(parent)
 	defer stop()
@@ -395,8 +396,8 @@ func runStatus(h *hub.Hub, cfgPath string) {
 	}
 }
 
-func ensureBotHubInPath(projectRoot string) {
-	bin := config.ResolveBotHubBinary(projectRoot)
+func ensurePebbleInPath(projectRoot string) {
+	bin := config.ResolvePebbleBinary(projectRoot)
 	if bin == "" {
 		return
 	}

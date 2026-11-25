@@ -6,13 +6,13 @@
     "enabled": true,
     "host": "127.0.0.1",
     "port": 3789,
-    "webhookSecret": "${BOT_HUB_WEBHOOK_SECRET}",
-    "apiToken": "${BOT_HUB_API_TOKEN}",
+    "webhookSecret": "${PEBBLE_WEBHOOK_SECRET}",
+    "apiToken": "${PEBBLE_API_TOKEN}",
     "tailcat": { "enabled": false }
   },
   "push": {
     "enabled": true,
-    "relayUrl": "${BOT_HUB_PUSH_RELAY_URL}",
+    "relayUrl": "${PEBBLE_PUSH_RELAY_URL}",
     "apns": {
       "keyPath": "${APNS_KEY_PATH}",
       "keyId": "${APNS_KEY_ID}",

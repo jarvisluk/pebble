@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 
+	"bot-hub/internal/config"
 	"bot-hub/internal/desktop"
 	"bot-hub/internal/mcp"
 )
@@ -26,13 +27,13 @@ type connOpts struct {
 }
 
 func registerConnFlags(fs *flag.FlagSet, o *connOpts) {
-	fs.StringVar(&o.hubURL, "hub-url", "", "running bot-hub HTTP base URL")
+	fs.StringVar(&o.hubURL, "hub-url", "", "running Pebble HTTP base URL")
 	fs.StringVar(&o.botID, "bot-id", "", "caller bot ID")
 	fs.StringVar(&o.cfg, "config", "", "path to bots.json config file")
-	fs.StringVar(&o.token, "token", "", "bot-hub API token")
+	fs.StringVar(&o.token, "token", "", "pebble API token")
 }
 
-// runCommand executes `bot-hub <bot|session|routine|node|desktop> ...` and
+// runCommand executes `pebble <bot|settings|session|routine|node|desktop> ...` and
 // returns a process exit code. Separated from os.Exit for unit testing.
 func runCommand(ctx context.Context, args []string, cwd string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
@@ -46,6 +47,8 @@ func runCommand(ctx context.Context, args []string, cwd string, stdout, stderr i
 	switch sub {
 	case "bot":
 		err = runBotCmd(ctx, rest, cwd, stdout, stderr)
+	case "settings":
+		err = runSettingsCmd(ctx, rest, cwd, stdout, stderr)
 	case "session":
 		err = runSessionCmd(ctx, rest, cwd, stdout, stderr)
 	case "routine":
@@ -66,22 +69,29 @@ func runCommand(ctx context.Context, args []string, cwd string, stdout, stderr i
 	return 0
 }
 
+func rejectComputerUseRole(cmdName string) error {
+	if config.LookupEnv("PEBBLE_MCP_ROLE", "BOT_HUB_MCP_ROLE") == "computer_use" {
+		return fmt.Errorf("%s cannot be called from inside a computer-use worker", cmdName)
+	}
+	return nil
+}
+
 func resolveClient(o connOpts, cwd string) *mcp.Client {
 	hubURL := strings.TrimSpace(o.hubURL)
 	if hubURL == "" {
-		hubURL = strings.TrimSpace(os.Getenv("BOT_HUB_URL"))
+		hubURL = config.LookupEnv("PEBBLE_URL", "BOT_HUB_URL")
 	}
 	botID := strings.TrimSpace(o.botID)
 	if botID == "" {
-		botID = strings.TrimSpace(os.Getenv("BOT_HUB_BOT_ID"))
+		botID = config.LookupEnv("PEBBLE_BOT_ID", "BOT_HUB_BOT_ID")
 	}
 	cfgPath := strings.TrimSpace(o.cfg)
 	if cfgPath == "" {
-		cfgPath = strings.TrimSpace(os.Getenv("BOT_HUB_CONFIG"))
+		cfgPath = config.LookupEnv("PEBBLE_CONFIG", "BOT_HUB_CONFIG")
 	}
 	tok := strings.TrimSpace(o.token)
 	if tok == "" {
-		tok = strings.TrimSpace(os.Getenv("BOT_HUB_API_TOKEN"))
+		tok = config.LookupEnv("PEBBLE_API_TOKEN", "BOT_HUB_API_TOKEN")
 	}
 
 	if hubURL == "" || botID == "" || cfgPath == "" || tok == "" {
@@ -102,13 +112,20 @@ func resolveClient(o connOpts, cwd string) *mcp.Client {
 	return mcp.NewClient(hubURL, botID, cfgPath, tok)
 }
 
+func lookupTokenEnvMap(m map[string]string) string {
+	if tok := strings.TrimSpace(m["PEBBLE_API_TOKEN"]); tok != "" {
+		return tok
+	}
+	return strings.TrimSpace(m["BOT_HUB_API_TOKEN"])
+}
+
 func discoverWorkspaceContext(cwd string) connOpts {
 	var out connOpts
 	if strings.TrimSpace(cwd) == "" {
 		return out
 	}
 
-	// 1. opencode.json -> mcp.servers.bot-hub
+	// 1. opencode.json -> mcp.servers.pebble (or legacy bot-hub)
 	if raw, err := os.ReadFile(filepath.Join(cwd, "opencode.json")); err == nil {
 		var doc struct {
 			MCP struct {
@@ -119,17 +136,19 @@ func discoverWorkspaceContext(cwd string) connOpts {
 			} `json:"mcp"`
 		}
 		if json.Unmarshal(raw, &doc) == nil {
-			if srv, ok := doc.MCP.Servers["bot-hub"]; ok {
-				parseMCPArgs(srv.Command, &out)
-				if out.token == "" {
-					out.token = strings.TrimSpace(srv.Environment["BOT_HUB_API_TOKEN"])
+			for _, key := range []string{config.MCPServerName, config.LegacyMCPServerName} {
+				if srv, ok := doc.MCP.Servers[key]; ok {
+					parseMCPArgs(srv.Command, &out)
+					if out.token == "" {
+						out.token = lookupTokenEnvMap(srv.Environment)
+					}
+					return out
 				}
-				return out
 			}
 		}
 	}
 
-	// 2. .agents/mcp_config.json (agy) or .pi/mcp.json (pi) -> mcpServers.bot-hub
+	// 2. .agents/mcp_config.json (agy) or .pi/mcp.json (pi) -> mcpServers.pebble (or legacy bot-hub)
 	for _, rel := range []string{filepath.Join(".agents", "mcp_config.json"), filepath.Join(".pi", "mcp.json")} {
 		raw, err := os.ReadFile(filepath.Join(cwd, rel))
 		if err != nil {
@@ -143,12 +162,14 @@ func discoverWorkspaceContext(cwd string) connOpts {
 			} `json:"mcpServers"`
 		}
 		if json.Unmarshal(raw, &doc) == nil {
-			if srv, ok := doc.MCPServers["bot-hub"]; ok {
-				parseMCPArgs(append([]string{srv.Command}, srv.Args...), &out)
-				if out.token == "" {
-					out.token = strings.TrimSpace(srv.Env["BOT_HUB_API_TOKEN"])
+			for _, key := range []string{config.MCPServerName, config.LegacyMCPServerName} {
+				if srv, ok := doc.MCPServers[key]; ok {
+					parseMCPArgs(append([]string{srv.Command}, srv.Args...), &out)
+					if out.token == "" {
+						out.token = lookupTokenEnvMap(srv.Env)
+					}
+					return out
 				}
-				return out
 			}
 		}
 	}
@@ -190,21 +211,21 @@ func writeJSONOut(w io.Writer, raw []byte) error {
 	return err
 }
 
-func readInstructionsInput(inline, filePath, cwd string, inlineSet, fileSet bool) (string, bool, error) {
+func readTextInput(inline, filePath, cwd string, inlineSet, fileSet bool, flagBase string) (string, bool, error) {
 	if inlineSet && fileSet {
-		return "", false, errors.New("cannot specify both --instructions and --instructions-file")
+		return "", false, fmt.Errorf("cannot specify both --%s and --%s-file", flagBase, flagBase)
 	}
 	if fileSet {
 		p := strings.TrimSpace(filePath)
 		if p == "" {
-			return "", false, errors.New("--instructions-file cannot be empty")
+			return "", false, fmt.Errorf("--%s-file cannot be empty", flagBase)
 		}
 		if !filepath.IsAbs(p) && cwd != "" {
 			p = filepath.Join(cwd, p)
 		}
 		b, err := os.ReadFile(p)
 		if err != nil {
-			return "", false, fmt.Errorf("read instructions file: %w", err)
+			return "", false, fmt.Errorf("read %s file: %w", flagBase, err)
 		}
 		return string(b), true, nil
 	}
@@ -222,11 +243,25 @@ func (m *multiStringFlag) Set(v string) error {
 	return nil
 }
 
+func appendValidateDryRunQuery(path string, validate, dryRun bool) string {
+	q := url.Values{}
+	if validate {
+		q.Set("validate", "1")
+	}
+	if dryRun {
+		q.Set("dryRun", "1")
+	}
+	if enc := q.Encode(); enc != "" {
+		return path + "?" + enc
+	}
+	return path
+}
+
 // --- bot ---
 
 func runBotCmd(ctx context.Context, args []string, cwd string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: bot-hub bot <list|get|create|update|delete|message|send> [flags]")
+		return errors.New("usage: pebble bot <list|get|create|update|delete|message|send> [flags]")
 	}
 	action := args[0]
 	rest := args[1:]
@@ -257,7 +292,7 @@ func runBotCmd(ctx context.Context, args []string, cwd string, stdout, stderr io
 		c := resolveClient(co, cwd)
 		target := c.ResolveBotID(*id)
 		if target == "" {
-			return errors.New("bot ID is required (--id or BOT_HUB_BOT_ID)")
+			return errors.New("bot ID is required (--id or PEBBLE_BOT_ID)")
 		}
 		body, err := c.DoJSON(ctx, http.MethodGet, "/api/bots/"+url.PathEscape(target), nil)
 		if err != nil {
@@ -266,6 +301,9 @@ func runBotCmd(ctx context.Context, args []string, cwd string, stdout, stderr io
 		return writeJSONOut(stdout, body)
 
 	case "create":
+		if err := rejectComputerUseRole("bot create"); err != nil {
+			return err
+		}
 		fs := newSubFlagSet("bot create", stderr, &co)
 		id := fs.String("id", "", "unique bot ID")
 		name := fs.String("name", "", "display name")
@@ -275,10 +313,11 @@ func runBotCmd(ctx context.Context, args []string, cwd string, stdout, stderr io
 		instr := fs.String("instructions", "", "AGENTS.md markdown content")
 		instrFile := fs.String("instructions-file", "", "path to markdown file for AGENTS.md")
 		model := fs.String("model", "", "model override")
-		harnessName := fs.String("harness", "", "agent runtime (opencode|pi|dsh|claude|agy)")
+		harnessName := fs.String("harness", "", "agent runtime (opencode|codebuddy|qoder|codex|claude|grok|trae|pi|dsh|agy)")
 		priv := fs.Bool("private-sessions", false, "enable private sessions")
 		deskTarget := fs.String("desktop-target", "", "bound desktop screen target (e.g. local, virtual:<slot>, <nodeId>, <nodeId>:virtual:<slot>)")
 		browserMode := fs.String("browser-mode", "", "browser isolation mode (auto|isolated|attach)")
+		force := fs.Bool("force", false, "skip strict harness/model validation")
 		if err := fs.Parse(rest); err != nil {
 			return err
 		}
@@ -287,7 +326,7 @@ func runBotCmd(ctx context.Context, args []string, cwd string, stdout, stderr io
 		if strings.TrimSpace(*id) == "" || strings.TrimSpace(*name) == "" {
 			return errors.New("--id and --name are required")
 		}
-		instructions, hasInstr, err := readInstructionsInput(*instr, *instrFile, cwd, visited["instructions"], visited["instructions-file"])
+		instructions, hasInstr, err := readTextInput(*instr, *instrFile, cwd, visited["instructions"], visited["instructions-file"], "instructions")
 		if err != nil {
 			return err
 		}
@@ -323,13 +362,17 @@ func runBotCmd(ctx context.Context, args []string, cwd string, stdout, stderr io
 			payload["browserMode"] = *browserMode
 		}
 		c := resolveClient(co, cwd)
-		body, err := c.DoJSON(ctx, http.MethodPost, "/api/bots", payload)
+		path := appendValidateDryRunQuery("/api/bots", !*force, false)
+		body, err := c.DoJSON(ctx, http.MethodPost, path, payload)
 		if err != nil {
 			return err
 		}
 		return writeJSONOut(stdout, body)
 
 	case "update":
+		if err := rejectComputerUseRole("bot update"); err != nil {
+			return err
+		}
 		fs := newSubFlagSet("bot update", stderr, &co)
 		id := fs.String("id", "", "bot ID (defaults to current bot)")
 		name := fs.String("name", "", "new display name")
@@ -339,16 +382,22 @@ func runBotCmd(ctx context.Context, args []string, cwd string, stdout, stderr io
 		instr := fs.String("instructions", "", "new AGENTS.md markdown content")
 		instrFile := fs.String("instructions-file", "", "path to markdown file for AGENTS.md")
 		model := fs.String("model", "", "model override (empty string inherits hub default)")
-		harnessName := fs.String("harness", "", "agent runtime (opencode|pi|dsh|claude|agy)")
+		inheritModel := fs.Bool("inherit-model", false, "inherit hub default model (clears explicit model override)")
+		harnessName := fs.String("harness", "", "agent runtime (opencode|codebuddy|qoder|codex|claude|grok|trae|pi|dsh|agy)")
 		priv := fs.Bool("private-sessions", false, "enable private sessions")
 		deskTarget := fs.String("desktop-target", "", "bound desktop screen target (empty string follows default)")
 		browserMode := fs.String("browser-mode", "", "browser isolation mode (auto|isolated|attach)")
+		dryRun := fs.Bool("dry-run", false, "validate and preview update without applying changes")
+		force := fs.Bool("force", false, "skip strict harness/model validation")
 		if err := fs.Parse(rest); err != nil {
 			return err
 		}
 		visited := map[string]bool{}
 		fs.Visit(func(f *flag.Flag) { visited[f.Name] = true })
-		instructions, hasInstr, err := readInstructionsInput(*instr, *instrFile, cwd, visited["instructions"], visited["instructions-file"])
+		if *inheritModel && visited["model"] && strings.TrimSpace(*model) != "" {
+			return errors.New("cannot combine --inherit-model with a non-empty --model")
+		}
+		instructions, hasInstr, err := readTextInput(*instr, *instrFile, cwd, visited["instructions"], visited["instructions-file"], "instructions")
 		if err != nil {
 			return err
 		}
@@ -368,7 +417,9 @@ func runBotCmd(ctx context.Context, args []string, cwd string, stdout, stderr io
 		if hasInstr {
 			payload["instructions"] = instructions
 		}
-		if visited["model"] {
+		if *inheritModel {
+			payload["model"] = ""
+		} else if visited["model"] {
 			payload["model"] = *model
 		}
 		if visited["harness"] {
@@ -384,22 +435,27 @@ func runBotCmd(ctx context.Context, args []string, cwd string, stdout, stderr io
 			payload["browserMode"] = *browserMode
 		}
 		if len(payload) == 0 {
-			return errors.New("specify at least one field to update (--name, --description, --avatar, --color, --instructions, --instructions-file, --model, --harness, --private-sessions, --desktop-target, --browser-mode)")
+			return errors.New("specify at least one field to update (--name, --description, --avatar, --color, --instructions, --instructions-file, --model, --inherit-model, --harness, --private-sessions, --desktop-target, --browser-mode)")
 		}
 		c := resolveClient(co, cwd)
 		target := c.ResolveBotID(*id)
 		if target == "" {
-			return errors.New("bot ID is required (--id or BOT_HUB_BOT_ID)")
+			return errors.New("bot ID is required (--id or PEBBLE_BOT_ID)")
 		}
-		body, err := c.DoJSON(ctx, http.MethodPatch, "/api/bots/"+url.PathEscape(target), payload)
+		path := appendValidateDryRunQuery("/api/bots/"+url.PathEscape(target), !*force, *dryRun)
+		body, err := c.DoJSON(ctx, http.MethodPatch, path, payload)
 		if err != nil {
 			return err
 		}
 		return writeJSONOut(stdout, body)
 
 	case "delete":
+		if err := rejectComputerUseRole("bot delete"); err != nil {
+			return err
+		}
 		fs := newSubFlagSet("bot delete", stderr, &co)
 		id := fs.String("id", "", "bot ID to delete")
+		confirmSelf := fs.Bool("confirm-self", false, "confirm deleting the currently active bot")
 		if err := fs.Parse(rest); err != nil {
 			return err
 		}
@@ -411,6 +467,9 @@ func runBotCmd(ctx context.Context, args []string, cwd string, stdout, stderr io
 			return errors.New("--id is required")
 		}
 		c := resolveClient(co, cwd)
+		if c.SelfBotID() != "" && target == c.SelfBotID() && !*confirmSelf {
+			return fmt.Errorf("refusing to delete current bot %q without --confirm-self", target)
+		}
 		body, err := c.DoJSON(ctx, http.MethodDelete, "/api/bots/"+url.PathEscape(target), nil)
 		if err != nil {
 			return err
@@ -434,7 +493,7 @@ func runBotCmd(ctx context.Context, args []string, cwd string, stdout, stderr io
 			return errors.New("--id and --message are required")
 		}
 		c := resolveClient(co, cwd)
-		hop, _ := strconv.Atoi(os.Getenv("BOT_HUB_HOP"))
+		hop, _ := strconv.Atoi(config.LookupEnv("PEBBLE_HOP", "BOT_HUB_HOP"))
 		body, err := c.DoJSON(ctx, http.MethodPost, "/api/bots/"+url.PathEscape(strings.TrimSpace(*id))+"/message", map[string]any{
 			"message":   *msg,
 			"fromBotId": c.SelfBotID(),
@@ -462,7 +521,7 @@ func runBotCmd(ctx context.Context, args []string, cwd string, stdout, stderr io
 		c := resolveClient(co, cwd)
 		target := c.ResolveBotID(*id)
 		if target == "" {
-			return errors.New("bot ID is required (--id or BOT_HUB_BOT_ID)")
+			return errors.New("bot ID is required (--id or PEBBLE_BOT_ID)")
 		}
 		if strings.TrimSpace(*text) == "" && len(images) == 0 && len(files) == 0 {
 			return errors.New("--text (or positional text), --image, or --file is required")
@@ -506,11 +565,244 @@ func runBotCmd(ctx context.Context, args []string, cwd string, stdout, stderr io
 	}
 }
 
+// --- settings ---
+
+func runSettingsCmd(ctx context.Context, args []string, cwd string, stdout, stderr io.Writer) error {
+	if len(args) == 0 {
+		return errors.New("usage: pebble settings <get|models|set> [flags]")
+	}
+	action := args[0]
+	rest := args[1:]
+	var co connOpts
+
+	switch action {
+	case "get":
+		fs := newSubFlagSet("settings get", stderr, &co)
+		fresh := fs.Bool("fresh", false, "bypass cache and probe harnesses/Magpie live")
+		if err := fs.Parse(rest); err != nil {
+			return err
+		}
+		c := resolveClient(co, cwd)
+		path := "/api/settings"
+		if *fresh {
+			path += "?fresh=1"
+		}
+		body, err := c.DoJSON(ctx, http.MethodGet, path, nil)
+		if err != nil {
+			return err
+		}
+		return writeJSONOut(stdout, body)
+
+	case "models":
+		fs := newSubFlagSet("settings models", stderr, &co)
+		harnessName := fs.String("harness", "", "target harness ID (defaults to current bot's harness)")
+		source := fs.String("source", "", "model catalog source (optional: magpie)")
+		if err := fs.Parse(rest); err != nil {
+			return err
+		}
+		c := resolveClient(co, cwd)
+		targetHarness := strings.TrimSpace(*harnessName)
+		if targetHarness == "" && c.SelfBotID() != "" {
+			if botBody, err := c.DoJSON(ctx, http.MethodGet, "/api/bots/"+url.PathEscape(c.SelfBotID()), nil); err == nil {
+				var botDoc struct {
+					Harness string `json:"harness"`
+				}
+				if json.Unmarshal(botBody, &botDoc) == nil && strings.TrimSpace(botDoc.Harness) != "" {
+					targetHarness = strings.TrimSpace(botDoc.Harness)
+				}
+			}
+		}
+		if targetHarness == "" {
+			if sBody, err := c.DoJSON(ctx, http.MethodGet, "/api/settings", nil); err == nil {
+				var sDoc struct {
+					DefaultHarness string `json:"defaultHarness"`
+				}
+				if json.Unmarshal(sBody, &sDoc) == nil && strings.TrimSpace(sDoc.DefaultHarness) != "" {
+					targetHarness = strings.TrimSpace(sDoc.DefaultHarness)
+				}
+			}
+		}
+		if targetHarness == "" {
+			targetHarness = "opencode"
+		}
+
+		q := url.Values{}
+		q.Set("harness", targetHarness)
+		src := strings.TrimSpace(*source)
+		if src != "" {
+			q.Set("source", src)
+		}
+		body, err := c.DoJSON(ctx, http.MethodGet, "/api/models?"+q.Encode(), nil)
+		if err != nil {
+			return err
+		}
+		var mDoc struct {
+			Models []string `json:"models"`
+		}
+		if err := json.Unmarshal(body, &mDoc); err != nil {
+			return writeJSONOut(stdout, body)
+		}
+		if mDoc.Models == nil {
+			mDoc.Models = []string{}
+		}
+		outBytes, err := json.Marshal(struct {
+			Harness string   `json:"harness"`
+			Source  string   `json:"source,omitempty"`
+			Models  []string `json:"models"`
+		}{
+			Harness: targetHarness,
+			Source:  src,
+			Models:  mDoc.Models,
+		})
+		if err != nil {
+			return err
+		}
+		return writeJSONOut(stdout, outBytes)
+
+	case "set":
+		if err := rejectComputerUseRole("settings set"); err != nil {
+			return err
+		}
+		fs := newSubFlagSet("settings set", stderr, &co)
+		defHarness := fs.String("default-harness", "", "hub-wide default harness")
+		defModel := fs.String("default-model", "", "hub-wide default model")
+		clearDefModel := fs.Bool("clear-default-model", false, "clear hub-wide default model")
+		var harnessModels multiStringFlag
+		var clearHarnessModels multiStringFlag
+		fs.Var(&harnessModels, "harness-model", "per-harness default model override in <harness>=<model> form (repeatable)")
+		fs.Var(&clearHarnessModels, "clear-harness-model", "clear per-harness default model override for <harness> (repeatable)")
+		deskHarness := fs.String("desktop-harness", "", "desktop worker harness")
+		clearDeskHarness := fs.Bool("clear-desktop-harness", false, "clear desktop worker harness")
+		deskModel := fs.String("desktop-model", "", "desktop worker model")
+		clearDeskModel := fs.Bool("clear-desktop-model", false, "clear desktop worker model")
+		magpieWebURL := fs.String("magpie-web-url", "", "Magpie web URL")
+		clearMagpieWebURL := fs.Bool("clear-magpie-web-url", false, "clear Magpie web URL")
+		sharedUserMD := fs.String("shared-user-md", "", "shared _shared/USER.md markdown content")
+		sharedUserMDFile := fs.String("shared-user-md-file", "", "path to markdown file for _shared/USER.md")
+		dryRun := fs.Bool("dry-run", false, "validate and preview impact without applying changes")
+		force := fs.Bool("force", false, "skip strict harness/model validation")
+		if err := fs.Parse(rest); err != nil {
+			return err
+		}
+
+		visited := map[string]bool{}
+		fs.Visit(func(f *flag.Flag) { visited[f.Name] = true })
+
+		payload := map[string]any{}
+		if visited["default-harness"] {
+			v := strings.TrimSpace(*defHarness)
+			if v == "" {
+				return errors.New("--default-harness cannot be empty")
+			}
+			payload["defaultHarness"] = v
+		}
+
+		if visited["default-model"] && *clearDefModel {
+			return errors.New("cannot specify both --default-model and --clear-default-model")
+		}
+		if visited["default-model"] {
+			v := strings.TrimSpace(*defModel)
+			if v == "" {
+				return errors.New("--default-model cannot be empty (use --clear-default-model to clear)")
+			}
+			payload["defaultModel"] = v
+		} else if *clearDefModel {
+			payload["defaultModel"] = ""
+		}
+
+		patch := map[string]string{}
+		for _, entry := range harnessModels {
+			h, m, ok := strings.Cut(entry, "=")
+			h = strings.TrimSpace(h)
+			m = strings.TrimSpace(m)
+			if !ok || h == "" || m == "" {
+				return fmt.Errorf("invalid --harness-model %q (expected <harness>=<model>; use --clear-harness-model <harness> to clear)", entry)
+			}
+			patch[h] = m
+		}
+		for _, rawH := range clearHarnessModels {
+			h := strings.TrimSpace(rawH)
+			if h == "" {
+				return errors.New("--clear-harness-model cannot be empty")
+			}
+			if _, exists := patch[h]; exists {
+				return fmt.Errorf("cannot both set and clear harness model for %q", h)
+			}
+			patch[h] = ""
+		}
+		if len(patch) > 0 {
+			payload["defaultModelsPatch"] = patch
+		}
+
+		if visited["desktop-harness"] && *clearDeskHarness {
+			return errors.New("cannot specify both --desktop-harness and --clear-desktop-harness")
+		}
+		if visited["desktop-harness"] {
+			v := strings.TrimSpace(*deskHarness)
+			if v == "" {
+				return errors.New("--desktop-harness cannot be empty (use --clear-desktop-harness to clear)")
+			}
+			payload["desktopHarness"] = v
+		} else if *clearDeskHarness {
+			payload["desktopHarness"] = ""
+		}
+
+		if visited["desktop-model"] && *clearDeskModel {
+			return errors.New("cannot specify both --desktop-model and --clear-desktop-model")
+		}
+		if visited["desktop-model"] {
+			v := strings.TrimSpace(*deskModel)
+			if v == "" {
+				return errors.New("--desktop-model cannot be empty (use --clear-desktop-model to clear)")
+			}
+			payload["desktopModel"] = v
+		} else if *clearDeskModel {
+			payload["desktopModel"] = ""
+		}
+
+		if visited["magpie-web-url"] && *clearMagpieWebURL {
+			return errors.New("cannot specify both --magpie-web-url and --clear-magpie-web-url")
+		}
+		if visited["magpie-web-url"] {
+			v := strings.TrimSpace(*magpieWebURL)
+			if v == "" {
+				return errors.New("--magpie-web-url cannot be empty (use --clear-magpie-web-url to clear)")
+			}
+			payload["magpieWebUrl"] = v
+		} else if *clearMagpieWebURL {
+			payload["magpieWebUrl"] = ""
+		}
+
+		userMD, hasUserMD, err := readTextInput(*sharedUserMD, *sharedUserMDFile, cwd, visited["shared-user-md"], visited["shared-user-md-file"], "shared-user-md")
+		if err != nil {
+			return err
+		}
+		if hasUserMD {
+			payload["sharedUserMd"] = userMD
+		}
+
+		if len(payload) == 0 {
+			return errors.New("specify at least one setting to update")
+		}
+
+		c := resolveClient(co, cwd)
+		path := appendValidateDryRunQuery("/api/settings", !*force, *dryRun)
+		body, err := c.DoJSON(ctx, http.MethodPatch, path, payload)
+		if err != nil {
+			return err
+		}
+		return writeJSONOut(stdout, body)
+
+	default:
+		return fmt.Errorf("unknown settings action %q (expected get|models|set)", action)
+	}
+}
+
 // --- session ---
 
 func runSessionCmd(ctx context.Context, args []string, cwd string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: bot-hub session <list|recall|rotate> [flags]")
+		return errors.New("usage: pebble session <list|recall|rotate> [flags]")
 	}
 	action := args[0]
 	rest := args[1:]
@@ -618,7 +910,7 @@ func runSessionCmd(ctx context.Context, args []string, cwd string, stdout, stder
 		c := resolveClient(co, cwd)
 		target := c.ResolveBotID(*botID)
 		if target == "" {
-			return errors.New("bot ID is required (--bot or BOT_HUB_BOT_ID)")
+			return errors.New("bot ID is required (--bot or PEBBLE_BOT_ID)")
 		}
 		body, err := c.DoJSON(ctx, http.MethodPost, "/api/bots/"+url.PathEscape(target)+"/rotate", map[string]any{
 			"handoffNote": *handoff,
@@ -638,7 +930,7 @@ func runSessionCmd(ctx context.Context, args []string, cwd string, stdout, stder
 
 func runRoutineCmd(ctx context.Context, args []string, cwd string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: bot-hub routine <list|upsert|delete|run> [flags]")
+		return errors.New("usage: pebble routine <list|upsert|delete|run> [flags]")
 	}
 	action := args[0]
 	rest := args[1:]
@@ -654,7 +946,7 @@ func runRoutineCmd(ctx context.Context, args []string, cwd string, stdout, stder
 		c := resolveClient(co, cwd)
 		target := c.ResolveBotID(*botID)
 		if target == "" {
-			return errors.New("bot ID is required (--bot or BOT_HUB_BOT_ID)")
+			return errors.New("bot ID is required (--bot or PEBBLE_BOT_ID)")
 		}
 		body, err := c.DoJSON(ctx, http.MethodGet, "/api/bots/"+url.PathEscape(target)+"/routines", nil)
 		if err != nil {
@@ -688,7 +980,7 @@ func runRoutineCmd(ctx context.Context, args []string, cwd string, stdout, stder
 		c := resolveClient(co, cwd)
 		target := c.ResolveBotID(*botID)
 		if target == "" {
-			return errors.New("bot ID is required (--bot or BOT_HUB_BOT_ID)")
+			return errors.New("bot ID is required (--bot or PEBBLE_BOT_ID)")
 		}
 		payload := map[string]any{
 			"name":   strings.TrimSpace(*name),
@@ -746,7 +1038,7 @@ func runRoutineCmd(ctx context.Context, args []string, cwd string, stdout, stder
 		c := resolveClient(co, cwd)
 		target := c.ResolveBotID(*botID)
 		if target == "" {
-			return errors.New("bot ID is required (--bot or BOT_HUB_BOT_ID)")
+			return errors.New("bot ID is required (--bot or PEBBLE_BOT_ID)")
 		}
 		body, err := c.DoJSON(ctx, http.MethodDelete, "/api/bots/"+url.PathEscape(target)+"/routines/"+url.PathEscape(strings.TrimSpace(*id)), nil)
 		if err != nil {
@@ -770,7 +1062,7 @@ func runRoutineCmd(ctx context.Context, args []string, cwd string, stdout, stder
 		c := resolveClient(co, cwd)
 		target := c.ResolveBotID(*botID)
 		if target == "" {
-			return errors.New("bot ID is required (--bot or BOT_HUB_BOT_ID)")
+			return errors.New("bot ID is required (--bot or PEBBLE_BOT_ID)")
 		}
 		body, err := c.DoJSON(ctx, http.MethodPost, "/api/bots/"+url.PathEscape(target)+"/routines/"+url.PathEscape(strings.TrimSpace(*id))+"/run", nil)
 		if err != nil {
@@ -787,7 +1079,7 @@ func runRoutineCmd(ctx context.Context, args []string, cwd string, stdout, stder
 
 func runNodeCmd(ctx context.Context, args []string, cwd string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: bot-hub node <list|exec|file> [flags]")
+		return errors.New("usage: pebble node <list|exec|file> [flags]")
 	}
 	action := args[0]
 	rest := args[1:]
@@ -887,16 +1179,28 @@ func runNodeCmd(ctx context.Context, args []string, cwd string, stdout, stderr i
 
 func runDesktopCmd(ctx context.Context, args []string, cwd string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: bot-hub desktop <task|takeover|setup|power> [flags]")
+		return errors.New("usage: pebble desktop <task|takeover|setup|power|targets> [flags]")
 	}
 	action := args[0]
 	rest := args[1:]
 	var co connOpts
 
 	switch action {
+	case "targets":
+		fs := newSubFlagSet("desktop targets", stderr, &co)
+		if err := fs.Parse(rest); err != nil {
+			return err
+		}
+		c := resolveClient(co, cwd)
+		body, err := c.DoJSON(ctx, http.MethodGet, "/api/desktop/targets", nil)
+		if err != nil {
+			return err
+		}
+		return writeJSONOut(stdout, body)
+
 	case "task":
-		if strings.TrimSpace(os.Getenv("BOT_HUB_MCP_ROLE")) == "computer_use" {
-			return errors.New("desktop task cannot be called from inside a computer-use worker")
+		if err := rejectComputerUseRole("desktop task"); err != nil {
+			return err
 		}
 		fs := newSubFlagSet("desktop task", stderr, &co)
 		goal := fs.String("goal", "", "GUI goal description")
@@ -914,7 +1218,7 @@ func runDesktopCmd(ctx context.Context, args []string, cwd string, stdout, stder
 		}
 		c := resolveClient(co, cwd)
 		if c.SelfBotID() == "" {
-			return errors.New("caller bot ID is unknown (--bot-id or BOT_HUB_BOT_ID)")
+			return errors.New("caller bot ID is unknown (--bot-id or PEBBLE_BOT_ID)")
 		}
 		body, err := c.DoJSON(ctx, http.MethodPost, "/api/desktop/task", map[string]any{
 			"botId":      c.SelfBotID(),
@@ -1013,6 +1317,6 @@ func runDesktopCmd(ctx context.Context, args []string, cwd string, stdout, stder
 		return writeJSONOut(stdout, body)
 
 	default:
-		return fmt.Errorf("unknown desktop action %q (expected task|takeover|setup|power)", action)
+		return fmt.Errorf("unknown desktop action %q (expected task|takeover|setup|power|targets)", action)
 	}
 }

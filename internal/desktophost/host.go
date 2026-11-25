@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -20,6 +21,7 @@ import (
 	"bot-hub/internal/config"
 	"bot-hub/internal/harness"
 	"bot-hub/internal/node"
+	"bot-hub/internal/protocol"
 	"bot-hub/internal/state"
 	"bot-hub/internal/syncer"
 	"bot-hub/internal/tunnel"
@@ -59,6 +61,7 @@ type Snapshot struct {
 	CanFailback         bool     `json:"canFailback"`
 	TailscaleBound      bool     `json:"tailscaleBound"`
 	TailscaleControlURL string   `json:"tailscaleControlUrl"`
+	DaemonProtocol      int      `json:"daemonProtocol,omitempty"`
 }
 
 // RemoteTarget describes a parsed remote connection link.
@@ -170,6 +173,7 @@ func (h *Host) Snapshot() Snapshot {
 		CanFailback:         p.Mode == "local" && linkTrimmed != "",
 		TailscaleBound:      p.TailscaleBound,
 		TailscaleControlURL: p.TailscaleControlURL,
+		DaemonProtocol:      protocol.CurrentProtocol,
 	}
 }
 
@@ -309,12 +313,25 @@ func (h *Host) startLocal(ctx context.Context, done chan struct{}) (string, stri
 			return "", "", fmt.Errorf("本机服务退出：%v", err)
 		default:
 		}
-		if r, err := warmClient.Get(base + "/healthz"); err == nil {
-			r.Body.Close()
-			if sr, serr := warmClient.Get(base + "/api/settings"); serr == nil {
-				sr.Body.Close()
+		if req, rerr := http.NewRequestWithContext(ctx, http.MethodGet, base+"/api/meta", nil); rerr == nil {
+			if cfg.HTTP.APIToken != "" {
+				req.Header.Set("Authorization", "Bearer "+cfg.HTTP.APIToken)
 			}
-			return base + "/", cfg.HTTP.APIToken, nil
+			if r, err := warmClient.Do(req); err == nil {
+				pidHdr := strings.TrimSpace(r.Header.Get("X-Pebble-PID"))
+				r.Body.Close()
+				if r.StatusCode == http.StatusOK && (pidHdr == "" || pidHdr == strconv.Itoa(os.Getpid())) {
+					if sreq, serr := http.NewRequestWithContext(ctx, http.MethodGet, base+"/api/settings", nil); serr == nil {
+						if cfg.HTTP.APIToken != "" {
+							sreq.Header.Set("Authorization", "Bearer "+cfg.HTTP.APIToken)
+						}
+						if sr, serr := warmClient.Do(sreq); serr == nil {
+							sr.Body.Close()
+						}
+					}
+					return base + "/", cfg.HTTP.APIToken, nil
+				}
+			}
 		}
 	}
 	return "", "", errors.New("本机服务没有响应")
@@ -720,6 +737,20 @@ func (h *Host) setRemoteToken(tok string) {
 	}
 }
 
+// SetLocalToken updates the active token when running in local mode and notifies UI shells.
+func (h *Host) SetLocalToken(tok string) {
+	tok = strings.TrimSpace(tok)
+	h.mu.Lock()
+	changed := h.prefs.Mode == "local" && h.activeToken != tok
+	if changed {
+		h.activeToken = tok
+	}
+	h.mu.Unlock()
+	if changed {
+		h.notify()
+	}
+}
+
 // SetLocalNode updates local node settings and reconfigures the live node agent if running.
 func (h *Host) SetLocalNode(enabled *bool, name *string, perms []string) map[string]any {
 	h.mu.Lock()
@@ -919,7 +950,7 @@ func (h *Host) TailscaleStart(ctx context.Context, authKey, controlURL string, o
 	if existing == nil {
 		n := tunnel.NewTailscaleNode(tunnel.TailscaleOptions{
 			StateDir:   filepath.Join(h.dir, "tailscale-client"),
-			Hostname:   tunnel.DefaultTailscaleHostname("bothub-desktop"),
+			Hostname:   tunnel.DefaultTailscaleHostname("pebble-desktop"),
 			ControlURL: ctrl,
 			AuthKey:    key,
 		})

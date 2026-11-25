@@ -318,7 +318,7 @@ func (m *Manager) handleMessage(botID string, payload any) {
 	m.pushAlert(APSAlert{
 		Title: name,
 		Body:  preview,
-	}, "active", "bot-"+botID, "bothub://bot/"+botID, botID, "", "bot_message")
+	}, "active", "bot-"+botID, "pebble://bot/"+botID, botID, "", "bot_message")
 }
 
 func (m *Manager) handleTakeover(payload any) {
@@ -351,7 +351,7 @@ func (m *Manager) handleTakeover(payload any) {
 			if reason == "" {
 				reason = "需要人工接管完成操作"
 			}
-			deepLink := "bothub://desktop?target=" + target
+			deepLink := "pebble://desktop?target=" + target
 			m.pushAlert(APSAlert{
 				Title:    "需要接管远程桌面",
 				Subtitle: target,
@@ -424,7 +424,7 @@ func (m *Manager) handleQuestions(payload any) {
 		m.pushAlert(APSAlert{
 			Title: name + " 等待回复",
 			Body:  body,
-		}, "active", "question-"+item.BotID, "bothub://bot/"+item.BotID, item.BotID, "", "question")
+		}, "active", "question-"+item.BotID, "pebble://bot/"+item.BotID, item.BotID, "", "question")
 	}
 
 	m.mu.Lock()
@@ -520,7 +520,7 @@ func (m *Manager) pushLiveActivity(activityKey string, attrs LiveActivityAttribu
 			Timestamp:    nowUnix,
 		}
 		if sendEvent == "start" {
-			aps.AttributesType = "BotHubActivityAttributes"
+			aps.AttributesType = "PebbleActivityAttributes"
 			aps.Attributes = &attrs
 		}
 		if sendEvent == "end" {

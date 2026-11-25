@@ -1761,3 +1761,22 @@
   .ws-back-btn { display: grid; place-items: center; }
   .ws-preview-hd { flex-wrap: wrap; }
 }
+
+.compat-note {
+  margin-bottom: 8px;
+}
+.compat-note-warn {
+  background: var(--pink);
+  color: var(--pink-ink);
+}
+.compat-note-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.compat-note-row span {
+  flex: 1;
+  min-width: 0;
+  line-height: 1.4;
+}

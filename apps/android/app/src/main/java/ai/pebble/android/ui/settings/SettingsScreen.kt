@@ -316,6 +316,9 @@ fun SettingsDetailScreen(
     val dirty = settingsChanged || botUpdates.isNotEmpty()
 
     LaunchedEffect(dirty) { onDirtyChanged(dirty) }
+    DisposableEffect(Unit) {
+        onDispose { onDirtyChanged(false) }
+    }
     LaunchedEffect(requestLeave) {
         if (requestLeave) {
             onClearRequestLeave()

@@ -71,7 +71,7 @@ func NewWithStore(cfg *config.HubConfig, store *state.Store) *Syncer {
 	host, _ := os.Hostname()
 	host = strings.TrimSpace(host)
 	if host == "" {
-		host = "bot-hub"
+		host = "pebble"
 	}
 	if store != nil {
 		host = store.GetOrCreateHostID(host)

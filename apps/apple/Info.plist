@@ -16,7 +16,7 @@
 	</dict>
 	<key>NSBonjourServices</key>
 	<array>
-		<string>_bothub._tcp</string>
+		<string>_pebble._tcp</string>
 	</array>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
@@ -27,6 +27,7 @@
 		<dict>
 			<key>CFBundleURLSchemes</key>
 			<array>
+				<string>pebble</string>
 				<string>bothub</string>
 			</array>
 		</dict>

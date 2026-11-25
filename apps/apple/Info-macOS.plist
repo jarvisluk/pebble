@@ -23,6 +23,7 @@
 		<dict>
 			<key>CFBundleURLSchemes</key>
 			<array>
+				<string>pebble</string>
 				<string>bothub</string>
 			</array>
 		</dict>
@@ -39,7 +40,7 @@
 	<string>连接同一局域网内的 Pebble 主电脑</string>
 	<key>NSBonjourServices</key>
 	<array>
-		<string>_bothub._tcp</string>
+		<string>_pebble._tcp</string>
 	</array>
 </dict>
 </plist>

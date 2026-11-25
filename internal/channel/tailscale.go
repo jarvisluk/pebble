@@ -60,7 +60,7 @@ func (s *HTTPServer) startTailscale(handler http.Handler) {
 	}
 	hostname := strings.TrimSpace(tc.Hostname)
 	if hostname == "" {
-		hostname = tunnel.DefaultTailscaleHostname("bothub")
+		hostname = tunnel.DefaultTailscaleHostname("pebble")
 	}
 	node := tunnel.NewTailscaleNode(tunnel.TailscaleOptions{
 		StateDir:   s.tailscaleStateDir(),
@@ -320,8 +320,11 @@ func (s *HTTPServer) handleSetTailscale(w http.ResponseWriter, r *http.Request) 
 	s.cfg.APIToken = token
 	s.cfgMu.Unlock()
 
-	if token != prevToken && s.hub != nil {
-		s.hub.SetAPIToken(token)
+	if token != prevToken {
+		if s.hub != nil {
+			s.hub.SetAPIToken(token)
+		}
+		s.notifyTokenChanged(token)
 	}
 
 	if token != "" && (token != prevToken || enable) {

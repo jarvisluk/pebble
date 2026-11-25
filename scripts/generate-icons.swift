@@ -362,14 +362,147 @@ func renderBackgroundOnly(size: Int, dark: Bool) -> NSBitmapImageRep {
     return rep
 }
 
+enum MenuBarPebbleSpec {
+    static let eyeW: CGFloat = 5.6
+    static let eyeH: CGFloat = 10.4
+    static let eyeGap: CGFloat = 20.8
+    static let eyeEx: CGFloat = 53.8
+    static let eyeEy: CGFloat = 46.2
+    static let eyeLeanDeg: CGFloat = -14.0
+}
+
+func renderMenuBarIcon(size: Int, bodyFraction: CGFloat, template: Bool) -> NSBitmapImageRep {
+    let (rep, ctx) = makeBitmapContext(size: size)
+    let s = CGFloat(size)
+
+    var rot = CGAffineTransform(translationX: 50, y: 50)
+        .rotated(by: PebbleSpec.bodyRotDeg * .pi / 180.0)
+        .translatedBy(x: -50, y: -50)
+    let rawBody = PebbleSpec.bodyCGPath()
+    let rotatedBody = rawBody.copy(using: &rot) ?? rawBody
+    let bbox = rotatedBody.boundingBoxOfPath
+    let scale = (s * bodyFraction) / max(bbox.width, bbox.height)
+
+    ctx.saveGState()
+    ctx.translateBy(x: s / 2.0, y: s / 2.0)
+    ctx.scaleBy(x: scale, y: scale)
+    ctx.translateBy(x: -bbox.midX, y: -bbox.midY)
+
+    // Body
+    ctx.saveGState()
+    ctx.addPath(rotatedBody)
+    ctx.clip()
+    if template {
+        ctx.setFillColor(RGB(hex: 0x000000).cgColor)
+        ctx.fill(bbox.insetBy(dx: -2, dy: -2))
+    } else {
+        drawLinearGradient(
+            ctx: ctx,
+            colors: [RGB(hex: 0x83B4A2).cgColor, RGB(hex: 0x7AAA98).cgColor, RGB(hex: 0x6D9E8B).cgColor],
+            locations: [0.0, 0.55, 1.0],
+            start: CGPoint(x: 15, y: 12),
+            end: CGPoint(x: 85, y: 88)
+        )
+    }
+    ctx.restoreGState()
+
+    // Optically compensated eyes
+    let eyeCxs = [
+        MenuBarPebbleSpec.eyeEx - MenuBarPebbleSpec.eyeGap / 2.0,
+        MenuBarPebbleSpec.eyeEx + MenuBarPebbleSpec.eyeGap / 2.0,
+    ]
+    let w = MenuBarPebbleSpec.eyeW * 2.0
+    let h = MenuBarPebbleSpec.eyeH * 2.0
+    let rx = min(MenuBarPebbleSpec.eyeW, MenuBarPebbleSpec.eyeH)
+
+    for cx in eyeCxs {
+        ctx.saveGState()
+        ctx.translateBy(x: cx, y: MenuBarPebbleSpec.eyeEy)
+        ctx.rotate(by: MenuBarPebbleSpec.eyeLeanDeg * .pi / 180.0)
+        ctx.translateBy(x: -cx, y: -MenuBarPebbleSpec.eyeEy)
+
+        let eyeRect = CGRect(
+            x: cx - MenuBarPebbleSpec.eyeW,
+            y: MenuBarPebbleSpec.eyeEy - MenuBarPebbleSpec.eyeH,
+            width: w,
+            height: h
+        )
+        let eyePath = CGPath(roundedRect: eyeRect, cornerWidth: rx, cornerHeight: rx, transform: nil)
+        ctx.addPath(eyePath)
+        if template {
+            ctx.setBlendMode(.clear)
+            ctx.fillPath()
+        } else {
+            ctx.setFillColor(RGB(hex: 0x1C140E, alpha: 0.92).cgColor)
+            ctx.fillPath()
+        }
+        ctx.restoreGState()
+    }
+
+    ctx.restoreGState()
+    return rep
+}
+
+func generateMenuBarAssets(root: String) throws {
+    let menuBarImagesetDir = "\(root)/apps/apple/Pebble/Assets.xcassets/MenuBarIcon.imageset"
+    try FileManager.default.createDirectory(atPath: menuBarImagesetDir, withIntermediateDirectories: true)
+
+    let menuBarFraction: CGFloat = 15.5 / 18.0
+    try savePNG(renderMenuBarIcon(size: 18, bodyFraction: menuBarFraction, template: true), to: "\(menuBarImagesetDir)/menubar@1x.png")
+    try savePNG(renderMenuBarIcon(size: 36, bodyFraction: menuBarFraction, template: true), to: "\(menuBarImagesetDir)/menubar@2x.png")
+    try savePNG(renderMenuBarIcon(size: 54, bodyFraction: menuBarFraction, template: true), to: "\(menuBarImagesetDir)/menubar@3x.png")
+
+    let contentsJSON = """
+    {
+      "images" : [
+        {
+          "filename" : "menubar@1x.png",
+          "idiom" : "universal",
+          "scale" : "1x"
+        },
+        {
+          "filename" : "menubar@2x.png",
+          "idiom" : "universal",
+          "scale" : "2x"
+        },
+        {
+          "filename" : "menubar@3x.png",
+          "idiom" : "universal",
+          "scale" : "3x"
+        }
+      ],
+      "info" : {
+        "author" : "xcode",
+        "version" : 1
+      },
+      "properties" : {
+        "template-rendering-intent" : "template"
+      }
+    }
+    """
+    try contentsJSON.write(toFile: "\(menuBarImagesetDir)/Contents.json", atomically: true, encoding: .utf8)
+
+    let desktopAssetsDir = "\(root)/cmd/bot-hub-desktop/assets"
+    try FileManager.default.createDirectory(atPath: desktopAssetsDir, withIntermediateDirectories: true)
+    try savePNG(renderMenuBarIcon(size: 44, bodyFraction: 15.5 / 22.0, template: true), to: "\(desktopAssetsDir)/tray_mac_template.png")
+    try savePNG(renderMenuBarIcon(size: 64, bodyFraction: 0.86, template: false), to: "\(desktopAssetsDir)/tray_color.png")
+}
+
 // MARK: - Paths
 let root = FileManager.default.currentDirectoryPath
-let appleIconDir = "\(root)/apps/apple/BotHub/Assets.xcassets/AppIcon.appiconset"
+let menubarOnly = CommandLine.arguments.contains("--menubar-only")
+
+try generateMenuBarAssets(root: root)
+if menubarOnly {
+    print("Generated menu bar / tray icon assets successfully.")
+    exit(0)
+}
+let appleIconDir = "\(root)/apps/apple/Pebble/Assets.xcassets/AppIcon.appiconset"
 let mobileAssetsDir = "\(root)/apps/mobile/assets"
 let androidResDir = "\(root)/apps/mobile/android/app/src/main/res"
 let webPublicDir = "\(root)/web/public"
-let macIconsetDir = "/tmp/bothub-AppIcon.iconset"
-let androidTmpDir = "/tmp/bothub-android-icons"
+let macIconsetDir = "/tmp/pebble-AppIcon.iconset"
+let androidTmpDir = "/tmp/pebble-android-icons"
 
 // 1. Apple AppIcon.appiconset
 try savePNG(renderFullBleedIcon(size: 1024, variant: .light), to: "\(appleIconDir)/icon.png")

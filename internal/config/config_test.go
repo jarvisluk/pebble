@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -135,15 +136,23 @@ func TestPlatformInstructionsAndOpenCodeSync(t *testing.T) {
 	if !cfg.Bots[0].PrivateSessions {
 		t.Fatal("expected PrivateSessions=true")
 	}
-	botHubMD, err := os.ReadFile(filepath.Join(cfg.SharedDir, PlatformInstructionsFilename))
+	pebbleMD, err := os.ReadFile(filepath.Join(cfg.SharedDir, PlatformInstructionsFilename))
 	if err != nil {
-		t.Fatalf("expected _shared/BOT_HUB.md: %v", err)
+		t.Fatalf("expected _shared/PEBBLE.md: %v", err)
 	}
-	if !strings.Contains(string(botHubMD), "recall_session") || !strings.Contains(string(botHubMD), "bot:<your-bot-id>") ||
-		!strings.Contains(string(botHubMD), "agent-desktop") || !strings.Contains(string(botHubMD), "agent-browser") ||
-		!strings.Contains(string(botHubMD), "request_takeover") || !strings.Contains(string(botHubMD), "bot-hub bot") ||
-		!strings.Contains(string(botHubMD), "update") || strings.Contains(string(botHubMD), "node_desktop") {
-		t.Fatalf("unexpected BOT_HUB.md content:\n%s", botHubMD)
+	if !strings.Contains(string(pebbleMD), "recall_session") || !strings.Contains(string(pebbleMD), "bot:<your-bot-id>") ||
+		!strings.Contains(string(pebbleMD), "agent-desktop") || !strings.Contains(string(pebbleMD), "agent-browser") ||
+		!strings.Contains(string(pebbleMD), "request_takeover") || !strings.Contains(string(pebbleMD), "pebble bot") ||
+		!strings.Contains(string(pebbleMD), "pebble settings") || !strings.Contains(string(pebbleMD), "pebble-setup") ||
+		!strings.Contains(string(pebbleMD), "update") || strings.Contains(string(pebbleMD), "node_desktop") {
+		t.Fatalf("unexpected PEBBLE.md content:\n%s", pebbleMD)
+	}
+	skillRaw, err := os.ReadFile(filepath.Join(cfg.Bots[0].Workspace, ".agents", "skills", PebbleSetupSkillName, "SKILL.md"))
+	if err != nil {
+		t.Fatalf("expected workspace pebble-setup SKILL.md: %v", err)
+	}
+	if !strings.Contains(string(skillRaw), "name: pebble-setup") {
+		t.Fatalf("unexpected skill content:\n%s", skillRaw)
 	}
 	agentsMD, err := os.ReadFile(filepath.Join(cfg.Bots[0].Workspace, "AGENTS.md"))
 	if err != nil {
@@ -156,8 +165,8 @@ func TestPlatformInstructionsAndOpenCodeSync(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(ocRaw), `"_shared/BOT_HUB.md"`) {
-		t.Fatalf("expected _shared/BOT_HUB.md in opencode.json instructions:\n%s", ocRaw)
+	if !strings.Contains(string(ocRaw), `"_shared/PEBBLE.md"`) || !strings.Contains(string(ocRaw), `"pebble"`) {
+		t.Fatalf("expected _shared/PEBBLE.md and pebble server in opencode.json:\n%s", ocRaw)
 	}
 }
 
@@ -437,6 +446,163 @@ func TestBotDesktopTargetAndBrowserModeValidation(t *testing.T) {
 	}
 	if cfg.Bots[0].DesktopTarget != "virtual:a" || cfg.Bots[0].BrowserMode != "isolated" || cfg.Bots[0].EffectiveBrowserMode() != "isolated" {
 		t.Fatalf("unexpected loaded bot config: %+v", cfg.Bots[0])
+	}
+}
+
+func TestWorkspaceSkillProvisioningAndValidateModelID(t *testing.T) {
+	root := t.TempDir()
+	cfgDir := filepath.Join(root, "config")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfgPath := filepath.Join(cfgDir, "bots.json")
+	raw := `{"bots":[{"id":"oc","harness":"opencode"},{"id":"cl","harness":"claude"}]}`
+	if err := os.WriteFile(cfgPath, []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _, err := Load(root, cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Both bots get .agents/skills/pebble-setup/SKILL.md.
+	for _, b := range cfg.Bots {
+		sharedSkill := filepath.Join(b.Workspace, ".agents", "skills", PebbleSetupSkillName, "SKILL.md")
+		data, err := os.ReadFile(sharedSkill)
+		if err != nil {
+			t.Fatalf("missing shared skill for bot %s: %v", b.ID, err)
+		}
+		if string(data) != PebbleSetupSkillText() {
+			t.Fatalf("skill mismatch for bot %s", b.ID)
+		}
+	}
+	// Only claude bot gets .claude/skills/pebble-setup/SKILL.md on initial provisioning.
+	if _, err := os.Stat(filepath.Join(cfg.Bots[1].Workspace, ".claude", "skills", PebbleSetupSkillName, "SKILL.md")); err != nil {
+		t.Fatalf("expected .claude skill for claude bot: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(cfg.Bots[0].Workspace, ".claude", "skills", PebbleSetupSkillName, "SKILL.md")); !os.IsNotExist(err) {
+		t.Fatalf("did not expect .claude skill for opencode bot, got err=%v", err)
+	}
+
+	skillText := PebbleSetupSkillText()
+	if !strings.HasPrefix(skillText, "---\nname: pebble-setup\ndescription: ") || strings.Contains(skillText, "node_desktop") {
+		t.Fatalf("invalid pebble-setup SKILL.md frontmatter or stale reference")
+	}
+
+	for _, valid := range []string{"", "sonnet", "magpie/mac-mini/auto/sonnet", "anthropic/claude-sonnet-4-5"} {
+		if err := ValidateModelID(valid); err != nil {
+			t.Fatalf("ValidateModelID(%q) unexpected error: %v", valid, err)
+		}
+	}
+	for _, invalid := range []string{"bad model", "bad\nmodel", "bad\tmodel", "bad\x00model", strings.Repeat("a", 257)} {
+		if err := ValidateModelID(invalid); err == nil {
+			t.Fatalf("expected ValidateModelID(%q) to fail", invalid)
+		}
+	}
+}
+
+func TestLegacyMigrationLookupEnvAndResolveBinary(t *testing.T) {
+	// 1. LookupEnv prefers PEBBLE_* and falls back to BOT_HUB_*.
+	t.Setenv("PEBBLE_TEST_KEY", "")
+	t.Setenv("BOT_HUB_TEST_KEY", "legacy-val")
+	if got := LookupEnv("PEBBLE_TEST_KEY", "BOT_HUB_TEST_KEY"); got != "legacy-val" {
+		t.Fatalf("LookupEnv fallback = %q, want legacy-val", got)
+	}
+	t.Setenv("PEBBLE_TEST_KEY", "new-val")
+	if got := LookupEnv("PEBBLE_TEST_KEY", "BOT_HUB_TEST_KEY"); got != "new-val" {
+		t.Fatalf("LookupEnv primary = %q, want new-val", got)
+	}
+
+	// 2. ResolvePebbleBinary prefers bin/pebble and falls back to bin/bot-hub.
+	binRoot := t.TempDir()
+	binDir := filepath.Join(binRoot, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	legacyBin := filepath.Join(binDir, "bot-hub")
+	if err := os.WriteFile(legacyBin, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := ResolvePebbleBinary(binRoot); got != legacyBin {
+		t.Fatalf("ResolvePebbleBinary fallback = %q, want %q", got, legacyBin)
+	}
+	pebbleBin := filepath.Join(binDir, "pebble")
+	if err := os.WriteFile(pebbleBin, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := ResolvePebbleBinary(binRoot); got != pebbleBin {
+		t.Fatalf("ResolvePebbleBinary primary = %q, want %q", got, pebbleBin)
+	}
+
+	// 3. Managed legacy _shared/BOT_HUB.md and opencode.json bot-hub server migrate cleanly.
+	root := t.TempDir()
+	cfgDir := filepath.Join(root, "config")
+	sharedDir := filepath.Join(root, "workspaces", "_shared")
+	ws := filepath.Join(root, "workspaces", "ops")
+	for _, dir := range []string{cfgDir, sharedDir, ws} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(cfgDir, "bots.json"), []byte(`{"http":{"apiToken":"tok-mig"},"bots":[{"id":"ops","name":"Ops"}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sharedDir, LegacyPlatformInstructionsFilename), []byte("<!-- Managed by bot-hub; old -->\n# Bot Hub Platform Guide\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	legacyOC := `{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "bot-hub": { "type": "local" },
+    "servers": {
+      "bot-hub": { "type": "local", "command": ["/old/bot-hub", "mcp"], "environment": {"BOT_HUB_API_TOKEN": "tok-old"} },
+      "custom": { "type": "local", "command": ["echo", "keep"] }
+    }
+  },
+  "instructions": ["_shared/BOT_HUB.md", "custom.md"]
+}`
+	if err := os.WriteFile(filepath.Join(ws, "opencode.json"), []byte(legacyOC), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Load(root, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(sharedDir, PlatformInstructionsFilename)); err != nil {
+		t.Fatalf("expected _shared/PEBBLE.md created: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(sharedDir, LegacyPlatformInstructionsFilename)); !os.IsNotExist(err) {
+		t.Fatalf("expected managed legacy _shared/BOT_HUB.md cleaned up, got err=%v", err)
+	}
+	ocRaw, err := os.ReadFile(filepath.Join(ws, "opencode.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ocDoc struct {
+		MCP struct {
+			Servers map[string]struct {
+				Environment map[string]string `json:"environment"`
+			} `json:"servers"`
+		} `json:"mcp"`
+		Instructions []string `json:"instructions"`
+	}
+	if err := json.Unmarshal(ocRaw, &ocDoc); err != nil {
+		t.Fatal(err)
+	}
+	if ocDoc.MCP.Servers["bot-hub"].Environment != nil {
+		t.Fatalf("expected legacy bot-hub server removed from opencode.json:\n%s", ocRaw)
+	}
+	if _, hasLegacy := ocDoc.MCP.Servers["bot-hub"]; hasLegacy {
+		t.Fatalf("expected legacy bot-hub key deleted from opencode.json:\n%s", ocRaw)
+	}
+	if ocDoc.MCP.Servers["pebble"].Environment["PEBBLE_API_TOKEN"] != "tok-mig" {
+		t.Fatalf("expected pebble server with PEBBLE_API_TOKEN in opencode.json:\n%s", ocRaw)
+	}
+	if _, hasCustom := ocDoc.MCP.Servers["custom"]; !hasCustom {
+		t.Fatalf("expected custom server preserved in opencode.json:\n%s", ocRaw)
+	}
+	instrJoined := strings.Join(ocDoc.Instructions, ",")
+	if strings.Contains(instrJoined, "_shared/BOT_HUB.md") || !strings.Contains(instrJoined, "_shared/PEBBLE.md") || !strings.Contains(instrJoined, "custom.md") {
+		t.Fatalf("unexpected migrated instructions: %v", ocDoc.Instructions)
 	}
 }
 
