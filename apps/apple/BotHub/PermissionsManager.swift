@@ -218,7 +218,6 @@ final class PermissionsManager {
         await primeLocalNetwork(duration: .milliseconds(600))
         await requestRemoteDesktopBundle()
         #elseif os(iOS)
-        await primeWirelessData()
         await PushManager.shared.refreshAuthorizationStatus()
         if PushManager.shared.authStatus == .notDetermined {
             await PushManager.shared.requestPermissionAndRegister()
@@ -226,8 +225,33 @@ final class PermissionsManager {
         if AVCaptureDevice.authorizationStatus(for: .video) == .notDetermined {
             _ = await AVCaptureDevice.requestAccess(for: .video)
         }
+        await primeWirelessData()
         await primeLocalNetwork(duration: .milliseconds(800))
         markNetworkPrimed()
+        await refresh()
+        #endif
+    }
+
+    func requestMobileUnboxIfNeeded() async {
+        #if os(iOS)
+        guard !unboxDone, !requesting else { return }
+        requesting = true
+        busyItemId = "all"
+        defer {
+            requesting = false
+            busyItemId = ""
+        }
+        await PushManager.shared.refreshAuthorizationStatus()
+        if PushManager.shared.authStatus == .notDetermined {
+            await PushManager.shared.requestPermissionAndRegister()
+        }
+        if AVCaptureDevice.authorizationStatus(for: .video) == .notDetermined {
+            _ = await AVCaptureDevice.requestAccess(for: .video)
+        }
+        await primeWirelessData()
+        await primeLocalNetwork(duration: .milliseconds(800))
+        markNetworkPrimed()
+        markUnboxDone()
         await refresh()
         #endif
     }
@@ -311,15 +335,6 @@ final class PermissionsManager {
         #endif
     }
 
-    func primeSilentNetworkIfNeeded() async {
-        #if os(iOS)
-        guard !networkPrimed else { return }
-        await primeWirelessData()
-        await primeLocalNetwork(duration: .milliseconds(600))
-        markNetworkPrimed()
-        #endif
-    }
-
     private func scheduleFollowUpRefresh() {
         followUpTask?.cancel()
         followUpTask = Task { [weak self] in
@@ -338,7 +353,7 @@ final class PermissionsManager {
 
     private func primeWirelessData() async {
         guard let url = URL(string: "https://captive.apple.com/hotspot-detect.html") else { return }
-        var req = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 4)
+        var req = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 2)
         req.httpMethod = "HEAD"
         _ = try? await URLSession.shared.data(for: req)
     }

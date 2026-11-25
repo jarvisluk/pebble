@@ -5,7 +5,6 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
-import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -38,7 +37,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
@@ -49,7 +47,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -67,9 +64,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import ai.pebble.android.data.ConnState
 import ai.pebble.android.data.PebbleStore
 import ai.pebble.android.data.ServerProfile
@@ -93,6 +87,7 @@ import ai.pebble.android.ui.theme.StatusTextBanner
 import ai.pebble.android.ui.theme.TagPill
 import ai.pebble.android.ui.theme.pebbleFieldColors
 import ai.pebble.android.ui.theme.readClipboardText
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.ui.res.painterResource
 import ai.pebble.android.ui.theme.PebbleIcons
@@ -127,49 +122,37 @@ fun ConnectScreen(
     var tsControlUrl by remember { mutableStateOf(store.tsControlUrl) }
     var manualOpen by remember { mutableStateOf(false) }
     var manualAdvOpen by remember { mutableStateOf(false) }
-    var hasNotifPerm by remember { mutableStateOf(NotificationHelper.hasNotificationPermission(context)) }
-    var hasCameraPerm by remember {
-        mutableStateOf(
-            ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
-        )
-    }
-    var notifTried by remember { mutableStateOf(false) }
-    var cameraTried by remember { mutableStateOf(false) }
-
-    val refreshPerms = {
-        hasNotifPerm = NotificationHelper.hasNotificationPermission(context)
-        hasCameraPerm = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
-    }
-
-    val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) {
-                refreshPerms()
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
+    var unboxPromptLaunched by remember { mutableStateOf(false) }
 
     val multiPermLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
-        refreshPerms()
         store.markUnboxPermsDone()
-    }
-    val singlePermLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
-        refreshPerms()
     }
 
     val isFreshOnboarding = isGate && store.servers.isEmpty() && store.activeServer == null
-    val showUnboxPermissions = isFreshOnboarding && !manualOpen && !store.unboxPermsDone && (!hasNotifPerm || !hasCameraPerm)
-    val showFreshHero = isFreshOnboarding && !manualOpen && !showUnboxPermissions
+    val showFreshHero = isFreshOnboarding && !manualOpen
     val isConnectingGate = isGate && store.activeServer != null &&
         store.connState == ConnState.CONNECTING && store.bots.isEmpty() &&
         !showFormWhileConnecting && !submitting
 
-    LaunchedEffect(isFreshOnboarding, store.unboxPermsDone, hasNotifPerm, hasCameraPerm) {
-        if (isFreshOnboarding && !store.unboxPermsDone && hasNotifPerm && hasCameraPerm) {
-            store.markUnboxPermsDone()
+    LaunchedEffect(isFreshOnboarding, store.unboxPermsDone) {
+        if (isFreshOnboarding && !store.unboxPermsDone && !unboxPromptLaunched) {
+            unboxPromptLaunched = true
+            val reqs = buildList {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                    !NotificationHelper.hasNotificationPermission(context)
+                ) {
+                    add(Manifest.permission.POST_NOTIFICATIONS)
+                }
+                if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+                    add(Manifest.permission.CAMERA)
+                }
+            }
+            if (reqs.isNotEmpty()) {
+                delay(350)
+                multiPermLauncher.launch(reqs.toTypedArray())
+            } else {
+                store.markUnboxPermsDone()
+            }
         }
     }
 
@@ -294,238 +277,6 @@ fun ConnectScreen(
                 Text(store.t("connectingHost"), color = p.text2, fontSize = PebbleFont.body)
                 OutlinedButton(onClick = { showFormWhileConnecting = true }) {
                     Text(store.t("switchHost"), color = p.text)
-                }
-            }
-        }
-        return
-    }
-
-    if (showUnboxPermissions) {
-        val notifCanPrompt = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !notifTried
-        val cameraCanPrompt = !cameraTried
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(p.page)
-                .windowInsetsPadding(WindowInsets.statusBars)
-                .navigationBarsPadding(),
-        ) {
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
-                contentAlignment = Alignment.TopCenter,
-            ) {
-                Column(
-                    modifier = Modifier
-                        .widthIn(max = 520.dp)
-                        .fillMaxWidth()
-                        .verticalScroll(rememberScrollState())
-                        .padding(start = 20.dp, end = 20.dp, top = 24.dp, bottom = 12.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(18.dp),
-                ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        BotAvatar(
-                            id = "assistant",
-                            size = 72.dp,
-                            color = PEBBLE_COLOR_HEX,
-                            interactive = true,
-                        )
-                        Text(
-                            text = store.t("ubPermTitle"),
-                            color = p.text,
-                            fontSize = PebbleFont.hero,
-                            fontWeight = FontWeight.Bold,
-                            textAlign = TextAlign.Center,
-                        )
-                        Text(
-                            text = store.t("ubPermSubMobile"),
-                            color = p.text2,
-                            fontSize = PebbleFont.secondary,
-                            textAlign = TextAlign.Center,
-                        )
-                    }
-
-                    Column(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                text = store.t("ubPermGroupEssentials"),
-                                color = p.text2,
-                                fontSize = PebbleFont.secondary,
-                                fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier.weight(1f),
-                            )
-                            IconButton(
-                                onClick = { refreshPerms() },
-                                modifier = Modifier.size(28.dp),
-                            ) {
-                                Icon(
-                                    painter = painterResource(PebbleIcons.Refresh),
-                                    contentDescription = store.t("refresh"),
-                                    tint = p.text2,
-                                    modifier = Modifier.size(18.dp),
-                                )
-                            }
-                        }
-
-                        SectionCard {
-                            UnboxPermRow(
-                                title = store.t("ubPermNotifName"),
-                                description = store.t("ubPermNotifDesc"),
-                                granted = hasNotifPerm,
-                                statusLabel = store.t(if (hasNotifPerm) "ubPermEnabled" else "ubPermNotEnabled"),
-                                canPrompt = notifCanPrompt,
-                                requestLabel = store.t("ubPermEnableBtn"),
-                                settingsLabel = store.t("deskPermOpenSettings"),
-                                onRequest = {
-                                    notifTried = true
-                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                                        singlePermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                                    }
-                                },
-                                onOpenSettings = {
-                                    runCatching {
-                                        context.startActivity(
-                                            Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
-                                                .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
-                                        )
-                                    }
-                                },
-                            )
-                        }
-                    }
-
-                    Column(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Text(
-                            text = store.t("ubPermGroupQR"),
-                            color = p.text2,
-                            fontSize = PebbleFont.secondary,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.padding(horizontal = 4.dp),
-                        )
-
-                        SectionCard {
-                            UnboxPermRow(
-                                title = store.t("ubPermCameraName"),
-                                description = store.t("ubPermCameraDesc"),
-                                granted = hasCameraPerm,
-                                statusLabel = store.t(if (hasCameraPerm) "ubPermEnabled" else "ubPermNotEnabled"),
-                                canPrompt = cameraCanPrompt,
-                                requestLabel = store.t("ubPermEnableBtn"),
-                                settingsLabel = store.t("deskPermOpenSettings"),
-                                onRequest = {
-                                    cameraTried = true
-                                    singlePermLauncher.launch(Manifest.permission.CAMERA)
-                                },
-                                onOpenSettings = {
-                                    runCatching {
-                                        context.startActivity(
-                                            Intent(
-                                                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                                                Uri.fromParts("package", context.packageName, null),
-                                            )
-                                        )
-                                    }
-                                },
-                            )
-                        }
-
-                        Text(
-                            text = store.t("ubPermQRHint"),
-                            color = p.mute,
-                            fontSize = PebbleFont.caption,
-                            modifier = Modifier.padding(horizontal = 4.dp),
-                        )
-                    }
-                }
-            }
-
-            HorizontalDivider(thickness = 1.dp, color = p.s2)
-
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(p.page)
-                    .padding(horizontal = 20.dp, vertical = 14.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Column(
-                    modifier = Modifier
-                        .widthIn(max = 420.dp)
-                        .fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    Button(
-                        onClick = {
-                            val reqs = buildList {
-                                if (!hasNotifPerm && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                                    add(Manifest.permission.POST_NOTIFICATIONS)
-                                }
-                                if (!hasCameraPerm) {
-                                    add(Manifest.permission.CAMERA)
-                                }
-                            }
-                            if (reqs.isNotEmpty()) {
-                                multiPermLauncher.launch(reqs.toTypedArray())
-                            } else if (!hasNotifPerm) {
-                                runCatching {
-                                    context.startActivity(
-                                        Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
-                                            .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
-                                    )
-                                }
-                            } else {
-                                store.markUnboxPermsDone()
-                            }
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(48.dp),
-                        shape = RoundedCornerShape(14.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = p.accent,
-                            contentColor = p.onAccent,
-                        ),
-                    ) {
-                        Text(
-                            text = store.t("ubPermGrantAllContinue"),
-                            fontSize = PebbleFont.body,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                    }
-
-                    Button(
-                        onClick = { store.markUnboxPermsDone() },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(48.dp),
-                        shape = RoundedCornerShape(14.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = p.card,
-                            contentColor = p.text,
-                        ),
-                    ) {
-                        Text(
-                            text = store.t("ubPermSkipLater"),
-                            fontSize = PebbleFont.body,
-                            fontWeight = FontWeight.Medium,
-                        )
-                    }
                 }
             }
         }
@@ -1214,71 +965,6 @@ private fun SavedHostRow(
         }
         IconButton(onClick = onDelete) {
             Icon(painterResource(PebbleIcons.DeleteOutline), contentDescription = null, tint = p.mute, modifier = Modifier.size(19.dp))
-        }
-    }
-}
-
-@Composable
-private fun UnboxPermRow(
-    title: String,
-    description: String,
-    granted: Boolean,
-    statusLabel: String,
-    canPrompt: Boolean,
-    requestLabel: String,
-    settingsLabel: String,
-    onRequest: () -> Unit,
-    onOpenSettings: () -> Unit,
-) {
-    val p = LocalPalette.current
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Text(
-                text = title,
-                color = p.text,
-                fontSize = PebbleFont.body,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.weight(1f),
-            )
-            TagPill(
-                text = statusLabel,
-                bg = if (granted) p.sage else p.s1,
-                fg = if (granted) p.sageInk else p.text2,
-            )
-        }
-        Text(
-            text = description,
-            color = p.text2,
-            fontSize = PebbleFont.secondary,
-        )
-        if (!granted) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (canPrompt) {
-                    Button(
-                        onClick = onRequest,
-                        colors = ButtonDefaults.buttonColors(containerColor = p.accent, contentColor = p.onAccent),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                    ) {
-                        Text(requestLabel, fontSize = PebbleFont.secondary, fontWeight = FontWeight.SemiBold)
-                    }
-                } else {
-                    OutlinedButton(
-                        onClick = onOpenSettings,
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                    ) {
-                        Text(settingsLabel, fontSize = PebbleFont.secondary, color = p.text)
-                    }
-                }
-            }
         }
     }
 }
