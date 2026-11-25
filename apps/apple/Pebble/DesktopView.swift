@@ -443,7 +443,8 @@ struct DesktopView: View {
             } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: AppFont.cardTitle, weight: .semibold))
-                    .frame(width: 28, height: 28)
+                    .frame(width: composerControlHeight, height: composerControlHeight)
+                    .contentShape(Circle())
             }
             .composerGlassButton()
             .accessibilityLabel(hub.t("close"))
@@ -453,14 +454,15 @@ struct DesktopView: View {
                 .font(.system(size: AppFont.body))
                 .focused($draftFocused)
                 .padding(.horizontal, 14)
-                .padding(.vertical, 9)
+                .padding(.vertical, 8)
                 .composerGlassField()
                 .onSubmit { sendText() }
 
             Button { sendText() } label: {
                 Image(systemName: "arrow.up")
                     .font(.system(size: AppFont.cardTitle, weight: .bold))
-                    .frame(width: 28, height: 28)
+                    .frame(width: composerControlHeight, height: composerControlHeight)
+                    .contentShape(Circle())
             }
             .composerSendButton(accent: p.accent)
             .disabled(draft.isEmpty)
