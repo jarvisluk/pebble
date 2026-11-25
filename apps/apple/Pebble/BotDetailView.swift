@@ -110,7 +110,11 @@ struct BotDetailView: View {
             } catch {
                 if Task.isCancelled { break }
                 if previewFrameImage == nil {
-                    previewFrameError = errText(error, hub.t("connFailed"))
+                    if let he = error as? HubError, he.code == "screen_recording_denied" {
+                        previewFrameError = hub.t("deskScreenRecordingDenied")
+                    } else {
+                        previewFrameError = errText(error, hub.t("connFailed"))
+                    }
                 }
             }
             try? await Task.sleep(nanoseconds: 2_500_000_000)

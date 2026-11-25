@@ -226,7 +226,7 @@ struct SettingsMemoryTab: View {
                         return
                     }
                     let tags = memTags
-                        .components(separatedBy: CharacterSet(charactersIn: ",，"))
+                        .components(separatedBy: CharacterSet(charactersIn: ",，")) // i18n:allow-cjk
                         .map { $0.trimmingCharacters(in: .whitespaces) }
                         .filter { !$0.isEmpty }
                     run("mem:save", "saveMemFailed") {

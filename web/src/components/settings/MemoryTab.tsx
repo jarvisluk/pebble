@@ -290,7 +290,7 @@ export const MemoryTab: React.FC<MemoryTabProps> = ({
                     return;
                   }
                   const tags = memTags
-                    .split(/[,，]/)
+                    .split(/[,，]/) // i18n:allow-cjk
                     .map((s) => s.trim())
                     .filter(Boolean);
                   setMemErr('');

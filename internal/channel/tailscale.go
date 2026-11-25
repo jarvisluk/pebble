@@ -222,13 +222,13 @@ func (s *HTTPServer) handleSetTailscale(w http.ResponseWriter, r *http.Request) 
 	}
 	if (req.ResetToken || req.APIToken != "") && cfgPath != "" {
 		if envRef := config.RawAPITokenEnvRef(cfgPath); envRef != "" {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"error": fmt.Sprintf("当前口令来自环境变量 %s，请修改 .env 文件", envRef)})
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": fmt.Sprintf("token is provided by environment variable %s; edit .env to change it", envRef)})
 			return
 		}
 	}
 	if req.AuthKey != nil && strings.TrimSpace(*req.AuthKey) != "" && cfgPath != "" {
 		if envRef := config.RawTailscaleAuthKeyEnvRef(cfgPath); envRef != "" {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"error": fmt.Sprintf("当前 Auth Key 来自环境变量 %s，请修改 .env 文件", envRef)})
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": fmt.Sprintf("Auth Key is provided by environment variable %s; edit .env to change it", envRef)})
 			return
 		}
 	}

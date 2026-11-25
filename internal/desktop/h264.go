@@ -389,7 +389,7 @@ func (e *Engine) StartVideoStream(
 
 	ffmpegPath, err := exec.LookPath("ffmpeg")
 	if err != nil {
-		return errors.New("需要安装 ffmpeg 以启用视频流")
+		return errors.New("ffmpeg is required to enable video streaming")
 	}
 
 	encoders := h264EncodersForOS()

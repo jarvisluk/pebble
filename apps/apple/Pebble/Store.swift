@@ -84,7 +84,7 @@ func formatStamp(_ iso: String?) -> String {
     if cal.isDateInToday(d) { return "\(L.t("today")) \(t)" }
     if cal.isDateInYesterday(d) { return "\(L.t("yesterday")) \(t)" }
     let c = cal.dateComponents([.month, .day], from: d)
-    return L.lang == "en" ? "\(c.month ?? 0)/\(c.day ?? 0) \(t)" : "\(c.month ?? 0)月\(c.day ?? 0)日 \(t)"
+    return L.lang == "en" ? "\(c.month ?? 0)/\(c.day ?? 0) \(t)" : "\(c.month ?? 0)月\(c.day ?? 0)日 \(t)" // i18n:allow-cjk
 }
 
 private let previewCodeRegex = try? NSRegularExpression(pattern: "```[\\s\\S]*?```")

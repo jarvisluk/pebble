@@ -371,7 +371,7 @@ export const DesktopStage: React.FC<DesktopStageProps> = ({
       if (wsRef.current !== ws || !openRef.current || gen !== streamGenRef.current) return;
       if (code === 'screen_recording_denied') {
         setMode('error');
-        setCenterText(errMsg || t('deskScreenRecordingDenied'));
+        setCenterText(t('deskScreenRecordingDenied'));
         setShowRetry(false);
         setShowCenterMsg(true);
         return;

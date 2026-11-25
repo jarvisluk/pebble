@@ -89,12 +89,12 @@ func (c *Coordinator) ListTakeovers() []TakeoverRequest {
 	return c.snapshotTakeoversLocked()
 }
 
-// RequestTakeover pauses until a human clicks "完成并恢复 AI" or ctx is cancelled.
+// RequestTakeover pauses until a human clicks "Done & Resume AI" or ctx is cancelled.
 func (c *Coordinator) RequestTakeover(ctx context.Context, target, botID, botName, reason, app string) (string, error) {
 	t := NormalizeTarget(target)
 	reason = strings.TrimSpace(reason)
 	if reason == "" {
-		reason = "需要人工在屏幕上确认或登录"
+		reason = "Manual confirmation or sign-in required on screen"
 	}
 	id := newTakeoverID()
 	w := &takeoverWaiter{
@@ -150,7 +150,7 @@ func (c *Coordinator) ResolveTakeover(idOrBotID, note string) bool {
 	key := strings.TrimSpace(idOrBotID)
 	note = strings.TrimSpace(note)
 	if note == "" {
-		note = "人工操作已完成，请继续执行。"
+		note = "Manual action completed; please continue."
 	}
 	c.mu.Lock()
 	var resolved []*takeoverWaiter

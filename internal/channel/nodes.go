@@ -128,7 +128,7 @@ func (s *HTTPServer) handleNodeCall(w http.ResponseWriter, r *http.Request) {
 			writeNodeUpgradeErr(
 				w,
 				http.StatusUnprocessableEntity,
-				fmt.Sprintf("远端节点 %q 版本过低，不支持独立虚拟屏，请升级该节点或在 Bot 详情中改绑其主桌面", targetNode.ID),
+				fmt.Sprintf("remote node %q is outdated and does not support dedicated virtual screens; upgrade the node or bind its main desktop in Bot Details", targetNode.ID),
 				protocol.CapNodeVirtualSlots,
 			)
 			return

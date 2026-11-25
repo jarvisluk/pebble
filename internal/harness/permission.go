@@ -75,7 +75,7 @@ func ResolveApprovalDecision(ctx context.Context, opts RunOptions, req Permissio
 		if !strings.EqualFold(req.ToolName, "ExitPlanMode") {
 			return PermissionResponse{
 				Decision: "reject",
-				Reason:   "当前处于规划模式（plan），仅允许只读分析操作",
+				Reason:   "Plan mode only allows read-only analysis",
 			}
 		}
 	case config.PermissionModeEdit:
@@ -87,7 +87,7 @@ func ResolveApprovalDecision(ctx context.Context, opts RunOptions, req Permissio
 	if opts.OnPermission == nil {
 		return PermissionResponse{
 			Decision: "reject",
-			Reason:   "当前为无人值守任务且权限模式不是 auto，已自动拒绝需要批准的操作",
+			Reason:   "Unattended run with non-auto permission mode; action auto-rejected",
 		}
 	}
 

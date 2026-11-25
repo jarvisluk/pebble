@@ -309,7 +309,7 @@ func toolDefinitions() []map[string]any {
 		},
 		{
 			"name":        "request_takeover",
-			"description": "Pause automation and request a human to handle an interactive step (such as QR login, 2FA/OTP code, CAPTCHA, or payment confirmation) via the live Remote Desktop view. Blocks until the user clicks '完成并恢复 AI'.",
+			"description": "Pause automation and request a human to handle an interactive step (such as QR login, 2FA/OTP code, CAPTCHA, or payment confirmation) via the live Remote Desktop view. Blocks until the user clicks 'Done & Resume AI'.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -611,7 +611,7 @@ func (s *Server) callTool(ctx context.Context, name string, rawArgs json.RawMess
 		if json.Unmarshal(body, &resp) == nil && resp.Note != "" {
 			return resp.Note, false
 		}
-		return "人工接管已完成，可继续执行。", false
+		return "Manual takeover completed; you may continue.", false
 
 	case "recall_session":
 		var args struct {

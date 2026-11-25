@@ -1,4 +1,4 @@
-.PHONY: web build desktop app app-fast app-wails serve chat status test ios-tunnel android-tunnel android-native android-native-debug
+.PHONY: web build desktop app app-fast app-wails serve chat status test check-i18n ios-tunnel android-tunnel android-native android-native-debug
 
 GO_LDFLAGS ?= -s -w
 APP_CONFIG ?= Release
@@ -168,6 +168,9 @@ status:
 
 test:
 	go test ./...
+
+check-i18n:
+	go test -v ./internal/i18ncheck
 
 ios-tunnel:
 	./scripts/build-tunnel-ios.sh

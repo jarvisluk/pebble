@@ -96,12 +96,12 @@ func (s *HTTPServer) checkRemoteDesktopCapability(nodeID, slot, requiredCap stri
 	}
 	if slot != "" && !n.HasCapability(protocol.CapNodeVirtualSlots) {
 		if n.OS != "linux" {
-			return http.StatusUnprocessableEntity, fmt.Sprintf("远端节点 %q (%s) 不支持独立虚拟屏", nodeID, n.OS), protocol.CapNodeVirtualSlots, false
+			return http.StatusUnprocessableEntity, fmt.Sprintf("remote node %q (%s) does not support dedicated virtual screens", nodeID, n.OS), protocol.CapNodeVirtualSlots, false
 		}
-		return http.StatusUnprocessableEntity, fmt.Sprintf("远端节点 %q 版本过低，不支持独立虚拟屏，请升级该节点或在 Bot 详情中改绑其主桌面", nodeID), protocol.CapNodeVirtualSlots, false
+		return http.StatusUnprocessableEntity, fmt.Sprintf("remote node %q is outdated and does not support dedicated virtual screens; upgrade the node or bind its main desktop in Bot Details", nodeID), protocol.CapNodeVirtualSlots, false
 	}
 	if requiredCap != "" && !n.HasCapability(requiredCap) {
-		return http.StatusNotImplemented, fmt.Sprintf("远端节点 %q 版本过低，不支持此桌面操作，请升级该节点", nodeID), requiredCap, false
+		return http.StatusNotImplemented, fmt.Sprintf("remote node %q is outdated and does not support this desktop action; please upgrade the node", nodeID), requiredCap, false
 	}
 	return 0, "", "", true
 }
@@ -115,8 +115,8 @@ func synthesizePermissionsFromStatus(target string, st desktop.HostStatus, fallb
 	if sr := strings.TrimSpace(st.ScreenRecording); sr != "" && sr != "unsupported" {
 		items = append(items, desktop.PermissionItem{
 			ID:              "screen_recording",
-			Name:            "屏幕录制",
-			Description:     "用于采集本机桌面画面并在远程桌面中实时预览。",
+			Name:            "Screen Recording",
+			Description:     "Capture the host desktop screen for live remote desktop preview.",
 			Status:          sr,
 			CanOpenSettings: plat == "darwin",
 		})
@@ -124,8 +124,8 @@ func synthesizePermissionsFromStatus(target string, st desktop.HostStatus, fallb
 	if ax := strings.TrimSpace(st.Accessibility); ax != "" && ax != "unsupported" {
 		items = append(items, desktop.PermissionItem{
 			ID:              "accessibility",
-			Name:            "辅助功能",
-			Description:     "用于远程鼠标点击、滚轮、键盘输入以及桌面窗口识别与控制。",
+			Name:            "Accessibility",
+			Description:     "Inject remote mouse, scroll, and keyboard input and inspect desktop windows.",
 			Status:          ax,
 			CanOpenSettings: plat == "darwin",
 		})
@@ -168,7 +168,7 @@ func (s *HTTPServer) handleDesktopTargets(w http.ResponseWriter, r *http.Request
 	localVirtualSupported := pool.VirtualSupported()
 	localEntry := map[string]any{
 		"id":               "local",
-		"name":             "本机桌面",
+		"name":             "Host Desktop",
 		"local":            true,
 		"supported":        localSt == nil || localSt.Supported,
 		"webrtcAvailable":  localSt != nil && localSt.WebRTCAvailable,
@@ -232,7 +232,7 @@ func (s *HTTPServer) handleDesktopTargets(w http.ResponseWriter, r *http.Request
 			seenTargets[slot.Target] = true
 			targets = append(targets, map[string]any{
 				"id":         slot.Target,
-				"name":       "虚拟屏 · " + slot.Slot,
+				"name":       "Virtual Screen · " + slot.Slot,
 				"local":      true,
 				"hostId":     "local",
 				"slot":       slot.Slot,
@@ -261,7 +261,7 @@ func (s *HTTPServer) handleDesktopTargets(w http.ResponseWriter, r *http.Request
 					seenTargets[spec.Raw] = true
 					targets = append(targets, map[string]any{
 						"id":        spec.Raw,
-						"name":      "虚拟屏 · " + spec.VirtualSlot,
+						"name":      "Virtual Screen · " + spec.VirtualSlot,
 						"local":     true,
 						"hostId":    "local",
 						"slot":      spec.VirtualSlot,
@@ -273,7 +273,7 @@ func (s *HTTPServer) handleDesktopTargets(w http.ResponseWriter, r *http.Request
 					seenTargets[spec.Raw] = true
 					targets = append(targets, map[string]any{
 						"id":        spec.Raw,
-						"name":      n.Name + " · 虚拟屏 " + spec.VirtualSlot,
+						"name":      n.Name + " · Virtual Screen " + spec.VirtualSlot,
 						"local":     false,
 						"hostId":    n.ID,
 						"slot":      spec.VirtualSlot,

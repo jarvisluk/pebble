@@ -69,7 +69,7 @@ func installCommandForTarget(target string) ([]string, error) {
 	case "codebuddy":
 		npmPath, ok := findBinary("npm")
 		if !ok {
-			return nil, errors.New("未检测到 npm，请先安装 Node.js 后重试")
+			return nil, errors.New("npm not found; install Node.js and retry")
 		}
 		return []string{npmPath, "install", "-g", "@tencent-ai/codebuddy-code"}, nil
 	case "codex":
@@ -98,7 +98,7 @@ func installCommandForTarget(target string) ([]string, error) {
 func loginCommandForTarget(kind string) ([]string, error) {
 	installed, binPath := DetectHarness(kind)
 	if !installed {
-		return nil, fmt.Errorf("%s 尚未安装", kind)
+		return nil, fmt.Errorf("%s is not installed", kind)
 	}
 	switch kind {
 	case "claude":
@@ -112,7 +112,7 @@ func loginCommandForTarget(kind string) ([]string, error) {
 	case "grok":
 		return []string{binPath, "login"}, nil
 	default:
-		return nil, fmt.Errorf("%s 无需或不支持自动登录", kind)
+		return nil, fmt.Errorf("%s does not require or support automatic login", kind)
 	}
 }
 

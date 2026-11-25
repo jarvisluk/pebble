@@ -201,7 +201,7 @@ func (m *Manager) handleBotStatus(botID string, payload any) {
 			m.mu.Unlock()
 			m.pushBotActivity("bot:"+botID, botID, name, "start", LiveActivityContentState{
 				Phase:      "running",
-				StatusText: "正在思考",
+				StatusText: "Thinking…",
 				StepCount:  0,
 				StartedAt:  float64(now.UnixMilli()) / 1000.0,
 			}, "")
@@ -220,10 +220,10 @@ func (m *Manager) handleBotStatus(botID string, payload any) {
 		m.mu.Unlock()
 		m.pushBotActivity("bot:"+botID, botID, name, "end", LiveActivityContentState{
 			Phase:      "completed",
-			StatusText: "已完成",
+			StatusText: "Completed",
 			StepCount:  steps,
 			StartedAt:  float64(startedAt.UnixMilli()) / 1000.0,
-			Summary:    "任务已完成",
+			Summary:    "Task completed",
 		}, "")
 		return
 	}
@@ -278,7 +278,7 @@ func (m *Manager) handleToolUse(botID string, payload any) {
 
 	m.pushBotActivity("bot:"+botID, botID, name, "update", LiveActivityContentState{
 		Phase:      "running",
-		StatusText: fmt.Sprintf("正在运行 %s", toolName),
+		StatusText: fmt.Sprintf("Running %s", toolName),
 		StepCount:  steps,
 		StartedAt:  float64(startedAt.UnixMilli()) / 1000.0,
 	}, "")
@@ -319,7 +319,7 @@ func (m *Manager) handleMessage(botID string, payload any) {
 	}
 	preview := compactPreview(msg.Text, 120)
 	if preview == "" {
-		preview = "收到新回复"
+		preview = "New reply"
 	}
 	m.pushAlert(APSAlert{
 		Title: name,
@@ -355,11 +355,11 @@ func (m *Manager) handleTakeover(payload any) {
 		if prevID != item.ID {
 			reason := strings.TrimSpace(item.Reason)
 			if reason == "" {
-				reason = "需要人工接管完成操作"
+				reason = "Manual action required"
 			}
 			deepLink := "pebble://desktop?target=" + target
 			m.pushAlert(APSAlert{
-				Title:    "需要接管远程桌面",
+				Title:    "Remote desktop takeover needed",
 				Subtitle: target,
 				Body:     reason,
 			}, "time-sensitive", "takeover-"+target, deepLink, "", target, "takeover")
@@ -367,7 +367,7 @@ func (m *Manager) handleTakeover(payload any) {
 			now := time.Now()
 			m.pushDesktopActivity("desktop:"+target, target, "start", LiveActivityContentState{
 				Phase:          "takeover",
-				StatusText:     "等待人工接管",
+				StatusText:     "Waiting for takeover",
 				StartedAt:      float64(now.UnixMilli()) / 1000.0,
 				TakeoverReason: reason,
 			})
@@ -388,9 +388,9 @@ func (m *Manager) handleTakeover(payload any) {
 		now := time.Now()
 		m.pushDesktopActivity("desktop:"+target, target, "end", LiveActivityContentState{
 			Phase:      "completed",
-			StatusText: "接管已完成",
+			StatusText: "Takeover completed",
 			StartedAt:  float64(now.UnixMilli()) / 1000.0,
-			Summary:    "远程桌面已恢复自动执行",
+			Summary:    "Automation resumed",
 		})
 	}
 }
@@ -433,10 +433,10 @@ func (m *Manager) handleQuestions(payload any) {
 			body = compactPreview(item.Prompt, 120)
 		}
 		if body == "" {
-			body = "等待你的确认"
+			body = "Waiting for your reply"
 		}
 		m.pushAlert(APSAlert{
-			Title: name + " 等待回复",
+			Title: name + " is waiting for a reply",
 			Body:  body,
 		}, "active", "question-"+item.BotID, "pebble://bot/"+item.BotID, item.BotID, "", "question")
 	}
@@ -510,11 +510,11 @@ func (m *Manager) handleApprovals(payload any) {
 			}
 		}
 		if body == "" {
-			body = "请求批准执行操作"
+			body = "Approval required to run action"
 		}
 
 		m.pushAlert(APSAlert{
-			Title: name + " 请求批准",
+			Title: name + " needs approval",
 			Body:  body,
 		}, "time-sensitive", "approval-"+item.BotID, "pebble://bot/"+item.BotID, item.BotID, "", "approval")
 
@@ -527,7 +527,7 @@ func (m *Manager) handleApprovals(payload any) {
 			m.mu.Unlock()
 			m.pushBotActivity("bot:"+item.BotID, item.BotID, name, "update", LiveActivityContentState{
 				Phase:      "approval",
-				StatusText: "等待批准",
+				StatusText: "Approval required",
 				StepCount:  steps,
 				StartedAt:  float64(startedAt.UnixMilli()) / 1000.0,
 				Summary:    body,
@@ -570,7 +570,7 @@ func (m *Manager) handleApprovals(payload any) {
 	for _, r := range toRestore {
 		m.pushBotActivity("bot:"+r.botID, r.botID, r.name, "update", LiveActivityContentState{
 			Phase:      "running",
-			StatusText: "正在执行",
+			StatusText: "Running",
 			StepCount:  r.steps,
 			StartedAt:  float64(r.startedAt.UnixMilli()) / 1000.0,
 		}, "")
@@ -880,11 +880,11 @@ func stripMarkdownForPreview(s string) string {
 		return ""
 	}
 	s = strings.ReplaceAll(s, "\r\n", "\n")
-	s = mdFenceRe.ReplaceAllString(s, " [代码] ")
+	s = mdFenceRe.ReplaceAllString(s, " [Code] ")
 	s = mdMathBlockRe.ReplaceAllStringFunc(s, func(m string) string {
 		inner := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(m, "$$"), "$$"))
 		if inner == "" {
-			return " [公式] "
+			return " [Formula] "
 		}
 		return " " + latexToPlain(inner) + " "
 	})
@@ -925,9 +925,9 @@ func stripMarkdownForPreview(s string) string {
 	s = mdImageRe.ReplaceAllStringFunc(s, func(m string) string {
 		sub := mdImageRe.FindStringSubmatch(m)
 		if len(sub) > 1 && strings.TrimSpace(sub[1]) != "" {
-			return "[图片: " + strings.TrimSpace(sub[1]) + "]"
+			return "[Image: " + strings.TrimSpace(sub[1]) + "]"
 		}
-		return "[图片]"
+		return "[Image]"
 	})
 	s = mdLinkRe.ReplaceAllString(s, "$1")
 	s = mdAutoLinkRe.ReplaceAllString(s, "$1")

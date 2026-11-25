@@ -103,18 +103,18 @@ func (h *CodexHarness) Reload() {
 
 func (h *CodexHarness) ListCommands(_ context.Context, bot config.BotConfig) ([]SlashCommand, error) {
 	builtins := []SlashCommand{
-		{Name: "compact", Description: "压缩当前会话上下文", Source: "harness"},
-		{Name: "new", Description: "开启新会话", Source: "harness"},
-		{Name: "clear", Description: "清空会话历史", Source: "harness"},
-		{Name: "review", Description: "评审当前代码变更", Source: "harness"},
-		{Name: "plan", Description: "进入计划模式", Source: "harness"},
-		{Name: "model", Description: "查看或切换模型", Source: "harness"},
-		{Name: "diff", Description: "查看工作区变更", Source: "harness"},
-		{Name: "mention", Description: "引用文件或目录", Source: "harness"},
-		{Name: "mcp", Description: "查看 MCP 服务状态", Source: "harness"},
-		{Name: "init", Description: "初始化项目 AGENTS.md", Source: "harness"},
-		{Name: "status", Description: "查看当前会话状态", Source: "harness"},
-		{Name: "help", Description: "查看可用命令帮助", Source: "harness"},
+		{Name: "compact", Description: "Compact current session context", Source: "harness"},
+		{Name: "new", Description: "Start a new session", Source: "harness"},
+		{Name: "clear", Description: "Clear session history", Source: "harness"},
+		{Name: "review", Description: "Review current code changes", Source: "harness"},
+		{Name: "plan", Description: "Enter plan mode", Source: "harness"},
+		{Name: "model", Description: "View or switch model", Source: "harness"},
+		{Name: "diff", Description: "View workspace diff", Source: "harness"},
+		{Name: "mention", Description: "Mention files or directories", Source: "harness"},
+		{Name: "mcp", Description: "Show MCP server status", Source: "harness"},
+		{Name: "init", Description: "Initialize project AGENTS.md", Source: "harness"},
+		{Name: "status", Description: "View current session status", Source: "harness"},
+		{Name: "help", Description: "Show available commands", Source: "harness"},
 	}
 	var local []SlashCommand
 	if bot.Workspace != "" {

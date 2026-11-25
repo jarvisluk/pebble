@@ -86,7 +86,7 @@ type UnifiedInput struct {
 }
 
 // ErrScreenRecordingDenied indicates macOS Screen Recording permission is not granted.
-var ErrScreenRecordingDenied = errors.New("缺少 macOS 屏幕录制权限，请在「系统设置 → 隐私与安全性 → 录屏与系统录音」中允许 Bot Hub 后重试")
+var ErrScreenRecordingDenied = errors.New("macOS Screen Recording permission is denied; allow Pebble in System Settings -> Privacy & Security -> Screen & System Audio Recording and retry")
 
 // Engine drives local desktop capture, WebRTC streaming, window inspection, and input injection,
 // preferring opencode-remote-desktop's native `bot-host` sidecar with OS fallback when absent.
@@ -759,5 +759,5 @@ func FormatScreenError(err error) string {
 	if err == nil {
 		return ""
 	}
-	return fmt.Sprintf("桌面操作失败: %v", err)
+	return fmt.Sprintf("desktop action failed: %v", err)
 }

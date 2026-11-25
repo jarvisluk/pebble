@@ -138,12 +138,12 @@ func (h *ACPHarness) ListCommands(_ context.Context, bot config.BotConfig) ([]Sl
 	builtins := h.opts.BuiltinCommands
 	if len(builtins) == 0 {
 		builtins = []SlashCommand{
-			{Name: "compact", Description: "压缩当前会话上下文", Source: "harness"},
-			{Name: "clear", Description: "清空会话历史", Source: "harness"},
-			{Name: "plan", Description: "切换计划模式", Source: "harness"},
-			{Name: "review", Description: "代码评审", Source: "harness"},
-			{Name: "init", Description: "初始化项目配置", Source: "harness"},
-			{Name: "help", Description: "查看可用命令帮助", Source: "harness"},
+			{Name: "compact", Description: "Compact current session context", Source: "harness"},
+			{Name: "clear", Description: "Clear session history", Source: "harness"},
+			{Name: "plan", Description: "Switch to plan mode", Source: "harness"},
+			{Name: "review", Description: "Review code changes", Source: "harness"},
+			{Name: "init", Description: "Initialize project config", Source: "harness"},
+			{Name: "help", Description: "Show available commands", Source: "harness"},
 		}
 	}
 
