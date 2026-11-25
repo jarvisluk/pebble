@@ -104,6 +104,12 @@ func captureFallbackFrame(ctx context.Context, extraEnv []string, windowID strin
 			if msg == "" {
 				msg = err.Error()
 			}
+			if IsScreenRecordingDeniedError(errors.New(msg)) {
+				return nil, fmt.Errorf("%w: %s", ErrScreenRecordingDenied, msg)
+			}
+			if granted, supported := screenRecordingGrantedFn(); supported && !granted {
+				return nil, fmt.Errorf("%w: %s", ErrScreenRecordingDenied, msg)
+			}
 			return nil, classifyScreencaptureError(msg)
 		}
 

@@ -562,7 +562,7 @@ func (s *HTTPServer) handleDesktopFrame(w http.ResponseWriter, r *http.Request) 
 		if err != nil {
 			status := http.StatusBadRequest
 			payload := map[string]any{"error": err.Error()}
-			if errors.Is(err, desktop.ErrScreenRecordingDenied) {
+			if desktop.IsScreenRecordingDeniedError(err) {
 				status = http.StatusForbidden
 				payload["code"] = "screen_recording_denied"
 			}
@@ -584,7 +584,13 @@ func (s *HTTPServer) handleDesktopFrame(w http.ResponseWriter, r *http.Request) 
 		"quality":  quality,
 	}, spec.VirtualSlot), 10*time.Second, &fr)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		status := http.StatusBadRequest
+		payload := map[string]any{"error": err.Error()}
+		if desktop.IsScreenRecordingDeniedError(err) {
+			status = http.StatusForbidden
+			payload["code"] = "screen_recording_denied"
+		}
+		writeJSON(w, status, payload)
 		return
 	}
 	writeJSON(w, http.StatusOK, fr)
@@ -672,7 +678,7 @@ func (s *HTTPServer) handleDesktopStreamOffer(w http.ResponseWriter, r *http.Req
 	if err != nil {
 		status := http.StatusServiceUnavailable
 		payload := map[string]any{"error": err.Error()}
-		if errors.Is(err, desktop.ErrScreenRecordingDenied) {
+		if desktop.IsScreenRecordingDeniedError(err) {
 			status = http.StatusForbidden
 			payload["code"] = "screen_recording_denied"
 		}

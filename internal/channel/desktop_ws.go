@@ -448,7 +448,7 @@ func (s *HTTPServer) handleDesktopStreamWS(w http.ResponseWriter, r *http.Reques
 		}
 		if err != nil {
 			code := ""
-			if errors.Is(err, desktop.ErrScreenRecordingDenied) {
+			if desktop.IsScreenRecordingDeniedError(err) {
 				code = "screen_recording_denied"
 			}
 			_ = writeText(map[string]any{
