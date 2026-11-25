@@ -67,7 +67,7 @@ private struct MacMenuBarLabel: View {
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        Label("Pebble", systemImage: "bubble.left.and.bubble.right.fill")
+        Label("Pebble", image: "MenuBarIcon")
             .onAppear {
                 appDelegate.onReopenWindow = {
                     openWindow(id: "main")
