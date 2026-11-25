@@ -188,6 +188,9 @@ final class HubStore {
     var serverInfo: ServerInfo?
     var unsupportedCaps: Set<String> = []
     var dismissedCompatProto = 0
+    var updateStatus: UpdateStatus?
+    var updateChecking = false
+    var dismissedUpdateVersion = ""
     var routines: [String: [RoutineItem]] = [:]
     var pendingStageOpen: StageOpenEvent?
     var pendingChatInsert: PendingChatInsert?
@@ -229,6 +232,28 @@ final class HubStore {
         }
     }
 
+    var effectiveHasUpdate: Bool {
+        guard let st = updateStatus else { return false }
+        if st.hasUpdate { return true }
+        if let ver = st.latest?.version, !ver.isEmpty {
+            return isSemVerNewer(ver, than: platformCurrentShortVersion)
+        }
+        return false
+    }
+
+    var showUpdateBanner: Bool {
+        guard !isClientUpgradeRequired,
+              effectiveHasUpdate,
+              let ver = updateStatus?.latest?.version, !ver.isEmpty else { return false }
+        return dismissedUpdateVersion != ver
+    }
+
+    func dismissUpdateBanner() {
+        guard let ver = updateStatus?.latest?.version, !ver.isEmpty else { return }
+        dismissedUpdateVersion = ver
+        UserDefaults.standard.set(ver, forKey: "pebble.dismissedUpdate")
+    }
+
     static func isLocalDesktopTarget(_ target: String) -> Bool {
         target.isEmpty || target == "local" || target.hasPrefix("virtual:") || target.hasPrefix("local:virtual:")
     }
@@ -239,6 +264,7 @@ final class HubStore {
         langPref = d.string(forKey: "bothub.lang") ?? "system"
         tsBound = d.bool(forKey: "bothub.tsBound")
         tsControlUrl = d.string(forKey: "bothub.tsControlUrl") ?? ""
+        dismissedUpdateVersion = d.string(forKey: "pebble.dismissedUpdate") ?? ""
         L.lang = lang
         #if os(iOS)
         PebbleSharedStore.setPreferredLang(lang)
@@ -507,6 +533,10 @@ final class HubStore {
                     }
                 }
             }
+        case "update_status":
+            if let st = decodeAny(p, as: UpdateStatus.self) {
+                updateStatus = st
+            }
         default: break
         }
     }
@@ -522,6 +552,8 @@ final class HubStore {
         serverInfo = nil
         unsupportedCaps = []
         dismissedCompatProto = 0
+        updateStatus = nil
+        updateChecking = false
 
         do {
             try await connectEndpoint(profile: profile, rawAddress: profile.address, rawToken: profile.token, isStandby: false, seq: seq)
@@ -639,6 +671,7 @@ final class HubStore {
             }
             Task { if let q: QuestionsResp = try? await client.call("/api/questions"), seq == connSeq { questions = q.items ?? [] } }
             Task { if let a: ApprovalsResp = try? await client.call("/api/approvals"), seq == connSeq { approvals = a.items ?? [] } }
+            Task { await refreshUpdateStatus() }
             PushManager.shared.activeChatBotId = { [weak self] in self?.activeChat }
             PushManager.shared.configureConnection(base: url, token: tok)
             LiveActivityManager.shared.startObservingTokens()
@@ -738,6 +771,7 @@ final class HubStore {
             baseURL = ""; authToken = ""
             bots = []; msgs = [:]; last = [:]
             serverInfo = nil; unsupportedCaps = []; dismissedCompatProto = 0
+            updateStatus = nil; updateChecking = false
             connState = .idle
             connError = ""
         }
@@ -818,6 +852,7 @@ final class HubStore {
             }
             Task { if let q: QuestionsResp = try? await client.call("/api/questions"), seq == connSeq { questions = q.items ?? [] } }
             Task { if let a: ApprovalsResp = try? await client.call("/api/approvals"), seq == connSeq { approvals = a.items ?? [] } }
+            Task { await refreshUpdateStatus() }
             PushManager.shared.activeChatBotId = { [weak self] in self?.activeChat }
             PushManager.shared.configureConnection(base: cleanURL, token: token)
             startStream(cleanURL, token)
@@ -848,6 +883,8 @@ final class HubStore {
         serverInfo = nil
         unsupportedCaps = []
         dismissedCompatProto = 0
+        updateStatus = nil
+        updateChecking = false
         connState = .idle
         connError = ""
     }
@@ -1374,5 +1411,42 @@ final class HubStore {
     func insertIntoChat(_ text: String) {
         let nextSeq = (pendingChatInsert?.seq ?? 0) + 1
         pendingChatInsert = PendingChatInsert(seq: nextSeq, text: text)
+    }
+
+    func refreshUpdateStatus() async {
+        guard !baseURL.isEmpty, supports("update.check") else { return }
+        do {
+            let st: UpdateStatus = try await callAPI("/api/update")
+            updateStatus = st
+        } catch let e as HubError where e.isUnsupportedCapability {
+            markUnsupported("update.check")
+        } catch {}
+    }
+
+    func checkForUpdates() async {
+        guard !baseURL.isEmpty else { return }
+        updateChecking = true
+        defer { updateChecking = false }
+        do {
+            let st: UpdateStatus = try await callAPI("/api/update/check", method: "POST", body: [:])
+            updateStatus = st
+        } catch let e as HubError where e.isUnsupportedCapability {
+            markUnsupported("update.check")
+        } catch {}
+    }
+
+    func saveUpdateConfig(autoCheck: Bool? = nil, interval: String? = nil, channel: String? = nil) async {
+        guard !baseURL.isEmpty else { return }
+        var body: [String: Any] = [:]
+        if let autoCheck { body["autoCheck"] = autoCheck }
+        if let interval { body["interval"] = interval }
+        if let channel { body["channel"] = channel }
+        guard !body.isEmpty else { return }
+        do {
+            let st: UpdateStatus = try await callAPI("/api/update/config", method: "PATCH", body: body)
+            updateStatus = st
+        } catch let e as HubError where e.isUnsupportedCapability {
+            markUnsupported("update.check")
+        } catch {}
     }
 }

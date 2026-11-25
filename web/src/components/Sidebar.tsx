@@ -32,9 +32,11 @@ interface SidebarProps {
   filter: string;
   lang: ResolvedLang;
   compatNotice?: { required: boolean; text: string } | null;
+  updateNotice?: { version: string; url: string; text: string } | null;
   filterInputRef: React.RefObject<HTMLInputElement | null>;
   onFilterChange: (v: string) => void;
   onDismissCompatNotice?: () => void;
+  onDismissUpdateNotice?: () => void;
   onSelectBot: (id: string) => void;
   onOpenCreate: () => void;
   onCollapse: () => void;
@@ -62,9 +64,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
   filter,
   lang,
   compatNotice,
+  updateNotice,
   filterInputRef,
   onFilterChange,
   onDismissCompatNotice,
+  onDismissUpdateNotice,
   onSelectBot,
   onOpenCreate,
   onCollapse,
@@ -161,6 +165,28 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     {t('dismiss')}
                   </button>
                 )}
+              </div>
+            </div>
+          )}
+          {updateNotice && (
+            <div className="note compat-note">
+              <div className="compat-note-row">
+                <span>{updateNotice.text}</span>
+                <div className="row-inline-sm">
+                  <a
+                    className="mp go"
+                    href={updateNotice.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    {t('updateBannerView')}
+                  </a>
+                  {onDismissUpdateNotice && (
+                    <button type="button" className="mp" onClick={onDismissUpdateNotice}>
+                      {t('dismiss')}
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           )}

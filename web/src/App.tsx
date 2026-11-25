@@ -19,8 +19,17 @@ import type {
   StageOpenEvent,
   StageTab,
   TakeoverRequest,
+  UpdateStatus,
 } from './types';
-import { api, CLIENT_PROTOCOL, setUnauthorizedHandler } from './lib/api';
+import {
+  api,
+  checkForUpdates,
+  CLIENT_PROTOCOL,
+  fetchUpdateStatus,
+  isUnsupportedCapabilityError,
+  saveUpdateConfig,
+  setUnauthorizedHandler,
+} from './lib/api';
 import { getLangPref, resolveLang, setLangPref, translate } from './lib/i18n';
 import { installMacWindowDragBridge } from './lib/macShell';
 import { botColor, contrastText } from './lib/theme';
@@ -65,6 +74,15 @@ export default function App() {
   const [serverInfo, setServerInfo] = useState<ServerInfo | null>(null);
   const [unsupportedCaps, setUnsupportedCaps] = useState<Set<string>>(() => new Set());
   const [compatDismissedProto, setCompatDismissedProto] = useState(0);
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
+  const [updateChecking, setUpdateChecking] = useState(false);
+  const [dismissedUpdateVer, setDismissedUpdateVer] = useState<string>(() => {
+    try {
+      return localStorage.getItem('pebble.dismissedUpdate') || '';
+    } catch {
+      return '';
+    }
+  });
 
   const [view, setView] = useState<'chat' | 'settings'>('chat');
   const viewTx = useViewTransition(view, VIEW_ORDER);
@@ -172,6 +190,7 @@ export default function App() {
   }, []);
 
   const canUseFiles = hasServerCap('stage.files');
+  const canCheckUpdate = hasServerCap('update.check');
 
   useEffect(() => {
     if (!canUseFiles && activeStageTabId === 'files') {
@@ -402,6 +421,50 @@ export default function App() {
     } catch {}
   }, []);
 
+  const loadUpdateStatus = useCallback(async () => {
+    try {
+      const st = await fetchUpdateStatus();
+      setUpdateStatus(st);
+    } catch (e) {
+      if (isUnsupportedCapabilityError(e)) {
+        markCapUnsupported('update.check');
+      }
+    }
+  }, [markCapUnsupported]);
+
+  const handleCheckUpdates = useCallback(async () => {
+    setUpdateChecking(true);
+    try {
+      const st = await checkForUpdates();
+      setUpdateStatus(st);
+    } catch (e) {
+      if (isUnsupportedCapabilityError(e)) {
+        markCapUnsupported('update.check');
+      } else if (e instanceof Error && e.message !== 'unauthorized') {
+        showToast(e.message);
+      }
+    } finally {
+      setUpdateChecking(false);
+    }
+  }, [markCapUnsupported, showToast]);
+
+  const handleSaveUpdateConfig = useCallback(
+    async (patch: { autoCheck?: boolean; interval?: string; channel?: string }) => {
+      try {
+        const st = await saveUpdateConfig(patch);
+        setUpdateStatus(st);
+        showToast(t('updateConfigSaved'));
+      } catch (e) {
+        if (isUnsupportedCapabilityError(e)) {
+          markCapUnsupported('update.check');
+        } else if (e instanceof Error && e.message !== 'unauthorized') {
+          showToast(e.message);
+        }
+      }
+    },
+    [markCapUnsupported, showToast, t]
+  );
+
   const removeBotLocally = useCallback(
     (id: string) => {
       setBots((prev) => {
@@ -605,6 +668,12 @@ export default function App() {
         setRoutineRefreshSeq((n) => n + 1);
       }
     });
+
+    on('update_status', ({ payload }: { payload?: UpdateStatus }) => {
+      if (payload) {
+        setUpdateStatus(payload);
+      }
+    });
   }, [removeBotLocally]);
 
   const maybeAutoOpenUnbox = useCallback((s: SettingsData | null) => {
@@ -624,6 +693,7 @@ export default function App() {
         void refreshActiveDesktopTarget();
         void refreshApprovals();
         void refreshQuestions();
+        void loadUpdateStatus();
         maybeAutoOpenUnbox(s);
         setBootReady(true);
       })
@@ -932,6 +1002,19 @@ export default function App() {
         })()
       : null;
 
+  const updateNotice =
+    !compatNotice?.required &&
+    updateStatus?.hasUpdate &&
+    updateStatus.latest?.version &&
+    updateStatus.latest.url &&
+    dismissedUpdateVer !== updateStatus.latest.version
+      ? {
+          version: updateStatus.latest.version,
+          url: updateStatus.latest.url,
+          text: t('updateBannerText', { version: updateStatus.latest.tag || `v${updateStatus.latest.version}` }),
+        }
+      : null;
+
   return (
     <>
       <div
@@ -958,11 +1041,22 @@ export default function App() {
           filter={filter}
           lang={lang}
           compatNotice={compatNotice}
+          updateNotice={updateNotice}
           filterInputRef={filterInputRef}
           onFilterChange={setFilter}
           onDismissCompatNotice={
             compatNotice && !compatNotice.required
               ? () => setCompatDismissedProto(serverInfo?.protocolVersion ?? 0)
+              : undefined
+          }
+          onDismissUpdateNotice={
+            updateNotice
+              ? () => {
+                  setDismissedUpdateVer(updateNotice.version);
+                  try {
+                    localStorage.setItem('pebble.dismissedUpdate', updateNotice.version);
+                  } catch {}
+                }
               : undefined
           }
           onSelectBot={(id) => void selectBot(id)}
@@ -1086,6 +1180,9 @@ export default function App() {
             bots={bots}
             settings={settings}
             serverInfo={serverInfo}
+            updateStatus={updateStatus}
+            updateChecking={updateChecking}
+            canCheckUpdate={canCheckUpdate}
             models={modelsMap}
             nodesFromEvents={nodesFromEvents}
             lang={lang}
@@ -1095,6 +1192,8 @@ export default function App() {
               setLangPrefState(pref);
               setLang(setLangPref(pref));
             }}
+            onCheckUpdates={handleCheckUpdates}
+            onSaveUpdateConfig={handleSaveUpdateConfig}
             onToast={showToast}
             onConfirm={setConfirmOpts}
             onSettingsUpdated={setSettings}

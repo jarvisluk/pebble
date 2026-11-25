@@ -206,6 +206,12 @@ class PebbleStore(context: Context) {
         private set
     var dismissedCompatProto by mutableIntStateOf(0)
         private set
+    var updateStatus by mutableStateOf<UpdateStatus?>(null)
+        private set
+    var updateChecking by mutableStateOf(false)
+        private set
+    var dismissedUpdateVersion by mutableStateOf(prefs.getString("pebble.dismissedUpdate", "").orEmpty())
+        private set
     val routines = mutableStateMapOf<String, List<RoutineItem>>()
     var pendingStageOpen by mutableStateOf<StageOpenEvent?>(null)
         private set
@@ -244,7 +250,83 @@ class PebbleStore(context: Context) {
         serverInfo?.protocolVersion?.let { dismissedCompatProto = it }
     }
 
+    val effectiveHasUpdate: Boolean
+        get() {
+            val st = updateStatus ?: return false
+            if (st.hasUpdate) return true
+            val ver = st.latest?.version.orEmpty()
+            return ver.isNotEmpty() && isSemVerNewer(ver, ai.pebble.android.BuildConfig.VERSION_NAME)
+        }
+
+    val showUpdateBanner: Boolean
+        get() {
+            if (isClientUpgradeRequired || !effectiveHasUpdate) return false
+            val ver = updateStatus?.latest?.version.orEmpty()
+            return ver.isNotEmpty() && dismissedUpdateVersion != ver
+        }
+
+    fun dismissUpdateBanner() {
+        val ver = updateStatus?.latest?.version.orEmpty()
+        if (ver.isEmpty()) return
+        dismissedUpdateVersion = ver
+        prefs.edit().putString("pebble.dismissedUpdate", ver).apply()
+    }
+
     companion object {
+        fun isSemVerNewer(candidate: String, current: String): Boolean {
+            fun parse(raw: String): Triple<IntArray, List<String>, Boolean>? {
+                var s = raw.trim()
+                if (s.startsWith("v", ignoreCase = true)) s = s.substring(1)
+                if (s.isEmpty()) return null
+                val plusIdx = s.indexOf('+')
+                if (plusIdx >= 0) s = s.substring(0, plusIdx)
+                val dashIdx = s.indexOf('-')
+                val core: String
+                val pre: List<String>
+                if (dashIdx >= 0) {
+                    core = s.substring(0, dashIdx)
+                    val p = s.substring(dashIdx + 1)
+                    if (p.isEmpty()) return null
+                    pre = p.split('.')
+                    if (pre.any { it.isEmpty() }) return null
+                } else {
+                    core = s
+                    pre = emptyList()
+                }
+                val nums = core.split('.')
+                if (nums.size != 3) return null
+                val maj = nums[0].toIntOrNull() ?: return null
+                val min = nums[1].toIntOrNull() ?: return null
+                val pat = nums[2].toIntOrNull() ?: return null
+                if (maj < 0 || min < 0 || pat < 0) return null
+                return Triple(intArrayOf(maj, min, pat), pre, true)
+            }
+            val a = parse(candidate) ?: return false
+            val b = parse(current) ?: return false
+            for (i in 0..2) {
+                if (a.first[i] != b.first[i]) return a.first[i] > b.first[i]
+            }
+            val ap = a.second
+            val bp = b.second
+            if (ap.isEmpty() && bp.isEmpty()) return false
+            if (ap.isEmpty() != bp.isEmpty()) return ap.isEmpty()
+            val limit = minOf(ap.size, bp.size)
+            for (i in 0 until limit) {
+                val ai = ap[i]
+                val bi = bp[i]
+                if (ai == bi) continue
+                val an = ai.toIntOrNull()
+                val bn = bi.toIntOrNull()
+                return when {
+                    an != null && bn != null -> an > bn
+                    an != null -> false
+                    bn != null -> true
+                    else -> ai > bi
+                }
+            }
+            return ap.size > bp.size
+        }
+
         fun isLocalDesktopTarget(target: String): Boolean =
             target.isEmpty() || target == "local" || target.startsWith("virtual:") || target.startsWith("local:virtual:")
     }
@@ -580,6 +662,10 @@ class PebbleStore(context: Context) {
                         .getOrNull()?.routines?.let { routines[bid] = it }
                 }
             }
+            "update_status" -> {
+                val st = runCatching { HubJson.decodeFromJsonElement<UpdateStatus>(p) }.getOrNull() ?: return
+                updateStatus = st
+            }
         }
     }
 
@@ -594,6 +680,8 @@ class PebbleStore(context: Context) {
         serverInfo = null
         unsupportedCaps = emptySet()
         dismissedCompatProto = 0
+        updateStatus = null
+        updateChecking = false
 
         try {
             connectEndpoint(profile, profile.address, profile.token, isStandby = false, seq = seq)
@@ -721,6 +809,7 @@ class PebbleStore(context: Context) {
             }
             scope.launch { runCatching { client.call<QuestionsResp>("/api/questions") }.getOrNull()?.items?.let { if (seq == connSeq) questions = it } }
             scope.launch { runCatching { client.call<ApprovalsResp>("/api/approvals") }.getOrNull()?.items?.let { if (seq == connSeq) approvals = it } }
+            scope.launch { refreshUpdateStatus() }
             startStream(url, tok)
         } catch (err: Throwable) {
             if (seq == connSeq) {
@@ -841,6 +930,7 @@ class PebbleStore(context: Context) {
             takeovers = emptyList(); questions = emptyList(); approvals = emptyList()
             activeTakeoverIds.clear(); activeApprovalIds.clear()
             serverInfo = null; unsupportedCaps = emptySet(); dismissedCompatProto = 0
+            updateStatus = null; updateChecking = false
             connState = ConnState.IDLE
             connError = ""
         }
@@ -1400,5 +1490,45 @@ class PebbleStore(context: Context) {
 
     fun consumePendingStageOpen() {
         pendingStageOpen = null
+    }
+
+    suspend fun refreshUpdateStatus() {
+        if (baseURL.isEmpty() || !supports("update.check")) return
+        try {
+            updateStatus = api.call<UpdateStatus>("/api/update")
+        } catch (err: HubException) {
+            if (err.isUnsupportedCapability) markUnsupported("update.check")
+        } catch (_: Throwable) {}
+    }
+
+    suspend fun checkForUpdates() {
+        if (baseURL.isEmpty()) return
+        updateChecking = true
+        try {
+            updateStatus = api.call<UpdateStatus>("/api/update/check", method = "POST", body = emptyMap<String, Any?>())
+        } catch (err: HubException) {
+            if (err.isUnsupportedCapability) markUnsupported("update.check")
+        } catch (_: Throwable) {
+        } finally {
+            updateChecking = false
+        }
+    }
+
+    suspend fun saveUpdateConfig(
+        autoCheck: Boolean? = null,
+        interval: String? = null,
+        channel: String? = null,
+    ) {
+        if (baseURL.isEmpty()) return
+        val body = mutableMapOf<String, Any?>()
+        if (autoCheck != null) body["autoCheck"] = autoCheck
+        if (interval != null) body["interval"] = interval
+        if (channel != null) body["channel"] = channel
+        if (body.isEmpty()) return
+        try {
+            updateStatus = api.call<UpdateStatus>("/api/update/config", method = "PATCH", body = body)
+        } catch (err: HubException) {
+            if (err.isUnsupportedCapability) markUnsupported("update.check")
+        } catch (_: Throwable) {}
     }
 }
