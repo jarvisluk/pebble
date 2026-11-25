@@ -90,7 +90,11 @@ app:
 		IDENTITY=$$(security find-identity -v -p codesigning 2>/dev/null | awk '/Developer ID Application:/ {print $$2; exit}'); \
 	fi; \
 	if [ -z "$$IDENTITY" ]; then \
+		IDENTITY=$$(security find-identity -v -p codesigning 2>/dev/null | awk '/Pebble Local Signing/ {print $$2; exit}'); \
+	fi; \
+	if [ -z "$$IDENTITY" ]; then \
 		IDENTITY="-"; \
+		echo "WARNING: No code signing identity found; falling back to ad-hoc signing (-). Every rebuild will reset macOS TCC permissions (Screen Recording / Documents / etc.). Install an Apple Development certificate or create a trusted 'Pebble Local Signing' certificate in Keychain." >&2; \
 	fi; \
 	echo "Signing $(APP) with identity: $$IDENTITY"; \
 	for f in "$(RES_BIN)"/*; do \
@@ -149,7 +153,11 @@ app-wails: desktop
 		IDENTITY=$$(security find-identity -v -p codesigning 2>/dev/null | awk '/Developer ID Application:/ {print $$2; exit}'); \
 	fi; \
 	if [ -z "$$IDENTITY" ]; then \
+		IDENTITY=$$(security find-identity -v -p codesigning 2>/dev/null | awk '/Pebble Local Signing/ {print $$2; exit}'); \
+	fi; \
+	if [ -z "$$IDENTITY" ]; then \
 		IDENTITY="-"; \
+		echo "WARNING: No code signing identity found; falling back to ad-hoc signing (-). Every rebuild will reset macOS TCC permissions (Screen Recording / Documents / etc.). Install an Apple Development certificate or create a trusted 'Pebble Local Signing' certificate in Keychain." >&2; \
 	fi; \
 	echo "Signing $(APP) with identity: $$IDENTITY"; \
 	for f in "$(RES_BIN)"/*; do \

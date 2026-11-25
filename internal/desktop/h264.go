@@ -382,8 +382,10 @@ func (e *Engine) StartVideoStream(
 			return err
 		}
 		// If ScreenCaptureKit reports permission denied or no display, propagate instead of running ffmpeg.
-		if strings.Contains(strings.ToLower(err.Error()), "declined") || strings.Contains(strings.ToLower(err.Error()), "permission") {
-			return err
+		lower := strings.ToLower(err.Error())
+		if IsScreenRecordingDeniedError(err) || strings.Contains(lower, "declined") || strings.Contains(lower, "permission") {
+			e.recordScreenRecording("denied")
+			return fmt.Errorf("%w: %v", ErrScreenRecordingDenied, err)
 		}
 	}
 
