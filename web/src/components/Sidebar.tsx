@@ -285,6 +285,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <span>{t('backToChat')}</span>
         </button>
         <nav id="settingsTabs" className="list" role="tablist" aria-label={t('settingsTabs')}>
+          <div className="snav-group">{t('settingsGroupApp')}</div>
           <button
             type="button"
             className={`snav-item${settingsTab === 'general' ? ' on' : ''}`}
@@ -305,6 +306,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </svg>
             <span>{t('tabGeneral')}</span>
           </button>
+          <div className="snav-group">{t('settingsGroupHost')}</div>
           <button
             type="button"
             className={`snav-item${settingsTab === 'models' ? ' on' : ''}`}

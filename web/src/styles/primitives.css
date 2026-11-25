@@ -100,6 +100,14 @@ button.mp:hover { background: var(--s2); color: var(--text); }
 .mp.bad, .note button.mp.bad { background: var(--pink); color: var(--pink-ink); }
 .note button.mp.bad:hover, .mp.bad:hover { background: var(--pink); color: var(--pink-ink); filter: brightness(.95); }
 
+.sw { position: relative; display: inline-flex; align-items: center; width: 40px; height: 24px; padding: 2px; border-radius: 999px; background: var(--s3); border: none; cursor: pointer; flex: none; transition: background var(--dur-fast); }
+.sw::after { content: ''; width: 20px; height: 20px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, .22); transition: transform var(--dur-fast) var(--ease-out), background var(--dur-fast); }
+.sw.on { background: var(--sage-ink); }
+.sw.on::after { transform: translateX(16px); background: #fff; }
+.sw:disabled { opacity: 0.5; cursor: not-allowed; }
+.sw:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.sw-lbl { display: inline-flex; align-items: center; gap: 8px; font-size: var(--fs-xs); font-weight: 600; color: var(--text-2); white-space: nowrap; cursor: pointer; user-select: none; }
+
 /* ---------- overlays: shade, panel, dialog, toast ---------- */
 .shade { position: fixed; inset: 0; background: var(--shade); opacity: 0; pointer-events: none; transition: opacity .2s; z-index: var(--z-shade); }
 .shade.open { opacity: 1; pointer-events: auto; }

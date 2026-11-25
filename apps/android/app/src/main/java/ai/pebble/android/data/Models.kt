@@ -142,11 +142,25 @@ data class PermissionCapabilities(
 )
 
 @Serializable
+data class HarnessInstallInfo(
+    val command: String? = null,
+    val url: String? = null,
+)
+
+@Serializable
 data class HarnessInfo(
     val id: String,
     val label: String? = null,
     val defaultModel: String? = null,
     val installed: Boolean? = null,
+    val binaryPath: String? = null,
+    val authStatus: String? = null,
+    val authDetail: String? = null,
+    val requiresLogin: Boolean? = null,
+    val canAutoInstall: Boolean? = null,
+    val category: String? = null,
+    val summary: String? = null,
+    val install: HarnessInstallInfo? = null,
     val magpie: HarnessMagpie? = null,
     val permissions: PermissionCapabilities? = null,
 ) {
@@ -188,6 +202,9 @@ data class SetupTaskStatus(
     val state: String,
     val logs: List<String>? = null,
     val error: String? = null,
+    val loginUrl: String? = null,
+    val authStatus: String? = null,
+    val authDetail: String? = null,
 )
 
 @Serializable
@@ -210,6 +227,7 @@ data class TailcatStatus(
     val error: String? = null,
     val hasToken: Boolean? = null,
     val tokenEnvRef: String? = null,
+    val apiToken: String? = null,
 )
 
 @Serializable
@@ -251,6 +269,8 @@ data class HostTailscaleStatus(
     val error: String? = null,
     val hasToken: Boolean? = null,
     val tokenEnvRef: String? = null,
+    val apiToken: String? = null,
+    val authKeyEnvRef: String? = null,
 )
 
 @Serializable

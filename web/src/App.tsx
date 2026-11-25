@@ -29,7 +29,7 @@ import { Sidebar } from './components/Sidebar';
 import { ChatView } from './components/ChatView';
 import { DesktopStage } from './components/DesktopStage';
 import { WorkspaceFilesPane } from './components/WorkspaceFilesPane';
-import { SettingsView } from './components/SettingsView';
+import { SettingsView } from './components/settings/SettingsView';
 import { BotDetailPanel } from './components/BotDetailPanel';
 import { CollabPanel } from './components/CollabPanel';
 import { UnboxPage } from './components/onboarding/UnboxPage';
@@ -199,28 +199,35 @@ export default function App() {
     };
   }, []);
 
+  const confirmLeaveSettingsThen = useCallback(
+    (proceed: () => void, isTabSwitch = false) => {
+      if (!settingsDirtyRef.current) {
+        proceed();
+        return;
+      }
+      setConfirmOpts({
+        title: t('unsavedTitle'),
+        text: t('unsavedDesc'),
+        altText: t('discardChanges'),
+        altClass: 'bad',
+        onAlt: () => {
+          settingsResetRef.current?.();
+          proceed();
+        },
+        okText: isTabSwitch ? t('saveAndSwitch') : t('saveAndLeave'),
+        okClass: 'go',
+        onOk: async () => {
+          const ok = await settingsSaveRef.current?.();
+          if (ok !== false) proceed();
+        },
+      });
+    },
+    [t]
+  );
+
   const leaveSettings = useCallback(() => {
-    if (!settingsDirtyRef.current) {
-      setView('chat');
-      return;
-    }
-    setConfirmOpts({
-      title: t('unsavedTitle'),
-      text: t('unsavedDesc'),
-      altText: t('discardChanges'),
-      altClass: 'bad',
-      onAlt: () => {
-        settingsResetRef.current?.();
-        setView('chat');
-      },
-      okText: t('saveAndLeave'),
-      okClass: 'go',
-      onOk: async () => {
-        const ok = await settingsSaveRef.current?.();
-        if (ok !== false) setView('chat');
-      },
-    });
-  }, [t]);
+    confirmLeaveSettingsThen(() => setView('chat'), false);
+  }, [confirmLeaveSettingsThen]);
 
   const closeAllOverlays = useCallback(() => {
     setMobileSideOpen(false);
@@ -652,7 +659,7 @@ export default function App() {
         if (confirmOpts) setConfirmOpts(null);
         else if (unboxOpen) setUnboxOpen(false);
         else if (createOpen || panelOpen || collabPeerId || mobileSideOpen) closeAllOverlays();
-        else if (viewRef.current === 'settings') setView('chat');
+        else if (viewRef.current === 'settings') leaveSettings();
       }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
@@ -682,15 +689,22 @@ export default function App() {
   }, [closeAllOverlays, collabPeerId, confirmOpts, createOpen, leaveSettings, loadSettings, mobileSideOpen, panelOpen, toggleDesktopSidebar, unboxOpen]);
 
   const selectBot = async (id: string) => {
-    setActiveBotId(id);
-    setUnreadMap((prev) => ({ ...prev, [id]: 0 }));
-    try {
-      localStorage.setItem('bothub.active', id);
-    } catch {}
-    closeAllOverlays();
-    if (view === 'settings') setView('chat');
-    await loadMessages(id, true);
-    if (matchMedia('(min-width: 821px)').matches) inputRef.current?.focus();
+    const go = async () => {
+      setActiveBotId(id);
+      setUnreadMap((prev) => ({ ...prev, [id]: 0 }));
+      try {
+        localStorage.setItem('bothub.active', id);
+      } catch {}
+      closeAllOverlays();
+      if (viewRef.current === 'settings') setView('chat');
+      await loadMessages(id, true);
+      if (matchMedia('(min-width: 821px)').matches) inputRef.current?.focus();
+    };
+    if (viewRef.current === 'settings' && settingsDirtyRef.current) {
+      confirmLeaveSettingsThen(() => void go(), false);
+      return;
+    }
+    await go();
   };
 
   const openPanel = async (botId?: string) => {
@@ -974,8 +988,14 @@ export default function App() {
           }}
           onBackToChat={leaveSettings}
           onSwitchSettingsTab={(nextTab) => {
-            setSettingsTab(nextTab);
-            if (matchMedia('(max-width: 820px)').matches) closeAllOverlays();
+            if (nextTab === settingsTab) {
+              if (matchMedia('(max-width: 820px)').matches) closeAllOverlays();
+              return;
+            }
+            confirmLeaveSettingsThen(() => {
+              setSettingsTab(nextTab);
+              if (matchMedia('(max-width: 820px)').matches) closeAllOverlays();
+            }, true);
           }}
         />
 
@@ -1065,6 +1085,7 @@ export default function App() {
             tab={settingsTab}
             bots={bots}
             settings={settings}
+            serverInfo={serverInfo}
             models={modelsMap}
             nodesFromEvents={nodesFromEvents}
             lang={lang}

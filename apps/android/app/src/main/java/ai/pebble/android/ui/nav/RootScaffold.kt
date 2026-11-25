@@ -39,7 +39,6 @@ import ai.pebble.android.ui.bots.CreateBotSheet
 import ai.pebble.android.ui.chat.ChatScreen
 import ai.pebble.android.ui.connect.ConnectScreen
 import ai.pebble.android.ui.desktop.DesktopScreen
-import ai.pebble.android.ui.devices.DevicesSheet
 import ai.pebble.android.ui.settings.SettingsDetailScreen
 import ai.pebble.android.ui.settings.SettingsSidebar
 import ai.pebble.android.ui.settings.SettingsTab
@@ -51,7 +50,6 @@ import ai.pebble.android.ui.theme.PebbleIcons
 sealed interface SheetRoute {
     data class Connect(val scan: Boolean = false) : SheetRoute
     data object CreateBot : SheetRoute
-    data object Devices : SheetRoute
     data class BotInfo(val botId: String) : SheetRoute
 }
 
@@ -71,11 +69,14 @@ class PebbleRouter {
     var settingsTab by mutableStateOf<SettingsTab?>(null)
     var settingsDirty by mutableStateOf(false)
     var requestLeaveSettings by mutableStateOf(false)
+    var pendingSettingsTab by mutableStateOf<SettingsTab?>(null)
+    var pendingBackToSidebar by mutableStateOf(false)
+    var settingsSaveAction: (suspend () -> Boolean)? = null
+    var settingsDiscardAction: (() -> Unit)? = null
 
     fun openBot(id: String) {
         if (sheet is SheetRoute.BotInfo) sheet = null
-        inSettings = false
-        clearSettingsDirty()
+        leaveSettings()
         selectedBotId = id
     }
 
@@ -90,9 +91,33 @@ class PebbleRouter {
         settingsTab = if (compact) null else SettingsTab.GENERAL
     }
 
+    fun requestSelectSettingsTab(target: SettingsTab) {
+        if (target == settingsTab) return
+        if (settingsDirty) {
+            pendingSettingsTab = target
+        } else {
+            settingsTab = target
+        }
+    }
+
+    fun requestLeaveSettings(toSidebarOnly: Boolean = false) {
+        if (settingsDirty) {
+            pendingBackToSidebar = toSidebarOnly
+            requestLeaveSettings = true
+        } else if (toSidebarOnly) {
+            leaveSettingsTab()
+        } else {
+            leaveSettings()
+        }
+    }
+
     fun clearSettingsDirty() {
         settingsDirty = false
         requestLeaveSettings = false
+        pendingSettingsTab = null
+        pendingBackToSidebar = false
+        settingsSaveAction = null
+        settingsDiscardAction = null
     }
 
     fun leaveSettingsTab() {
@@ -101,13 +126,7 @@ class PebbleRouter {
     }
 
     fun requestSettingsBack(compact: Boolean) {
-        if (compact && settingsTab != null) {
-            if (settingsDirty) requestLeaveSettings = true
-            else leaveSettingsTab()
-        } else {
-            if (settingsDirty) requestLeaveSettings = true
-            else leaveSettings()
-        }
+        requestLeaveSettings(toSidebarOnly = compact && settingsTab != null)
     }
 
     fun leaveSettings() {
@@ -118,11 +137,13 @@ class PebbleRouter {
     fun openDesktop(target: String = "local") {
         val resolved = target.trim().ifEmpty { "local" }
         sheet = null
+        leaveSettings()
         desktop = DesktopPresentation(target = resolved, initialTab = StageKind.DESKTOP, botId = selectedBotId)
     }
 
     fun openFiles(botId: String, path: String? = null) {
         sheet = null
+        leaveSettings()
         desktop = DesktopPresentation(target = "local", initialTab = StageKind.FILES, botId = botId, initialPath = path)
     }
 
@@ -133,6 +154,7 @@ class PebbleRouter {
         }
         val kind = StageKind.fromRaw(ev.kind)
         sheet = null
+        leaveSettings()
         desktop = DesktopPresentation(target = "local", initialTab = kind, botId = targetBot, initialPath = ev.path)
     }
 }
@@ -220,15 +242,11 @@ fun RootScaffold(
                     } else {
                         SettingsDetailScreen(
                             store = store,
+                            router = router,
                             tab = tab,
                             compact = true,
-                            requestLeave = router.requestLeaveSettings,
-                            onClearRequestLeave = { router.requestLeaveSettings = false },
-                            onDirtyChanged = { router.settingsDirty = it },
                             onBack = { router.requestSettingsBack(compact = true) },
-                            onLeaveSettings = { router.leaveSettingsTab() },
                             onOpenConnect = { router.sheet = SheetRoute.Connect(false) },
-                            onOpenDevices = { router.sheet = SheetRoute.Devices },
                             onOpenCreateBot = { router.sheet = SheetRoute.CreateBot },
                             onOpenDesktop = { router.openDesktop(it) },
                         )
@@ -277,7 +295,7 @@ fun RootScaffold(
                             store = store,
                             compact = false,
                             selectedTab = router.settingsTab ?: SettingsTab.GENERAL,
-                            onSelectTab = { router.settingsTab = it },
+                            onSelectTab = { router.requestSelectSettingsTab(it) },
                             onBack = { router.requestSettingsBack(compact = false) },
                         )
                     }
@@ -285,15 +303,11 @@ fun RootScaffold(
                     Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
                         SettingsDetailScreen(
                             store = store,
+                            router = router,
                             tab = router.settingsTab ?: SettingsTab.GENERAL,
                             compact = false,
-                            requestLeave = router.requestLeaveSettings,
-                            onClearRequestLeave = { router.requestLeaveSettings = false },
-                            onDirtyChanged = { router.settingsDirty = it },
                             onBack = { router.requestSettingsBack(compact = false) },
-                            onLeaveSettings = { router.leaveSettings() },
                             onOpenConnect = { router.sheet = SheetRoute.Connect(false) },
-                            onOpenDevices = { router.sheet = SheetRoute.Devices },
                             onOpenCreateBot = { router.sheet = SheetRoute.CreateBot },
                             onOpenDesktop = { router.openDesktop(it) },
                         )
@@ -415,20 +429,6 @@ fun RootScaffold(
                             router.sheet = null
                             router.openBot(newId)
                         },
-                    )
-                }
-            }
-            SheetRoute.Devices -> {
-                ModalBottomSheet(
-                    onDismissRequest = { router.sheet = null },
-                    sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-                    containerColor = p.page,
-                ) {
-                    DevicesSheet(
-                        store = store,
-                        onClose = { router.sheet = null },
-                        onManageConnections = { router.sheet = SheetRoute.Connect(false) },
-                        onOpenDesktop = { router.openDesktop(it) },
                     )
                 }
             }

@@ -242,15 +242,34 @@ private struct MacMenuBarContent: View {
 enum SheetRoute: Identifiable, Equatable {
     case connect(scan: Bool)
     case createBot
-    case devices
     case botInfo(String)
 
     var id: String {
         switch self {
         case let .connect(scan): return "connect-\(scan)"
         case .createBot: return "create"
-        case .devices: return "devices"
         case let .botInfo(botId): return "botInfo-\(botId)"
+        }
+    }
+}
+
+enum SettingsGroup: String, CaseIterable, Identifiable {
+    case app
+    case host
+
+    var id: String { rawValue }
+
+    var titleKey: String {
+        switch self {
+        case .app: return "settingsGroupApp"
+        case .host: return "settingsGroupHost"
+        }
+    }
+
+    var tabs: [SettingsTab] {
+        switch self {
+        case .app: return [.general]
+        case .host: return [.models, .memory, .desktop, .remote]
         }
     }
 }
@@ -263,6 +282,13 @@ enum SettingsTab: String, CaseIterable, Identifiable, Hashable {
     case remote
 
     var id: String { rawValue }
+
+    var group: SettingsGroup {
+        switch self {
+        case .general: return .app
+        case .models, .memory, .desktop, .remote: return .host
+        }
+    }
 
     var titleKey: String {
         switch self {
@@ -306,11 +332,13 @@ final class Router {
     var settingsTab: SettingsTab? = nil
     var settingsDirty = false
     var requestLeaveSettings = false
+    var pendingSettingsTab: SettingsTab? = nil
+    @ObservationIgnored var settingsSaveAction: (() async -> Bool)? = nil
+    @ObservationIgnored var settingsDiscardAction: (() -> Void)? = nil
 
     func openBot(_ id: String) {
         if case .botInfo = sheet { sheet = nil }
-        inSettings = false
-        clearSettingsDirty()
+        leaveSettings()
         selected = id
         preferredColumn = .detail
     }
@@ -337,9 +365,21 @@ final class Router {
         }
     }
 
+    func selectSettingsTab(_ tab: SettingsTab) {
+        if settingsTab == tab { return }
+        if settingsDirty {
+            pendingSettingsTab = tab
+        } else {
+            settingsTab = tab
+        }
+    }
+
     func clearSettingsDirty() {
         settingsDirty = false
         requestLeaveSettings = false
+        pendingSettingsTab = nil
+        settingsSaveAction = nil
+        settingsDiscardAction = nil
     }
 
     func requestSettingsBack(fallback: (() -> Void)? = nil) {
@@ -352,6 +392,10 @@ final class Router {
         }
     }
 
+    func requestExitSettings() {
+        requestSettingsBack()
+    }
+
     func leaveSettings() {
         inSettings = false
         clearSettingsDirty()
@@ -362,8 +406,7 @@ final class Router {
         let resolved = target.trimmingCharacters(in: .whitespacesAndNewlines)
         let dest = resolved.isEmpty ? "local" : resolved
         sheet = nil
-        inSettings = false
-        clearSettingsDirty()
+        leaveSettings()
         detailOpen = false
         stageTab = .desktop
         desktop = DesktopPresentation(target: dest, initialTab: .desktop, botId: selected)
@@ -371,8 +414,7 @@ final class Router {
 
     func openFiles(botId: String, path: String? = nil) {
         sheet = nil
-        inSettings = false
-        clearSettingsDirty()
+        leaveSettings()
         detailOpen = false
         stageTab = .files
         desktop = DesktopPresentation(target: "local", initialTab: .files, botId: botId, initialPath: path)
@@ -385,8 +427,7 @@ final class Router {
         }
         let kind = StageKind(rawValue: ev.kind) ?? .files
         sheet = nil
-        inSettings = false
-        clearSettingsDirty()
+        leaveSettings()
         detailOpen = false
         stageTab = kind
         desktop = DesktopPresentation(target: "local", initialTab: kind, botId: targetBot, initialPath: ev.path)
@@ -642,7 +683,6 @@ struct SheetHost: View {
         switch route {
         case .createBot: return (520, 620)
         case .botInfo: return (520, 640)
-        case .devices: return (520, 600)
         case .connect: return (480, 540)
         }
     }
@@ -652,7 +692,6 @@ struct SheetHost: View {
             switch route {
             case let .connect(scan): ConnectView(startScan: scan)
             case .createBot: CreateBotView()
-            case .devices: DevicesView()
             case let .botInfo(botId): BotInfoSheet(botId: botId)
             }
         }

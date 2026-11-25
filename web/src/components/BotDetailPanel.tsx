@@ -45,7 +45,7 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
   detail,
   bots,
   settings,
-  models: _models,
+  models,
   routineRefreshSeq,
   lang,
   canBindDesktop = true,
@@ -72,6 +72,8 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
   const [editColor, setEditColor] = useState('');
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   const [editPrivate, setEditPrivate] = useState(false);
+  const [editHarness, setEditHarness] = useState('opencode');
+  const [editModel, setEditModel] = useState('');
   const [editDesktopTarget, setEditDesktopTarget] = useState('');
   const [editBrowserMode, setEditBrowserMode] = useState('');
   const [editPermissionMode, setEditPermissionMode] = useState<PermissionMode>('auto');
@@ -168,6 +170,8 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
     setEditAvatar(detail.avatar || '');
     setEditColor(detail.color || '');
     setEditPrivate(Boolean(detail.privateSessions));
+    setEditHarness(detail.harness || settings?.defaultHarness || 'opencode');
+    setEditModel((detail.modelInherited ? '' : detail.model || '').trim());
     setEditDesktopTarget(detail.desktopTarget || '');
     setEditBrowserMode(detail.browserMode || '');
     setEditPermissionMode((detail.permissionMode as PermissionMode) || 'auto');
@@ -181,6 +185,9 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
     detail?.avatar,
     detail?.color,
     detail?.privateSessions,
+    detail?.harness,
+    detail?.model,
+    detail?.modelInherited,
     detail?.desktopTarget,
     detail?.browserMode,
     detail?.permissionMode,
@@ -203,6 +210,16 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
   const harnessLabel = (id?: string) =>
     settings?.harnesses.find((h) => h.id === id)?.label || id || 'opencode';
 
+  const resolveBotDefaultModel = (g: string, h: string) => {
+    if (!g) return '';
+    if (g.startsWith('magpie/')) return h === 'claude' ? g.slice(7) : g;
+    if (!g.includes('/')) return g;
+    return h === '' || h === 'opencode' || h === 'pi' ? g : '';
+  };
+
+  const origModel = detail ? (detail.modelInherited ? '' : detail.model || '').trim() : '';
+  const origHarness = detail?.harness || settings?.defaultHarness || 'opencode';
+
   const isDirty = Boolean(
     detail &&
       (editName !== (detail.name || '') ||
@@ -210,6 +227,8 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
         editAvatar !== (detail.avatar || '') ||
         editColor !== (detail.color || '') ||
         editPrivate !== Boolean(detail.privateSessions) ||
+        editHarness !== origHarness ||
+        editModel.trim() !== origModel ||
         (canBindDesktop && editDesktopTarget !== (detail.desktopTarget || '')) ||
         (canIsolateBrowser && editBrowserMode !== (detail.browserMode || '')) ||
         editPermissionMode !== ((detail.permissionMode as PermissionMode) || 'auto') ||
@@ -232,6 +251,8 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
         description: editDesc.trim(),
         avatar: editAvatar,
         color: editColor,
+        harness: editHarness,
+        model: editModel.trim(),
         instructions: editInst,
         privateSessions: editPrivate,
       };
@@ -1015,14 +1036,6 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
                     <dd id="pId">{detail.id}</dd>
                   </div>
                   <div>
-                    <dt>Harness</dt>
-                    <dd id="pHarness">{harnessLabel(detail.harness)}</dd>
-                  </div>
-                  <div>
-                    <dt>{t('model')}</dt>
-                    <dd id="pModel">{(detail.model || '—') + (detail.modelInherited ? t('defaultTag') : '')}</dd>
-                  </div>
-                  <div>
                     <dt>Session</dt>
                     <dd id="pSession">{detail.session?.sessionId || '—'}</dd>
                   </div>
@@ -1051,6 +1064,51 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
                     </dd>
                   </div>
                 </dl>
+                <div className="stack6 mt-10">
+                  <div className="fld">
+                    <label htmlFor="peHarness">{t('statHarness')}</label>
+                    <select
+                      id="peHarness"
+                      value={editHarness}
+                      onChange={(e) => {
+                        const nextH = e.target.value;
+                        if (nextH === editHarness) return;
+                        setEditHarness(nextH);
+                        setEditModel('');
+                        void onLoadModels(nextH);
+                      }}
+                    >
+                      {(settings?.harnesses || [{ id: editHarness, label: harnessLabel(editHarness) }]).map((h) => (
+                        <option key={h.id} value={h.id}>
+                          {h.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="fld">
+                    <label htmlFor="peModel">{t('model')}</label>
+                    <input
+                      id="peModel"
+                      className="mono"
+                      list="bot-detail-models"
+                      spellCheck={false}
+                      placeholder={(() => {
+                        const per = settings?.defaultModels?.[editHarness]?.trim() || '';
+                        const def =
+                          per || resolveBotDefaultModel((settings?.defaultModel || '').trim(), editHarness);
+                        return def ? t('defaultModelPh', { model: def }) : t('inheritGlobalPh');
+                      })()}
+                      value={editModel}
+                      onFocus={() => void onLoadModels(editHarness)}
+                      onChange={(e) => setEditModel(e.target.value)}
+                    />
+                    <datalist id="bot-detail-models">
+                      {(models[editHarness] || []).map((m) => (
+                        <option key={m} value={m} />
+                      ))}
+                    </datalist>
+                  </div>
+                </div>
                 {(() => {
                   const seenOpts = new Set<string>(['', 'local']);
                   const screenOpts: Array<{ value: string; label: string }> = [

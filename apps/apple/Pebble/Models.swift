@@ -114,11 +114,24 @@ struct PermissionCapabilities: Codable, Hashable {
     var supportsAllowAlways: Bool?
 }
 
+struct HarnessInstallInfo: Codable, Hashable {
+    var command: String?
+    var url: String?
+}
+
 struct HarnessInfo: Codable, Identifiable, Hashable {
     var id: String
     var label: String?
     var defaultModel: String?
     var installed: Bool?
+    var binaryPath: String?
+    var authStatus: String?
+    var authDetail: String?
+    var requiresLogin: Bool?
+    var canAutoInstall: Bool?
+    var category: String?
+    var summary: String?
+    var install: HarnessInstallInfo?
     var magpie: HarnessMagpie?
     var permissions: PermissionCapabilities?
 
@@ -158,6 +171,9 @@ struct SetupTaskStatus: Codable {
     var state: String
     var logs: [String]?
     var error: String?
+    var loginUrl: String?
+    var authStatus: String?
+    var authDetail: String?
 }
 
 struct OnboardingInfo: Codable {

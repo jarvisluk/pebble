@@ -196,6 +196,8 @@ struct BotInfoSheet: View {
     @State private var editAvatar = ""
     @State private var editColor = ""
     @State private var appearOpen = false
+    @State private var editHarness = ""
+    @State private var editModel = ""
     @State private var editInst = ""
     @State private var editPrivate = false
     @State private var editDesktopTarget = ""
@@ -217,11 +219,28 @@ struct BotInfoSheet: View {
     private var canBindDesktop: Bool { hub.supports("bot.desktop_binding") }
     private var canIsolateBrowser: Bool { hub.supports("bot.browser_isolation") }
 
+    private var harnessOptions: [(String, String)] {
+        var opts = settingsHarnessList(from: hub).map { ($0.id, $0.title) }
+        if !editHarness.isEmpty && !opts.contains(where: { $0.0 == editHarness }) {
+            opts.insert((editHarness, editHarness), at: 0)
+        }
+        return opts
+    }
+
+    private var effectiveModelPlaceholder: String {
+        let per = (hub.settings?.defaultModels?[editHarness] ?? "").trimmingCharacters(in: .whitespaces)
+        let ph = per.isEmpty ? resolveDefaultModel((hub.settings?.defaultModel ?? "").trimmingCharacters(in: .whitespaces), editHarness) : per
+        return ph.isEmpty ? hub.t("inheritDefaultPh") : ph
+    }
+
     private var dirty: Bool {
         guard let a = active else { return false }
         let activePerm = hub.clampPermissionMode(a.permissionMode, harnessId: a.harness)
+        let baseModel = (a.modelInherited == true ? "" : (a.model ?? "")).trimmingCharacters(in: .whitespaces)
         return editName != (a.name ?? botId) || editDesc != (a.description ?? "")
             || editAvatar != (a.avatar ?? "") || editColor != (a.color ?? "")
+            || editHarness != (a.harness ?? "")
+            || editModel.trimmingCharacters(in: .whitespaces) != baseModel
             || editPrivate != (a.privateSessions ?? false)
             || (canBindDesktop && editDesktopTarget != (a.desktopTarget ?? ""))
             || (canIsolateBrowser && editBrowserMode != (a.browserMode ?? ""))
@@ -295,8 +314,28 @@ struct BotInfoSheet: View {
 
                 Section {
                     DisclosureGroup(hub.t("techDetails"), isExpanded: $techOpen) {
-                        LabeledContent(hub.t("statHarness"), value: active?.harness ?? "-")
-                        LabeledContent(hub.t("statModel"), value: (active?.model ?? "").isEmpty ? hub.t("defaultTag") : active!.model!)
+                        HubMenuPicker(
+                            title: hub.t("statHarness"),
+                            selection: Binding(
+                                get: { editHarness },
+                                set: { next in
+                                    guard next != editHarness else { return }
+                                    editHarness = next
+                                    editModel = ""
+                                    Task { _ = try? await hub.loadModels(next) }
+                                }
+                            ),
+                            options: harnessOptions
+                        )
+                        HubFormField(label: hub.t("statModel")) {
+                            ModelFieldRow(
+                                title: hub.t("statModel"),
+                                harness: editHarness,
+                                text: $editModel,
+                                placeholder: effectiveModelPlaceholder,
+                                onError: { err = $0 }
+                            )
+                        }
                         LabeledContent(hub.t("statArchived"), value: hub.t("archivedCount", ["n": active?.archivedSessions ?? 0])
                             + ((active?.privateSessions ?? false) ? hub.t("privateTag") : ""))
                         LabeledContent(hub.t("workspaceDir")) {
@@ -409,6 +448,8 @@ struct BotInfoSheet: View {
         editDesc = src?.description ?? ""
         editAvatar = src?.avatar ?? ""
         editColor = src?.color ?? ""
+        editHarness = src?.harness ?? ""
+        editModel = (src?.modelInherited == true ? "" : (src?.model ?? "")).trimmingCharacters(in: .whitespaces)
         editInst = detail?.instructions ?? ""
         editPrivate = src?.privateSessions ?? false
         editDesktopTarget = src?.desktopTarget ?? ""
@@ -417,6 +458,10 @@ struct BotInfoSheet: View {
         loading = true
         Task { await loadMem() }
         Task { _ = try? await hub.refreshDesktopTargets() }
+        Task {
+            if hub.settings == nil { _ = try? await hub.loadSettings() }
+            if !editHarness.isEmpty { _ = try? await hub.loadModels(editHarness) }
+        }
         if let d = try? await hub.botDetail(botId) { apply(d) }
         loading = false
     }
@@ -427,11 +472,16 @@ struct BotInfoSheet: View {
         editDesc = d.description ?? ""
         editAvatar = d.avatar ?? ""
         editColor = d.color ?? ""
+        editHarness = d.harness ?? ""
+        editModel = (d.modelInherited == true ? "" : (d.model ?? "")).trimmingCharacters(in: .whitespaces)
         editInst = d.instructions ?? ""
         editPrivate = d.privateSessions ?? false
         editDesktopTarget = d.desktopTarget ?? ""
         editBrowserMode = d.browserMode ?? ""
         editPermMode = hub.clampPermissionMode(d.permissionMode, harnessId: d.harness)
+        if !editHarness.isEmpty {
+            Task { _ = try? await hub.loadModels(editHarness) }
+        }
     }
 
     private func save() {
@@ -446,6 +496,8 @@ struct BotInfoSheet: View {
                     "description": editDesc.trimmingCharacters(in: .whitespaces),
                     "avatar": editAvatar,
                     "color": editColor,
+                    "harness": editHarness,
+                    "model": editModel.trimmingCharacters(in: .whitespaces),
                     "instructions": editInst,
                     "privateSessions": editPrivate,
                     "permissionMode": editPermMode,
@@ -501,7 +553,7 @@ struct BotInfoSheet: View {
                         ProgressView().controlSize(.small)
                     } else if memReady {
                         Button(hub.t("saveMemory")) { addMem() }
-                            .buttonStyle(.borderedProminent).tint(pal.accent).controlSize(.small)
+                            .buttonStyle(HubPrimaryButtonStyle())
                     } else {
                         Button(hub.t("saveMemory")) { addMem() }
                             .buttonStyle(.bordered).controlSize(.small)
@@ -546,7 +598,7 @@ struct MemoryRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
-                Text(item.kind ?? "memory").font(.system(size: AppFont.secondary, weight: .semibold)).foregroundStyle(p.sageInk)
+                Text(localizedMemoryKind(item.kind, hub: hub)).font(.system(size: AppFont.secondary, weight: .semibold)).foregroundStyle(p.sageInk)
                 if showScope, let sc = item.scope, !sc.isEmpty {
                     Text(sc == "everywhere" || sc == "global" ? hub.t("memScopeEverywhere") : hub.t("memScopeProject"))
                         .font(.system(size: AppFont.caption))

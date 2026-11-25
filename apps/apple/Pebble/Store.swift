@@ -1007,8 +1007,8 @@ final class HubStore {
     // MARK: 设置
 
     @discardableResult
-    func loadSettings() async throws -> SettingsData {
-        let s: SettingsData = try await callAPI("/api/settings")
+    func loadSettings(fresh: Bool = false) async throws -> SettingsData {
+        let s: SettingsData = try await callAPI(fresh ? "/api/settings?fresh=1" : "/api/settings")
         settings = s
         return s
     }
@@ -1043,22 +1043,65 @@ final class HubStore {
         return models[harness] ?? list
     }
 
-    private func resetModelsCache() {
+    func loadMagpieModels(_ harness: String) async throws -> [String] {
+        guard !harness.isEmpty else { return [] }
+        let d: ModelsResp = try await callAPI("/api/models?harness=\(enc(harness))&source=magpie")
+        return d.models ?? []
+    }
+
+    func resetModelsCache() {
         for (_, entry) in modelLoadTasks { entry.1.cancel() }
         modelLoadTasks.removeAll()
         models = [:]
         modelsGeneration += 1
     }
 
-    func saveSettings(changed: Bool, defaultHarness: String, defaultPermissionMode: String, defaultModel: String, defaultModels: [String: String], sharedUserMd: String,
-                      botUpdates: [(id: String, harness: String, model: String)]) async throws {
+    func saveModelsSettings(
+        changed: Bool,
+        defaultHarness: String,
+        defaultPermissionMode: String? = nil,
+        defaultModel: String,
+        defaultModels: [String: String],
+        magpieWebUrl: String?,
+        botUpdates: [(id: String, harness: String, model: String)]
+    ) async throws {
         if changed {
-            settings = try await callAPI("/api/settings", method: "PUT",
-                                          body: ["defaultHarness": defaultHarness, "defaultPermissionMode": defaultPermissionMode, "defaultModel": defaultModel, "defaultModels": defaultModels, "sharedUserMd": sharedUserMd])
+            var body: [String: Any] = [
+                "defaultHarness": defaultHarness,
+                "defaultModel": defaultModel,
+                "defaultModels": defaultModels,
+            ]
+            if let defaultPermissionMode, !defaultPermissionMode.isEmpty {
+                body["defaultPermissionMode"] = defaultPermissionMode
+            }
+            if let magpieWebUrl {
+                body["magpieWebUrl"] = magpieWebUrl
+            }
+            settings = try await callAPI("/api/settings", method: "PUT", body: body)
         }
         for u in botUpdates { try await updateBot(u.id, ["harness": u.harness, "model": u.model]) }
         try await loadSettings()
         try await refreshBots()
+    }
+
+    func saveSharedUserMd(_ content: String) async throws {
+        settings = try await callAPI("/api/settings", method: "PUT", body: ["sharedUserMd": content])
+    }
+
+    func startHarnessInstall(_ harness: String) async throws -> SetupTaskStatus {
+        try await callAPI("/api/harnesses/\(enc(harness))/install", method: "POST", body: [:])
+    }
+
+    func harnessInstallStatus(_ harness: String) async throws -> SetupTaskStatus {
+        try await callAPI("/api/harnesses/\(enc(harness))/install")
+    }
+
+    func startHarnessLogin(_ harness: String) async throws -> SetupTaskStatus {
+        try await callAPI("/api/harnesses/\(enc(harness))/login", method: "POST", body: [:])
+    }
+
+    func harnessLoginStatus(_ harness: String) async throws -> SetupTaskStatus {
+        try await callAPI("/api/harnesses/\(enc(harness))/login")
     }
 
     func connectMagpie(_ harness: String, model: String) async throws {

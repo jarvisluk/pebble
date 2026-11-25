@@ -137,6 +137,143 @@ var platformSwitchControlSize: ControlSize {
     #endif
 }
 
+var platformNotificationSectionTitleKey: String {
+    #if os(iOS)
+    return "pushSection"
+    #else
+    return "pushSectionMac"
+    #endif
+}
+
+var platformAppVersionString: String {
+    let info = Bundle.main.infoDictionary
+    let ver = (info?["CFBundleShortVersionString"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    let build = (info?["CFBundleVersion"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    if ver.isEmpty { return "1.0.0" }
+    if !build.isEmpty && build != ver { return "\(ver) (\(build))" }
+    return ver
+}
+
+@MainActor
+func platformManagedHostLabel(hub: HubStore) -> String? {
+    #if os(macOS)
+    guard hub.managedMode else { return nil }
+    let label = DesktopHostManager.shared.snapshot.mode == "remote"
+        ? hub.t("macModeRemoteTag")
+        : hub.t("macModeLocalTag")
+    switch hub.connState {
+    case .connecting: return "\(label) · \(hub.t("connectingShort"))"
+    case .unauthorized: return "\(label) · \(hub.t("needsToken"))"
+    case .error: return "\(label) · \(hub.t("connLost"))"
+    case .connected: return hub.online ? label : "\(label) · \(hub.t("reconnecting"))"
+    case .idle: return hub.t("disconnected")
+    }
+    #else
+    return nil
+    #endif
+}
+
+struct PlatformNotificationExtrasRows: View {
+    @Environment(HubStore.self) private var hub
+    @Environment(\.palette) private var p
+
+    var body: some View {
+        #if os(iOS)
+        let la = LiveActivityManager.shared
+        let pm = PushManager.shared
+        HStack {
+            Text(hub.t("pushLiveActivity"))
+            Spacer()
+            Text(la.activitiesEnabled ? hub.t("pushEnabled") : hub.t("pushDisabled"))
+                .foregroundStyle(la.activitiesEnabled ? p.sageInk : .secondary)
+        }
+        HStack {
+            Text(hub.t("pushServerChannel"))
+            Spacer()
+            Text(pushModeLabel(pm.serverStatus.mode))
+                .foregroundStyle(pm.serverStatus.configured ? p.sageInk : .secondary)
+        }
+        #else
+        EmptyView()
+        #endif
+    }
+
+    private func pushModeLabel(_ mode: String) -> String {
+        switch mode {
+        case "direct": return hub.t("pushModeDirect")
+        case "relay": return hub.t("pushModeRelay")
+        default: return hub.t("pushModeDisabled")
+        }
+    }
+}
+
+struct PlatformDesktopHostModeSection: View {
+    @Environment(HubStore.self) private var hub
+    @Environment(\.palette) private var p
+
+    var body: some View {
+        #if os(macOS)
+        let host = DesktopHostManager.shared
+        let snap = host.snapshot
+        Section(hub.t("macHostSection")) {
+            LabeledContent(hub.t("macCurrentMode")) {
+                HStack(spacing: 6) {
+                    if host.daemonOutdated {
+                        Tag(text: hub.t("nodeOutdatedTag"), bg: p.pink, fg: p.pinkInk)
+                    }
+                    Text(snap.mode == "remote" ? hub.t("macModeRemoteTag") : hub.t("macModeLocalTag"))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            if !snap.dataDir.isEmpty {
+                LabeledContent(hub.t("macDataDir")) {
+                    Text(snap.dataDir)
+                        .font(.system(size: AppFont.caption, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
+            if snap.mode == "remote" {
+                Toggle(hub.t("macAllowNode"), isOn: Binding(
+                    get: { snap.allowNode },
+                    set: { next in Task { await host.setLocalNode(enabled: next) } }
+                ))
+                if snap.allowNode {
+                    LabeledContent(hub.t("macNodeStatus")) {
+                        let statusText = snap.nodeConnected ? hub.t("macNodeConnected")
+                            : snap.nodeStatus == "waiting_auth" ? hub.t("macNodeWaiting")
+                            : hub.t("macNodeDisconnected")
+                        Text(statusText)
+                            .foregroundStyle(snap.nodeConnected ? p.sageInk : .secondary)
+                    }
+                }
+                if snap.canFailover {
+                    Button(hub.t("macFailover")) {
+                        Task { await host.failoverToLocal() }
+                    }
+                }
+            } else if snap.canFailback {
+                Button(hub.t("macFailback")) {
+                    Task { await host.failbackToRemote() }
+                }
+            }
+            Button(hub.t("macOpenDataDir")) {
+                host.openDataDir()
+            }
+            Button(hub.t("ubPermReopenBtn")) {
+                NotificationCenter.default.post(name: .hubOpenUnboxPermissions, object: nil)
+            }
+            Button(hub.t("macSwitchMode")) {
+                Task { await host.resetMode() }
+            }
+        }
+        #else
+        EmptyView()
+        #endif
+    }
+}
+
 #if os(macOS)
 private final class MacSeamlessTitlebarView: NSView {
     weak var appliedWindow: NSWindow?

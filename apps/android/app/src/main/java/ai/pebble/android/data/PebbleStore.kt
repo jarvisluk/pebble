@@ -1014,8 +1014,8 @@ class PebbleStore(context: Context) {
 
     // MARK: Settings & Magpie
 
-    suspend fun loadSettings(): SettingsData {
-        val s = api.call<SettingsData>("/api/settings")
+    suspend fun loadSettings(fresh: Boolean = false): SettingsData {
+        val s = api.call<SettingsData>(if (fresh) "/api/settings?fresh=1" else "/api/settings")
         settings = s
         return s
     }
@@ -1046,34 +1046,40 @@ class PebbleStore(context: Context) {
         }
     }
 
-    private fun resetModelsCache() {
+    suspend fun loadMagpieModels(harness: String): List<String> {
+        if (harness.isEmpty()) return emptyList()
+        return api.call<ModelsResp>("/api/models?harness=${encodeURIComponent(harness)}&source=magpie").models.orEmpty()
+    }
+
+    fun resetModelsCache() {
         modelLoadJobs.values.forEach { it.cancel() }
         modelLoadJobs.clear()
         models.clear()
         modelsGeneration += 1
     }
 
-    suspend fun saveSettings(
+    suspend fun saveModelsSettings(
         changed: Boolean,
         defaultHarness: String,
-        defaultPermissionMode: String,
+        defaultPermissionMode: String? = null,
         defaultModel: String,
         defaultModels: Map<String, String>,
-        sharedUserMd: String,
+        magpieWebUrl: String?,
         botUpdates: List<Triple<String, String, String>>,
     ) {
         if (changed) {
-            settings = api.call(
-                "/api/settings",
-                method = "PUT",
-                body = mapOf(
-                    "defaultHarness" to defaultHarness,
-                    "defaultPermissionMode" to defaultPermissionMode,
-                    "defaultModel" to defaultModel,
-                    "defaultModels" to defaultModels,
-                    "sharedUserMd" to sharedUserMd,
-                ),
+            val body = mutableMapOf<String, Any?>(
+                "defaultHarness" to defaultHarness,
+                "defaultModel" to defaultModel,
+                "defaultModels" to defaultModels,
             )
+            if (!defaultPermissionMode.isNullOrEmpty()) {
+                body["defaultPermissionMode"] = defaultPermissionMode
+            }
+            if (magpieWebUrl != null) {
+                body["magpieWebUrl"] = magpieWebUrl
+            }
+            settings = api.call("/api/settings", method = "PUT", body = body)
         }
         for ((bid, h, m) in botUpdates) {
             updateBot(bid, mapOf("harness" to h, "model" to m))
@@ -1081,6 +1087,22 @@ class PebbleStore(context: Context) {
         loadSettings()
         refreshBots()
     }
+
+    suspend fun saveSharedUserMd(content: String) {
+        settings = api.call("/api/settings", method = "PUT", body = mapOf("sharedUserMd" to content))
+    }
+
+    suspend fun startHarnessInstall(harness: String): SetupTaskStatus =
+        api.call("/api/harnesses/${encodeURIComponent(harness)}/install", method = "POST", body = emptyMap())
+
+    suspend fun getHarnessInstallStatus(harness: String): SetupTaskStatus =
+        api.call("/api/harnesses/${encodeURIComponent(harness)}/install")
+
+    suspend fun startHarnessLogin(harness: String): SetupTaskStatus =
+        api.call("/api/harnesses/${encodeURIComponent(harness)}/login", method = "POST", body = emptyMap())
+
+    suspend fun getHarnessLoginStatus(harness: String): SetupTaskStatus =
+        api.call("/api/harnesses/${encodeURIComponent(harness)}/login")
 
     suspend fun connectMagpie(harness: String, model: String) {
         settings = api.call(
@@ -1135,13 +1157,52 @@ class PebbleStore(context: Context) {
         nodes = api.call<NodesResp>("/api/nodes").nodes.orEmpty()
     }
 
+    private fun applyRotatedAPIToken(newTok: String?) {
+        if (newTok.isNullOrEmpty() || newTok == authToken) return
+        authToken = newTok
+        val id = activeServerId
+        if (id != null) {
+            val list = servers.toMutableList()
+            val idx = list.indexOfFirst { it.id == id }
+            if (idx >= 0) {
+                list[idx] = list[idx].copy(token = newTok)
+                servers = list
+                persistServers()
+            }
+        }
+        if (baseURL.isNotEmpty()) {
+            startStream(baseURL, newTok)
+        }
+    }
+
     suspend fun refreshTailcat() {
         tailcat = api.call("/api/tailcat")
     }
 
+    suspend fun revealTailcatToken(): String =
+        api.call<TailcatStatus>("/api/tailcat?reveal=1").apiToken.orEmpty()
+
+    suspend fun setTailcat(body: Map<String, Any?>): TailcatStatus {
+        val res = api.call<TailcatStatus>("/api/tailcat", method = "POST", body = body)
+        tailcat = res
+        applyRotatedAPIToken(res.apiToken)
+        return res
+    }
+
+    suspend fun fetchTailcatQR(): ByteArray = api.rawBytes("/api/tailcat/qr.png")
+
     suspend fun refreshHostTailscale() {
         hostTailscale = api.call("/api/tailscale")
     }
+
+    suspend fun setHostTailscale(body: Map<String, Any?>): HostTailscaleStatus {
+        val res = api.call<HostTailscaleStatus>("/api/tailscale", method = "POST", body = body)
+        hostTailscale = res
+        applyRotatedAPIToken(res.apiToken)
+        return res
+    }
+
+    suspend fun fetchHostTailscaleQR(): ByteArray = api.rawBytes("/api/tailscale/qr.png")
 
     suspend fun refreshMobileTailscale(includePeers: Boolean = true) {
         val st = PebbleTunnel.tailscaleStatus(includePeers)

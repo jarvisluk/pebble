@@ -87,6 +87,10 @@ import ai.pebble.android.data.PebbleStore
 import ai.pebble.android.data.RoutineItem
 import ai.pebble.android.data.RoutineRun
 import ai.pebble.android.data.errText
+import ai.pebble.android.data.resolveDefaultModel
+import ai.pebble.android.ui.settings.ModelInputWithMenu
+import ai.pebble.android.ui.settings.localizedMemoryKind
+import ai.pebble.android.ui.settings.settingsHarnessList
 import ai.pebble.android.ui.desktop.H264SurfaceView
 import ai.pebble.android.ui.theme.BotAppearancePicker
 import ai.pebble.android.ui.theme.PebbleFont
@@ -376,6 +380,10 @@ fun BotInfoSheet(
     var editAvatar by remember(botId) { mutableStateOf("") }
     var editColor by remember(botId) { mutableStateOf("") }
     var editInst by remember(botId) { mutableStateOf("") }
+    var editHarness by remember(botId) { mutableStateOf("") }
+    var editModel by remember(botId) { mutableStateOf("") }
+    var harnessMenuOpen by remember(botId) { mutableStateOf(false) }
+    var loadingModels by remember(botId) { mutableStateOf(false) }
     var editPrivate by remember(botId) { mutableStateOf(false) }
     var editDesktopTarget by remember(botId) { mutableStateOf("") }
     var editBrowserMode by remember(botId) { mutableStateOf("") }
@@ -400,13 +408,31 @@ fun BotInfoSheet(
     val canBindDesktop = store.supports("bot.desktop_binding")
     val canIsolateBrowser = store.supports("bot.browser_isolation")
 
-    val dirty = remember(active, detail, editName, editDesc, editAvatar, editColor, editPrivate, editDesktopTarget, editBrowserMode, editPermMode, editInst, canBindDesktop, canIsolateBrowser) {
+    val harnesses = remember(store.settings?.harnesses, editHarness) {
+        val list = settingsHarnessList(store)
+        if (editHarness.isNotEmpty() && list.none { it.id == editHarness }) {
+            list + ai.pebble.android.data.HarnessInfo(id = editHarness, label = editHarness)
+        } else {
+            list
+        }
+    }
+
+    val effectiveModelPlaceholder = remember(editHarness, store.settings, store.langRevision) {
+        val per = store.settings?.defaultModels?.get(editHarness).orEmpty().trim()
+        val ph = per.ifEmpty { resolveDefaultModel(store.settings?.defaultModel.orEmpty().trim(), editHarness) }
+        ph.ifEmpty { store.t("inheritDefaultPh") }
+    }
+
+    val dirty = remember(active, detail, editName, editDesc, editAvatar, editColor, editHarness, editModel, editPrivate, editDesktopTarget, editBrowserMode, editPermMode, editInst, canBindDesktop, canIsolateBrowser) {
         val activePerm = store.clampPermissionMode(active?.permissionMode, active?.harness)
+        val baseModel = (if (active?.modelInherited == true) "" else active?.model.orEmpty()).trim()
         active != null && (
             editName != (active.name ?: botId) ||
                 editDesc != active.description.orEmpty() ||
                 editAvatar != active.avatar.orEmpty() ||
                 editColor != active.color.orEmpty() ||
+                editHarness != active.harness.orEmpty() ||
+                editModel.trim() != baseModel ||
                 editPrivate != (active.privateSessions == true) ||
                 (canBindDesktop && editDesktopTarget != active.desktopTarget.orEmpty()) ||
                 (canIsolateBrowser && editBrowserMode != active.browserMode.orEmpty()) ||
@@ -457,11 +483,16 @@ fun BotInfoSheet(
         editDesc = d.description.orEmpty()
         editAvatar = d.avatar.orEmpty()
         editColor = d.color.orEmpty()
+        editHarness = d.harness.orEmpty()
+        editModel = (if (d.modelInherited == true) "" else d.model.orEmpty()).trim()
         editInst = d.instructions.orEmpty()
         editPrivate = d.privateSessions == true
         editDesktopTarget = d.desktopTarget.orEmpty()
         editBrowserMode = d.browserMode.orEmpty()
         editPermMode = store.clampPermissionMode(d.permissionMode, d.harness)
+        if (editHarness.isNotEmpty()) {
+            scope.launch { runCatching { store.loadModels(editHarness) } }
+        }
     }
 
     suspend fun loadMem() {
@@ -477,6 +508,8 @@ fun BotInfoSheet(
         editDesc = src?.description.orEmpty()
         editAvatar = src?.avatar.orEmpty()
         editColor = src?.color.orEmpty()
+        editHarness = src?.harness.orEmpty()
+        editModel = (if (src?.modelInherited == true) "" else src?.model.orEmpty()).trim()
         editInst = detail?.instructions.orEmpty()
         editPrivate = src?.privateSessions == true
         editDesktopTarget = src?.desktopTarget.orEmpty()
@@ -485,6 +518,10 @@ fun BotInfoSheet(
         loading = true
         scope.launch { loadMem() }
         scope.launch { runCatching { store.refreshDesktopTargets() } }
+        scope.launch {
+            if (store.settings == null) runCatching { store.loadSettings() }
+            if (editHarness.isNotEmpty()) runCatching { store.loadModels(editHarness) }
+        }
         runCatching { store.botDetail(botId) }.getOrNull()?.let { apply(it) }
         loading = false
     }
@@ -504,6 +541,8 @@ fun BotInfoSheet(
                     "description" to editDesc.trim(),
                     "avatar" to editAvatar,
                     "color" to editColor,
+                    "harness" to editHarness,
+                    "model" to editModel.trim(),
                     "instructions" to editInst,
                     "privateSessions" to editPrivate,
                     "permissionMode" to editPermMode,
@@ -773,10 +812,78 @@ fun BotInfoSheet(
                     }
                     AnimatedVisibility(visible = techOpen) {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            DetailRow(store.t("statHarness"), active?.harness ?: "-")
-                            DetailRow(
-                                store.t("statModel"),
-                                active?.model?.takeIf { it.isNotEmpty() } ?: store.t("defaultTag"),
+                            Box(modifier = Modifier.fillMaxWidth()) {
+                                val currentHarnessLabel = harnesses.firstOrNull { it.id == editHarness }?.title ?: editHarness.ifEmpty { "-" }
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(PebbleDimens.rowShape)
+                                        .clickable { harnessMenuOpen = true }
+                                        .padding(vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    Text(store.t("statHarness"), color = p.text, fontSize = PebbleFont.body, modifier = Modifier.weight(1f))
+                                    Text(currentHarnessLabel, color = p.text2, fontSize = PebbleFont.secondary)
+                                    Icon(painterResource(PebbleIcons.ExpandMore), contentDescription = null, tint = p.mute, modifier = Modifier.size(18.dp))
+                                }
+                                DropdownMenu(
+                                    expanded = harnessMenuOpen,
+                                    onDismissRequest = { harnessMenuOpen = false },
+                                    containerColor = p.card,
+                                ) {
+                                    harnesses.forEach { h ->
+                                        DropdownMenuItem(
+                                            text = { Text(h.title, color = p.text, fontSize = PebbleFont.body) },
+                                            trailingIcon = if (editHarness == h.id) {
+                                                { Icon(painterResource(PebbleIcons.Check), contentDescription = null, tint = pal.accent, modifier = Modifier.size(16.dp)) }
+                                            } else {
+                                                null
+                                            },
+                                            onClick = {
+                                                harnessMenuOpen = false
+                                                if (h.id != editHarness) {
+                                                    editHarness = h.id
+                                                    editModel = ""
+                                                    scope.launch { runCatching { store.loadModels(h.id) } }
+                                                }
+                                            },
+                                        )
+                                    }
+                                }
+                            }
+                            Text(store.t("statModel"), color = p.text2, fontSize = PebbleFont.secondary)
+                            ModelInputWithMenu(
+                                value = editModel,
+                                placeholder = effectiveModelPlaceholder,
+                                candidates = store.models[editHarness].orEmpty(),
+                                loading = loadingModels,
+                                onLoadCandidates = {
+                                    if (editHarness.isNotEmpty() && !loadingModels) {
+                                        loadingModels = true
+                                        scope.launch {
+                                            try {
+                                                store.loadModels(editHarness)
+                                            } finally {
+                                                loadingModels = false
+                                            }
+                                        }
+                                    }
+                                },
+                                onRefreshCandidates = {
+                                    if (editHarness.isNotEmpty() && !loadingModels) {
+                                        loadingModels = true
+                                        scope.launch {
+                                            try {
+                                                store.loadModels(editHarness, force = true)
+                                            } finally {
+                                                loadingModels = false
+                                            }
+                                        }
+                                    }
+                                },
+                                onValueChange = { editModel = it },
+                                store = store,
                             )
                             val permModes = store.supportedPermissionModes(active?.harness)
                             if (permModes.size <= 1) {
@@ -1081,7 +1188,7 @@ fun MemoryItemRow(
     ) {
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(item.kind ?: "memory", color = p.sageInk, fontSize = PebbleFont.secondary, fontWeight = FontWeight.SemiBold)
+                Text(localizedMemoryKind(item.kind, store), color = p.sageInk, fontSize = PebbleFont.secondary, fontWeight = FontWeight.SemiBold)
                 if (showScope && !item.scope.isNullOrEmpty()) {
                     Text(
                         text = if (item.scope == "everywhere" || item.scope == "global") store.t("memScopeEverywhere") else store.t("memScopeProject"),
