@@ -267,7 +267,8 @@ func TestNoClientCodeCJKLeaks(t *testing.T) {
 				strings.Contains(rel, ".test.") ||
 				rel == "apps/android/app/src/main/java/ai/pebble/android/i18n/StringsZh.kt" ||
 				rel == "apps/android/app/src/main/java/ai/pebble/android/i18n/StringsEn.kt" ||
-				rel == "web/src/lib/i18n.ts"
+				rel == "web/src/lib/i18n/zh-CN.ts" ||
+				rel == "web/src/lib/i18n/en.ts"
 		},
 	)
 	if len(violations) > 0 {
@@ -325,18 +326,18 @@ func TestEnglishResourcesNoCJK(t *testing.T) {
 	}
 
 	// Check Web en block.
-	tsPath := filepath.Join(root, "web/src/lib/i18n.ts")
+	tsPath := filepath.Join(root, "web/src/lib/i18n/en.ts")
 	tsRaw, err := os.ReadFile(tsPath)
 	if err != nil {
-		t.Fatalf("read i18n.ts: %v", err)
+		t.Fatalf("read web/src/lib/i18n/en.ts: %v", err)
 	}
-	tsEnBlock, tsStartLine := extractBlock(string(tsRaw), "\n  en: {", "\n  },")
+	tsEnBlock, tsStartLine := extractBlock(string(tsRaw), "export const en: Record<string, string> = {", "\n};")
 	if tsEnBlock == "" {
-		t.Fatal("failed to locate en block in web/src/lib/i18n.ts")
+		t.Fatal("failed to locate en block in web/src/lib/i18n/en.ts")
 	}
 	for i, line := range strings.Split(tsEnBlock, "\n") {
 		if hasCJK(line) {
-			violations = append(violations, "web/src/lib/i18n.ts:"+itoa(tsStartLine+i)+": "+strings.TrimSpace(line))
+			violations = append(violations, "web/src/lib/i18n/en.ts:"+itoa(tsStartLine+i)+": "+strings.TrimSpace(line))
 		}
 	}
 
@@ -372,16 +373,19 @@ func TestI18nKeyParity(t *testing.T) {
 	enKt := extractRegexKeys(ktKeyRe, enKtBlock)
 	assertSameKeys(t, "Android zhStrings", zhKt, "Android enStrings", enKt)
 
-	// 3. Web i18n.ts.
-	tsRawBytes, err := os.ReadFile(filepath.Join(root, "web/src/lib/i18n.ts"))
+	// 3. Web i18n/zh-CN.ts & i18n/en.ts.
+	zhTsRawBytes, err := os.ReadFile(filepath.Join(root, "web/src/lib/i18n/zh-CN.ts"))
 	if err != nil {
-		t.Fatalf("read web/src/lib/i18n.ts: %v", err)
+		t.Fatalf("read web/src/lib/i18n/zh-CN.ts: %v", err)
 	}
-	tsRaw := string(tsRawBytes)
-	zhTsBlock, _ := extractBlock(tsRaw, "\n  'zh-CN': {", "\n  },")
-	enTsBlock, _ := extractBlock(tsRaw, "\n  en: {", "\n  },")
+	enTsRawBytes, err := os.ReadFile(filepath.Join(root, "web/src/lib/i18n/en.ts"))
+	if err != nil {
+		t.Fatalf("read web/src/lib/i18n/en.ts: %v", err)
+	}
+	zhTsBlock, _ := extractBlock(string(zhTsRawBytes), "export const zhCN: Record<string, string> = {", "\n};")
+	enTsBlock, _ := extractBlock(string(enTsRawBytes), "export const en: Record<string, string> = {", "\n};")
 	if zhTsBlock == "" || enTsBlock == "" {
-		t.Fatal("failed to extract zh-CN/en blocks from web/src/lib/i18n.ts")
+		t.Fatal("failed to extract zhCN/en blocks from web/src/lib/i18n/")
 	}
 	tsKeyRe := regexp.MustCompile(`(?m)^\s+([A-Za-z0-9_]+):`)
 	zhTs := extractRegexKeys(tsKeyRe, zhTsBlock)
