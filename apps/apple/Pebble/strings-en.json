@@ -708,5 +708,11 @@
   "workspaceDir": "Workspace",
   "workspaceFiles": "Workspace Files",
   "yesterday": "Yesterday",
-  "youPrefix": "You: "
+  "youPrefix": "You: ",
+  "macDaemonNotFound": "pebble executable not found",
+  "macDaemonExited": "host-daemon exited unexpectedly (code {code})",
+  "macDaemonNotReady": "Desktop host is not ready yet",
+  "mdDetails": "Details",
+  "mdImageFallback": "[Image]",
+  "mdImageFallbackAlt": "[Image: {alt}]"
 }

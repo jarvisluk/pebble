@@ -141,7 +141,15 @@ func formatDurationMs(_ ms: Double?) -> String {
 final class HubStore {
     // 偏好
     var themePref: String { didSet { UserDefaults.standard.set(themePref, forKey: "bothub.theme") } }
-    var langPref: String { didSet { UserDefaults.standard.set(langPref, forKey: "bothub.lang"); L.lang = lang } }
+    var langPref: String {
+        didSet {
+            UserDefaults.standard.set(langPref, forKey: "bothub.lang")
+            L.lang = lang
+            #if os(iOS)
+            PebbleSharedStore.setPreferredLang(lang)
+            #endif
+        }
+    }
     var tsBound: Bool { didSet { UserDefaults.standard.set(tsBound, forKey: "bothub.tsBound") } }
     var tsControlUrl: String { didSet { UserDefaults.standard.set(tsControlUrl, forKey: "bothub.tsControlUrl") } }
 
@@ -232,6 +240,9 @@ final class HubStore {
         tsBound = d.bool(forKey: "bothub.tsBound")
         tsControlUrl = d.string(forKey: "bothub.tsControlUrl") ?? ""
         L.lang = lang
+        #if os(iOS)
+        PebbleSharedStore.setPreferredLang(lang)
+        #endif
         if autoConnect {
             if let data = SecureStore.read("servers"), let list = try? JSONDecoder().decode([ServerProfile].self, from: data) {
                 servers = list

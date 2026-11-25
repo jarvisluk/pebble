@@ -297,7 +297,7 @@ struct MarkdownText: View {
                         rawBlock.removeSubrange(closeRange.lowerBound..<rawBlock.endIndex)
                     }
                     rawBlock = rawBlock.trimmingCharacters(in: .whitespacesAndNewlines)
-                    var summary = "详情"
+                    var summary = L.t("mdDetails")
                     var bodyText = rawBlock
                     if let sm = firstRange(rxSummary, in: rawBlock) {
                         var inner = String(rawBlock[sm])
@@ -976,7 +976,7 @@ struct MarkdownText: View {
                     let rawTarget = String(chars[(closeB + 2)..<closeP]).trimmingCharacters(in: .whitespaces)
                     let urlStr = rawTarget.components(separatedBy: .whitespaces).first ?? ""
                     flushPlain()
-                    let label = alt.isEmpty ? "[图片]" : "[图片: \(alt)]"
+                    let label = alt.isEmpty ? L.t("mdImageFallback") : L.t("mdImageFallbackAlt", ["alt": alt])
                     var imgAttr = AttributedString(label)
                     if let url = URL(string: urlStr), urlStr.lowercased().hasPrefix("http://") || urlStr.lowercased().hasPrefix("https://") {
                         imgAttr.link = url
@@ -1454,7 +1454,7 @@ private struct MarkdownImageView: View {
 
     @ViewBuilder
     private func fallbackChip(link: URL?) -> some View {
-        let label = alt.isEmpty ? "[图片]" : "[图片: \(alt)]"
+        let label = alt.isEmpty ? L.t("mdImageFallback") : L.t("mdImageFallbackAlt", ["alt": alt])
         if let link {
             Link(label, destination: link)
                 .font(.system(size: AppFont.secondary))

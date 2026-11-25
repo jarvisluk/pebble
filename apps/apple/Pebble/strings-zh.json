@@ -708,5 +708,11 @@
   "workspaceDir": "工作目录",
   "workspaceFiles": "工作区文件",
   "yesterday": "昨天",
-  "youPrefix": "你: "
+  "youPrefix": "你: ",
+  "macDaemonNotFound": "未找到 pebble 可执行文件",
+  "macDaemonExited": "host-daemon 异常退出（code {code}）",
+  "macDaemonNotReady": "桌面宿主尚未就绪",
+  "mdDetails": "详情",
+  "mdImageFallback": "[图片]",
+  "mdImageFallbackAlt": "[图片: {alt}]"
 }

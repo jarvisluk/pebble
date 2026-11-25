@@ -309,7 +309,12 @@ function splitTrailingPunct(url: string): { url: string; trailing: string } {
 
 const SAFE_INLINE_TAG_RE = /^<(sup|sub|u|s|del|b|strong|i|em|code|kbd|mark)>([\s\S]*?)<\/\1>/i;
 
-function inlineMd(src: string, depth = 0): string {
+export interface MarkdownLabels {
+  details?: string;
+  image?: string;
+}
+
+function inlineMd(src: string, depth = 0, imageLabel = 'Image'): string {
   if (!src) return '';
   if (depth > 8) return escHtml(src);
 
@@ -357,7 +362,7 @@ function inlineMd(src: string, depth = 0): string {
       if (safeTagMatch) {
         const tag = safeTagMatch[1].toLowerCase();
         const inner = safeTagMatch[2];
-        const renderedInner = (tag === 'code' || tag === 'kbd') ? escHtml(inner) : inlineMd(inner, depth + 1);
+        const renderedInner = (tag === 'code' || tag === 'kbd') ? escHtml(inner) : inlineMd(inner, depth + 1, imageLabel);
         out += `<${tag}>${renderedInner}</${tag}>`;
         i += safeTagMatch[0].length;
         continue;
@@ -387,7 +392,7 @@ function inlineMd(src: string, depth = 0): string {
             const safeAlt = escHtml(alt || 'image');
             out += `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer"><img class="md-img" src="${safeUrl}" alt="${safeAlt}" loading="lazy"></a>`;
           } else {
-            out += `<span class="md-img-fallback">${escHtml(alt ? `[图片: ${alt}]` : '[图片]')}</span>`;
+            out += `<span class="md-img-fallback">${escHtml(alt ? `[${imageLabel}: ${alt}]` : `[${imageLabel}]`)}</span>`;
           }
           i = closeParen + 1;
           continue;
@@ -415,7 +420,7 @@ function inlineMd(src: string, depth = 0): string {
           const url = parseLinkTarget(src.slice(closeBracket + 2, closeParen));
           if (isSafeUrl(url, true)) {
             const safeUrl = escHtml(url);
-            out += `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${inlineMd(label, depth + 1)}</a>`;
+            out += `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${inlineMd(label, depth + 1, imageLabel)}</a>`;
             i = closeParen + 1;
             continue;
           }
@@ -456,7 +461,7 @@ function inlineMd(src: string, depth = 0): string {
       if (!isUnder || !isWordChar(i > 0 ? src[i - 1] : undefined)) {
         const end = findClosingDelimiter(src, i + 3, delim, isUnder);
         if (end !== -1) {
-          out += `<strong><em>${inlineMd(src.slice(i + 3, end), depth + 1)}</em></strong>`;
+          out += `<strong><em>${inlineMd(src.slice(i + 3, end), depth + 1, imageLabel)}</em></strong>`;
           i = end + 3;
           continue;
         }
@@ -470,7 +475,7 @@ function inlineMd(src: string, depth = 0): string {
       if (!isUnder || !isWordChar(i > 0 ? src[i - 1] : undefined)) {
         const end = findClosingDelimiter(src, i + 2, delim, isUnder);
         if (end !== -1) {
-          out += `<strong>${inlineMd(src.slice(i + 2, end), depth + 1)}</strong>`;
+          out += `<strong>${inlineMd(src.slice(i + 2, end), depth + 1, imageLabel)}</strong>`;
           i = end + 2;
           continue;
         }
@@ -481,7 +486,7 @@ function inlineMd(src: string, depth = 0): string {
     if (src.startsWith('~~', i) && i + 2 < n && !/\s/.test(src[i + 2])) {
       const end = findClosingDelimiter(src, i + 2, '~~', false);
       if (end !== -1) {
-        out += `<del>${inlineMd(src.slice(i + 2, end), depth + 1)}</del>`;
+        out += `<del>${inlineMd(src.slice(i + 2, end), depth + 1, imageLabel)}</del>`;
         i = end + 2;
         continue;
       }
@@ -493,7 +498,7 @@ function inlineMd(src: string, depth = 0): string {
       if (!isUnder || !isWordChar(i > 0 ? src[i - 1] : undefined)) {
         const end = findClosingDelimiter(src, i + 1, ch, isUnder);
         if (end !== -1) {
-          out += `<em>${inlineMd(src.slice(i + 1, end), depth + 1)}</em>`;
+          out += `<em>${inlineMd(src.slice(i + 1, end), depth + 1, imageLabel)}</em>`;
           i = end + 1;
           continue;
         }
@@ -595,14 +600,15 @@ function parseListLine(line: string): ListItem | null {
   return { ordered, marker, task, checked, indent, text };
 }
 
-function renderBlocks(lines: string[], copyLabel: string): string[] {
+function renderBlocks(lines: string[], copyLabel: string, labels: Required<MarkdownLabels>): string[] {
+  const { details: detailsLabel, image: imageLabel } = labels;
   const out: string[] = [];
   let para: string[] = [];
   let list: ListItem[] = [];
 
   const flushPara = () => {
     if (para.length) {
-      out.push(`<p>${para.map((ln) => inlineMd(ln)).join('<br>')}</p>`);
+      out.push(`<p>${para.map((ln) => inlineMd(ln, 0, imageLabel)).join('<br>')}</p>`);
       para = [];
     }
   };
@@ -622,7 +628,7 @@ function renderBlocks(lines: string[], copyLabel: string): string[] {
         const markerHtml = item.task
           ? `<span class="md-check${item.checked ? ' is-checked' : ''}" aria-hidden="true">${item.checked ? '✓' : ''}</span>`
           : `<span class="md-li-mark">${escHtml(item.marker)}</span>`;
-        return `<div class="${cls}">${markerHtml}<div class="md-li-body">${inlineMd(item.text)}</div></div>`;
+        return `<div class="${cls}">${markerHtml}<div class="md-li-body">${inlineMd(item.text, 0, imageLabel)}</div></div>`;
       })
       .join('');
     out.push(`<div class="md-list">${rows}</div>`);
@@ -707,16 +713,16 @@ function renderBlocks(lines: string[], copyLabel: string): string[] {
           collected.push(lines[k]);
         }
         const rawBlock = collected.join('\n').replace(/<\/details>\s*$/i, '').trim();
-        let summaryText = '详情';
+        let summaryText = detailsLabel;
         let bodyText = rawBlock;
         const sumMatch = rawBlock.match(/<summary>([\s\S]*?)<\/summary>/i);
         if (sumMatch) {
-          summaryText = sumMatch[1].trim() || '详情';
+          summaryText = sumMatch[1].trim() || detailsLabel;
           bodyText = rawBlock.replace(sumMatch[0], '').trim();
         }
-        const bodyHtml = bodyText ? renderBlocks(bodyText.split('\n'), copyLabel).join('') : '';
+        const bodyHtml = bodyText ? renderBlocks(bodyText.split('\n'), copyLabel, labels).join('') : '';
         out.push(
-          `<details class="md-details"${isOpen ? ' open' : ''}><summary>${inlineMd(summaryText)}</summary>${bodyHtml ? `<div class="md-details-body">${bodyHtml}</div>` : ''}</details>`
+          `<details class="md-details"${isOpen ? ' open' : ''}><summary>${inlineMd(summaryText, 0, imageLabel)}</summary>${bodyHtml ? `<div class="md-details-body">${bodyHtml}</div>` : ''}</details>`
         );
         i = hasEndOnSameOrLater + 1;
         continue;
@@ -737,7 +743,7 @@ function renderBlocks(lines: string[], copyLabel: string): string[] {
       flushPara();
       flushList();
       const level = hMatch[1].length;
-      out.push(`<h${level}>${inlineMd(hMatch[2])}</h${level}>`);
+      out.push(`<h${level}>${inlineMd(hMatch[2], 0, imageLabel)}</h${level}>`);
       i++;
       continue;
     }
@@ -762,7 +768,7 @@ function renderBlocks(lines: string[], copyLabel: string): string[] {
           const colCount = Math.max(headers.length, aligns.length);
           const ths = Array.from({ length: colCount }, (_, idx) => {
             const align = aligns[idx] || 'left';
-            return `<th style="text-align:${align}">${inlineMd(headers[idx] || '')}</th>`;
+            return `<th style="text-align:${align}">${inlineMd(headers[idx] || '', 0, imageLabel)}</th>`;
           }).join('');
           const bodyRows: string[] = [];
           i += 2;
@@ -773,7 +779,7 @@ function renderBlocks(lines: string[], copyLabel: string): string[] {
             const cells = splitTableCells(lines[i]);
             const tds = Array.from({ length: colCount }, (_, idx) => {
               const align = aligns[idx] || 'left';
-              return `<td style="text-align:${align}">${inlineMd(cells[idx] || '')}</td>`;
+              return `<td style="text-align:${align}">${inlineMd(cells[idx] || '', 0, imageLabel)}</td>`;
             }).join('');
             bodyRows.push(`<tr>${tds}</tr>`);
             i++;
@@ -795,7 +801,7 @@ function renderBlocks(lines: string[], copyLabel: string): string[] {
         quoteLines.push(lines[i].trim().replace(/^>\s?/, ''));
         i++;
       }
-      out.push(`<blockquote>${renderBlocks(quoteLines, copyLabel).join('')}</blockquote>`);
+      out.push(`<blockquote>${renderBlocks(quoteLines, copyLabel, labels).join('')}</blockquote>`);
       continue;
     }
 
@@ -814,7 +820,7 @@ function renderBlocks(lines: string[], copyLabel: string): string[] {
       flushPara();
       flushList();
       out.push(
-        `<div class="md-footnote"><span class="md-fn-id">${escHtml(fnDefMatch[1])}</span><div class="md-fn-body">${inlineMd(fnDefMatch[2])}</div></div>`
+        `<div class="md-footnote"><span class="md-fn-id">${escHtml(fnDefMatch[1])}</span><div class="md-fn-body">${inlineMd(fnDefMatch[2], 0, imageLabel)}</div></div>`
       );
       i++;
       continue;
@@ -831,7 +837,11 @@ function renderBlocks(lines: string[], copyLabel: string): string[] {
   return out;
 }
 
-export function renderMarkdownHtml(text: string, copyLabel: string): string {
+export function renderMarkdownHtml(text: string, copyLabel: string, labels?: MarkdownLabels): string {
   const normalized = String(text || '').replace(/\r\n/g, '\n');
-  return `<div class="md">${renderBlocks(normalized.split('\n'), copyLabel).join('')}</div>`;
+  const resolved: Required<MarkdownLabels> = {
+    details: labels?.details || 'Details',
+    image: labels?.image || 'Image',
+  };
+  return `<div class="md">${renderBlocks(normalized.split('\n'), copyLabel, resolved).join('')}</div>`;
 }

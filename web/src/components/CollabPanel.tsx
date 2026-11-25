@@ -169,7 +169,14 @@ export const CollabPanel: React.FC<CollabPanelProps> = ({
                       </div>
                       <div className="bubble">
                         {m.text ? (
-                          <div dangerouslySetInnerHTML={{ __html: renderMarkdownHtml(m.text, t('copy')) }} />
+                          <div
+                            dangerouslySetInnerHTML={{
+                              __html: renderMarkdownHtml(m.text, t('copy'), {
+                                details: t('mdDetails'),
+                                image: t('mdImage'),
+                              }),
+                            }}
+                          />
                         ) : null}
                         <MessageAttachments media={m.media} lang={lang} onPreviewImage={setPreviewImg} />
                       </div>

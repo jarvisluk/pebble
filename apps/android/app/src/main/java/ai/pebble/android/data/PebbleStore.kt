@@ -308,6 +308,7 @@ class PebbleStore(context: Context) {
         prefs.edit().putString("pebble.lang", value).apply()
         L.lang = resolvedLang
         langRevision += 1
+        NotificationHelper.ensureChannels(appContext)
     }
 
     fun markUnboxPermsDone() {
@@ -466,7 +467,15 @@ class PebbleStore(context: Context) {
                     val steps = botSteps.remove(st.id) ?: 0
                     if (hadBusy && !inForeground) {
                         val preview = last[st.id]?.let { plainPreview(it.body) }.orEmpty()
-                        val summary = if (preview.isNotEmpty()) preview.take(90) else if (steps > 0) "$steps 步已完成" else ""
+                        val summary = if (preview.isNotEmpty()) {
+                            preview.take(90)
+                        } else if (steps == 1) {
+                            L.t("notifStepDoneOne")
+                        } else if (steps > 1) {
+                            L.t("notifStepsDone", mapOf("n" to steps))
+                        } else {
+                            ""
+                        }
                         NotificationHelper.endBotActivity(appContext, st.id, st.displayName, summary, notify = activeChat != st.id)
                     } else {
                         NotificationHelper.cancelBotActivity(appContext, st.id)

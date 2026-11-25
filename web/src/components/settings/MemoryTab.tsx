@@ -316,7 +316,7 @@ export const MemoryTab: React.FC<MemoryTabProps> = ({
         )}
 
         <div className="mem-filters">
-          <div className="mem-scope-seg" role="group" aria-label="Memory scope">
+          <div className="mem-scope-seg" role="group" aria-label={t('memScopeAria')}>
             <button
               type="button"
               id="sMemScopeGlobal"

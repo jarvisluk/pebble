@@ -1003,8 +1003,8 @@ export default function App() {
           className={`side-resizer${sideResizing ? ' active' : ''}`}
           role="separator"
           aria-orientation="vertical"
-          aria-label="调整侧边栏宽度"
-          title="拖动调整宽度，双击重置"
+          aria-label={t('resizeSidebarAria')}
+          title={t('resizeSidebarTitle')}
           onMouseDown={handleSideResizeStart}
           onDoubleClick={handleSideResizeReset}
         />
@@ -1193,7 +1193,7 @@ export default function App() {
                 </svg>
                 <span>{activeBot?.name || t('stageChatToggle')}</span>
               </button>
-              <nav className="stage-tabs" aria-label="Stage tabs">
+              <nav className="stage-tabs" aria-label={t('stageTabsAria')}>
                 {canUseFiles && (
                   <button
                     type="button"
