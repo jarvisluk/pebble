@@ -49,7 +49,7 @@ final class LiveActivityManager {
             )
             let state = PebbleActivityAttributes.ContentState(
                 phase: "running",
-                statusText: L.lang == "en" ? "Thinking…" : "正在思考",
+                statusText: L.lang == "en" ? "Thinking…" : "正在思考", // i18n:allow-cjk
                 stepCount: 0,
                 startedAt: now,
                 summary: nil,
@@ -68,10 +68,10 @@ final class LiveActivityManager {
             let steps = botSteps.removeValue(forKey: bot.id) ?? 0
             let finalState = PebbleActivityAttributes.ContentState(
                 phase: "completed",
-                statusText: L.lang == "en" ? "Completed" : "已完成",
+                statusText: L.lang == "en" ? "Completed" : "已完成", // i18n:allow-cjk
                 stepCount: steps,
                 startedAt: started,
-                summary: L.lang == "en" ? "Task finished" : "任务已完成",
+                summary: L.lang == "en" ? "Task finished" : "任务已完成", // i18n:allow-cjk
                 takeoverReason: nil
             )
             Task {
@@ -90,8 +90,8 @@ final class LiveActivityManager {
         botSteps[botId] = steps
         let started = botStartedAt[botId] ?? Date().timeIntervalSince1970
         let status = tool.isEmpty
-            ? (L.lang == "en" ? "Running tool" : "正在运行工具")
-            : (L.lang == "en" ? "Running \(tool)" : "正在运行 \(tool)")
+            ? (L.lang == "en" ? "Running tool" : "正在运行工具") // i18n:allow-cjk
+            : (L.lang == "en" ? "Running \(tool)" : "正在运行 \(tool)") // i18n:allow-cjk
         let state = PebbleActivityAttributes.ContentState(
             phase: "running",
             statusText: status,
@@ -112,11 +112,11 @@ final class LiveActivityManager {
             let target = (item.target ?? "").isEmpty ? "local" : item.target!
             activeTargets.insert(target)
             let reason = (item.reason ?? "").isEmpty
-                ? (L.lang == "en" ? "Manual action required" : "需要人工接管完成操作")
+                ? (L.lang == "en" ? "Manual action required" : "需要人工接管完成操作") // i18n:allow-cjk
                 : item.reason!
             let state = PebbleActivityAttributes.ContentState(
                 phase: "takeover",
-                statusText: L.lang == "en" ? "Waiting for takeover" : "等待人工接管",
+                statusText: L.lang == "en" ? "Waiting for takeover" : "等待人工接管", // i18n:allow-cjk
                 stepCount: 0,
                 startedAt: Date().timeIntervalSince1970,
                 summary: nil,
@@ -147,10 +147,10 @@ final class LiveActivityManager {
             tokenTasks.removeValue(forKey: "desktop:\(target)")?.cancel()
             let doneState = PebbleActivityAttributes.ContentState(
                 phase: "completed",
-                statusText: L.lang == "en" ? "Takeover resolved" : "接管已完成",
+                statusText: L.lang == "en" ? "Takeover resolved" : "接管已完成", // i18n:allow-cjk
                 stepCount: 0,
                 startedAt: Date().timeIntervalSince1970,
-                summary: L.lang == "en" ? "Automation resumed" : "远程桌面已恢复自动执行",
+                summary: L.lang == "en" ? "Automation resumed" : "远程桌面已恢复自动执行", // i18n:allow-cjk
                 takeoverReason: nil
             )
             Task {
@@ -182,7 +182,7 @@ final class LiveActivityManager {
             }()
             let state = PebbleActivityAttributes.ContentState(
                 phase: "approval",
-                statusText: L.lang == "en" ? "Approval required" : "等待批准",
+                statusText: L.lang == "en" ? "Approval required" : "等待批准", // i18n:allow-cjk
                 stepCount: steps,
                 startedAt: started,
                 summary: body,
@@ -198,7 +198,7 @@ final class LiveActivityManager {
             let steps = botSteps[botId] ?? 0
             let state = PebbleActivityAttributes.ContentState(
                 phase: "running",
-                statusText: L.lang == "en" ? "Thinking…" : "正在思考",
+                statusText: L.lang == "en" ? "Thinking…" : "正在思考", // i18n:allow-cjk
                 stepCount: steps,
                 startedAt: started,
                 summary: nil,

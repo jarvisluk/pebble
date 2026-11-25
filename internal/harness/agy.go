@@ -143,19 +143,19 @@ func (h *AgyHarness) PermissionCapabilities() PermissionCapabilities {
 
 func (h *AgyHarness) ListCommands(_ context.Context, bot config.BotConfig) ([]SlashCommand, error) {
 	builtins := []SlashCommand{
-		{Name: "compact", Description: "压缩当前会话上下文", Source: "harness"},
-		{Name: "plan", Description: "切换计划模式", Source: "harness"},
-		{Name: "clear", Description: "清空会话上下文", Source: "harness"},
-		{Name: "goal", Description: "开启长程目标执行", Source: "harness"},
-		{Name: "schedule", Description: "创建定时任务或提醒", Source: "harness"},
-		{Name: "browser", Description: "启用浏览器交互任务", Source: "harness"},
-		{Name: "grill-me", Description: "通过问答访谈对齐方案", Source: "harness"},
-		{Name: "teamwork", Description: "启动多代理协作", Source: "harness"},
-		{Name: "learn", Description: "沉淀本次经验到配置", Source: "harness"},
-		{Name: "boost", Description: "启用深度思考与严格验证", Source: "harness"},
-		{Name: "plugin", Description: "管理或创建插件", Source: "harness"},
-		{Name: "automation", Description: "配置后台自动化任务", Source: "harness"},
-		{Name: "help", Description: "查看可用命令帮助", Source: "harness"},
+		{Name: "compact", Description: "Compact current session context", Source: "harness"},
+		{Name: "plan", Description: "Switch to plan mode", Source: "harness"},
+		{Name: "clear", Description: "Clear session context", Source: "harness"},
+		{Name: "goal", Description: "Start long-running goal execution", Source: "harness"},
+		{Name: "schedule", Description: "Create scheduled task or timer", Source: "harness"},
+		{Name: "browser", Description: "Run browser interaction task", Source: "harness"},
+		{Name: "grill-me", Description: "Align on plan via Q&A interview", Source: "harness"},
+		{Name: "teamwork", Description: "Start multi-agent collaboration", Source: "harness"},
+		{Name: "learn", Description: "Save lessons to configuration", Source: "harness"},
+		{Name: "boost", Description: "Enable deep thinking and verification", Source: "harness"},
+		{Name: "plugin", Description: "Manage or create plugins", Source: "harness"},
+		{Name: "automation", Description: "Configure background automation", Source: "harness"},
+		{Name: "help", Description: "Show available commands", Source: "harness"},
 	}
 
 	h.cmdMu.Lock()

@@ -43,13 +43,13 @@ var ErrRoutineNotFound = errors.New("routine not found")
 var ErrDesktopTaskBusy = errors.New("desktop task already running for target")
 
 // ErrLocalDesktopDisabled indicates local host desktop automation is turned off in settings.
-var ErrLocalDesktopDisabled = errors.New("本机桌面操控已在「设置 › 远程与设备」中关闭")
+var ErrLocalDesktopDisabled = errors.New("local desktop control is disabled in Settings -> Connection & Devices")
 
 // ErrBoundDesktopOffline indicates a bot's explicitly bound desktop target is offline or unavailable.
-var ErrBoundDesktopOffline = errors.New("绑定的桌面节点当前离线或未开启桌面权限")
+var ErrBoundDesktopOffline = errors.New("bound desktop node is offline or desktop permission is disabled")
 
 // ErrNodeUpgradeRequired indicates the target remote node is running an older version that lacks a required capability.
-var ErrNodeUpgradeRequired = errors.New("远端节点版本过低，不支持此功能，请升级该节点")
+var ErrNodeUpgradeRequired = errors.New("remote node version is too old for this feature; please upgrade the node")
 
 // ErrForbidden indicates the caller is not permitted to access another bot's private sessions.
 var ErrForbidden = errors.New("forbidden")
@@ -1186,7 +1186,7 @@ func (h *Hub) ResetSession(botID string) (state.SessionRecord, bool, error) {
 			SessionID: prev.ID,
 			Role:      "system",
 			From:      "system",
-			Text:      fmt.Sprintf("Session 已重置（旧 Session: %s），Workspace 和 memory/ 已保留。", prev.SessionID),
+			Text:      fmt.Sprintf("Session reset (previous: %s). Workspace and memory/ preserved.", prev.SessionID),
 		})
 		h.emitStatus(lane)
 	}
@@ -1232,7 +1232,7 @@ func (h *Hub) RotateSession(botID, handoffNote string, deferUntilTurnEnd bool) (
 			SessionID: prev.ID,
 			Role:      "system",
 			From:      "system",
-			Text:      fmt.Sprintf("Session 已归档（%s），下一轮将开启新会话。", prev.ID),
+			Text:      fmt.Sprintf("Session archived (%s). The next turn will start a new session.", prev.ID),
 		})
 		h.emitStatus(lane)
 	}
@@ -1321,12 +1321,12 @@ func (h *Hub) HandleInput(ctx context.Context, botID, rawInput string, opts Send
 		caps := harness.CapabilitiesOf(runner)
 		rec, _ := h.store.Get(botID)
 		if arg == "" {
-			text := fmt.Sprintf("当前权限模式：%s\n可用模式：%s", bot.EffectivePermissionMode(), strings.Join(caps.Modes, ", "))
+			text := fmt.Sprintf("Current permission mode: %s\nAvailable modes: %s", bot.EffectivePermissionMode(), strings.Join(caps.Modes, ", "))
 			return &harness.TurnResult{BotID: botID, SessionID: rec.SessionID, Text: text}, nil
 		}
 		norm, err := config.NormalizePermissionMode(arg)
 		if err != nil || norm == "" {
-			return nil, fmt.Errorf("无效权限模式 %q（可选：%s）", arg, strings.Join(caps.Modes, ", "))
+			return nil, fmt.Errorf("invalid permission mode %q (available: %s)", arg, strings.Join(caps.Modes, ", "))
 		}
 		st, err := h.UpdateBot(botID, BotUpdate{PermissionMode: &norm})
 		if err != nil {
@@ -1335,7 +1335,7 @@ func (h *Hub) HandleInput(ctx context.Context, botID, rawInput string, opts Send
 		return &harness.TurnResult{
 			BotID:     botID,
 			SessionID: rec.SessionID,
-			Text:      fmt.Sprintf("已将 %s 权限模式切换为 %s。", st.Name, st.PermissionMode),
+			Text:      fmt.Sprintf("Switched %s permission mode to %s.", st.Name, st.PermissionMode),
 		}, nil
 	}
 
@@ -1629,7 +1629,7 @@ func formatCrossHostHandoffPrefix(recent []state.SyncMessageRow) string {
 
 func formatRoutineReceiptsPrefix(receipts []state.RoutineRun) string {
 	var lines []string
-	lines = append(lines, "[后台定时任务回执 — 以下为此前后台巡检结果，仅供参考，无需重复汇报]")
+	lines = append(lines, "[Background routine receipt — results from earlier background checks, for context only; no need to repeat]")
 	for _, r := range receipts {
 		name := r.RoutineName
 		if name == "" {
@@ -1868,7 +1868,7 @@ func (h *Hub) executeTurn(ctx context.Context, lane *botLane, bot config.BotConf
 				if errors.Is(ctx.Err(), context.Canceled) {
 					h.appendMessage(state.ChatMessage{
 						BotID: bot.ID, SessionID: sess.ID, Turn: turnNum, Tools: tools,
-						Role: "system", From: "system", Text: "已停止",
+						Role: "system", From: "system", Text: "Stopped",
 					})
 				}
 				return nil, err
@@ -1891,7 +1891,7 @@ func (h *Hub) executeTurn(ctx context.Context, lane *botLane, bot config.BotConf
 				}
 				h.appendMessage(state.ChatMessage{
 					BotID: bot.ID, SessionID: sess.ID, Turn: turnNum, Tools: tools,
-					Role: "system", From: "system", Text: "已停止",
+					Role: "system", From: "system", Text: "Stopped",
 				})
 				return nil, err
 			}
@@ -1907,13 +1907,13 @@ func (h *Hub) executeTurn(ctx context.Context, lane *botLane, bot config.BotConf
 				h.appendMessage(state.ChatMessage{
 					BotID: bot.ID, SessionID: sess.ID, Turn: turnNum, Tools: tools,
 					Role: "system", From: "error",
-					Text: fmt.Sprintf("执行失败 (%s): %v", firstLineSummary(prompt, 80), err),
+					Text: fmt.Sprintf("Execution failed (%s): %v", firstLineSummary(prompt, 80), err),
 				})
 				_, _, _ = h.store.ArchiveSessionByID(sess.ID, "error", err.Error(), "")
 				h.appendMessage(state.ChatMessage{
 					BotID: bot.ID, SessionID: sess.ID, Turn: turnNum,
 					Role: "system", From: "system",
-					Text: fmt.Sprintf("检测到会话异常，已归档旧会话 (%s) 并开启新会话重试。", sess.ID),
+					Text: fmt.Sprintf("Session error detected; archived previous session (%s) and retrying in a new session.", sess.ID),
 				})
 				h.emitStatus(lane)
 				continue
@@ -1935,7 +1935,7 @@ func (h *Hub) executeTurn(ctx context.Context, lane *botLane, bot config.BotConf
 			}
 			h.appendMessage(state.ChatMessage{
 				BotID: bot.ID, SessionID: sess.ID, Turn: turnNum, Tools: tools,
-				Role: "system", From: "error", Text: fmt.Sprintf("执行失败: %v", err),
+				Role: "system", From: "error", Text: fmt.Sprintf("Execution failed: %v", err),
 			})
 			return nil, err
 		}
@@ -2030,7 +2030,7 @@ func (h *Hub) executeTurn(ctx context.Context, lane *botLane, bot config.BotConf
 				h.appendMessage(state.ChatMessage{
 					BotID: bot.ID, SessionID: sess.ID, Turn: turnNum,
 					Role: "system", From: "system",
-					Text: fmt.Sprintf("Session 已归档（%s），下一轮将开启新会话。", sess.ID),
+					Text: fmt.Sprintf("Session archived (%s). The next turn will start a new session.", sess.ID),
 				})
 			}
 		}
@@ -2309,7 +2309,7 @@ func (h *Hub) normalizeBotUpdate(upd *BotUpdate) error {
 		}
 	}
 	if upd.Name != nil && strings.TrimSpace(*upd.Name) == "" {
-		return errors.New("名称不能为空")
+		return errors.New("name is required")
 	}
 	if upd.Avatar != nil {
 		avatar, err := config.NormalizeBotAvatar(*upd.Avatar)
@@ -2694,7 +2694,7 @@ func (h *Hub) UpdateBot(botID string, upd BotUpdate) (*BotStatus, error) {
 		if prev, existed, _ := h.store.ArchiveActive(botID, "harness_changed", "", ""); existed {
 			h.appendMessage(state.ChatMessage{
 				BotID: botID, SessionID: prev.ID, Role: "system", From: "system",
-				Text: fmt.Sprintf("已切换到 %s，开启新 Session（旧 Session: %s）。", bot.Harness, prev.SessionID),
+				Text: fmt.Sprintf("Switched to %s and started a new session (previous: %s).", bot.Harness, prev.SessionID),
 			})
 		}
 		st, _ = h.statusOne(botID)
@@ -2718,7 +2718,7 @@ func (h *Hub) DeleteBot(botID string) error {
 	}
 	if len(h.order) <= 1 {
 		h.lanesMu.Unlock()
-		return errors.New("至少需要保留一个 Bot")
+		return errors.New("at least one bot is required")
 	}
 	if h.cfg.ConfigPath != "" {
 		err := config.UpdateRaw(h.cfg, func(raw *config.HubConfig) error {
@@ -3737,7 +3737,7 @@ func ValidateMagpieWebURL(raw string) (string, error) {
 	if u != "" {
 		parsed, err := url.Parse(u)
 		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
-			return "", fmt.Errorf("Magpie 网页地址需以 http:// 或 https:// 开头")
+			return "", fmt.Errorf("Magpie URL must start with http:// or https://")
 		}
 	}
 	return u, nil
@@ -3806,9 +3806,9 @@ func formatVirtualTargetName(hostName, slot string) string {
 		return hostName
 	}
 	if hostName == "" || hostName == "local" {
-		return "虚拟屏 · " + slot
+		return "Virtual Screen · " + slot
 	}
-	return hostName + " · 虚拟屏 " + slot
+	return hostName + " · Virtual Screen " + slot
 }
 
 // ActiveDesktopTarget returns the currently active desktop target, falling back to
@@ -3902,7 +3902,7 @@ func (h *Hub) SetActiveDesktopTarget(target string, ttl time.Duration) (ActiveDe
 	}
 	if spec.IsLocal() && spec.IsVirtualSlot() {
 		if h.localDeskPool == nil || !h.localDeskPool.VirtualSupported() {
-			return ActiveDesktopTarget{}, errors.New("当前主机不支持独立虚拟屏幕（仅 Linux 支持多虚拟屏）")
+			return ActiveDesktopTarget{}, errors.New("this host does not support dedicated virtual screens (Linux only)")
 		}
 		h.desktopTargetMu.Lock()
 		if h.activeDesktopTimer != nil {
@@ -3928,7 +3928,7 @@ func (h *Hub) SetActiveDesktopTarget(target string, ttl time.Duration) (ActiveDe
 		if n.OS != "linux" {
 			return ActiveDesktopTarget{}, fmt.Errorf("remote node %q (%s) does not support virtual screens", spec.NodeID, n.OS)
 		}
-		return ActiveDesktopTarget{}, fmt.Errorf("远端节点 %q 版本过低，不支持独立虚拟屏，请升级该节点或在 Bot 详情中改绑其主桌面: %w", spec.NodeID, ErrNodeUpgradeRequired)
+		return ActiveDesktopTarget{}, fmt.Errorf("remote node %q is outdated and does not support dedicated virtual screens; upgrade the node or bind its main desktop in Bot Details: %w", spec.NodeID, ErrNodeUpgradeRequired)
 	}
 	if ttl <= 0 {
 		ttl = defaultDesktopTargetTTL
@@ -4015,7 +4015,7 @@ func (h *Hub) ResolveBotDesktopTarget(botID, explicitTarget string) (string, err
 	spec := desktop.ParseTarget(raw)
 	if spec.IsLocal() {
 		if spec.IsVirtualSlot() && (h.localDeskPool == nil || !h.localDeskPool.VirtualSupported()) {
-			return "", errors.New("当前主机不支持独立虚拟屏幕（仅 Linux 支持多虚拟屏）")
+			return "", errors.New("this host does not support dedicated virtual screens (Linux only)")
 		}
 		return spec.Raw, nil
 	}
@@ -4023,7 +4023,7 @@ func (h *Hub) ResolveBotDesktopTarget(botID, explicitTarget string) (string, err
 	n, ok := h.findRemoteDesktopNode(spec.NodeID)
 	if !ok {
 		if boundFromBot {
-			return "", fmt.Errorf("Bot %q 绑定的桌面节点 %q 当前离线或未开启桌面权限: %w", botID, spec.NodeID, ErrBoundDesktopOffline)
+			return "", fmt.Errorf("bot %q bound desktop node %q is offline or desktop permission is disabled: %w", botID, spec.NodeID, ErrBoundDesktopOffline)
 		}
 		return "", fmt.Errorf("remote desktop target %q unavailable: %w", spec.NodeID, ErrBoundDesktopOffline)
 	}
@@ -4031,7 +4031,7 @@ func (h *Hub) ResolveBotDesktopTarget(botID, explicitTarget string) (string, err
 		if n.OS != "linux" {
 			return "", fmt.Errorf("remote node %q (%s) does not support virtual screens", spec.NodeID, n.OS)
 		}
-		return "", fmt.Errorf("远端节点 %q 版本过低，不支持独立虚拟屏，请升级该节点或在 Bot 详情中改绑其主桌面: %w", spec.NodeID, ErrNodeUpgradeRequired)
+		return "", fmt.Errorf("remote node %q is outdated and does not support dedicated virtual screens; upgrade the node or bind its main desktop in Bot Details: %w", spec.NodeID, ErrNodeUpgradeRequired)
 	}
 	return spec.Raw, nil
 }
@@ -4483,20 +4483,20 @@ func (h *Hub) auditApproval(botID string, req harness.PermissionRequest, resp ha
 	switch resp.Decision {
 	case "allow_once":
 		if summary != "" {
-			text = fmt.Sprintf("已批准 %s：%s", tool, summary)
+			text = fmt.Sprintf("Approved %s: %s", tool, summary)
 		} else {
-			text = fmt.Sprintf("已批准 %s", tool)
+			text = fmt.Sprintf("Approved %s", tool)
 		}
 	case "allow_always":
-		text = fmt.Sprintf("本次会话始终允许：%s", tool)
+		text = fmt.Sprintf("Always allowed for this session: %s", tool)
 	case "reject":
 		if summary != "" {
-			text = fmt.Sprintf("已拒绝 %s：%s", tool, summary)
+			text = fmt.Sprintf("Rejected %s: %s", tool, summary)
 		} else {
-			text = fmt.Sprintf("已拒绝 %s", tool)
+			text = fmt.Sprintf("Rejected %s", tool)
 		}
 		if r := firstLineSummary(resp.Reason, 80); r != "" {
-			text += fmt.Sprintf("（%s）", r)
+			text += fmt.Sprintf(" (%s)", r)
 		}
 	default:
 		return
@@ -4610,7 +4610,7 @@ func (h *Hub) RequestApproval(ctx context.Context, bot config.BotConfig, mode st
 		}
 		return resp, nil
 	case <-timer.C:
-		resp := harness.PermissionResponse{Decision: "reject", Reason: "审批超时"}
+		resp := harness.PermissionResponse{Decision: "reject", Reason: "approval timed out"}
 		h.auditApproval(bot.ID, req, resp)
 		return resp, nil
 	case <-ctx.Done():
@@ -4741,11 +4741,11 @@ func (h *Hub) ListBotCommands(ctx context.Context, botID string) ([]harness.Slas
 	}
 
 	hubBuiltins := []harness.SlashCommand{
-		{Name: "status", Description: "查看当前会话状态与费用", Source: "hub"},
-		{Name: "bots", Description: "列出所有 Bot", Source: "hub"},
-		{Name: "mode", Description: "查看或切换权限模式", ArgumentHint: "[auto|edit|ask|plan]", Source: "hub"},
-		{Name: "ask", Description: "委派任务给其他 Bot", ArgumentHint: "<bot> <message>", Source: "hub"},
-		{Name: "reset", Description: "归档当前会话并开启新会话", Source: "hub"},
+		{Name: "status", Description: "Show current session status and cost", Source: "hub"},
+		{Name: "bots", Description: "List all bots", Source: "hub"},
+		{Name: "mode", Description: "View or switch permission mode", ArgumentHint: "[auto|edit|ask|plan]", Source: "hub"},
+		{Name: "ask", Description: "Delegate a task to another bot", ArgumentHint: "<bot> <message>", Source: "hub"},
+		{Name: "reset", Description: "Archive current session and start fresh", Source: "hub"},
 	}
 	hubSet := map[string]harness.SlashCommand{}
 	for _, c := range hubBuiltins {

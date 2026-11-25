@@ -674,7 +674,7 @@ func TestRunIsolatedConcurrentAndReceiptInjection(t *testing.T) {
 	if ephCall == nil || ephCall.Bot.Model != "cheap-model" || ephCall.SessionID != "" {
 		t.Fatalf("unexpected ephemeral RunOptions: %+v", ephCall)
 	}
-	if !strings.Contains(lastPrompt, "[后台定时任务回执") || !strings.Contains(lastPrompt, "发现 /var 使用率 91%") || !strings.Contains(lastPrompt, "user ask 2") {
+	if !strings.Contains(lastPrompt, "[Background routine receipt") || !strings.Contains(lastPrompt, "发现 /var 使用率 91%") || !strings.Contains(lastPrompt, "user ask 2") {
 		t.Fatalf("expected receipt injected into main prompt, got:\n%s", lastPrompt)
 	}
 
@@ -1842,7 +1842,7 @@ func TestPermissionModeApprovalLifecycleAndSessionAllow(t *testing.T) {
 
 	// 1. /mode command queries & updates mode.
 	resQ, err := h.HandleInput(context.Background(), "dev", "/mode", SendOptions{Source: "web"})
-	if err != nil || !strings.Contains(resQ.Text, "当前权限模式：ask") {
+	if err != nil || !strings.Contains(resQ.Text, "Current permission mode: ask") {
 		t.Fatalf("/mode query failed: res=%+v err=%v", resQ, err)
 	}
 	if _, err := h.HandleInput(context.Background(), "dev", "/mode invalid", SendOptions{Source: "web"}); err == nil {
@@ -1920,10 +1920,10 @@ func TestPermissionModeApprovalLifecycleAndSessionAllow(t *testing.T) {
 	msgs, _ := h.Messages("dev", 20)
 	var sawAuditAllow, sawAuditDeny bool
 	for _, m := range msgs {
-		if m.Role == "system" && strings.Contains(m.Text, "本次会话始终允许：bash") {
+		if m.Role == "system" && strings.Contains(m.Text, "Always allowed for this session: bash") {
 			sawAuditAllow = true
 		}
-		if m.Role == "system" && strings.Contains(m.Text, "已拒绝 bash") && strings.Contains(m.Text, "危险命令") {
+		if m.Role == "system" && strings.Contains(m.Text, "Rejected bash") && strings.Contains(m.Text, "危险命令") {
 			sawAuditDeny = true
 		}
 	}

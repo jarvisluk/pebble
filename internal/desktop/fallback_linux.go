@@ -28,7 +28,7 @@ func hasAgentDesktop() bool {
 func runAgentDesktop(ctx context.Context, extraEnv []string, args ...string) ([]byte, error) {
 	bin, err := exec.LookPath("agent-desktop")
 	if err != nil {
-		return nil, errors.New("未安装 agent-desktop CLI，请先安装或配置 bot-host")
+		return nil, errors.New("agent-desktop CLI is not installed; install or configure bot-host first")
 	}
 	cmd := exec.CommandContext(ctx, bin, args...)
 	if len(extraEnv) > 0 {
@@ -68,7 +68,7 @@ func captureLinuxFallbackFrame(ctx context.Context, extraEnv []string, windowID 
 	args = append(args, pngPath)
 
 	if _, err := runAgentDesktop(ctx, extraEnv, args...); err != nil {
-		return nil, fmt.Errorf("agent-desktop 截屏失败: %w", err)
+		return nil, fmt.Errorf("agent-desktop screenshot failed: %w", err)
 	}
 
 	raw, err := os.ReadFile(pngPath)
@@ -77,7 +77,7 @@ func captureLinuxFallbackFrame(ctx context.Context, extraEnv []string, windowID 
 	}
 	img, _, err := image.Decode(bytes.NewReader(raw))
 	if err != nil {
-		return nil, fmt.Errorf("解码截屏图像失败: %w", err)
+		return nil, fmt.Errorf("failed to decode screenshot image: %w", err)
 	}
 
 	origBounds := img.Bounds()
@@ -233,7 +233,7 @@ func injectLinuxFallbackInput(ctx context.Context, extraEnv []string, ev Unified
 	case "keyup":
 		return nil
 	default:
-		return fmt.Errorf("不支持的输入事件类型 %q", ev.Kind)
+		return fmt.Errorf("unsupported input event kind %q", ev.Kind)
 	}
 }
 

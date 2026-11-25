@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -134,6 +135,21 @@ func TestEngineScreenRecordingDeniedCache(t *testing.T) {
 		t.Fatalf("expected srDenied=false after granted")
 	}
 	eng.permMu.Unlock()
+}
+
+func TestClassifyScreencaptureError(t *testing.T) {
+	err := classifyScreencaptureError("could not create image from display")
+	if !errors.Is(err, ErrScreenRecordingDenied) {
+		t.Fatalf("expected errors.Is(ErrScreenRecordingDenied), got %v", err)
+	}
+	if strings.Contains(err.Error(), "失败") {
+		t.Fatalf("unexpected CJK in error: %v", err)
+	}
+
+	other := classifyScreencaptureError("invalid display id")
+	if errors.Is(other, ErrScreenRecordingDenied) {
+		t.Fatalf("did not expect ErrScreenRecordingDenied for generic error: %v", other)
+	}
 }
 
 func TestEngineIsScreenRecordingDeniedNativeFallback(t *testing.T) {

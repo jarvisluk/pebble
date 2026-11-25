@@ -310,7 +310,7 @@ func (h *Host) startLocal(ctx context.Context, done chan struct{}) (string, stri
 	for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
 		select {
 		case err := <-errc:
-			return "", "", fmt.Errorf("本机服务退出：%v", err)
+			return "", "", fmt.Errorf("local service exited: %v", err)
 		default:
 		}
 		if req, rerr := http.NewRequestWithContext(ctx, http.MethodGet, base+"/api/meta", nil); rerr == nil {
@@ -334,7 +334,7 @@ func (h *Host) startLocal(ctx context.Context, done chan struct{}) (string, stri
 			}
 		}
 	}
-	return "", "", errors.New("本机服务没有响应")
+	return "", "", errors.New("local service did not respond")
 }
 
 // ParseRemoteTarget parses tailcat://, tailscale://, or http(s):// addresses.
@@ -621,19 +621,19 @@ func (h *Host) FailoverToLocal() {
 	if p.Mode != "remote" || strings.TrimSpace(p.Link) == "" {
 		return
 	}
-	h.setStatus("正在从主电脑同步数据并切换至本机接管…")
+	h.setStatus("Syncing data from primary host and switching to local failover…")
 	if err := EnsureConfig(h.dir); err != nil {
-		h.setStatus("初始化本机配置失败：" + err.Error())
+		h.setStatus("Failed to initialize local config: " + err.Error())
 		return
 	}
 	cfg, _, err := config.Load(h.dir, "")
 	if err != nil {
-		h.setStatus("读取本机配置失败：" + err.Error())
+		h.setStatus("Failed to load local config: " + err.Error())
 		return
 	}
 	store, err := state.NewStore(cfg.StateFile)
 	if err != nil {
-		h.setStatus("打开本机状态库失败：" + err.Error())
+		h.setStatus("Failed to open local state DB: " + err.Error())
 		return
 	}
 	svc := syncer.NewWithStore(cfg, store)
@@ -667,15 +667,15 @@ func (h *Host) FailbackToRemote() {
 	if p.Mode != "local" || strings.TrimSpace(p.Link) == "" {
 		return
 	}
-	h.setStatus("正在回传接管增量至主电脑…")
+	h.setStatus("Syncing local changes back to primary host…")
 	cfg, _, err := config.Load(h.dir, "")
 	if err != nil {
-		h.setStatus("读取本机配置失败：" + err.Error())
+		h.setStatus("Failed to load local config: " + err.Error())
 		return
 	}
 	store, err := state.NewStore(cfg.StateFile)
 	if err != nil {
-		h.setStatus("打开本机状态库失败：" + err.Error())
+		h.setStatus("Failed to open local state DB: " + err.Error())
 		return
 	}
 	svc := syncer.NewWithStore(cfg, store)
@@ -685,7 +685,7 @@ func (h *Host) FailbackToRemote() {
 	if err != nil {
 		cancel()
 		_ = store.Close()
-		h.setStatus("连接主电脑失败，已保留在本机运行：" + err.Error())
+		h.setStatus("Failed to reach primary host; staying in local mode: " + err.Error())
 		return
 	}
 	_, pushErr := svc.PushToPeer(ctx, cli, peerBase, peerTok)
@@ -693,7 +693,7 @@ func (h *Host) FailbackToRemote() {
 	cancel()
 	if pushErr != nil {
 		_ = store.Close()
-		h.setStatus("回传增量失败，已保留在本机运行：" + pushErr.Error())
+		h.setStatus("Failed to sync changes; staying in local mode: " + pushErr.Error())
 		return
 	}
 	if cfg.Sync.GitEnabled() {

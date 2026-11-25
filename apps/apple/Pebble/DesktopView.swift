@@ -673,7 +673,7 @@ struct DesktopView: View {
                 if Task.isCancelled { break }
                 if let he = error as? HubError, he.code == "screen_recording_denied" {
                     streaming = false
-                    self.error = he.message.isEmpty ? hub.t("deskScreenRecordingDenied") : he.message
+                    self.error = hub.t("deskScreenRecordingDenied")
                     break
                 }
                 consecErrors += 1

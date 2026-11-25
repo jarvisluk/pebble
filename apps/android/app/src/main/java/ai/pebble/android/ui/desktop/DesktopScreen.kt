@@ -319,7 +319,7 @@ fun DesktopScreen(
                 if (!isActive) return@onFailure
                 if (err is HubException && err.code == "screen_recording_denied") {
                     streaming = false
-                    error = err.message.ifEmpty { store.t("deskScreenRecordingDenied") }
+                    error = store.t("deskScreenRecordingDenied")
                     return@LaunchedEffect
                 }
                 consecErrors += 1

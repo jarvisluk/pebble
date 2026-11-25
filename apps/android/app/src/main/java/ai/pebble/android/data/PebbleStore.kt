@@ -75,7 +75,7 @@ fun formatStamp(iso: String?): String {
     return if (L.lang == "en") {
         "${date.monthValue}/${date.dayOfMonth} $t"
     } else {
-        "${date.monthValue}月${date.dayOfMonth}日 $t"
+        "${date.monthValue}月${date.dayOfMonth}日 $t" // i18n:allow-cjk
     }
 }
 

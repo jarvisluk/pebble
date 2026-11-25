@@ -110,7 +110,7 @@ func captureFallbackFrame(ctx context.Context, extraEnv []string, windowID strin
 			if granted, supported := screenRecordingGrantedFn(); supported && !granted {
 				return nil, fmt.Errorf("%w: %s", ErrScreenRecordingDenied, msg)
 			}
-			return nil, fmt.Errorf("screencapture 失败（请检查系统「屏幕录制」权限）: %s", msg)
+			return nil, classifyScreencaptureError(msg)
 		}
 
 		finalPath := rawPath
@@ -485,4 +485,14 @@ func macOSKeyCode(keyName, webCode string) (int, bool) {
 		return macOSKeyCode(webCode[3:], "")
 	}
 	return 0, false
+}
+
+func classifyScreencaptureError(msg string) error {
+	low := strings.ToLower(msg)
+	if strings.Contains(low, "could not create image") ||
+		strings.Contains(low, "permission") ||
+		strings.Contains(low, "not permitted") {
+		return fmt.Errorf("%w: %s", ErrScreenRecordingDenied, msg)
+	}
+	return fmt.Errorf("screencapture failed (check Screen Recording permission): %s", msg)
 }

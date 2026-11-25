@@ -329,7 +329,7 @@ func (a *Agent) loop(ctx context.Context, done chan struct{}) {
 		}
 		if err != nil {
 			if statusCode == http.StatusUnauthorized {
-				a.setState("waiting_auth", false, "等待登录主电脑")
+				a.setState("waiting_auth", false, "Waiting to sign in to primary host")
 				wait := 2 * time.Second
 				select {
 				case <-time.After(wait):
@@ -487,7 +487,7 @@ func (a *Agent) execute(ctx context.Context, cmd Command) Result {
 		return Result{OK: false, Error: err.Error()}
 	}
 	if !a.hasPerm(reqPerm) {
-		return Result{OK: false, Error: fmt.Sprintf("本机未开启「%s」权限", PermLabel(reqPerm))}
+		return Result{OK: false, Error: fmt.Sprintf("%q permission is not enabled on this host", PermLabel(reqPerm))}
 	}
 
 	switch cmd.Action {
@@ -864,7 +864,7 @@ func (a *Agent) takeScreenshot(ctx context.Context, raw json.RawMessage) Result 
 			if msg == "" {
 				msg = err.Error()
 			}
-			return Result{OK: false, Error: fmt.Sprintf("screencapture 失败（请检查「系统设置 → 隐私与安全性 → 屏幕录制」是否已允许 Bot Hub）: %s", msg)}
+			return Result{OK: false, Error: fmt.Sprintf("screencapture failed (check System Settings -> Privacy & Security -> Screen Recording for Pebble): %s", msg)}
 		}
 
 		jpgPath := filepath.Join(tmpDir, "screen.jpg")

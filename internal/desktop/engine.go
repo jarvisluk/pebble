@@ -86,7 +86,7 @@ type UnifiedInput struct {
 }
 
 // ErrScreenRecordingDenied indicates macOS Screen Recording permission is not granted.
-var ErrScreenRecordingDenied = errors.New("缺少 macOS 屏幕录制权限，请在「系统设置 → 隐私与安全性 → 录屏与系统录音」中允许 Pebble 后重试")
+var ErrScreenRecordingDenied = errors.New("macOS Screen Recording permission is denied; allow Pebble in System Settings -> Privacy & Security -> Screen & System Audio Recording and retry")
 
 var screenRecordingGrantedFn = nativeScreenRecordingGranted
 
@@ -102,7 +102,7 @@ func IsScreenRecordingDeniedError(err error) bool {
 	if strings.Contains(msg, "screen_recording_denied") ||
 		strings.Contains(msg, "declined tccs") ||
 		strings.Contains(msg, "user declined") ||
-		strings.Contains(msg, "屏幕录制权限") ||
+		strings.Contains(msg, "屏幕录制权限") || // i18n:allow-cjk
 		strings.Contains(msg, "screen recording permission") {
 		return true
 	}
@@ -792,5 +792,5 @@ func FormatScreenError(err error) string {
 	if err == nil {
 		return ""
 	}
-	return fmt.Sprintf("桌面操作失败: %v", err)
+	return fmt.Sprintf("desktop action failed: %v", err)
 }

@@ -198,7 +198,7 @@ func AppendAttachmentContext(prompt string, atts []Attachment) string {
 		return prompt
 	}
 	if trimmed == "" {
-		trimmed = "请查看附件。"
+		trimmed = "Please check the attached file(s)."
 	}
 	var paths []string
 	for _, a := range atts {

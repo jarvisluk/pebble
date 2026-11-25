@@ -231,10 +231,10 @@ export const StepHarness: React.FC<StepHarnessProps> = ({
     const selected = h.installed && h.id === selectedHarness;
     const isRecommended = h.id === recommendedId;
     const expanded = expandedInstall.has(h.id);
-    const rawCmd = h.install?.command || '';
-    const isShellCmd = rawCmd.includes(' ') && !rawCmd.startsWith('查看');
-    const cmdText = isShellCmd ? rawCmd : rawCmd ? t('ubManualInstall', { name: h.label }) : '';
+    const rawCmd = (h.install?.command || '').trim();
     const url = h.install?.url || '';
+    const isShellCmd = Boolean(rawCmd);
+    const cmdText = isShellCmd ? rawCmd : url ? t('ubManualInstall', { name: h.label }) : '';
 
     const instTask = installTasks[h.id];
     const loginTask = loginTasks[h.id];

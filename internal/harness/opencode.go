@@ -767,7 +767,7 @@ func (h *OpenCodeHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnRe
 				dur := time.Since(started)
 				text := strings.Join(texts, "\n")
 				if isCompact && text == "" {
-					text = "会话上下文已压缩。"
+					text = "Session context compacted."
 				}
 				return &TurnResult{
 					BotID:      bot.ID,
@@ -855,20 +855,20 @@ func decodeOpenCodeDataList[T any](raw json.RawMessage) ([]T, bool) {
 
 func (h *OpenCodeHarness) ListCommands(ctx context.Context, bot config.BotConfig) ([]SlashCommand, error) {
 	builtins := []SlashCommand{
-		{Name: "compact", Description: "压缩当前会话上下文", Source: "harness"},
-		{Name: "init", Description: "初始化项目 AGENTS.md", Source: "harness"},
-		{Name: "review", Description: "评审当前代码变更", Source: "harness"},
-		{Name: "undo", Description: "撤销上一轮更改", Source: "harness"},
-		{Name: "redo", Description: "重做已撤销的更改", Source: "harness"},
-		{Name: "new", Description: "开启新会话", Source: "harness"},
-		{Name: "share", Description: "分享当前会话", Source: "harness"},
-		{Name: "unshare", Description: "取消分享当前会话", Source: "harness"},
-		{Name: "models", Description: "查看或切换模型", Source: "harness"},
-		{Name: "agents", Description: "查看或切换 Agent", Source: "harness"},
-		{Name: "mcp", Description: "查看 MCP 服务状态", Source: "harness"},
-		{Name: "sessions", Description: "列出历史会话", Source: "harness"},
-		{Name: "export", Description: "导出当前会话", Source: "harness"},
-		{Name: "help", Description: "查看可用命令帮助", Source: "harness"},
+		{Name: "compact", Description: "Compact current session context", Source: "harness"},
+		{Name: "init", Description: "Initialize project AGENTS.md", Source: "harness"},
+		{Name: "review", Description: "Review current code changes", Source: "harness"},
+		{Name: "undo", Description: "Undo last turn changes", Source: "harness"},
+		{Name: "redo", Description: "Redo undone changes", Source: "harness"},
+		{Name: "new", Description: "Start a new session", Source: "harness"},
+		{Name: "share", Description: "Share current session", Source: "harness"},
+		{Name: "unshare", Description: "Unshare current session", Source: "harness"},
+		{Name: "models", Description: "View or switch model", Source: "harness"},
+		{Name: "agents", Description: "View or switch agent", Source: "harness"},
+		{Name: "mcp", Description: "Show MCP server status", Source: "harness"},
+		{Name: "sessions", Description: "List previous sessions", Source: "harness"},
+		{Name: "export", Description: "Export current session", Source: "harness"},
+		{Name: "help", Description: "Show available commands", Source: "harness"},
 	}
 	h.mu.Lock()
 	ready := h.baseURL != "" || h.external != ""
