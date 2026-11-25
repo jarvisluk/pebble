@@ -634,7 +634,7 @@ fun SettingsDetailScreen(
                                         .clip(PebbleDimens.rowShape)
                                         .clickable {
                                             runCatching {
-                                                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/jarvisluk/bot-hub")))
+                                                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/jarvisluk/pebble")))
                                             }
                                         }
                                         .padding(vertical = 6.dp),

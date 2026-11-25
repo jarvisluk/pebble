@@ -1156,7 +1156,7 @@ struct SettingsView: View {
             Text(hub.t("openSourceDesc"))
                 .font(.system(size: AppFont.secondary))
                 .foregroundStyle(p.text2)
-            Link(destination: URL(string: "https://github.com/jarvisluk/bot-hub")!) {
+            Link(destination: URL(string: "https://github.com/jarvisluk/pebble")!) {
                 Label(hub.t("openSourceLinkBtn"), systemImage: "star")
                     .foregroundStyle(p.text)
             }

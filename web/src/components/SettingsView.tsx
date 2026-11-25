@@ -1851,7 +1851,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 <a
                   id="sOpenGitHub"
                   className="mp"
-                  href="https://github.com/jarvisluk/bot-hub"
+                  href="https://github.com/jarvisluk/pebble"
                   target="_blank"
                   rel="noopener noreferrer"
                 >
