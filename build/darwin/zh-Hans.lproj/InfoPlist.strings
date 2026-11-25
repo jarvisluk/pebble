@@ -2,3 +2,4 @@
 "NSDesktopFolderUsageDescription" = "Pebble 需要访问桌面文件夹，以便在开启「允许主电脑操控本机」后读写文件。";
 "NSDocumentsFolderUsageDescription" = "Pebble 需要访问文稿文件夹，以便在开启「允许主电脑操控本机」后读写文件。";
 "NSDownloadsFolderUsageDescription" = "Pebble 需要访问下载文件夹，以便在开启「允许主电脑操控本机」后读写文件。";
+"NSLocalNetworkUsageDescription" = "连接同一局域网内的 Pebble 主电脑";

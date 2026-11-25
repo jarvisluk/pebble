@@ -47,10 +47,22 @@ enum PebbleSharedStore {
         defaults?.removeObject(forKey: "pendingInterruptBotId")
         return id
     }
+
+    static func setPreferredLang(_ lang: String) {
+        defaults?.set(lang, forKey: "preferredLang")
+    }
+
+    static var isEnglish: Bool {
+        if let saved = defaults?.string(forKey: "preferredLang"), !saved.isEmpty {
+            return saved == "en"
+        }
+        let sys = Bundle.main.preferredLocalizations.first ?? Locale.preferredLanguages.first ?? "en"
+        return !sys.lowercased().hasPrefix("zh")
+    }
 }
 
 struct InterruptBotIntent: LiveActivityIntent {
-    static var title: LocalizedStringResource = "中断任务"
+    static var title: LocalizedStringResource = "Interrupt Task"
     static var openAppWhenRun: Bool = true
 
     @Parameter(title: "Bot ID")

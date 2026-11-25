@@ -44,7 +44,7 @@ test('renderMarkdownHtml covers full Markdown/GFM and edge cases', () => {
     '[^1]: 脚注说明',
   ].join('\n');
 
-  const html = renderMarkdownHtml(input, '复制');
+  const html = renderMarkdownHtml(input, '复制', { details: '详情', image: '图片' });
 
   assert.match(html, /<h1>H1<\/h1>/);
   assert.match(html, /<h6>H6<\/h6>/);
@@ -96,4 +96,22 @@ test('renderMarkdownHtml covers full Markdown/GFM and edge cases', () => {
   assert.ok(html.includes('&lt;u onclick=&quot;alert(1)&quot;&gt;bad&lt;/u&gt;'));
   assert.ok(html.includes('&lt;img src=x onerror=alert(1)&gt;'));
   assert.ok(html.includes('<div class="md-footnote"><span class="md-fn-id">1</span>'));
+});
+
+test('renderMarkdownHtml respects localized details and image labels', () => {
+  const input = [
+    '<details>Hidden body</details>',
+    '',
+    '![diagram](chart.png) ![](anon.png)',
+  ].join('\n');
+
+  const enHtml = renderMarkdownHtml(input, 'Copy', { details: 'Details', image: 'Image' });
+  assert.ok(enHtml.includes('<details class="md-details"><summary>Details</summary>'));
+  assert.ok(enHtml.includes('<span class="md-img-fallback">[Image: diagram]</span>'));
+  assert.ok(enHtml.includes('<span class="md-img-fallback">[Image]</span>'));
+
+  const zhHtml = renderMarkdownHtml(input, '复制', { details: '详情', image: '图片' });
+  assert.ok(zhHtml.includes('<details class="md-details"><summary>详情</summary>'));
+  assert.ok(zhHtml.includes('<span class="md-img-fallback">[图片: diagram]</span>'));
+  assert.ok(zhHtml.includes('<span class="md-img-fallback">[图片]</span>'));
 });

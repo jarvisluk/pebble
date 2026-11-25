@@ -870,7 +870,14 @@ export const ChatView: React.FC<ChatViewProps> = ({
                           {via}
                           <div className="bubble">
                             {m.text ? (
-                              <div dangerouslySetInnerHTML={{ __html: renderMarkdownHtml(m.text, t('copy')) }} />
+                              <div
+                                dangerouslySetInnerHTML={{
+                                  __html: renderMarkdownHtml(m.text, t('copy'), {
+                                    details: t('mdDetails'),
+                                    image: t('mdImage'),
+                                  }),
+                                }}
+                              />
                             ) : null}
                             {mediaEl}
                           </div>
@@ -886,7 +893,14 @@ export const ChatView: React.FC<ChatViewProps> = ({
                           {rt}
                           <div className="bubble">
                             {m.text ? (
-                              <div dangerouslySetInnerHTML={{ __html: renderMarkdownHtml(m.text, t('copy')) }} />
+                              <div
+                                dangerouslySetInnerHTML={{
+                                  __html: renderMarkdownHtml(m.text, t('copy'), {
+                                    details: t('mdDetails'),
+                                    image: t('mdImage'),
+                                  }),
+                                }}
+                              />
                             ) : null}
                             {mediaEl}
                           </div>

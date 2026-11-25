@@ -1,0 +1,6 @@
+"NSLocalNetworkUsageDescription" = "Connect to your Pebble host on the local network.";
+"NSCameraUsageDescription" = "Scan the pairing QR code from your Pebble host to connect.";
+"NSAppleEventsUsageDescription" = "Pebble needs Automation permission to control apps on this Mac when remote computer control is enabled.";
+"NSDesktopFolderUsageDescription" = "Pebble needs access to your Desktop folder to read and write files when remote computer control is enabled.";
+"NSDocumentsFolderUsageDescription" = "Pebble needs access to your Documents folder to read and write files when remote computer control is enabled.";
+"NSDownloadsFolderUsageDescription" = "Pebble needs access to your Downloads folder to read and write files when remote computer control is enabled.";

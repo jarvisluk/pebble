@@ -2,10 +2,12 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
 	<key>CFBundleLocalizations</key>
 	<array>
-		<string>zh-Hans</string>
 		<string>en</string>
+		<string>zh-Hans</string>
 	</array>
 	<key>LSMinimumSystemVersion</key>
 	<string>14.0</string>
@@ -37,7 +39,7 @@
 	<key>NSDownloadsFolderUsageDescription</key>
 	<string>Pebble needs access to your Downloads folder to read and write files when remote computer control is enabled.</string>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>连接同一局域网内的 Pebble 主电脑</string>
+	<string>Connect to your Pebble host on the local network.</string>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_pebble._tcp</string>

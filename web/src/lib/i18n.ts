@@ -757,6 +757,12 @@ export const I18N: Record<ResolvedLang, Record<string, string>> = {
     rtPermFollow: '跟随 Bot',
     rtPermAuto: '全自动（无人值守）',
     rtPermPlan: '仅规划只读（安全检查）',
+    resizeSidebarAria: '调整侧边栏宽度',
+    resizeSidebarTitle: '拖动调整宽度，双击重置',
+    stageTabsAria: '舞台标签页',
+    memScopeAria: '记忆范围',
+    mdDetails: '详情',
+    mdImage: '图片',
   },
   en: {
     newBot: 'New Bot',
@@ -1516,6 +1522,12 @@ export const I18N: Record<ResolvedLang, Record<string, string>> = {
     rtPermFollow: 'Follow bot',
     rtPermAuto: 'Auto (unattended)',
     rtPermPlan: 'Plan (read-only)',
+    resizeSidebarAria: 'Resize sidebar',
+    resizeSidebarTitle: 'Drag to resize, double-click to reset',
+    stageTabsAria: 'Stage tabs',
+    memScopeAria: 'Memory scope',
+    mdDetails: 'Details',
+    mdImage: 'Image',
   },
 };
 
