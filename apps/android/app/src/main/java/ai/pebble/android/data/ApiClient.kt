@@ -1,5 +1,6 @@
 package ai.pebble.android.data
 
+import ai.pebble.android.BuildConfig
 import ai.pebble.android.i18n.L
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -137,6 +138,7 @@ class ApiClient(
             builder
                 .header("X-Pebble-Protocol", CLIENT_PROTOCOL.toString())
                 .header("X-Pebble-Client", "android")
+                .header("X-Pebble-Version", BuildConfig.VERSION_NAME)
     }
 
     suspend fun rawBytes(path: String, method: String = "GET", body: Map<String, Any?>? = null): ByteArray =

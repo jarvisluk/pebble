@@ -26,3 +26,7 @@
   - **涉及 Go 后端（`cmd/`、`internal/`）、`web/` 或 macOS 端（`apps/apple`）**：若改了 `web/` 先执行 `make web`，再执行 `make build && make app`，完成本机 `Pebble.app` 的覆盖安装，并使用 `open -g` 平滑重启（不抢焦点）。
   - **涉及 Android 端（`apps/android`）**：重新构建最新 Release APK（`make android-native`），并通过 `adb install -r` 覆盖安装到已连接的调试真机。
   - **涉及 iOS / iPadOS 端（`apps/apple`）**：编译真机包并通过 `xcrun devicectl device install app` 覆盖安装到已配对/连接的 iOS 真机。
+
+## 4. 版本号与对外发版流程
+
+全仓统一 SemVer 版本管理（[`version.json`](../../version.json)）、Changelog 生成与多端 Release 打包/GitHub Actions 发布流程见 [版本号管理与发版流程](release-and-versioning.md)。
