@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	_ "embed"
 	"encoding/json"
 	"io/fs"
 	"log"
@@ -17,13 +18,18 @@ import (
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
-	"github.com/wailsapp/wails/v3/pkg/icons"
 
 	"bot-hub/internal/channel"
 	"bot-hub/internal/cli"
 	"bot-hub/internal/desktophost"
 	webassets "bot-hub/internal/web"
 )
+
+//go:embed assets/tray_mac_template.png
+var trayMacTemplateIcon []byte
+
+//go:embed assets/tray_color.png
+var trayColorIcon []byte
 
 func main() {
 	log.SetFlags(log.Ltime | log.Lmsgprefix)
@@ -110,9 +116,9 @@ func (d *desktop) run() {
 	snap := d.host.Snapshot()
 	tray := d.app.SystemTray.New()
 	if runtime.GOOS == "darwin" {
-		tray.SetTemplateIcon(icons.SystrayMacTemplate)
+		tray.SetTemplateIcon(trayMacTemplateIcon)
 	} else {
-		tray.SetIcon(icons.SystrayLight)
+		tray.SetIcon(trayColorIcon)
 	}
 	menu := d.app.NewMenu()
 	menu.Add("打开 Pebble").OnClick(func(*application.Context) { d.win.Show(); d.win.Focus() })
