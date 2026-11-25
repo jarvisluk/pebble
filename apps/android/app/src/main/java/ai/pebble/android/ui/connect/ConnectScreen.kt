@@ -133,6 +133,8 @@ fun ConnectScreen(
             ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
         )
     }
+    var notifTried by remember { mutableStateOf(false) }
+    var cameraTried by remember { mutableStateOf(false) }
 
     val refreshPerms = {
         hasNotifPerm = NotificationHelper.hasNotificationPermission(context)
@@ -299,9 +301,8 @@ fun ConnectScreen(
     }
 
     if (showUnboxPermissions) {
-        val grantedCount = (if (hasNotifPerm) 1 else 0) + (if (hasCameraPerm) 1 else 0)
-        val allReady = grantedCount == 2
-        val notifCanPrompt = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+        val notifCanPrompt = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !notifTried
+        val cameraCanPrompt = !cameraTried
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -349,79 +350,106 @@ fun ConnectScreen(
                         )
                     }
 
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        Text(
-                            text = if (allReady) {
-                                store.t("ubPermAllReady")
-                            } else {
-                                store.t("ubPermProgress", mapOf("granted" to grantedCount, "total" to 2))
-                            },
-                            color = if (allReady) p.sageInk else p.text2,
-                            fontSize = PebbleFont.secondary,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.weight(1f),
-                        )
-                        IconButton(
-                            onClick = { refreshPerms() },
-                            modifier = Modifier.size(28.dp),
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Icon(
-                                painter = painterResource(PebbleIcons.Refresh),
-                                contentDescription = store.t("refresh"),
-                                tint = p.text2,
-                                modifier = Modifier.size(18.dp),
+                            Text(
+                                text = store.t("ubPermGroupEssentials"),
+                                color = p.text2,
+                                fontSize = PebbleFont.secondary,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.weight(1f),
+                            )
+                            IconButton(
+                                onClick = { refreshPerms() },
+                                modifier = Modifier.size(28.dp),
+                            ) {
+                                Icon(
+                                    painter = painterResource(PebbleIcons.Refresh),
+                                    contentDescription = store.t("refresh"),
+                                    tint = p.text2,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                            }
+                        }
+
+                        SectionCard {
+                            UnboxPermRow(
+                                title = store.t("ubPermNotifName"),
+                                description = store.t("ubPermNotifDesc"),
+                                granted = hasNotifPerm,
+                                statusLabel = store.t(if (hasNotifPerm) "ubPermEnabled" else "ubPermNotEnabled"),
+                                canPrompt = notifCanPrompt,
+                                requestLabel = store.t("ubPermEnableBtn"),
+                                settingsLabel = store.t("deskPermOpenSettings"),
+                                onRequest = {
+                                    notifTried = true
+                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                        singlePermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                                    }
+                                },
+                                onOpenSettings = {
+                                    runCatching {
+                                        context.startActivity(
+                                            Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                                                .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                                        )
+                                    }
+                                },
                             )
                         }
                     }
 
-                    SectionCard {
-                        UnboxPermRow(
-                            title = store.t("ubPermNotifName"),
-                            description = store.t("ubPermNotifDesc"),
-                            granted = hasNotifPerm,
-                            statusLabel = store.t(if (hasNotifPerm) "deskPermGranted" else "deskPermNotDetermined"),
-                            canPrompt = notifCanPrompt,
-                            requestLabel = store.t("deskPermRequest"),
-                            settingsLabel = store.t("deskPermOpenSettings"),
-                            onRequest = {
-                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                                    singlePermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                                }
-                            },
-                            onOpenSettings = {
-                                runCatching {
-                                    context.startActivity(
-                                        Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
-                                            .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
-                                    )
-                                }
-                            },
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text(
+                            text = store.t("ubPermGroupQR"),
+                            color = p.text2,
+                            fontSize = PebbleFont.secondary,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(horizontal = 4.dp),
                         )
-                        CardDivider()
-                        UnboxPermRow(
-                            title = store.t("ubPermCameraName"),
-                            description = store.t("ubPermCameraDesc"),
-                            granted = hasCameraPerm,
-                            statusLabel = store.t(if (hasCameraPerm) "deskPermGranted" else "deskPermNotDetermined"),
-                            canPrompt = true,
-                            requestLabel = store.t("deskPermRequest"),
-                            settingsLabel = store.t("deskPermOpenSettings"),
-                            onRequest = { singlePermLauncher.launch(Manifest.permission.CAMERA) },
-                            onOpenSettings = {
-                                runCatching {
-                                    context.startActivity(
-                                        Intent(
-                                            Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                                            Uri.fromParts("package", context.packageName, null),
+
+                        SectionCard {
+                            UnboxPermRow(
+                                title = store.t("ubPermCameraName"),
+                                description = store.t("ubPermCameraDesc"),
+                                granted = hasCameraPerm,
+                                statusLabel = store.t(if (hasCameraPerm) "ubPermEnabled" else "ubPermNotEnabled"),
+                                canPrompt = cameraCanPrompt,
+                                requestLabel = store.t("ubPermEnableBtn"),
+                                settingsLabel = store.t("deskPermOpenSettings"),
+                                onRequest = {
+                                    cameraTried = true
+                                    singlePermLauncher.launch(Manifest.permission.CAMERA)
+                                },
+                                onOpenSettings = {
+                                    runCatching {
+                                        context.startActivity(
+                                            Intent(
+                                                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                                Uri.fromParts("package", context.packageName, null),
+                                            )
                                         )
-                                    )
-                                }
-                            },
+                                    }
+                                },
+                            )
+                        }
+
+                        Text(
+                            text = store.t("ubPermQRHint"),
+                            color = p.mute,
+                            fontSize = PebbleFont.caption,
+                            modifier = Modifier.padding(horizontal = 4.dp),
                         )
                     }
                 }
@@ -1242,12 +1270,13 @@ private fun UnboxPermRow(
                     ) {
                         Text(requestLabel, fontSize = PebbleFont.secondary, fontWeight = FontWeight.SemiBold)
                     }
-                }
-                OutlinedButton(
-                    onClick = onOpenSettings,
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                ) {
-                    Text(settingsLabel, fontSize = PebbleFont.secondary, color = p.text)
+                } else {
+                    OutlinedButton(
+                        onClick = onOpenSettings,
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                    ) {
+                        Text(settingsLabel, fontSize = PebbleFont.secondary, color = p.text)
+                    }
                 }
             }
         }

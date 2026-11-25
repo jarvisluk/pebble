@@ -1,11 +1,14 @@
 import React, { useEffect, useRef, useState } from 'react';
-import type { HarnessInfo, SettingsData, SetupTaskStatus } from '../../types';
+import type { HarnessInfo, ResolvedLang, SettingsData, SetupTaskStatus } from '../../types';
 import { api } from '../../lib/api';
 import { HarnessIcon } from '../HarnessIcon';
 import { ModelCombo } from '../ModelCombo';
+import { StepMagpie } from './StepMagpie';
 
 interface StepHarnessProps {
   t: (k: string, vars?: Record<string, string | number>) => string;
+  lang: ResolvedLang;
+  settings: SettingsData | null;
   harnesses: HarnessInfo[];
   selectedHarness: string;
   onSelectHarness: (id: string) => void;
@@ -14,8 +17,11 @@ interface StepHarnessProps {
   models: Record<string, string[]>;
   loadingModels: Record<string, boolean>;
   busy: boolean;
+  onBusyChange: (b: boolean) => void;
   onRecheck: () => void;
+  onSettingsUpdated: (s: SettingsData) => void;
   onFetchModels: (harnessId: string, force?: boolean) => Promise<void>;
+  onLoadModels: (harness: string, force?: boolean) => Promise<string[]>;
   onLoadSettings: (fresh?: boolean) => Promise<SettingsData>;
   onResetModels: () => void;
   onToast: (msg: string) => void;
@@ -24,6 +30,8 @@ interface StepHarnessProps {
 
 export const StepHarness: React.FC<StepHarnessProps> = ({
   t,
+  lang,
+  settings,
   harnesses,
   selectedHarness,
   onSelectHarness,
@@ -32,15 +40,20 @@ export const StepHarness: React.FC<StepHarnessProps> = ({
   models,
   loadingModels,
   busy,
+  onBusyChange,
   onRecheck,
+  onSettingsUpdated,
   onFetchModels,
+  onLoadModels,
   onLoadSettings,
   onResetModels,
   onToast,
   onError,
 }) => {
   const [expandedInstall, setExpandedInstall] = useState<Set<string>>(() => new Set());
+  const [showUninstalled, setShowUninstalled] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [advConfigOpen, setAdvConfigOpen] = useState(false);
   const [installTasks, setInstallTasks] = useState<Record<string, SetupTaskStatus>>({});
   const [loginTasks, setLoginTasks] = useState<Record<string, SetupTaskStatus>>({});
   const [copiedId, setCopiedId] = useState('');
@@ -201,8 +214,22 @@ export const StepHarness: React.FC<StepHarnessProps> = ({
   const hInfo = harnesses.find((h) => h.id === selectedHarness);
   const hLabel = hInfo?.label || selectedHarness || 'opencode';
 
+  const recommendedId =
+    installedHarnesses.find((h) => h.authStatus !== 'needs_login')?.id ||
+    installedHarnesses[0]?.id ||
+    recommendedUninstalled.find((h) => h.id === 'opencode')?.id ||
+    recommendedUninstalled[0]?.id ||
+    '';
+
+  const advSummary = hInfo?.magpie?.connected
+    ? t('ubAdvModelSummaryMagpie', { model: hInfo.magpie.model || t('defaultTag') })
+    : defaultModel.trim()
+      ? t('ubAdvModelSummaryCustom', { model: defaultModel.trim() })
+      : t('ubAdvModelSummaryDefault', { label: hLabel });
+
   const renderHarnessRow = (h: HarnessInfo) => {
-    const selected = h.id === selectedHarness;
+    const selected = h.installed && h.id === selectedHarness;
+    const isRecommended = h.id === recommendedId;
     const expanded = expandedInstall.has(h.id);
     const rawCmd = h.install?.command || '';
     const isShellCmd = rawCmd.includes(' ') && !rawCmd.startsWith('查看');
@@ -260,6 +287,16 @@ export const StepHarness: React.FC<StepHarnessProps> = ({
           <div className="unbox-item-acts">
             {h.installed ? (
               <>
+                {selected ? (
+                  <span className="mp go unbox-selected-pill">
+                    <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.2" aria-hidden="true">
+                      <path d="M3.5 8.5l3 3 6-6.5" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                    {t('ubSelected')}
+                  </span>
+                ) : (
+                  isRecommended && <span className="mp">{t('ubRecommended')}</span>
+                )}
                 <span className={`mp${needsLogin ? ' bad' : ' ok'}`}>
                   {needsLogin ? t('ubNeedsLogin') : t('ubReady')}
                 </span>
@@ -275,18 +312,24 @@ export const StepHarness: React.FC<StepHarnessProps> = ({
                 )}
               </>
             ) : h.canAutoInstall ? (
-              <button
-                type="button"
-                className="mp go"
-                disabled={installing}
-                onClick={() => void startHarnessInstall(h.id)}
-              >
-                {installing ? t('ubInstalling') : t('ubOneClickInstall')}
-              </button>
+              <>
+                {isRecommended && <span className="mp ok">{t('ubRecommended')}</span>}
+                <button
+                  type="button"
+                  className="mp go"
+                  disabled={installing}
+                  onClick={() => void startHarnessInstall(h.id)}
+                >
+                  {installing ? t('ubInstalling') : t('ubOneClickInstall')}
+                </button>
+              </>
             ) : (
-              <button type="button" className="mp go" onClick={toggleInstall}>
-                {expanded ? t('ubHideInstall') : t('ubOneClickInstall')}
-              </button>
+              <>
+                {isRecommended && <span className="mp ok">{t('ubRecommended')}</span>}
+                <button type="button" className="mp go" onClick={toggleInstall}>
+                  {expanded ? t('ubHideInstall') : t('ubOneClickInstall')}
+                </button>
+              </>
             )}
           </div>
         </div>
@@ -376,51 +419,102 @@ export const StepHarness: React.FC<StepHarnessProps> = ({
 
           {uninstalledHarnesses.length > 0 && (
             <>
-              <div className="unbox-group-hd">{t('ubAvailableGroup')}</div>
-              <div id="ubHarnessAvailable" className="unbox-list unbox-full-grid">
-                {recommendedUninstalled.map(renderHarnessRow)}
-              </div>
-              {advancedUninstalled.length > 0 && (
+              {installedHarnesses.length > 0 && (
+                <button
+                  type="button"
+                  id="ubToggleUninstalled"
+                  className="link-btn unbox-more-btn"
+                  onClick={() => setShowUninstalled((v) => !v)}
+                >
+                  {showUninstalled
+                    ? t('ubHideInstallOther')
+                    : t('ubInstallOtherToggle', { n: uninstalledHarnesses.length })}
+                </button>
+              )}
+              {(installedHarnesses.length === 0 || showUninstalled) && (
                 <>
-                  <button
-                    type="button"
-                    className="link-btn unbox-more-btn"
-                    onClick={() => setShowAdvanced((v) => !v)}
-                  >
-                    {showAdvanced ? t('ubHideMoreEngines') : t('ubMoreEngines')}
-                  </button>
-                  {showAdvanced && (
-                    <div className="unbox-list unbox-full-grid">{advancedUninstalled.map(renderHarnessRow)}</div>
+                  {installedHarnesses.length > 0 && (
+                    <div className="unbox-group-hd">{t('ubAvailableGroup')}</div>
+                  )}
+                  <div id="ubHarnessAvailable" className="unbox-list unbox-full-grid">
+                    {recommendedUninstalled.map(renderHarnessRow)}
+                  </div>
+                  {advancedUninstalled.length > 0 && (
+                    <>
+                      <button
+                        type="button"
+                        className="link-btn unbox-more-btn"
+                        onClick={() => setShowAdvanced((v) => !v)}
+                      >
+                        {showAdvanced ? t('ubHideMoreEngines') : t('ubMoreEngines')}
+                      </button>
+                      {showAdvanced && (
+                        <div className="unbox-list unbox-full-grid">{advancedUninstalled.map(renderHarnessRow)}</div>
+                      )}
+                    </>
                   )}
                 </>
               )}
             </>
           )}
 
-          <div className="note unbox-defaults">
-            <div className="row-between row-wrap">
-              <span className="set-card-desc">
-                {t('ubDefaultHarnessLbl')}
-                <strong>{hLabel}</strong>
-              </span>
+          {(installedHarnesses.length > 0 || hInfo?.installed) && (
+            <div className="note unbox-fold">
+              <div className="unbox-fold-hd">
+                <div className="unbox-fold-info">
+                  <strong>{t('ubAdvModelTitle')}</strong>
+                  <span className="set-card-desc">{advSummary}</span>
+                </div>
+                <button
+                  type="button"
+                  id="ubAdvConfigToggle"
+                  className="mp"
+                  onClick={() => setAdvConfigOpen((v) => !v)}
+                >
+                  {advConfigOpen ? t('ubCollapseConfig') : t('ubExpandConfig')}
+                </button>
+              </div>
+              {advConfigOpen && (
+                <div className="unbox-fold-body">
+                  <div className="fld">
+                    <label>
+                      {t('ubDefaultModelLbl')} <em>{t('ubDefaultModelHint')}</em>
+                    </label>
+                    <ModelCombo
+                      id="ubStep1DefaultModel"
+                      value={defaultModel}
+                      onChange={onChangeDefaultModel}
+                      options={models[selectedHarness] || []}
+                      loading={Boolean(loadingModels[selectedHarness])}
+                      placeholder={t('ubDefaultModelPh')}
+                      loadingText={t('ubLoadingModels')}
+                      emptyText={t('ubNoModelsFound')}
+                      dropUp
+                    />
+                  </div>
+                  <StepMagpie
+                    t={t}
+                    lang={lang}
+                    settings={settings}
+                    selectedHarness={selectedHarness}
+                    hLabel={hLabel}
+                    hInfo={hInfo}
+                    defaultModel={defaultModel}
+                    onChangeDefaultModel={onChangeDefaultModel}
+                    busy={busy}
+                    onBusyChange={onBusyChange}
+                    onRecheck={onRecheck}
+                    onSettingsUpdated={onSettingsUpdated}
+                    onLoadSettings={onLoadSettings}
+                    onLoadModels={onLoadModels}
+                    onResetModels={onResetModels}
+                    onToast={onToast}
+                    onError={onError}
+                  />
+                </div>
+              )}
             </div>
-            <div className="fld">
-              <label>
-                {t('ubDefaultModelLbl')} <em>{t('ubDefaultModelHint')}</em>
-              </label>
-              <ModelCombo
-                id="ubStep1DefaultModel"
-                value={defaultModel}
-                onChange={onChangeDefaultModel}
-                options={models[selectedHarness] || []}
-                loading={Boolean(loadingModels[selectedHarness])}
-                placeholder={t('ubDefaultModelPh')}
-                loadingText={t('ubLoadingModels')}
-                emptyText={t('ubNoModelsFound')}
-                dropUp
-              />
-            </div>
-          </div>
+          )}
         </>
       )}
     </div>

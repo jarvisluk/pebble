@@ -14,12 +14,21 @@ enum UnboxPermStatus: String, Equatable {
     case unsupported
 }
 
+enum UnboxPermGroup: String, Equatable {
+    case essentials
+    case qrPairing
+    case remoteDesktop
+    case advanced
+}
+
 struct UnboxPermissionItem: Identifiable, Equatable {
     let id: String
+    let group: UnboxPermGroup
     let titleKey: String
     let fallbackTitle: String
     let descKey: String
     let fallbackDesc: String
+    var shortPurposeKey: String? = nil
     var status: UnboxPermStatus
     var canPrompt: Bool
     var canOpenSettings: Bool
@@ -58,6 +67,34 @@ final class PermissionsManager {
         #else
         return "ubPermSubMobile"
         #endif
+    }
+
+    var essentialItems: [UnboxPermissionItem] {
+        items.filter { $0.group == .essentials }
+    }
+
+    var qrItems: [UnboxPermissionItem] {
+        items.filter { $0.group == .qrPairing }
+    }
+
+    var remoteDesktopItems: [UnboxPermissionItem] {
+        items.filter { $0.group == .remoteDesktop }
+    }
+
+    var advancedItems: [UnboxPermissionItem] {
+        items.filter { $0.group == .advanced }
+    }
+
+    var remoteDesktopGrantedCount: Int {
+        remoteDesktopItems.filter { $0.status == .granted || $0.status == .requested }.count
+    }
+
+    var allRemoteDesktopGranted: Bool {
+        !remoteDesktopItems.isEmpty && remoteDesktopGrantedCount == remoteDesktopItems.count
+    }
+
+    var hasPromptableRemoteDesktop: Bool {
+        remoteDesktopItems.contains { $0.canPrompt && $0.status != .granted && $0.status != .requested }
     }
 
     var coreItems: [UnboxPermissionItem] {
@@ -111,16 +148,19 @@ final class PermissionsManager {
         if DesktopHostManager.shared.ready {
             let hostPerms = await DesktopHostManager.shared.fetchHostPermissions()
             for hp in hostPerms where hp.status != "unsupported" {
+                let isAdv = hp.id == "full_disk_access"
                 built.append(UnboxPermissionItem(
                     id: hp.id,
+                    group: isAdv ? .advanced : .remoteDesktop,
                     titleKey: "deskPermName_\(hp.id)",
                     fallbackTitle: hp.name,
                     descKey: "deskPermDesc_\(hp.id)",
                     fallbackDesc: hp.description,
+                    shortPurposeKey: isAdv ? nil : "ubPermCap_\(hp.id)",
                     status: mapHostStatus(hp.status),
                     canPrompt: hp.canPrompt ?? false,
                     canOpenSettings: hp.canOpenSettings ?? true,
-                    optional: hp.id == "full_disk_access"
+                    optional: isAdv
                 ))
             }
         }
@@ -134,6 +174,7 @@ final class PermissionsManager {
         }
         let camItem = UnboxPermissionItem(
             id: "camera",
+            group: .qrPairing,
             titleKey: "ubPermCameraName",
             fallbackTitle: "Camera",
             descKey: "ubPermCameraDesc",
@@ -141,10 +182,11 @@ final class PermissionsManager {
             status: camStatus,
             canPrompt: camAuth == .notDetermined,
             canOpenSettings: true,
-            optional: false
+            optional: true
         )
         let netItem = UnboxPermissionItem(
             id: "network",
+            group: .essentials,
             titleKey: "ubPermNetworkName",
             fallbackTitle: "Wireless Data & Local Network",
             descKey: "ubPermNetworkDesc",
@@ -154,7 +196,7 @@ final class PermissionsManager {
             canOpenSettings: true,
             optional: false
         )
-        items = [notifItem, camItem, netItem]
+        items = [notifItem, netItem, camItem]
         #endif
     }
 
@@ -174,17 +216,7 @@ final class PermissionsManager {
             await PushManager.shared.requestPermissionAndRegister()
         }
         await primeLocalNetwork(duration: .milliseconds(600))
-        if DesktopHostManager.shared.ready {
-            let hostPerms = await DesktopHostManager.shared.fetchHostPermissions()
-            if hostPerms.contains(where: { ($0.canPrompt ?? false) && $0.status != "granted" }) {
-                if let res = await DesktopHostManager.shared.requestHostPermission("all", openSettings: false),
-                   res.prompted == true {
-                    feedback = L.t("deskPermPrompted")
-                }
-            }
-        }
-        await refresh()
-        scheduleFollowUpRefresh()
+        await requestRemoteDesktopBundle()
         #elseif os(iOS)
         await primeWirelessData()
         await PushManager.shared.refreshAuthorizationStatus()
@@ -197,6 +229,22 @@ final class PermissionsManager {
         await primeLocalNetwork(duration: .milliseconds(800))
         markNetworkPrimed()
         await refresh()
+        #endif
+    }
+
+    func requestRemoteDesktopBundle() async {
+        #if os(macOS)
+        if DesktopHostManager.shared.ready {
+            let hostPerms = await DesktopHostManager.shared.fetchHostPermissions()
+            if hostPerms.contains(where: { $0.id != "full_disk_access" && ($0.canPrompt ?? false) && $0.status != "granted" }) {
+                if let res = await DesktopHostManager.shared.requestHostPermission("all", openSettings: false),
+                   res.prompted == true {
+                    feedback = L.t("deskPermPrompted")
+                }
+            }
+        }
+        await refresh()
+        scheduleFollowUpRefresh()
         #endif
     }
 
@@ -303,6 +351,7 @@ final class PermissionsManager {
         }
         return UnboxPermissionItem(
             id: "notifications",
+            group: .essentials,
             titleKey: "ubPermNotifName",
             fallbackTitle: "Notifications",
             descKey: "ubPermNotifDesc",

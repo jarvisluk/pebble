@@ -13,14 +13,13 @@ import { PEBBLE_COLOR } from '../../lib/pebble';
 import { BotAvatar } from '../BotAvatar';
 import { DragBar } from '../DragBar';
 import { StepHarness } from './StepHarness';
-import { StepMagpie } from './StepMagpie';
 import { StepPair } from './StepPair';
 import { StepPermissions } from './StepPermissions';
 
-type UnboxStepId = 'harness' | 'magpie' | 'permissions' | 'pair';
+type UnboxStepId = 'harness' | 'permissions' | 'pair';
 
 function mapInitialStep(initialStep: 1 | 2 | 3): UnboxStepId {
-  if (initialStep === 2) return 'magpie';
+  if (initialStep === 2) return 'permissions';
   if (initialStep === 3) return 'pair';
   return 'harness';
 }
@@ -163,7 +162,7 @@ export const UnboxPage: React.FC<UnboxPageProps> = ({
 
   useEffect(() => {
     if (!open) return;
-    if ((step === 'harness' || step === 'magpie') && selectedHarness) {
+    if (step === 'harness' && selectedHarness) {
       void fetchModels(selectedHarness);
     }
   }, [open, step, selectedHarness, fetchModels]);
@@ -174,7 +173,7 @@ export const UnboxPage: React.FC<UnboxPageProps> = ({
   );
 
   const steps: UnboxStepId[] = useMemo(
-    () => (hasActionablePerms ? ['harness', 'magpie', 'permissions', 'pair'] : ['harness', 'magpie', 'pair']),
+    () => (hasActionablePerms ? ['harness', 'permissions', 'pair'] : ['harness', 'pair']),
     [hasActionablePerms]
   );
 
@@ -266,8 +265,6 @@ export const UnboxPage: React.FC<UnboxPageProps> = ({
       if (safeStep === 'harness') {
         await persistHarness();
         await persistModelAndComplete(false);
-      } else if (safeStep === 'magpie') {
-        await persistModelAndComplete(false);
       }
       if (stepIdx < steps.length - 1) {
         setStepDir('next');
@@ -290,12 +287,9 @@ export const UnboxPage: React.FC<UnboxPageProps> = ({
 
   const harnesses = settings?.harnesses || [];
   const anyInstalled = harnesses.some((h) => h.installed);
-  const hInfo = harnesses.find((h) => h.id === selectedHarness);
-  const hLabel = hInfo?.label || selectedHarness || 'opencode';
 
   const headerMeta: Record<UnboxStepId, { title: string; sub: string }> = {
     harness: { title: t('ubStep1Title'), sub: t('ubStep1Sub') },
-    magpie: { title: t('ubStep2Title'), sub: t('ubStep2Sub') },
     permissions: { title: t('ubPermTitle'), sub: t('ubPermSub') },
     pair: { title: t('ubStep3Title'), sub: t('ubStep3Sub') },
   };
@@ -305,8 +299,6 @@ export const UnboxPage: React.FC<UnboxPageProps> = ({
     switch (id) {
       case 'harness':
         return t('ubStepHarnessShort');
-      case 'magpie':
-        return 'Magpie';
       case 'permissions':
         return t('ubStepPermsShort');
       case 'pair':
@@ -338,6 +330,8 @@ export const UnboxPage: React.FC<UnboxPageProps> = ({
               {safeStep === 'harness' && (
                 <StepHarness
                   t={t}
+                  lang={lang}
+                  settings={settings}
                   harnesses={harnesses}
                   selectedHarness={selectedHarness}
                   onSelectHarness={setSelectedHarness}
@@ -346,30 +340,12 @@ export const UnboxPage: React.FC<UnboxPageProps> = ({
                   models={models}
                   loadingModels={loadingModels}
                   busy={busy}
-                  onRecheck={() => void recheck()}
-                  onFetchModels={fetchModels}
-                  onLoadSettings={onLoadSettings}
-                  onResetModels={onResetModels}
-                  onToast={onToast}
-                  onError={setErr}
-                />
-              )}
-              {safeStep === 'magpie' && (
-                <StepMagpie
-                  t={t}
-                  lang={lang}
-                  settings={settings}
-                  selectedHarness={selectedHarness}
-                  hLabel={hLabel}
-                  hInfo={hInfo}
-                  defaultModel={defaultModel}
-                  onChangeDefaultModel={setDefaultModel}
-                  busy={busy}
                   onBusyChange={setBusy}
                   onRecheck={() => void recheck()}
                   onSettingsUpdated={onSettingsUpdated}
-                  onLoadSettings={onLoadSettings}
+                  onFetchModels={fetchModels}
                   onLoadModels={onLoadModels}
+                  onLoadSettings={onLoadSettings}
                   onResetModels={onResetModels}
                   onToast={onToast}
                   onError={setErr}
