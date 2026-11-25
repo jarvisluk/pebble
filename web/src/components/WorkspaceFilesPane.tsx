@@ -379,7 +379,12 @@ export const WorkspaceFilesPane: React.FC<WorkspaceFilesPaneProps> = ({
                   {preview.kind === 'markdown' ? (
                     <div
                       className="md ws-md"
-                      dangerouslySetInnerHTML={{ __html: renderMarkdownHtml(preview.content || '', lang) }}
+                      dangerouslySetInnerHTML={{
+                        __html: renderMarkdownHtml(preview.content || '', t('copy'), {
+                          details: t('mdDetails'),
+                          image: t('mdImage'),
+                        }),
+                      }}
                     />
                   ) : (
                     <pre className="ws-code">{preview.content || ''}</pre>

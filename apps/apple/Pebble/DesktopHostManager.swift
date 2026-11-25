@@ -68,7 +68,7 @@ final class DesktopHostManager {
 
         guard let binPath = resolveBinaryPath() else {
             starting = false
-            daemonError = "未找到 pebble 可执行文件"
+            daemonError = L.t("macDaemonNotFound")
             return
         }
 
@@ -96,7 +96,7 @@ final class DesktopHostManager {
                     self.starting = false
                     self.daemonProtocol = 0
                     if p.terminationStatus != 0 {
-                        self.daemonError = "host-daemon 异常退出（code \(p.terminationStatus)）"
+                        self.daemonError = L.t("macDaemonExited", ["code": p.terminationStatus])
                     }
                 }
             }
@@ -189,7 +189,7 @@ final class DesktopHostManager {
 
     private func controlRequest(_ path: String, method: String = "GET", body: [String: Any]? = nil) async throws -> Data {
         guard !controlURL.isEmpty, let url = URL(string: controlURL + path) else {
-            throw HubError(message: "桌面宿主尚未就绪")
+            throw HubError(message: L.t("macDaemonNotReady"))
         }
         var req = URLRequest(url: url)
         req.httpMethod = method

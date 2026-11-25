@@ -650,5 +650,11 @@
   "rtPermMode" : "Permission policy",
   "rtPermFollow" : "Follow bot",
   "rtPermAuto" : "Auto (unattended)",
-  "rtPermPlan" : "Plan (read-only)"
+  "rtPermPlan" : "Plan (read-only)",
+  "macDaemonNotFound" : "pebble executable not found",
+  "macDaemonExited" : "host-daemon exited unexpectedly (code {code})",
+  "macDaemonNotReady" : "Desktop host is not ready yet",
+  "mdDetails" : "Details",
+  "mdImageFallback" : "[Image]",
+  "mdImageFallbackAlt" : "[Image: {alt}]"
 }

@@ -2,3 +2,4 @@
 "NSDesktopFolderUsageDescription" = "Pebble needs access to your Desktop folder to read and write files when remote computer control is enabled.";
 "NSDocumentsFolderUsageDescription" = "Pebble needs access to your Documents folder to read and write files when remote computer control is enabled.";
 "NSDownloadsFolderUsageDescription" = "Pebble needs access to your Downloads folder to read and write files when remote computer control is enabled.";
+"NSLocalNetworkUsageDescription" = "Connect to your Pebble host on the local network.";

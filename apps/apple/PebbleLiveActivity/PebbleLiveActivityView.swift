@@ -4,6 +4,8 @@ import SwiftUI
 import WidgetKit
 
 struct PebbleLiveActivityWidget: Widget {
+    private var isEn: Bool { PebbleSharedStore.isEnglish }
+
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: PebbleActivityAttributes.self) { context in
             LockScreenView(context: context)
@@ -29,7 +31,7 @@ struct PebbleLiveActivityWidget: Widget {
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.trailing)
                     } else if context.state.stepCount > 0 {
-                        Text("\(context.state.stepCount) 步")
+                        Text(stepText(context.state.stepCount))
                             .font(.caption.monospacedDigit())
                             .foregroundStyle(.secondary)
                     }
@@ -45,7 +47,7 @@ struct PebbleLiveActivityWidget: Widget {
                             if context.attributes.kind == "desktop" || context.state.phase == "takeover" {
                                 if let url = deepLinkURL(for: context) {
                                     Link(destination: url) {
-                                        Label("立即接管", systemImage: "hand.tap.fill")
+                                        Label(isEn ? "Take Over" : "立即接管", systemImage: "hand.tap.fill")
                                             .font(.caption.weight(.semibold))
                                             .frame(maxWidth: .infinity)
                                     }
@@ -56,7 +58,7 @@ struct PebbleLiveActivityWidget: Widget {
                                 if context.state.phase == "running" || context.state.phase == "approval",
                                    let botId = context.attributes.botId, !botId.isEmpty {
                                     Button(intent: InterruptBotIntent(botId: botId)) {
-                                        Label("中断", systemImage: "stop.fill")
+                                        Label(isEn ? "Stop" : "中断", systemImage: "stop.fill")
                                             .font(.caption.weight(.semibold))
                                     }
                                     .buttonStyle(.bordered)
@@ -64,7 +66,7 @@ struct PebbleLiveActivityWidget: Widget {
                                 }
                                 if let url = deepLinkURL(for: context) {
                                     Link(destination: url) {
-                                        Label("查看会话", systemImage: "arrow.up.right")
+                                        Label(isEn ? "Open Chat" : "查看会话", systemImage: "arrow.up.right")
                                             .font(.caption.weight(.semibold))
                                             .frame(maxWidth: .infinity)
                                     }
@@ -96,10 +98,19 @@ struct PebbleLiveActivityWidget: Widget {
         }
     }
 
+    private func stepText(_ n: Int) -> String {
+        isEn ? (n == 1 ? "1 step" : "\(n) steps") : "\(n) 步"
+    }
+
+    private func desktopTitle(_ target: String?) -> String {
+        let resolved = (target ?? "").isEmpty ? "local" : target!
+        let base = isEn ? "Remote Desktop" : "远程桌面"
+        return resolved == "local" ? base : "\(base) · \(resolved)"
+    }
+
     private func displayTitle(for context: ActivityViewContext<PebbleActivityAttributes>) -> String {
         if context.attributes.kind == "desktop" {
-            let target = context.attributes.target ?? "local"
-            return target == "local" ? "远程桌面" : "远程桌面 · \(target)"
+            return desktopTitle(context.attributes.target)
         }
         return context.attributes.botName ?? context.attributes.botId ?? "Pebble"
     }
@@ -112,7 +123,7 @@ struct PebbleLiveActivityWidget: Widget {
             return summary
         }
         if context.state.stepCount > 0 {
-            return "\(context.state.statusText) · \(context.state.stepCount) 步"
+            return "\(context.state.statusText) · \(stepText(context.state.stepCount))"
         }
         return context.state.statusText
     }
@@ -162,6 +173,17 @@ struct PebbleLiveActivityWidget: Widget {
 private struct LockScreenView: View {
     let context: ActivityViewContext<PebbleActivityAttributes>
 
+    private var isEn: Bool { PebbleSharedStore.isEnglish }
+
+    private var titleText: String {
+        if context.attributes.kind == "desktop" {
+            let resolved = (context.attributes.target ?? "").isEmpty ? "local" : context.attributes.target!
+            let base = isEn ? "Remote Desktop" : "远程桌面"
+            return resolved == "local" ? base : "\(base) · \(resolved)"
+        }
+        return context.attributes.botName ?? context.attributes.botId ?? "Pebble"
+    }
+
     private var accent: Color {
         switch context.state.phase {
         case "takeover", "approval": return .orange
@@ -183,9 +205,7 @@ private struct LockScreenView: View {
 
             VStack(alignment: .leading, spacing: 3) {
                 HStack {
-                    Text(context.attributes.kind == "desktop"
-                         ? "远程桌面 · \(context.attributes.target ?? "local")"
-                         : (context.attributes.botName ?? context.attributes.botId ?? "Pebble"))
+                    Text(titleText)
                         .font(.subheadline.weight(.semibold))
                         .lineLimit(1)
                     Spacer()

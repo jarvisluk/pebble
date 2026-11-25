@@ -16,6 +16,7 @@ import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import ai.pebble.android.i18n.L
 import kotlin.math.abs
 
 object NotificationHelper {
@@ -35,31 +36,31 @@ object NotificationHelper {
     fun ensureChannels(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val mgr = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        if (mgr.getNotificationChannel(CHANNEL_ACTIVITY) == null) {
-            mgr.createNotificationChannel(
-                NotificationChannel(
-                    CHANNEL_ACTIVITY,
-                    "任务运行进度",
-                    NotificationManager.IMPORTANCE_LOW,
-                ),
-            )
-        }
-        if (mgr.getNotificationChannel(CHANNEL_ALERTS) == null) {
-            mgr.createNotificationChannel(
-                NotificationChannel(
-                    CHANNEL_ALERTS,
-                    "接管与完成提醒",
-                    NotificationManager.IMPORTANCE_HIGH,
-                ),
-            )
-        }
+        mgr.createNotificationChannel(
+            NotificationChannel(
+                CHANNEL_ACTIVITY,
+                L.t("notifChannelActivity"),
+                NotificationManager.IMPORTANCE_LOW,
+            ),
+        )
+        mgr.createNotificationChannel(
+            NotificationChannel(
+                CHANNEL_ALERTS,
+                L.t("notifChannelAlerts"),
+                NotificationManager.IMPORTANCE_HIGH,
+            ),
+        )
     }
 
     fun buildForegroundNotification(context: Context, botNames: List<String>): Notification {
         ensureChannels(context)
         val openIntent = deepLinkPendingIntent(context, "pebble://", FOREGROUND_ID)
-        val title = if (botNames.size == 1) "${botNames.first()} 正在执行任务" else "${botNames.size} 个 Bot 正在运行"
-        val text = if (botNames.isEmpty()) "保持实时连接" else botNames.joinToString(" · ")
+        val title = if (botNames.size == 1) {
+            L.t("notifFgSingle", mapOf("name" to botNames.first()))
+        } else {
+            L.t("notifFgMulti", mapOf("n" to botNames.size))
+        }
+        val text = if (botNames.isEmpty()) L.t("notifFgIdle") else botNames.joinToString(" · ")
         return NotificationCompat.Builder(context, CHANNEL_ACTIVITY)
             .setSmallIcon(android.R.drawable.stat_notify_sync)
             .setContentTitle(title)
@@ -75,7 +76,8 @@ object NotificationHelper {
         if (!hasNotificationPermission(context)) return
         ensureChannels(context)
         val title = botName.ifBlank { botId }
-        val content = if (stepCount > 0) "$statusText · $stepCount 步" else statusText
+        val stepLabel = if (stepCount == 1) L.t("notifStepOne") else L.t("notifSteps", mapOf("n" to stepCount))
+        val content = if (stepCount > 0) "$statusText · $stepLabel" else statusText
         val openIntent = deepLinkPendingIntent(context, "pebble://bot/${Uri.encode(botId)}", botId.hashCode())
         val interruptIntent = deepLinkPendingIntent(context, "pebble://interrupt/${Uri.encode(botId)}", "int:$botId".hashCode())
         val builder = NotificationCompat.Builder(context, CHANNEL_ACTIVITY)
@@ -86,7 +88,7 @@ object NotificationHelper {
             .setOnlyAlertOnce(true)
             .setProgress(0, 0, true)
             .setContentIntent(openIntent)
-            .addAction(0, "中断", interruptIntent)
+            .addAction(0, L.t("notifInterrupt"), interruptIntent)
             .setPriority(NotificationCompat.PRIORITY_LOW)
         NotificationManagerCompat.from(context).notify(botNotificationId(botId), builder.build())
     }
@@ -105,7 +107,7 @@ object NotificationHelper {
         val builder = NotificationCompat.Builder(context, CHANNEL_ALERTS)
             .setSmallIcon(android.R.drawable.stat_notify_chat)
             .setContentTitle(title)
-            .setContentText(summary.ifBlank { "任务已完成" })
+            .setContentText(summary.ifBlank { L.t("notifTaskDone") })
             .setAutoCancel(true)
             .setContentIntent(openIntent)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
@@ -123,8 +125,8 @@ object NotificationHelper {
         )
         val builder = NotificationCompat.Builder(context, CHANNEL_ALERTS)
             .setSmallIcon(android.R.drawable.ic_dialog_alert)
-            .setContentTitle("需要接管远程桌面 ($resolvedTarget)")
-            .setContentText(reason.ifBlank { "请前往远程桌面完成操作" })
+            .setContentTitle(L.t("notifTakeoverTitle", mapOf("target" to resolvedTarget)))
+            .setContentText(reason.ifBlank { L.t("notifTakeoverBody") })
             .setAutoCancel(true)
             .setOngoing(true)
             .setContentIntent(openIntent)
@@ -153,8 +155,8 @@ object NotificationHelper {
         )
         val builder = NotificationCompat.Builder(context, CHANNEL_ALERTS)
             .setSmallIcon(android.R.drawable.ic_dialog_alert)
-            .setContentTitle("$name · 请求批准")
-            .setContentText(summary.ifBlank { "请求批准执行操作" })
+            .setContentTitle(L.t("notifApprovalTitle", mapOf("name" to name)))
+            .setContentText(summary.ifBlank { L.t("notifApprovalBody") })
             .setAutoCancel(true)
             .setContentIntent(openIntent)
             .setPriority(NotificationCompat.PRIORITY_HIGH)

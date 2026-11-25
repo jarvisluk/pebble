@@ -221,7 +221,7 @@ object MarkdownParser {
                         rawBlock = rawBlock.substring(0, closeMatches.last().range.first)
                     }
                     rawBlock = rawBlock.trim()
-                    var summary = "详情"
+                    var summary = L.t("mdDetails")
                     var bodyText = rawBlock
                     val sm = summaryRegex.find(rawBlock)
                     if (sm != null) {
@@ -1020,7 +1020,7 @@ internal fun buildInlineMarkdown(
                         val alt = cleaned.substring(i + 2, closeB).trim()
                         val urlStr = cleaned.substring(closeB + 2, closeP).trim().split(Regex("\\s+")).firstOrNull().orEmpty()
                         flushPlain()
-                        val label = if (alt.isEmpty()) "[图片]" else "[图片: $alt]"
+                        val label = if (alt.isEmpty()) L.t("mdImageFallback") else L.t("mdImageFallbackAlt", mapOf("alt" to alt))
                         if (isSafeUrl(urlStr)) {
                             withLink(
                                 LinkAnnotation.Url(
@@ -1220,7 +1220,7 @@ fun MarkdownText(
 ) {
     val p = LocalPalette.current
     val fg = color ?: p.text
-    val blocks = remember(text) { MarkdownParser.parse(text) }
+    val blocks = remember(text, L.lang) { MarkdownParser.parse(text) }
 
     SelectionContainer(modifier = modifier) {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1253,7 +1253,7 @@ private fun RenderMarkdownBlock(
                 else -> PebbleFont.body
             }
             val headColor = if (block.level >= 5) p.text2 else fg
-            val inlineText = remember(block.text, p.dark, headColor) { buildInlineMarkdown(block.text, p, headColor) }
+            val inlineText = remember(block.text, p.dark, headColor, L.lang) { buildInlineMarkdown(block.text, p, headColor) }
             Text(
                 text = inlineText,
                 fontSize = size,
@@ -1269,7 +1269,7 @@ private fun RenderMarkdownBlock(
             )
         }
         is MarkdownBlock.Quote -> {
-            val quoteText = remember(block.text, p.dark) { buildInlineMarkdown(block.text, p, p.text2) }
+            val quoteText = remember(block.text, p.dark, L.lang) { buildInlineMarkdown(block.text, p, p.text2) }
             Row(
                 modifier = Modifier.height(IntrinsicSize.Min),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1318,7 +1318,7 @@ private fun RenderMarkdownBlock(
                             )
                         }
                         val itemColor = if (item.task && item.checked) p.text2 else fg
-                        val itemText = remember(item.text, p.dark, itemColor) { buildInlineMarkdown(item.text, p, itemColor) }
+                        val itemText = remember(item.text, p.dark, itemColor, L.lang) { buildInlineMarkdown(item.text, p, itemColor) }
                         Text(
                             text = itemText,
                             fontSize = PebbleFont.body,
@@ -1331,7 +1331,7 @@ private fun RenderMarkdownBlock(
             }
         }
         is MarkdownBlock.Footnote -> {
-            val fnText = remember(block.text, p.dark) { buildInlineMarkdown(block.text, p, p.text2) }
+            val fnText = remember(block.text, p.dark, L.lang) { buildInlineMarkdown(block.text, p, p.text2) }
             Row(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.Top,
@@ -1352,7 +1352,7 @@ private fun RenderMarkdownBlock(
         }
         is MarkdownBlock.ImageBlock -> MarkdownImageView(alt = block.alt, url = block.url)
         is MarkdownBlock.Para -> {
-            val paraText = remember(block.text, p.dark, fg) { buildInlineMarkdown(block.text, p, fg) }
+            val paraText = remember(block.text, p.dark, fg, L.lang) { buildInlineMarkdown(block.text, p, fg) }
             Text(
                 text = paraText,
                 fontSize = PebbleFont.body,
@@ -1553,7 +1553,7 @@ private fun TableBlockView(
                                 .padding(horizontal = 10.dp, vertical = 7.dp),
                             contentAlignment = align.boxAlign(),
                         ) {
-                            val cellInline = remember(cellText, p.dark, fg) { buildInlineMarkdown(cellText, p, fg) }
+                            val cellInline = remember(cellText, p.dark, fg, L.lang) { buildInlineMarkdown(cellText, p, fg) }
                             Text(
                                 text = cellInline,
                                 fontSize = PebbleFont.secondary,
@@ -1640,7 +1640,7 @@ private fun TableBlockView(
 private fun MarkdownImageView(alt: String, url: String) {
     val p = LocalPalette.current
     val uriHandler = LocalUriHandler.current
-    val label = if (alt.isEmpty()) "[图片]" else "[图片: $alt]"
+    val label = if (alt.isEmpty()) L.t("mdImageFallback") else L.t("mdImageFallbackAlt", mapOf("alt" to alt))
 
     if (isSafeUrl(url)) {
         SubcomposeAsyncImage(
