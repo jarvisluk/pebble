@@ -27,7 +27,7 @@ func mixHex(_ a: String, _ b: String, _ wa: Double) -> String {
 func contrastText(_ hex: String) -> Color {
     let c = rgb(hex)
     let lum = (0.2126 * c.0 + 0.7152 * c.1 + 0.0722 * c.2) / 255
-    return Color(hex: lum > 0.62 ? "#1d1b19" : "#ffffff")
+    return Color(hex: lum > 0.62 ? "#171717" : "#ffffff")
 }
 
 func fnv1a(_ s: String) -> UInt32 {
@@ -102,20 +102,20 @@ struct Palette {
 
     init(dark: Bool) {
         self.dark = dark
-        self.accent = Color(hex: dark ? "#f3f1ee" : "#1d1b19")
-        page = Color(hex: dark ? "#000000" : "#efece8")
-        card = Color(hex: dark ? "#171717" : "#ffffff")
-        s1 = Color(hex: dark ? "#232323" : "#f5f3f0")
-        s2 = Color(hex: dark ? "#303030" : "#e9e5e0")
-        s3 = Color(hex: dark ? "#404040" : "#dcd7d0")
-        text = Color(hex: dark ? "#f3f1ee" : "#1d1b19")
-        text2 = Color(hex: dark ? "#ccc7c1" : "#57524d")
-        mute = Color(hex: dark ? "#948e88" : "#9b958f")
-        accentSoft = Color(hex: dark ? "#2a2a2a" : "#e9e5e0")
-        sel = Color(hex: dark ? "#262626" : "#eeebe6")
-        pink = Color(hex: dark ? "#2c1616" : "#fde8e8")
+        self.accent = Color(hex: dark ? "#f3f1ee" : "#171717")
+        page = Color(hex: dark ? "#000000" : "#ffffff")
+        card = Color(hex: dark ? "#171717" : "#f6f6f7")
+        s1 = Color(hex: dark ? "#232323" : "#ededef")
+        s2 = Color(hex: dark ? "#303030" : "#e2e2e7")
+        s3 = Color(hex: dark ? "#404040" : "#d1d1d8")
+        text = Color(hex: dark ? "#f3f1ee" : "#171717")
+        text2 = Color(hex: dark ? "#ccc7c1" : "#52525b")
+        mute = Color(hex: dark ? "#948e88" : "#8e8e98")
+        accentSoft = Color(hex: dark ? "#2a2a2a" : "#e6e6eb")
+        sel = Color(hex: dark ? "#262626" : "#e6e6eb")
+        pink = Color(hex: dark ? "#2c1616" : "#feecec")
         pinkInk = Color(hex: dark ? "#ff6961" : "#dc2626")
-        lilac = Color(hex: dark ? "#24203a" : "#e0dbfb")
+        lilac = Color(hex: dark ? "#24203a" : "#ebe7fe")
         lilacInk = Color(hex: dark ? "#b7aaf5" : "#6a55c9")
         sage = Color(hex: dark ? "#14261c" : "#e6f6ec")
         sageInk = Color(hex: dark ? "#30d158" : "#16a34a")
@@ -127,14 +127,14 @@ struct Palette {
     /// 当前 Bot 局部强调色（仅 Bot 下属页面使用）。
     func bot(_ id: String, _ index: Int, custom: String? = nil) -> (accent: Color, text: Color, soft: Color) {
         let hex = botColorHex(id, index, custom: custom)
-        return (Color(hex: hex), contrastText(hex), Color(hex: dark ? "#2a2a2a" : mixHex(hex, "#ffffff", 0.16)))
+        return (Color(hex: hex), contrastText(hex), Color(hex: dark ? "#2a2a2a" : mixHex(hex, "#ffffff", 0.14)))
     }
 
     func botCollab(_ id: String, _ index: Int, custom: String? = nil) -> (bg: Color, ink: Color) {
         let hex = botColorHex(id, index, custom: custom)
         return (
             bg: Color(hex: dark ? mixHex(hex, "#171717", 0.28) : mixHex(hex, "#ffffff", 0.16)),
-            ink: Color(hex: dark ? mixHex(hex, "#ffffff", 0.72) : mixHex(hex, "#1d1b19", 0.62))
+            ink: Color(hex: dark ? mixHex(hex, "#ffffff", 0.72) : mixHex(hex, "#171717", 0.62))
         )
     }
 }
@@ -1084,7 +1084,8 @@ private struct MacComposerCircleButtonStyle: ButtonStyle {
     var onCard: Bool = false
 
     func makeBody(configuration: Configuration) -> some View {
-        let idleFill = onCard ? p.s1 : p.card
+        let floatFill = p.dark ? p.card : Color(hex: "#ffffff")
+        let idleFill = onCard ? p.s1 : floatFill
         let hoverFill = onCard ? p.s2 : p.s1
         configuration.label
             .frame(width: 34, height: 34)
@@ -1104,8 +1105,9 @@ private struct MacComposerFieldModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
+        let floatFill = p.dark ? p.card : Color(hex: "#ffffff")
         content
-            .background(onCard ? p.s1 : p.card, in: shape)
+            .background(onCard ? p.s1 : floatFill, in: shape)
             .overlay(shape.stroke(p.s2, lineWidth: 1))
     }
 }
@@ -1116,7 +1118,7 @@ private struct MacComposerSendButtonStyle: ButtonStyle {
     var accent: Color
 
     func makeBody(configuration: Configuration) -> some View {
-        let fg: Color = isEnabled ? contrastText(colorToHex(accent) ?? "#1d1b19") : p.mute
+        let fg: Color = isEnabled ? contrastText(colorToHex(accent) ?? "#171717") : p.mute
         let bg: Color = isEnabled ? (configuration.isPressed ? accent.opacity(0.82) : accent) : p.s2
         configuration.label
             .frame(width: 34, height: 34)

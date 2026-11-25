@@ -39,7 +39,7 @@ export function contrastText(hex: string): string {
   const g = (n >> 8) & 255;
   const b = n & 255;
   const lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
-  return lum > 0.62 ? '#1d1b19' : '#ffffff';
+  return lum > 0.62 ? '#171717' : '#ffffff';
 }
 
 export function getThemePref(): ThemePref {

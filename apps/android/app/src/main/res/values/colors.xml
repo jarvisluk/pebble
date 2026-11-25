@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="pebble_page_light">#EFECE8</color>
+    <color name="pebble_page_light">#FFFFFF</color>
     <color name="pebble_page_dark">#000000</color>
-    <color name="ic_launcher_background">#EFECE8</color>
+    <color name="ic_launcher_background">#FFFFFF</color>
 </resources>

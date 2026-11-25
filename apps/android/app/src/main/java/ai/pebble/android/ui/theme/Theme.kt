@@ -108,7 +108,7 @@ fun mixHex(a: String, b: String, wa: Double): String {
 fun contrastText(hex: String): Color {
     val (r, g, b) = parseRgb(hex)
     val lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255.0
-    return colorFromHex(if (lum > 0.62) "#1d1b19" else "#ffffff")
+    return colorFromHex(if (lum > 0.62) "#171717" else "#ffffff")
 }
 
 @Immutable
@@ -154,9 +154,9 @@ data class PebblePalette(
         return BotAccent(
             accent = colorFromHex(hex),
             onAccent = contrastText(hex),
-            soft = colorFromHex(if (dark) "#2a2a2a" else mixHex(hex, "#ffffff", 0.16)),
+            soft = colorFromHex(if (dark) "#2a2a2a" else mixHex(hex, "#ffffff", 0.14)),
             collabBg = colorFromHex(if (dark) mixHex(hex, "#171717", 0.28) else mixHex(hex, "#ffffff", 0.16)),
-            collabInk = colorFromHex(if (dark) mixHex(hex, "#ffffff", 0.72) else mixHex(hex, "#1d1b19", 0.62)),
+            collabInk = colorFromHex(if (dark) mixHex(hex, "#ffffff", 0.72) else mixHex(hex, "#171717", 0.62)),
         )
     }
 
@@ -193,21 +193,21 @@ data class PebblePalette(
         } else {
             PebblePalette(
                 dark = false,
-                page = colorFromHex("#efece8"),
-                card = colorFromHex("#ffffff"),
-                s1 = colorFromHex("#f5f3f0"),
-                s2 = colorFromHex("#e9e5e0"),
-                s3 = colorFromHex("#dcd7d0"),
-                text = colorFromHex("#1d1b19"),
-                text2 = colorFromHex("#57524d"),
-                mute = colorFromHex("#9b958f"),
-                accent = colorFromHex("#1d1b19"),
+                page = colorFromHex("#ffffff"),
+                card = colorFromHex("#f6f6f7"),
+                s1 = colorFromHex("#ededef"),
+                s2 = colorFromHex("#e2e2e7"),
+                s3 = colorFromHex("#d1d1d8"),
+                text = colorFromHex("#171717"),
+                text2 = colorFromHex("#52525b"),
+                mute = colorFromHex("#8e8e98"),
+                accent = colorFromHex("#171717"),
                 onAccent = colorFromHex("#ffffff"),
-                accentSoft = colorFromHex("#e9e5e0"),
-                sel = colorFromHex("#eeebe6"),
-                pink = colorFromHex("#fde8e8"),
+                accentSoft = colorFromHex("#e6e6eb"),
+                sel = colorFromHex("#e6e6eb"),
+                pink = colorFromHex("#feecec"),
                 pinkInk = colorFromHex("#dc2626"),
-                lilac = colorFromHex("#e0dbfb"),
+                lilac = colorFromHex("#ebe7fe"),
                 lilacInk = colorFromHex("#6a55c9"),
                 sage = colorFromHex("#e6f6ec"),
                 sageInk = colorFromHex("#16a34a"),
@@ -313,7 +313,7 @@ fun PebbleTheme(
             onSurface = pal.text,
             surfaceVariant = pal.s1,
             onSurfaceVariant = pal.text2,
-            surfaceContainerLowest = pal.card,
+            surfaceContainerLowest = pal.page,
             surfaceContainerLow = pal.card,
             surfaceContainer = pal.card,
             surfaceContainerHigh = pal.s1,

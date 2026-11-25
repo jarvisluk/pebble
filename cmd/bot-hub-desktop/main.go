@@ -94,7 +94,7 @@ func (d *desktop) run() {
 		Height:           760,
 		MinWidth:         680,
 		MinHeight:        520,
-		BackgroundColour: application.NewRGB(239, 236, 232),
+		BackgroundColour: application.NewRGB(255, 255, 255),
 		URL:              "/desktop-setup",
 		JS:               "if(/Mac/.test(navigator.platform)){window.__bothubMacShell=true;document.documentElement.classList.add('mac-app');}",
 		Mac: application.MacWindow{

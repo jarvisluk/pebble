@@ -158,13 +158,8 @@ func drawBackground(ctx: CGContext, rect: CGRect, dark: Bool, tinted: Bool = fal
             end: CGPoint(x: rect.maxX, y: rect.maxY)
         )
     } else {
-        drawLinearGradient(
-            ctx: ctx,
-            colors: [RGB(hex: 0xF5F3F0).cgColor, RGB(hex: 0xEFECE8).cgColor, RGB(hex: 0xE7E3DE).cgColor],
-            locations: [0.0, 0.55, 1.0],
-            start: CGPoint(x: rect.minX, y: rect.minY),
-            end: CGPoint(x: rect.maxX, y: rect.maxY)
-        )
+        ctx.setFillColor(RGB(hex: 0xFFFFFF).cgColor)
+        ctx.fill(rect)
     }
 }
 
@@ -189,7 +184,7 @@ func drawBot(ctx: CGContext, canvasSize: CGFloat, heroFraction: CGFloat, variant
         case .dark:
             shadowColor = RGB(hex: 0x000000, alpha: 0.45).cgColor
         case .light:
-            shadowColor = RGB(hex: 0x1D1B19, alpha: 0.14).cgColor
+            shadowColor = RGB(hex: 0x171717, alpha: 0.12).cgColor
         default:
             shadowColor = RGB(hex: 0x000000, alpha: 0.25).cgColor
         }
@@ -331,7 +326,7 @@ func renderMacOSSquircleIcon(size: Int) -> NSBitmapImageRep {
         color: RGB(hex: 0x000000, alpha: 0.22).cgColor
     )
     ctx.addPath(cardPath)
-    ctx.setFillColor(RGB(hex: 0xEFECE8).cgColor)
+    ctx.setFillColor(RGB(hex: 0xFFFFFF).cgColor)
     ctx.fillPath()
     ctx.restoreGState()
 
@@ -348,7 +343,7 @@ func renderMacOSSquircleIcon(size: Int) -> NSBitmapImageRep {
     // Crisp subtle inner edge highlight
     ctx.saveGState()
     ctx.addPath(cardPath)
-    ctx.setStrokeColor(RGB(hex: 0x1D1B19, alpha: 0.06).cgColor)
+    ctx.setStrokeColor(RGB(hex: 0x171717, alpha: 0.08).cgColor)
     ctx.setLineWidth(max(1.0, s / 512.0))
     ctx.strokePath()
     ctx.restoreGState()
@@ -498,11 +493,9 @@ if menubarOnly {
     exit(0)
 }
 let appleIconDir = "\(root)/apps/apple/Pebble/Assets.xcassets/AppIcon.appiconset"
-let mobileAssetsDir = "\(root)/apps/mobile/assets"
-let androidResDir = "\(root)/apps/mobile/android/app/src/main/res"
+let androidDrawableDir = "\(root)/apps/android/app/src/main/res/drawable-nodpi"
 let webPublicDir = "\(root)/web/public"
 let macIconsetDir = "/tmp/pebble-AppIcon.iconset"
-let androidTmpDir = "/tmp/pebble-android-icons"
 
 // 1. Apple AppIcon.appiconset
 try savePNG(renderFullBleedIcon(size: 1024, variant: .light), to: "\(appleIconDir)/icon.png")
@@ -537,7 +530,7 @@ let eyeY = PebbleSpec.eyeEy - PebbleSpec.eyeH
 let svg = """
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
   <style>
-    .bg { fill: #efece8; }
+    .bg { fill: #ffffff; }
     .eye { fill: rgba(28, 20, 14, 0.90); }
     @media (prefers-color-scheme: dark) {
       .bg { fill: #171717; }
@@ -564,34 +557,7 @@ let svg = """
 try FileManager.default.createDirectory(atPath: webPublicDir, withIntermediateDirectories: true)
 try svg.write(toFile: "\(webPublicDir)/favicon.svg", atomically: true, encoding: .utf8)
 
-// 4. Expo / Mobile assets
-try savePNG(renderFullBleedIcon(size: 1024, variant: .light), to: "\(mobileAssetsDir)/icon.png")
-try savePNG(renderFullBleedIcon(size: 64, variant: .light), to: "\(mobileAssetsDir)/favicon.png")
-try savePNG(renderFullBleedIcon(size: 1024, variant: .splash, heroFraction: 0.80), to: "\(mobileAssetsDir)/splash-icon.png")
-try savePNG(renderFullBleedIcon(size: 1024, variant: .splash, heroFraction: 0.68), to: "\(mobileAssetsDir)/android-icon-foreground.png")
-try savePNG(renderBackgroundOnly(size: 1024, dark: false), to: "\(mobileAssetsDir)/android-icon-background.png")
-try savePNG(renderFullBleedIcon(size: 1024, variant: .monochrome, heroFraction: 0.68), to: "\(mobileAssetsDir)/android-icon-monochrome.png")
-
-// 5. Android mipmap PNG staging + splashscreen_logo.png
-try? FileManager.default.removeItem(atPath: androidTmpDir)
-let dpis: [(name: String, legacy: Int, adaptive: Int, splash: Int)] = [
-    ("mdpi", 48, 108, 288),
-    ("hdpi", 72, 162, 432),
-    ("xhdpi", 96, 216, 576),
-    ("xxhdpi", 144, 324, 864),
-    ("xxxhdpi", 192, 432, 1152),
-]
-
-for d in dpis {
-    let dir = "\(androidTmpDir)/mipmap-\(d.name)"
-    let nightDir = "\(androidTmpDir)/mipmap-night-\(d.name)"
-    try savePNG(renderFullBleedIcon(size: d.legacy, variant: .light), to: "\(dir)/ic_launcher.png")
-    try savePNG(renderFullBleedIcon(size: d.legacy, variant: .light, circleMask: true), to: "\(dir)/ic_launcher_round.png")
-    try savePNG(renderFullBleedIcon(size: d.adaptive, variant: .splash, heroFraction: 0.68), to: "\(dir)/ic_launcher_foreground.png")
-    try savePNG(renderBackgroundOnly(size: d.adaptive, dark: false), to: "\(dir)/ic_launcher_background.png")
-    try savePNG(renderFullBleedIcon(size: d.adaptive, variant: .monochrome, heroFraction: 0.68), to: "\(dir)/ic_launcher_monochrome.png")
-    try savePNG(renderBackgroundOnly(size: d.adaptive, dark: true), to: "\(nightDir)/ic_launcher_background.png")
-    try savePNG(renderFullBleedIcon(size: d.splash, variant: .splash, heroFraction: 0.80), to: "\(androidResDir)/drawable-\(d.name)/splashscreen_logo.png")
-}
+// 4. Android adaptive icon background (1024x1024 pure white)
+try savePNG(renderBackgroundOnly(size: 1024, dark: false), to: "\(androidDrawableDir)/ic_launcher_background_img.png")
 
 print("Generated PNG/SVG assets successfully. pathD=\(pathD)")

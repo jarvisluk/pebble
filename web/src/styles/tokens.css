@@ -1,26 +1,27 @@
 /* Design tokens: see DESIGN.md §2–4, §7 */
 :root {
-  --page: #efece8;
-  --card: #ffffff;
-  --s1: #f5f3f0;
-  --s2: #e9e5e0;
-  --s3: #dcd7d0;
-  --text: #1d1b19;
-  --text-2: #57524d;
-  --mute: #9b958f;
-  --accent: #1d1b19;
+  --page: #ffffff;
+  --card: #f6f6f7;
+  --float: #ffffff;
+  --s1: #ededef;
+  --s2: #e2e2e7;
+  --s3: #d1d1d8;
+  --text: #171717;
+  --text-2: #52525b;
+  --mute: #8e8e98;
+  --accent: #171717;
   --accent-text: #ffffff;
-  --accent-soft: #e9e5e0;
-  --sel: #eeebe6;
+  --accent-soft: #e6e6eb;
+  --sel: #e6e6eb;
   --bot-accent: var(--accent);
   --bot-accent-text: var(--accent-text);
-  --bot-accent-soft: color-mix(in srgb, var(--bot-accent) 16%, var(--card));
+  --bot-accent-soft: color-mix(in srgb, var(--bot-accent) 14%, #ffffff);
   --bot-collab-bg-mix: 16%;
   --bot-collab-ink-mix: 62%;
   --bot-collab-ink-base: var(--text);
-  --pink: #fde8e8;
+  --pink: #feecec;
   --pink-ink: #dc2626;
-  --lilac: #e0dbfb;
+  --lilac: #ebe7fe;
   --lilac-ink: #6a55c9;
   --sage: #e6f6ec;
   --sage-ink: #16a34a;
@@ -47,7 +48,7 @@
   --r-card: 24px;
   --r-row: 12px;
   --r-bubble: 20px;
-  --pop-shadow: 0 12px 32px rgba(0, 0, 0, .16);
+  --pop-shadow: 0 8px 28px rgba(0, 0, 0, .09), 0 1px 3px rgba(0, 0, 0, .04);
   --edge-t: calc(var(--gap) + env(safe-area-inset-top));
   --edge-r: calc(var(--gap) + env(safe-area-inset-right));
   --edge-b: calc(var(--gap) + env(safe-area-inset-bottom));
@@ -72,6 +73,7 @@
   :root:not([data-theme="light"]) {
     --page: #000000;
     --card: #171717;
+    --float: #171717;
     --s1: #232323;
     --s2: #303030;
     --s3: #404040;
@@ -99,6 +101,7 @@
     --stage-text: #f3f1ee;
     --stage-mute: #9b958f;
     --shade: rgba(0, 0, 0, .6);
+    --pop-shadow: 0 12px 32px rgba(0, 0, 0, .16);
     color-scheme: dark;
   }
 }
@@ -106,6 +109,7 @@
 html[data-theme="dark"] {
   --page: #000000;
   --card: #171717;
+  --float: #171717;
   --s1: #232323;
   --s2: #303030;
   --s3: #404040;
@@ -133,5 +137,6 @@ html[data-theme="dark"] {
   --stage-text: #f3f1ee;
   --stage-mute: #9b958f;
   --shade: rgba(0, 0, 0, .6);
+  --pop-shadow: 0 12px 32px rgba(0, 0, 0, .16);
   color-scheme: dark;
 }

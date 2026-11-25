@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
   <style>
-    .bg { fill: #efece8; }
+    .bg { fill: #ffffff; }
     .eye { fill: rgba(28, 20, 14, 0.90); }
     @media (prefers-color-scheme: dark) {
       .bg { fill: #171717; }

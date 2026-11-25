@@ -988,7 +988,7 @@ fun ChatScreen(
                     }
 
                     Surface(
-                        color = if (inDesktopSidebar) p.s1 else p.card,
+                        color = if (inDesktopSidebar) p.s1 else if (p.dark) p.card else Color.White,
                         shape = PebbleDimens.composerShape,
                         shadowElevation = if (inDesktopSidebar) 0.dp else 3.dp,
                         modifier = Modifier
