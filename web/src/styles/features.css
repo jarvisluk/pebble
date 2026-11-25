@@ -848,9 +848,6 @@
   }
 
   /* approval cards & composer permission mode pill */
-  .apr-card {
-    border: 1px solid color-mix(in srgb, var(--busy) 38%, var(--s2));
-  }
   .apr-hd-left {
     display: flex;
     align-items: center;

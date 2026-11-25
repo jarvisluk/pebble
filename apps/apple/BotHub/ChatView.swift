@@ -1570,7 +1570,6 @@ struct ApprovalCardView: View {
         }
         .padding(16)
         .background(p.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(p.busy.opacity(0.45), lineWidth: 1))
         .onChange(of: approval.id) { _, _ in
             reason = ""
             showRaw = false

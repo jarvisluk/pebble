@@ -115,9 +115,7 @@ fun ApprovalCardView(
     Surface(
         color = p.card,
         shape = PebbleDimens.cardShape,
-        modifier = Modifier
-            .fillMaxWidth()
-            .border(1.dp, p.busy.copy(alpha = 0.45f), PebbleDimens.cardShape),
+        modifier = Modifier.fillMaxWidth(),
     ) {
         Column(
             modifier = Modifier.padding(14.dp),
