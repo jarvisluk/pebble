@@ -28,6 +28,12 @@ const (
 // -ldflags "-X bot-hub/internal/protocol.AppVersion=..."
 var AppVersion = "0.1.0"
 
+// BuildCommit and BuildDate can be overridden at build time via -ldflags.
+var (
+	BuildCommit = ""
+	BuildDate   = ""
+)
+
 const (
 	HeaderProtocol = "X-Pebble-Protocol"
 	HeaderClient   = "X-Pebble-Client"

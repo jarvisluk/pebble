@@ -4,8 +4,10 @@ package cli
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -24,6 +26,7 @@ import (
 	"bot-hub/internal/hub"
 	"bot-hub/internal/mcp"
 	"bot-hub/internal/node"
+	"bot-hub/internal/protocol"
 	"bot-hub/internal/scheduler"
 	"bot-hub/internal/state"
 	"bot-hub/internal/tunnel"
@@ -37,6 +40,10 @@ func Main(args []string) {
 	}
 
 	sub := args[0]
+	if sub == "version" || sub == "--version" || sub == "-v" {
+		runVersion(args[1:])
+		return
+	}
 	if sub == "mcp" {
 		runMCP(args[1:])
 		return
@@ -111,7 +118,48 @@ func printUsage() {
   pebble session  <list|recall|rotate> [flags]                   Inspect, recall, or rotate bot sessions
   pebble routine  <list|upsert|delete|run> [flags]               Manage and trigger scheduled routines
   pebble node     <list|exec|file> [flags]                       List or invoke remote computer nodes
-  pebble desktop  <task|takeover|setup|power|targets> [flags]    Delegate desktop GUI tasks, list targets, setup virtual desktop, or control power`)
+  pebble desktop  <task|takeover|setup|power|targets> [flags]    Delegate desktop GUI tasks, list targets, setup virtual desktop, or control power
+  pebble version  [--json]                                       Print Pebble version and build metadata`)
+}
+
+func runVersion(args []string) {
+	fs := flag.NewFlagSet("version", flag.ExitOnError)
+	jsonFlag := fs.Bool("json", false, "output version info as JSON")
+	_ = fs.Parse(args)
+	if err := writeVersion(os.Stdout, *jsonFlag); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func writeVersion(w io.Writer, jsonOut bool) error {
+	if jsonOut {
+		payload := struct {
+			Version         string `json:"version"`
+			Commit          string `json:"commit,omitempty"`
+			BuildDate       string `json:"buildDate,omitempty"`
+			ProtocolVersion int    `json:"protocolVersion"`
+		}{
+			Version:         protocol.AppVersion,
+			Commit:          protocol.BuildCommit,
+			BuildDate:       protocol.BuildDate,
+			ProtocolVersion: protocol.CurrentProtocol,
+		}
+		enc := json.NewEncoder(w)
+		return enc.Encode(payload)
+	}
+	var meta []string
+	if protocol.BuildCommit != "" {
+		meta = append(meta, protocol.BuildCommit)
+	}
+	if protocol.BuildDate != "" {
+		meta = append(meta, "built "+protocol.BuildDate)
+	}
+	if len(meta) > 0 {
+		_, err := fmt.Fprintf(w, "pebble %s (%s)\n", protocol.AppVersion, strings.Join(meta, ", "))
+		return err
+	}
+	_, err := fmt.Fprintf(w, "pebble %s\n", protocol.AppVersion)
+	return err
 }
 
 func runHostDaemon(args []string) {
