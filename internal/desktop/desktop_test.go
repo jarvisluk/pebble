@@ -2,6 +2,9 @@ package desktop
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -131,4 +134,56 @@ func TestEngineScreenRecordingDeniedCache(t *testing.T) {
 		t.Fatalf("expected srDenied=false after granted")
 	}
 	eng.permMu.Unlock()
+}
+
+func TestEngineIsScreenRecordingDeniedNativeFallback(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("macOS native screen recording preflight only runs on darwin")
+	}
+	orig := screenRecordingGrantedFn
+	defer func() { screenRecordingGrantedFn = orig }()
+
+	eng := NewEngine()
+	eng.host = nil
+	screenRecordingGrantedFn = func() (bool, bool) {
+		return false, true
+	}
+	if !eng.isScreenRecordingDenied(context.Background()) {
+		t.Fatalf("expected isScreenRecordingDenied=true when native preflight returns denied")
+	}
+	eng.permMu.Lock()
+	cachedDenied := eng.srDenied
+	cachedAt := eng.srChecked
+	eng.permMu.Unlock()
+	if !cachedDenied || cachedAt.IsZero() {
+		t.Fatalf("expected srDenied cached true and srChecked set, got denied=%v at=%v", cachedDenied, cachedAt)
+	}
+
+	eng.resetPermissionCache()
+	screenRecordingGrantedFn = func() (bool, bool) {
+		return true, true
+	}
+	if eng.isScreenRecordingDenied(context.Background()) {
+		t.Fatalf("expected isScreenRecordingDenied=false when native preflight returns granted")
+	}
+}
+
+func TestIsScreenRecordingDeniedError(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "nil", err: nil, want: false},
+		{name: "sentinel", err: ErrScreenRecordingDenied, want: true},
+		{name: "wrapped", err: fmt.Errorf("failed: %w", ErrScreenRecordingDenied), want: true},
+		{name: "sck_tcc_declined", err: errors.New("The user declined TCCs for application, window, display capture"), want: true},
+		{name: "remote_rpc_zh", err: errors.New("缺少 macOS 屏幕录制权限，请在系统设置中允许"), want: true},
+		{name: "network_err", err: errors.New("connection refused"), want: false},
+	}
+	for _, tc := range cases {
+		if got := IsScreenRecordingDeniedError(tc.err); got != tc.want {
+			t.Errorf("%s: IsScreenRecordingDeniedError(%v) = %v, want %v", tc.name, tc.err, got, tc.want)
+		}
+	}
 }

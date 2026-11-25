@@ -8,6 +8,10 @@ import (
 	"strings"
 )
 
+func nativeScreenRecordingGranted() (granted bool, supported bool) {
+	return false, false
+}
+
 func platformPermissions(_ context.Context) []PermissionItem {
 	return []PermissionItem{
 		{

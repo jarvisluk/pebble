@@ -129,6 +129,10 @@ func mapAutomationStatus(code int) string {
 	}
 }
 
+func nativeScreenRecordingGranted() (granted bool, supported bool) {
+	return C.bhScreenRecordingGranted() == 1, true
+}
+
 func platformPermissions(_ context.Context) []PermissionItem {
 	sr := "denied"
 	if C.bhScreenRecordingGranted() == 1 {

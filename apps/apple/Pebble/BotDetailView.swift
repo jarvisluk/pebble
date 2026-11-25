@@ -109,6 +109,10 @@ struct BotDetailView: View {
                 }
             } catch {
                 if Task.isCancelled { break }
+                if let he = error as? HubError, he.code == "screen_recording_denied" {
+                    previewFrameError = he.message.isEmpty ? hub.t("deskScreenRecordingDenied") : he.message
+                    break
+                }
                 if previewFrameImage == nil {
                     previewFrameError = errText(error, hub.t("connFailed"))
                 }
