@@ -32,6 +32,7 @@ import (
 	"bot-hub/internal/scheduler"
 	"bot-hub/internal/state"
 	"bot-hub/internal/syncer"
+	"bot-hub/internal/update"
 	"bot-hub/internal/web"
 )
 
@@ -46,8 +47,10 @@ type HTTPServer struct {
 	cfgMu   sync.RWMutex
 	cfg     config.HTTPConfig
 	srv     *http.Server
-	schedMu sync.RWMutex
-	sched   RoutineScheduler
+	schedMu   sync.RWMutex
+	sched     RoutineScheduler
+	updaterMu sync.RWMutex
+	updater   *update.Manager
 
 	tailcat        tailcatServe
 	tailscale      tailscaleServe
@@ -90,6 +93,12 @@ func (s *HTTPServer) scheduler() RoutineScheduler {
 	s.schedMu.RLock()
 	defer s.schedMu.RUnlock()
 	return s.sched
+}
+
+func (s *HTTPServer) SetUpdater(u *update.Manager) {
+	s.updaterMu.Lock()
+	s.updater = u
+	s.updaterMu.Unlock()
 }
 
 func (s *HTTPServer) apiToken() string {
@@ -175,6 +184,10 @@ func NewHTTPServer(h *hub.Hub, cfg config.HTTPConfig) *HTTPServer {
 	mux.HandleFunc("GET /api/settings", s.handleSettings)
 	mux.HandleFunc("PUT /api/settings", s.handlePutSettings)
 	mux.HandleFunc("PATCH /api/settings", s.handlePutSettings)
+	mux.HandleFunc("GET /api/update", s.handleUpdateStatus)
+	mux.HandleFunc("POST /api/update/check", s.handleUpdateCheck)
+	mux.HandleFunc("PUT /api/update/config", s.handleUpdateConfig)
+	mux.HandleFunc("PATCH /api/update/config", s.handleUpdateConfig)
 	mux.HandleFunc("POST /api/desktop/reset", s.handleDesktopReset)
 	mux.HandleFunc("POST /api/push/register", s.handlePushRegister)
 	mux.HandleFunc("POST /api/push/activity-token", s.handlePushActivityToken)

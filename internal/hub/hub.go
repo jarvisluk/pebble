@@ -564,6 +564,13 @@ func (h *Hub) broadcast(evt Event) {
 	}
 }
 
+func (h *Hub) BroadcastUpdateStatus(payload any) {
+	h.broadcast(Event{
+		Type:    "update_status",
+		Payload: payload,
+	})
+}
+
 func (h *Hub) PushStatus() push.Status {
 	if h.push == nil {
 		return push.Status{Mode: "disabled"}

@@ -57,6 +57,8 @@ func runCommand(ctx context.Context, args []string, cwd string, stdout, stderr i
 		err = runNodeCmd(ctx, rest, cwd, stdout, stderr)
 	case "desktop":
 		err = runDesktopCmd(ctx, rest, cwd, stdout, stderr)
+	case "update":
+		err = runUpdateCmd(ctx, rest, cwd, stdout, stderr)
 	default:
 		err = fmt.Errorf("unknown command %q", sub)
 	}

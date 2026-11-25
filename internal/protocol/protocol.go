@@ -52,6 +52,7 @@ const (
 	CapStageFiles          = "stage.files"
 	CapQuestions           = "questions"
 	CapRoutines            = "routines"
+	CapUpdateCheck         = "update.check"
 )
 
 // Remote node capabilities advertised in POST /api/nodes/poll.
@@ -160,6 +161,7 @@ func ServerCapabilities(virtualSupported bool) []string {
 		CapQuestions,
 		CapRoutines,
 		CapStageFiles,
+		CapUpdateCheck,
 	}
 	if virtualSupported {
 		caps = append(caps, CapDesktopVirtualSlots)
