@@ -405,8 +405,9 @@ func (s *Scheduler) executeWithSlot(ctx context.Context, botID string, sched con
 
 	started := time.Now()
 	res, err := s.hub.RunIsolated(ctx, botID, prompt, hub.IsolatedOptions{
-		Source: "routine:" + sched.Name,
-		Model:  sched.Model,
+		Source:         "routine:" + sched.Name,
+		Model:          sched.Model,
+		PermissionMode: sched.PermissionMode,
 	})
 	finished := time.Now()
 

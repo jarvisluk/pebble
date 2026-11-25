@@ -551,7 +551,18 @@ private fun BotListRow(
     val lastMsg = store.last[bot.id]
     val unreadCount = store.unread[bot.id] ?: 0
     val tool = store.tools[bot.id].orEmpty()
+    val hasTakeover = store.takeovers.any { it.botId == bot.id }
+    val hasApproval = store.approvals.any { it.botId == bot.id }
+    val hasQuestion = store.questions.any { it.botId == bot.id }
+    val previewColor = when {
+        hasTakeover -> p.danger
+        hasApproval || hasQuestion || bot.isBusy -> p.busy
+        else -> p.text2
+    }
     val preview = when {
+        hasTakeover -> store.t("takeoverWaitingBadge")
+        hasApproval -> store.t("approvalWaitingBadge")
+        hasQuestion -> store.t("questionWaitingBadge")
         bot.isBusy -> if (tool.isNotEmpty()) store.t("callingTool", mapOf("tool" to tool)) else store.t("thinking")
         lastMsg != null -> {
             val prefix = if (lastMsg.role == "user") store.t("youPrefix") else ""
@@ -631,7 +642,7 @@ private fun BotListRow(
                 ) {
                     Text(
                         text = preview,
-                        color = if (bot.isBusy) p.busy else p.text2,
+                        color = previewColor,
                         fontSize = PebbleFont.secondary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,

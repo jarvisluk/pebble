@@ -379,8 +379,10 @@ fun BotInfoSheet(
     var editPrivate by remember(botId) { mutableStateOf(false) }
     var editDesktopTarget by remember(botId) { mutableStateOf("") }
     var editBrowserMode by remember(botId) { mutableStateOf("") }
+    var editPermMode by remember(botId) { mutableStateOf("auto") }
     var screenMenuOpen by remember(botId) { mutableStateOf(false) }
     var browserMenuOpen by remember(botId) { mutableStateOf(false) }
+    var permMenuOpen by remember(botId) { mutableStateOf(false) }
     var saving by remember(botId) { mutableStateOf(false) }
     var err by remember(botId) { mutableStateOf("") }
     var confirm by remember(botId) { mutableStateOf<ConfirmItem?>(null) }
@@ -398,7 +400,8 @@ fun BotInfoSheet(
     val canBindDesktop = store.supports("bot.desktop_binding")
     val canIsolateBrowser = store.supports("bot.browser_isolation")
 
-    val dirty = remember(active, detail, editName, editDesc, editAvatar, editColor, editPrivate, editDesktopTarget, editBrowserMode, editInst, canBindDesktop, canIsolateBrowser) {
+    val dirty = remember(active, detail, editName, editDesc, editAvatar, editColor, editPrivate, editDesktopTarget, editBrowserMode, editPermMode, editInst, canBindDesktop, canIsolateBrowser) {
+        val activePerm = store.clampPermissionMode(active?.permissionMode, active?.harness)
         active != null && (
             editName != (active.name ?: botId) ||
                 editDesc != active.description.orEmpty() ||
@@ -407,6 +410,7 @@ fun BotInfoSheet(
                 editPrivate != (active.privateSessions == true) ||
                 (canBindDesktop && editDesktopTarget != active.desktopTarget.orEmpty()) ||
                 (canIsolateBrowser && editBrowserMode != active.browserMode.orEmpty()) ||
+                editPermMode != activePerm ||
                 editInst != detail?.instructions.orEmpty()
             )
     }
@@ -457,6 +461,7 @@ fun BotInfoSheet(
         editPrivate = d.privateSessions == true
         editDesktopTarget = d.desktopTarget.orEmpty()
         editBrowserMode = d.browserMode.orEmpty()
+        editPermMode = store.clampPermissionMode(d.permissionMode, d.harness)
     }
 
     suspend fun loadMem() {
@@ -476,6 +481,7 @@ fun BotInfoSheet(
         editPrivate = src?.privateSessions == true
         editDesktopTarget = src?.desktopTarget.orEmpty()
         editBrowserMode = src?.browserMode.orEmpty()
+        editPermMode = store.clampPermissionMode(src?.permissionMode, src?.harness)
         loading = true
         scope.launch { loadMem() }
         scope.launch { runCatching { store.refreshDesktopTargets() } }
@@ -500,6 +506,7 @@ fun BotInfoSheet(
                     "color" to editColor,
                     "instructions" to editInst,
                     "privateSessions" to editPrivate,
+                    "permissionMode" to editPermMode,
                 )
                 if (canBindDesktop) payload["desktopTarget"] = editDesktopTarget
                 if (canIsolateBrowser) payload["browserMode"] = editBrowserMode
@@ -771,6 +778,63 @@ fun BotInfoSheet(
                                 store.t("statModel"),
                                 active?.model?.takeIf { it.isNotEmpty() } ?: store.t("defaultTag"),
                             )
+                            val permModes = store.supportedPermissionModes(active?.harness)
+                            if (permModes.size <= 1) {
+                                val onlyMode = permModes.firstOrNull() ?: "auto"
+                                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    DetailRow(store.t("permMode"), store.t("permMode_$onlyMode"))
+                                    Text(
+                                        store.t("permModeUnsupported", mapOf("mode" to store.t("permMode_$onlyMode"))),
+                                        color = p.mute,
+                                        fontSize = PebbleFont.caption,
+                                    )
+                                }
+                            } else {
+                                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    Box(modifier = Modifier.fillMaxWidth()) {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(PebbleDimens.rowShape)
+                                                .clickable { permMenuOpen = true }
+                                                .padding(vertical = 8.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        ) {
+                                            Text(store.t("permMode"), color = p.text, fontSize = PebbleFont.body, modifier = Modifier.weight(1f))
+                                            Text(
+                                                text = store.t("permMode_$editPermMode"),
+                                                color = p.text2,
+                                                fontSize = PebbleFont.secondary,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                            Icon(painterResource(PebbleIcons.ExpandMore), contentDescription = null, tint = p.mute, modifier = Modifier.size(18.dp))
+                                        }
+                                        DropdownMenu(
+                                            expanded = permMenuOpen,
+                                            onDismissRequest = { permMenuOpen = false },
+                                            containerColor = p.card,
+                                        ) {
+                                            permModes.forEach { m ->
+                                                DropdownMenuItem(
+                                                    text = { Text(store.t("permMode_$m"), color = p.text, fontSize = PebbleFont.body) },
+                                                    trailingIcon = {
+                                                        if (editPermMode == m) {
+                                                            Icon(painterResource(PebbleIcons.Check), contentDescription = null, tint = pal.accent, modifier = Modifier.size(16.dp))
+                                                        }
+                                                    },
+                                                    onClick = {
+                                                        editPermMode = m
+                                                        permMenuOpen = false
+                                                    },
+                                                )
+                                            }
+                                        }
+                                    }
+                                    Text(store.t("permDesc_$editPermMode"), color = p.mute, fontSize = PebbleFont.caption)
+                                }
+                            }
                             val archivedText = store.t("archivedCount", mapOf("n" to (active?.archivedSessions ?: 0))) +
                                 if (active?.privateSessions == true) store.t("privateTag") else ""
                             DetailRow(store.t("statArchived"), archivedText)
@@ -1100,9 +1164,15 @@ private fun RoutinesBlock(
                         rt.lastRun?.status == "error" -> store.t("rtStatusError")
                         else -> ""
                     }
+                    val rtPermLabel = when (rt.permissionMode) {
+                        "auto" -> store.t("permMode_auto")
+                        "plan" -> store.t("permMode_plan")
+                        else -> null
+                    }
                     val meta = listOfNotNull(
                         trig.ifEmpty { null },
                         deliv,
+                        rtPermLabel,
                         if (!rt.webhookUrl.isNullOrEmpty()) store.t("rtWebhookPushTag") else null,
                         rt.model?.takeIf { it.isNotEmpty() },
                     ).joinToString(" · ")
@@ -1294,6 +1364,14 @@ private fun RoutineEditorSheet(
     var clearSecret by remember { mutableStateOf(false) }
     var webhookUrl by remember { mutableStateOf(routine?.webhookUrl.orEmpty()) }
     var delivery by remember { mutableStateOf(routine?.mainDelivery ?: "receipt") }
+    var permMode by remember {
+        mutableStateOf(
+            when (routine?.permissionMode) {
+                "auto", "plan" -> routine.permissionMode
+                else -> ""
+            },
+        )
+    }
     var prompt by remember { mutableStateOf(routine?.prompt.orEmpty()) }
     var enabled by remember { mutableStateOf(routine?.enabled ?: true) }
     var saving by remember { mutableStateOf(false) }
@@ -1321,6 +1399,7 @@ private fun RoutineEditorSheet(
             "webhookUrl" to webhookUrl.trim(),
             "prompt" to pr,
             "mainDelivery" to delivery,
+            "permissionMode" to permMode,
             "enabled" to enabled,
         )
         val sec = secret.trim()
@@ -1487,6 +1566,25 @@ private fun RoutineEditorSheet(
                     shape = SegmentedButtonDefaults.itemShape(idx, delivs.size),
                     label = { Text(lbl, fontSize = PebbleFont.secondary, maxLines = 1) },
                 )
+            }
+        }
+
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(store.t("rtPermMode"), color = p.text2, fontSize = PebbleFont.secondary)
+            val rtPerms = listOf(
+                "" to store.t("rtPermFollow"),
+                "auto" to store.t("permMode_auto"),
+                "plan" to store.t("permMode_plan"),
+            )
+            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                rtPerms.forEachIndexed { idx, (key, lbl) ->
+                    SegmentedButton(
+                        selected = permMode == key,
+                        onClick = { permMode = key },
+                        shape = SegmentedButtonDefaults.itemShape(idx, rtPerms.size),
+                        label = { Text(lbl, fontSize = PebbleFont.secondary, maxLines = 1) },
+                    )
+                }
             }
         }
 

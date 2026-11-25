@@ -52,6 +52,7 @@ data class BotStatus(
     val privateSessions: Boolean? = null,
     val desktopTarget: String? = null,
     val browserMode: String? = null,
+    val permissionMode: String? = null,
     val archivedSessions: Int? = null,
     val busy: Boolean? = null,
     val queued: Int? = null,
@@ -134,14 +135,24 @@ data class HarnessMagpie(
 )
 
 @Serializable
+data class PermissionCapabilities(
+    val modes: List<String>? = null,
+    val interactiveApproval: Boolean? = null,
+    val supportsAllowAlways: Boolean? = null,
+)
+
+@Serializable
 data class HarnessInfo(
     val id: String,
     val label: String? = null,
     val defaultModel: String? = null,
     val installed: Boolean? = null,
     val magpie: HarnessMagpie? = null,
+    val permissions: PermissionCapabilities? = null,
 ) {
     val title: String get() = if (label.isNullOrEmpty()) id else label
+    val supportedModes: List<String>
+        get() = permissions?.modes?.filter { it.isNotEmpty() }?.ifEmpty { listOf("auto") } ?: listOf("auto")
 }
 
 @Serializable
@@ -185,6 +196,7 @@ data class SettingsData(
     val desktopHarness: String? = null,
     val desktopModel: String? = null,
     val defaultHarness: String? = null,
+    val defaultPermissionMode: String? = null,
     val defaultModel: String? = null,
     val defaultModels: Map<String, String>? = null,
     val sharedUserMd: String? = null,
@@ -370,6 +382,7 @@ data class RoutineItem(
     val prompt: String? = null,
     val model: String? = null,
     val mainDelivery: String? = null,
+    val permissionMode: String? = null,
     val enabled: Boolean? = null,
     val running: Boolean? = null,
     val nextRunAt: String? = null,
@@ -477,12 +490,36 @@ data class DesktopPermissionRequestResp(
     val items: List<DesktopPermissionItem>? = null,
 )
 
+@Serializable
+data class PermissionOption(
+    val id: String,
+    val kind: String,
+    val label: String,
+    val description: String? = null,
+)
+
+@Serializable
+data class PendingApproval(
+    val id: String,
+    val botId: String,
+    val botName: String? = null,
+    val toolName: String,
+    val kind: String? = null,
+    val title: String? = null,
+    val summary: String? = null,
+    val rawInput: JsonObject? = null,
+    val options: List<PermissionOption>? = null,
+    val mode: String? = null,
+    val createdAt: String? = null,
+)
+
 // Response wrappers
 @Serializable data class BotsResp(val bots: List<BotStatus>? = null, val server: ServerInfo? = null)
 @Serializable data class MessagesResp(val messages: List<ChatMessage>? = null)
 @Serializable data class NodesResp(val nodes: List<NodeInfo>? = null)
 @Serializable data class TakeoversResp(val ok: Boolean? = null, val items: List<TakeoverRequest>? = null)
 @Serializable data class QuestionsResp(val ok: Boolean? = null, val items: List<PendingQuestion>? = null)
+@Serializable data class ApprovalsResp(val ok: Boolean? = null, val items: List<PendingApproval>? = null)
 @Serializable data class RoutinesResp(val routines: List<RoutineItem>? = null)
 @Serializable data class RunsResp(val runs: List<RoutineRun>? = null)
 @Serializable data class ModelsResp(val models: List<String>? = null)

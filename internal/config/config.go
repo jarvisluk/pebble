@@ -24,6 +24,11 @@ const (
 	RoutineFailoverAuto        = "auto"
 	RoutineFailoverPrimaryOnly = "primary_only"
 	RoutineFailoverManual      = "manual"
+
+	PermissionModeAuto = "auto"
+	PermissionModeEdit = "edit"
+	PermissionModeAsk  = "ask"
+	PermissionModePlan = "plan"
 )
 
 var cronParser = cron.NewParser(
@@ -54,6 +59,7 @@ type ScheduleConfig struct {
 	Model          string `json:"model,omitempty"`
 	MainDelivery   string `json:"mainDelivery,omitempty"`   // "receipt" (default) | "notify" | "none"
 	FailoverPolicy string `json:"failoverPolicy,omitempty"` // "auto" (default) | "primary_only" | "manual"
+	PermissionMode string `json:"permissionMode,omitempty"` // "" (follow bot) | "auto" | "plan"
 	Enabled        *bool  `json:"enabled,omitempty"`
 }
 
@@ -142,6 +148,9 @@ func (s ScheduleConfig) Validate() error {
 	default:
 		return fmt.Errorf("invalid failoverPolicy %q (expected auto, primary_only, or manual)", s.FailoverPolicy)
 	}
+	if _, err := NormalizeRoutinePermissionMode(s.PermissionMode); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -188,8 +197,9 @@ type BotConfig struct {
 	// than the bot's own config.
 	ModelInherited  bool              `json:"-"`
 	Agent           string            `json:"agent,omitempty"`
-	AutoApprove     *bool             `json:"autoApprove,omitempty"` // default: true
-	TimeoutSec      int               `json:"timeoutSec,omitempty"`  // default: 300
+	AutoApprove     *bool             `json:"autoApprove,omitempty"`    // legacy fallback: false -> "ask"
+	PermissionMode  string            `json:"permissionMode,omitempty"` // "auto" (default) | "edit" | "ask" | "plan"
+	TimeoutSec      int               `json:"timeoutSec,omitempty"`     // default: 300
 	PrivateSessions bool              `json:"privateSessions,omitempty"`
 	DesktopTarget   string            `json:"desktopTarget,omitempty"`
 	BrowserMode     string            `json:"browserMode,omitempty"` // "" | "auto" | "isolated" | "attach"
@@ -197,8 +207,19 @@ type BotConfig struct {
 	Schedules       []ScheduleConfig  `json:"schedules,omitempty"`
 }
 
+// EffectivePermissionMode returns the normalized permission mode ("auto", "edit", "ask", or "plan").
+func (b BotConfig) EffectivePermissionMode() string {
+	if pm, err := NormalizePermissionMode(b.PermissionMode); err == nil && pm != "" {
+		return pm
+	}
+	if b.AutoApprove != nil && !*b.AutoApprove {
+		return PermissionModeAsk
+	}
+	return PermissionModeAuto
+}
+
 func (b BotConfig) ShouldAutoApprove() bool {
-	return b.AutoApprove == nil || *b.AutoApprove
+	return b.EffectivePermissionMode() == PermissionModeAuto
 }
 
 type HTTPConfig struct {
@@ -474,7 +495,8 @@ type HubConfig struct {
 	ProjectRoot string `json:"-"`
 	ConfigPath  string `json:"-"`
 	// DefaultHarness selects the default backend harness when creating a bot.
-	DefaultHarness string `json:"defaultHarness,omitempty"`
+	DefaultHarness        string `json:"defaultHarness,omitempty"`
+	DefaultPermissionMode string `json:"defaultPermissionMode,omitempty"`
 	// DefaultModel applies to opencode and pi bots (they share provider/model
 	// IDs); DefaultModels overrides it per harness.
 	DefaultModel string `json:"defaultModel,omitempty"`
@@ -649,6 +671,39 @@ func (b BotConfig) EffectiveBrowserMode() string {
 	}
 }
 
+// NormalizePermissionMode validates and normalizes a permission mode.
+// Empty string is preserved (meaning inherit / default).
+func NormalizePermissionMode(v string) (string, error) {
+	s := strings.ToLower(strings.TrimSpace(v))
+	switch s {
+	case "", PermissionModeAuto, PermissionModeEdit, PermissionModeAsk, PermissionModePlan:
+		return s, nil
+	default:
+		return "", fmt.Errorf("invalid permissionMode %q (expected auto, edit, ask, or plan)", v)
+	}
+}
+
+// NormalizeRoutinePermissionMode validates and normalizes a routine's unattended permission override.
+func NormalizeRoutinePermissionMode(v string) (string, error) {
+	s := strings.ToLower(strings.TrimSpace(v))
+	switch s {
+	case "", PermissionModeAuto, PermissionModePlan:
+		return s, nil
+	default:
+		return "", fmt.Errorf("invalid routine permissionMode %q (expected empty, auto, or plan)", v)
+	}
+}
+
+// EffectiveDefaultPermissionMode returns the hub-wide default permission mode (falling back to "auto").
+func (c *HubConfig) EffectiveDefaultPermissionMode() string {
+	if c != nil {
+		if pm, err := NormalizePermissionMode(c.DefaultPermissionMode); err == nil && pm != "" {
+			return pm
+		}
+	}
+	return PermissionModeAuto
+}
+
 // ContainsEnvRef reports whether s contains a `${VAR}` environment variable reference.
 func ContainsEnvRef(s string) bool {
 	return envRefRe.MatchString(s)
@@ -769,6 +824,11 @@ func Load(projectRoot, explicitPath string) (*HubConfig, string, error) {
 
 	cfg.ProjectRoot = projectRoot
 	cfg.ConfigPath = cfgPath
+	dpm, err := NormalizePermissionMode(cfg.DefaultPermissionMode)
+	if err != nil {
+		return nil, cfgPath, err
+	}
+	cfg.DefaultPermissionMode = dpm
 	cfg.DefaultModel = expandEnv(cfg.DefaultModel)
 	cfg.DesktopHarness = strings.TrimSpace(cfg.DesktopHarness)
 	cfg.DesktopModel = strings.TrimSpace(expandEnv(cfg.DesktopModel))
@@ -857,6 +917,18 @@ func Load(projectRoot, explicitPath string) (*HubConfig, string, error) {
 			return nil, cfgPath, fmt.Errorf("bot %q: %w", b.ID, err)
 		}
 		b.BrowserMode = bm
+		pm, err := NormalizePermissionMode(b.PermissionMode)
+		if err != nil {
+			return nil, cfgPath, fmt.Errorf("bot %q: %w", b.ID, err)
+		}
+		b.PermissionMode = pm
+		for j := range b.Schedules {
+			rpm, err := NormalizeRoutinePermissionMode(b.Schedules[j].PermissionMode)
+			if err != nil {
+				return nil, cfgPath, fmt.Errorf("bot %q schedule %q: %w", b.ID, b.Schedules[j].Name, err)
+			}
+			b.Schedules[j].PermissionMode = rpm
+		}
 
 		NormalizeBot(b, &cfg)
 		if err := EnsureWorkspace(b, &cfg, ""); err != nil {
@@ -886,6 +958,14 @@ func NormalizeBot(b *BotConfig, cfg *HubConfig) {
 	}
 	if bm, err := NormalizeBrowserMode(b.BrowserMode); err == nil {
 		b.BrowserMode = bm
+	}
+	if pm, err := NormalizePermissionMode(b.PermissionMode); err == nil {
+		b.PermissionMode = pm
+	}
+	if b.PermissionMode == "" && b.AutoApprove == nil && cfg != nil {
+		if defPM := cfg.EffectiveDefaultPermissionMode(); defPM != PermissionModeAuto {
+			b.PermissionMode = defPM
+		}
 	}
 	if b.Harness == "" {
 		b.Harness = cfg.EffectiveDefaultHarness()
@@ -925,6 +1005,9 @@ func NormalizeSchedules(in []ScheduleConfig) []ScheduleConfig {
 		sc.WebhookURL = strings.TrimSpace(expandEnv(sc.WebhookURL))
 		sc.Model = strings.TrimSpace(expandEnv(sc.Model))
 		sc.MainDelivery = sc.EffectiveMainDelivery()
+		if rpm, err := NormalizeRoutinePermissionMode(sc.PermissionMode); err == nil {
+			sc.PermissionMode = rpm
+		}
 		baseID := sc.EffectiveID()
 		if n, exists := usedIDs[baseID]; exists {
 			n++

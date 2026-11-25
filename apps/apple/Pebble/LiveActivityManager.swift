@@ -16,6 +16,7 @@ final class LiveActivityManager {
     @ObservationIgnored private var botActivities: [String: Activity<PebbleActivityAttributes>] = [:]
     @ObservationIgnored private var botStartedAt: [String: Double] = [:]
     @ObservationIgnored private var botSteps: [String: Int] = [:]
+    @ObservationIgnored private var activeApprovalBots: Set<String> = []
     @ObservationIgnored private var desktopActivities: [String: Activity<PebbleActivityAttributes>] = [:]
     @ObservationIgnored private var tokenTasks: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private var startTokenTask: Task<Void, Never>?
@@ -161,6 +162,52 @@ final class LiveActivityManager {
         }
     }
 
+    func handleApprovals(_ items: [PendingApproval], bots: [BotStatus] = []) {
+        guard activitiesEnabled else { return }
+        var latestByBot: [String: PendingApproval] = [:]
+        for item in items where !item.botId.isEmpty {
+            latestByBot[item.botId] = item
+        }
+        for (botId, item) in latestByBot {
+            activeApprovalBots.insert(botId)
+            guard let act = botActivities[botId] else { continue }
+            let started = botStartedAt[botId] ?? Date().timeIntervalSince1970
+            let steps = botSteps[botId] ?? 0
+            let label = item.toolName.isEmpty ? (item.title ?? "") : item.toolName
+            let sum = (item.summary ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let body: String? = {
+                if !label.isEmpty && !sum.isEmpty { return "\(label): \(sum)" }
+                if !label.isEmpty { return label }
+                return sum.isEmpty ? nil : sum
+            }()
+            let state = PebbleActivityAttributes.ContentState(
+                phase: "approval",
+                statusText: L.lang == "en" ? "Approval required" : "等待批准",
+                stepCount: steps,
+                startedAt: started,
+                summary: body,
+                takeoverReason: nil
+            )
+            Task { await act.update(.init(state: state, staleDate: nil)) }
+        }
+        for botId in activeApprovalBots where latestByBot[botId] == nil {
+            activeApprovalBots.remove(botId)
+            guard let act = botActivities[botId],
+                  bots.first(where: { $0.id == botId })?.isBusy == true else { continue }
+            let started = botStartedAt[botId] ?? Date().timeIntervalSince1970
+            let steps = botSteps[botId] ?? 0
+            let state = PebbleActivityAttributes.ContentState(
+                phase: "running",
+                statusText: L.lang == "en" ? "Thinking…" : "正在思考",
+                stepCount: steps,
+                startedAt: started,
+                summary: nil,
+                takeoverReason: nil
+            )
+            Task { await act.update(.init(state: state, staleDate: nil)) }
+        }
+    }
+
     private func observeActivityToken(_ activity: Activity<PebbleActivityAttributes>, key: String) {
         tokenTasks[key]?.cancel()
         tokenTasks[key] = Task {
@@ -184,6 +231,7 @@ final class LiveActivityManager {
     func handleBotStatus(_ bot: BotStatus) {}
     func handleToolUse(botId: String, tool: String) {}
     func handleTakeovers(_ items: [TakeoverRequest]) {}
+    func handleApprovals(_ items: [PendingApproval], bots: [BotStatus] = []) {}
 }
 
 #endif

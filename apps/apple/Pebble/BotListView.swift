@@ -359,6 +359,12 @@ struct BotRow: View {
         let lastMsg = hub.last[bot.id]
         let unread = hub.unread[bot.id] ?? 0
         let (sub, subColor): (String, Color) = {
+            if hub.takeovers.contains(where: { $0.botId == bot.id }) {
+                return (hub.t("takeoverWaitingBadge"), p.danger)
+            }
+            if hub.approvals.contains(where: { $0.botId == bot.id }) {
+                return (hub.t("approvalWaitingBadge"), p.busy)
+            }
             if hub.questions.contains(where: { $0.botId == bot.id }) {
                 return (hub.t("questionWaitingBadge"), p.busy)
             }

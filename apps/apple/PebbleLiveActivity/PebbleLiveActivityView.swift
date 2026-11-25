@@ -23,7 +23,7 @@ struct PebbleLiveActivityWidget: Widget {
                     }
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    if context.state.phase == "running" || context.state.phase == "takeover" {
+                    if context.state.phase == "running" || context.state.phase == "takeover" || context.state.phase == "approval" {
                         Text(timerInterval: context.state.startedDate...Date.distantFuture, countsDown: false)
                             .font(.caption.monospacedDigit())
                             .foregroundStyle(.secondary)
@@ -53,7 +53,8 @@ struct PebbleLiveActivityWidget: Widget {
                                     .tint(.orange)
                                 }
                             } else {
-                                if context.state.phase == "running", let botId = context.attributes.botId, !botId.isEmpty {
+                                if context.state.phase == "running" || context.state.phase == "approval",
+                                   let botId = context.attributes.botId, !botId.isEmpty {
                                     Button(intent: InterruptBotIntent(botId: botId)) {
                                         Label("中断", systemImage: "stop.fill")
                                             .font(.caption.weight(.semibold))
@@ -79,7 +80,7 @@ struct PebbleLiveActivityWidget: Widget {
                 Image(systemName: iconName(for: context))
                     .foregroundStyle(accentColor(for: context.state.phase))
             } compactTrailing: {
-                if context.state.phase == "running" || context.state.phase == "takeover" {
+                if context.state.phase == "running" || context.state.phase == "takeover" || context.state.phase == "approval" {
                     Text(timerInterval: context.state.startedDate...Date.distantFuture, countsDown: false)
                         .font(.caption2.monospacedDigit())
                         .frame(maxWidth: 44)
@@ -121,6 +122,7 @@ struct PebbleLiveActivityWidget: Widget {
             return "display"
         }
         switch context.state.phase {
+        case "approval": return "checkmark.shield.fill"
         case "completed": return "checkmark.circle.fill"
         case "error": return "exclamationmark.triangle.fill"
         default: return "sparkles"
@@ -129,7 +131,7 @@ struct PebbleLiveActivityWidget: Widget {
 
     private func accentColor(for phase: String) -> Color {
         switch phase {
-        case "takeover": return .orange
+        case "takeover", "approval": return .orange
         case "completed": return .green
         case "error": return .red
         default: return Color(red: 0.85, green: 0.47, blue: 0.29)
@@ -138,7 +140,7 @@ struct PebbleLiveActivityWidget: Widget {
 
     private func backgroundColor(for phase: String) -> Color {
         switch phase {
-        case "takeover": return Color.orange.opacity(0.18)
+        case "takeover", "approval": return Color.orange.opacity(0.18)
         case "error": return Color.red.opacity(0.15)
         default: return Color(UIColor.secondarySystemBackground).opacity(0.88)
         }
@@ -162,7 +164,7 @@ private struct LockScreenView: View {
 
     private var accent: Color {
         switch context.state.phase {
-        case "takeover": return .orange
+        case "takeover", "approval": return .orange
         case "completed": return .green
         case "error": return .red
         default: return Color(red: 0.85, green: 0.47, blue: 0.29)
@@ -171,7 +173,9 @@ private struct LockScreenView: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: context.attributes.kind == "desktop" || context.state.phase == "takeover" ? "display" : "sparkles")
+            Image(systemName: context.attributes.kind == "desktop" || context.state.phase == "takeover"
+                  ? "display"
+                  : (context.state.phase == "approval" ? "checkmark.shield.fill" : "sparkles"))
                 .font(.title3.weight(.semibold))
                 .foregroundStyle(accent)
                 .frame(width: 34, height: 34)
@@ -185,7 +189,7 @@ private struct LockScreenView: View {
                         .font(.subheadline.weight(.semibold))
                         .lineLimit(1)
                     Spacer()
-                    if context.state.phase == "running" || context.state.phase == "takeover" {
+                    if context.state.phase == "running" || context.state.phase == "takeover" || context.state.phase == "approval" {
                         Text(timerInterval: context.state.startedDate...Date.distantFuture, countsDown: false)
                             .font(.caption.monospacedDigit())
                             .foregroundStyle(.secondary)
@@ -198,7 +202,8 @@ private struct LockScreenView: View {
                     .lineLimit(2)
             }
 
-            if context.state.phase == "running", let botId = context.attributes.botId, !botId.isEmpty {
+            if context.state.phase == "running" || context.state.phase == "approval",
+               let botId = context.attributes.botId, !botId.isEmpty {
                 Button(intent: InterruptBotIntent(botId: botId)) {
                     Image(systemName: "stop.fill")
                         .font(.caption.weight(.bold))

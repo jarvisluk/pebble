@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import type { BotStatus, ConfirmOptions, ResolvedLang, SettingsData } from '../types';
+import type { BotStatus, ConfirmOptions, PermissionMode, ResolvedLang, SettingsData } from '../types';
 import { api } from '../lib/api';
 import { translate } from '../lib/i18n';
 import { BotAppearancePicker } from './BotAppearancePicker';
@@ -35,6 +35,7 @@ export const CreateBotModal: React.FC<CreateBotModalProps> = ({
   const [color, setColor] = useState('');
   const [harness, setHarness] = useState('opencode');
   const [model, setModel] = useState('');
+  const [permMode, setPermMode] = useState<PermissionMode>('auto');
   const [inst, setInst] = useState('');
   const [priv, setPriv] = useState(false);
   const [err, setErr] = useState('');
@@ -51,14 +52,25 @@ export const CreateBotModal: React.FC<CreateBotModalProps> = ({
     setColor('');
     setHarness(defaultH);
     setModel('');
+    const hModes = settings?.harnesses.find((h) => h.id === defaultH)?.permissions?.modes;
+    const defPerm = (settings?.defaultPermissionMode || 'auto') as PermissionMode;
+    setPermMode(hModes && hModes.length > 0 && !hModes.includes(defPerm) ? hModes[0] : defPerm);
     setInst('');
     setPriv(false);
     setErr('');
     void onLoadModels(defaultH);
   }, [open]);
 
-  const defModel = settings?.harnesses.find((h) => h.id === harness)?.defaultModel || '';
+  const selectedHarness = settings?.harnesses.find((h) => h.id === harness);
+  const defModel = selectedHarness?.defaultModel || '';
   const modelList = models[harness] || [];
+  const supportedModes: PermissionMode[] =
+    selectedHarness?.permissions?.modes && selectedHarness.permissions.modes.length > 0
+      ? selectedHarness.permissions.modes
+      : ['auto', 'edit', 'ask', 'plan'];
+  const effectivePermMode: PermissionMode = supportedModes.includes(permMode)
+    ? permMode
+    : supportedModes[0] || 'auto';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -75,6 +87,7 @@ export const CreateBotModal: React.FC<CreateBotModalProps> = ({
           color,
           harness,
           model: model.trim(),
+          permissionMode: effectivePermMode,
           instructions: inst.trim(),
           privateSessions: priv,
         },
@@ -198,6 +211,26 @@ export const CreateBotModal: React.FC<CreateBotModalProps> = ({
                   <option key={m} value={m} />
                 ))}
               </datalist>
+            </div>
+          </div>
+          <div className="fld">
+            <label htmlFor="fPermMode">{t('permMode')}</label>
+            <select
+              id="fPermMode"
+              disabled={supportedModes.length <= 1}
+              value={effectivePermMode}
+              onChange={(e) => setPermMode(e.target.value as PermissionMode)}
+            >
+              {supportedModes.map((m) => (
+                <option key={m} value={m}>
+                  {t(`permMode_${m}`)}
+                </option>
+              ))}
+            </select>
+            <div className="set-card-desc mt-4">
+              {supportedModes.length <= 1
+                ? t('permModeUnsupported', { mode: t(`permMode_${supportedModes[0] || 'auto'}`) })
+                : t(`permDesc_${effectivePermMode}`)}
             </div>
           </div>
           <div className="fld">

@@ -172,6 +172,7 @@ final class HubStore {
     var tsBinding = false
     var takeovers: [TakeoverRequest] = []
     var questions: [PendingQuestion] = []
+    var approvals: [PendingApproval] = []
     var desktopTargets: [DesktopTarget] = []
     var activeDesktopTarget = ActiveDesktopTarget(target: "local", name: nil, temporary: false, expiresAt: nil)
     var usingStandby = false
@@ -465,6 +466,27 @@ final class HubStore {
             }
         case "questions":
             if let arr = p["items"], let list = decodeAny(arr, as: [PendingQuestion].self) { questions = list }
+        case "approvals":
+            if let arr = p["items"], let list = decodeAny(arr, as: [PendingApproval].self) {
+                #if os(macOS)
+                let oldIDs = Set(approvals.map(\.id))
+                for item in list where !oldIDs.contains(item.id) {
+                    let botName = item.botName ?? bots.first(where: { $0.id == item.botId })?.displayName ?? item.botId
+                    let label = item.toolName.isEmpty ? (item.title ?? L.t("approvalTitle")) : item.toolName
+                    let summary = (item.summary ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                    let body = summary.isEmpty ? label : "\(label): \(summary)"
+                    PushManager.shared.postLocalNotification(
+                        id: "approval-\(item.id)",
+                        botId: item.botId,
+                        title: "\(botName) · \(L.t("approvalWaitingBadge"))",
+                        body: body,
+                        deepLink: "pebble://bot/\(enc(item.botId))"
+                    )
+                }
+                #endif
+                approvals = list
+                LiveActivityManager.shared.handleApprovals(list, bots: bots)
+            }
         case "routine_updated", "routine_run":
             if let bid = p["botId"] as? String {
                 Task { [weak self] in
@@ -605,6 +627,7 @@ final class HubStore {
                 }
             }
             Task { if let q: QuestionsResp = try? await client.call("/api/questions"), seq == connSeq { questions = q.items ?? [] } }
+            Task { if let a: ApprovalsResp = try? await client.call("/api/approvals"), seq == connSeq { approvals = a.items ?? [] } }
             PushManager.shared.activeChatBotId = { [weak self] in self?.activeChat }
             PushManager.shared.configureConnection(base: url, token: tok)
             LiveActivityManager.shared.startObservingTokens()
@@ -783,6 +806,7 @@ final class HubStore {
                 }
             }
             Task { if let q: QuestionsResp = try? await client.call("/api/questions"), seq == connSeq { questions = q.items ?? [] } }
+            Task { if let a: ApprovalsResp = try? await client.call("/api/approvals"), seq == connSeq { approvals = a.items ?? [] } }
             PushManager.shared.activeChatBotId = { [weak self] in self?.activeChat }
             PushManager.shared.configureConnection(base: cleanURL, token: token)
             startStream(cleanURL, token)
@@ -808,6 +832,7 @@ final class HubStore {
         routines = [:]
         takeovers = []
         questions = []
+        approvals = []
         settings = nil
         serverInfo = nil
         unsupportedCaps = []
@@ -880,12 +905,14 @@ final class HubStore {
             body["mediaIds"] = mediaIds
         }
         let d: TextResp = try await callAPI("/api/bots/\(enc(botId))/message", method: "POST", body: body)
-        if ["/bots", "/status", "/reset"].contains(text), let out = d.text, !out.isEmpty {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if (["/bots", "/status", "/reset", "/mode"].contains(trimmed) || trimmed.hasPrefix("/mode ")),
+           let out = d.text, !out.isEmpty {
             pushIncoming(botId, ChatMessage(id: "cmd_\(Int(Date().timeIntervalSince1970 * 1000))", botId: botId,
                                             role: "system", from: "command", text: out,
                                             createdAt: ISO8601DateFormatter().string(from: Date())))
         }
-        if text == "/reset" { try await refreshBots() }
+        if trimmed == "/reset" || trimmed.hasPrefix("/mode ") { try await refreshBots() }
     }
 
     func interruptBot(_ botId: String) async throws -> Bool {
@@ -1023,11 +1050,11 @@ final class HubStore {
         modelsGeneration += 1
     }
 
-    func saveSettings(changed: Bool, defaultHarness: String, defaultModel: String, defaultModels: [String: String], sharedUserMd: String,
+    func saveSettings(changed: Bool, defaultHarness: String, defaultPermissionMode: String, defaultModel: String, defaultModels: [String: String], sharedUserMd: String,
                       botUpdates: [(id: String, harness: String, model: String)]) async throws {
         if changed {
             settings = try await callAPI("/api/settings", method: "PUT",
-                                          body: ["defaultHarness": defaultHarness, "defaultModel": defaultModel, "defaultModels": defaultModels, "sharedUserMd": sharedUserMd])
+                                          body: ["defaultHarness": defaultHarness, "defaultPermissionMode": defaultPermissionMode, "defaultModel": defaultModel, "defaultModels": defaultModels, "sharedUserMd": sharedUserMd])
         }
         for u in botUpdates { try await updateBot(u.id, ["harness": u.harness, "model": u.model]) }
         try await loadSettings()
@@ -1246,6 +1273,31 @@ final class HubStore {
         let r: QuestionsResp = try await callAPI("/api/questions/\(enc(id))/reply", method: "POST",
                                                   body: ["answers": answers, "cancelled": cancelled])
         questions = r.items ?? []
+    }
+
+    func harnessInfo(_ id: String?) -> HarnessInfo? {
+        guard let id, !id.isEmpty else { return nil }
+        return settings?.harnesses?.first(where: { $0.id == id })
+    }
+
+    func supportedPermissionModes(for harnessId: String?) -> [String] {
+        harnessInfo(harnessId)?.supportedModes ?? ["auto"]
+    }
+
+    func clampPermissionMode(_ raw: String?, harnessId: String?) -> String {
+        let modes = supportedPermissionModes(for: harnessId)
+        let cur = (raw ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !cur.isEmpty && modes.contains(cur) { return cur }
+        return modes.contains("auto") ? "auto" : (modes.first ?? "auto")
+    }
+
+    func replyApproval(id: String, decision: String, optionId: String? = nil, reason: String? = nil) async throws {
+        var body: [String: Any] = ["decision": decision]
+        if let optionId, !optionId.isEmpty { body["optionId"] = optionId }
+        if let reason, !reason.isEmpty { body["reason"] = reason }
+        let r: ApprovalsResp = try await api.call("/api/approvals/\(enc(id))/reply", method: "POST", body: body)
+        approvals = r.items ?? []
+        LiveActivityManager.shared.handleApprovals(approvals, bots: bots)
     }
 
     func listWorkspaceFiles(botId: String, path: String = "", showHidden: Bool = false) async throws -> WorkspaceListResult {

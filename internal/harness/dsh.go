@@ -34,7 +34,11 @@ type DshHarness struct {
 
 type dshSession struct {
 	model       string
-	autoApprove bool
+	turnMu      sync.Mutex
+	turnCtx     context.Context
+	turnOpts    *RunOptions
+	permMu      sync.Mutex
+	activePerms map[string]context.CancelFunc
 }
 
 type acpMessage struct {
@@ -84,6 +88,19 @@ func NewDshHarness() *DshHarness {
 
 func (h *DshHarness) Kind() string  { return "dsh" }
 func (h *DshHarness) Label() string { return "DeepSeek Harness" }
+
+func (h *DshHarness) PermissionCapabilities() PermissionCapabilities {
+	return PermissionCapabilities{
+		Modes: []string{
+			config.PermissionModeAuto,
+			config.PermissionModeEdit,
+			config.PermissionModeAsk,
+			config.PermissionModePlan,
+		},
+		InteractiveApproval: true,
+		SupportsAllowAlways: true,
+	}
+}
 
 func (h *DshHarness) ListCommands(_ context.Context, bot config.BotConfig) ([]SlashCommand, error) {
 	builtins := []SlashCommand{
@@ -210,7 +227,7 @@ func (h *DshHarness) readLoop(p *lineProc) {
 				}
 			}
 		case msg.Method == "session/request_permission":
-			h.answerPermission(p, msg)
+			go h.answerPermission(p, msg)
 		case msg.Method != "":
 			// Unsupported client method (fs, terminal…): refuse.
 			if len(msg.ID) > 0 {
@@ -247,30 +264,74 @@ func (h *DshHarness) readLoop(p *lineProc) {
 	h.mu.Unlock()
 }
 
+func (s *dshSession) setTurn(ctx context.Context, opts *RunOptions) {
+	s.turnMu.Lock()
+	s.turnCtx = ctx
+	s.turnOpts = opts
+	s.turnMu.Unlock()
+}
+
+func (s *dshSession) cancelAllPerms() {
+	s.permMu.Lock()
+	for id, cancel := range s.activePerms {
+		cancel()
+		delete(s.activePerms, id)
+	}
+	s.permMu.Unlock()
+}
+
 func (h *DshHarness) answerPermission(p *lineProc, msg acpMessage) {
-	var params struct {
-		SessionID string `json:"sessionId"`
-		Options   []struct {
-			OptionID string `json:"optionId"`
-			Kind     string `json:"kind"`
-		} `json:"options"`
-	}
-	_ = json.Unmarshal(msg.Params, &params)
+	rawID := append(json.RawMessage(nil), msg.ID...)
+	sessID, req, acpOpts := buildACPPermissionRequest(msg.Params)
+
 	h.mu.Lock()
-	allow := h.open[params.SessionID] != nil && h.open[params.SessionID].autoApprove
+	s := h.open[sessID]
 	h.mu.Unlock()
-	want := "reject_once"
-	if allow {
-		want = "allow_once"
-	}
-	outcome := map[string]any{"outcome": "cancelled"}
-	for _, o := range params.Options {
-		if o.Kind == want {
-			outcome = map[string]any{"outcome": "selected", "optionId": o.OptionID}
-			break
+
+	var (
+		turnCtx  context.Context
+		turnOpts RunOptions
+	)
+	if s != nil {
+		s.turnMu.Lock()
+		turnCtx = s.turnCtx
+		if s.turnOpts != nil {
+			turnOpts = *s.turnOpts
 		}
+		s.turnMu.Unlock()
 	}
-	_ = p.send(map[string]any{"jsonrpc": "2.0", "id": msg.ID, "result": map[string]any{"outcome": outcome}})
+	if turnCtx == nil {
+		turnCtx = context.Background()
+	}
+
+	var resp PermissionResponse
+	if s == nil {
+		resp = PermissionResponse{Decision: "reject"}
+	} else {
+		key := strings.TrimSpace(string(rawID))
+		pCtx, pCancel := context.WithCancel(turnCtx)
+		s.permMu.Lock()
+		if s.activePerms == nil {
+			s.activePerms = make(map[string]context.CancelFunc)
+		}
+		if prev, ok := s.activePerms[key]; ok {
+			prev()
+		}
+		s.activePerms[key] = pCancel
+		s.permMu.Unlock()
+
+		resp = ResolveApprovalDecision(pCtx, turnOpts, req)
+		pCancel()
+
+		s.permMu.Lock()
+		delete(s.activePerms, key)
+		s.permMu.Unlock()
+	}
+
+	outcome := buildACPPermissionOutcome(resp, acpOpts)
+	if p.alive() {
+		_ = p.send(map[string]any{"jsonrpc": "2.0", "id": rawID, "result": map[string]any{"outcome": outcome}})
+	}
 }
 
 func (h *DshHarness) request(ctx context.Context, p *lineProc, method string, params any) (json.RawMessage, error) {
@@ -305,7 +366,6 @@ func (h *DshHarness) openSession(ctx context.Context, p *lineProc, opts RunOptio
 	s := h.open[sid]
 	h.mu.Unlock()
 	if sid != "" && s != nil {
-		s.autoApprove = opts.Bot.ShouldAutoApprove()
 		return sid, nil
 	}
 	params := map[string]any{"cwd": opts.Bot.Workspace, "mcpServers": acpMCPServers(opts)}
@@ -335,7 +395,7 @@ func (h *DshHarness) openSession(ctx context.Context, p *lineProc, opts RunOptio
 		sid = res.SessionID
 	}
 	h.mu.Lock()
-	h.open[sid] = &dshSession{autoApprove: opts.Bot.ShouldAutoApprove()}
+	h.open[sid] = &dshSession{activePerms: make(map[string]context.CancelFunc)}
 	if h.sessionToBot == nil {
 		h.sessionToBot = make(map[string]string)
 	}
@@ -382,7 +442,7 @@ func acpModels(opts []acpConfigOption) []string {
 func (h *DshHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnResult, error) {
 	started := time.Now()
 	bot := opts.Bot
-	ctx, cancel := withBotTimeout(ctx, bot.TimeoutSec)
+	ctx, cancel := withTurnTimeout(ctx, bot.TimeoutSec, opts)
 	defer cancel()
 	p, err := h.ensure(ctx)
 	if err != nil {
@@ -412,6 +472,12 @@ func (h *DshHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnResult,
 		}
 		s.model = bot.Model
 	}
+
+	s.setTurn(ctx, &opts)
+	defer func() {
+		s.cancelAllPerms()
+		s.setTurn(nil, nil)
+	}()
 
 	updates := make(chan acpUpdate, 1024)
 	h.mu.Lock()
@@ -450,6 +516,7 @@ func (h *DshHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnResult,
 		select {
 		case <-ctxDone(ctx, cancelled):
 			cancelled = true
+			s.cancelAllPerms()
 			_ = p.send(map[string]any{"jsonrpc": "2.0", "method": "session/cancel", "params": map[string]any{"sessionId": sid}})
 			cancelDeadline = time.After(15 * time.Second)
 		case <-cancelDeadline:

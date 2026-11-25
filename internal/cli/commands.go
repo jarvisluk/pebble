@@ -317,6 +317,7 @@ func runBotCmd(ctx context.Context, args []string, cwd string, stdout, stderr io
 		priv := fs.Bool("private-sessions", false, "enable private sessions")
 		deskTarget := fs.String("desktop-target", "", "bound desktop screen target (e.g. local, virtual:<slot>, <nodeId>, <nodeId>:virtual:<slot>)")
 		browserMode := fs.String("browser-mode", "", "browser isolation mode (auto|isolated|attach)")
+		permMode := fs.String("permission-mode", "", "permission mode (auto|edit|ask|plan)")
 		force := fs.Bool("force", false, "skip strict harness/model validation")
 		if err := fs.Parse(rest); err != nil {
 			return err
@@ -361,6 +362,9 @@ func runBotCmd(ctx context.Context, args []string, cwd string, stdout, stderr io
 		if visited["browser-mode"] {
 			payload["browserMode"] = *browserMode
 		}
+		if visited["permission-mode"] {
+			payload["permissionMode"] = *permMode
+		}
 		c := resolveClient(co, cwd)
 		path := appendValidateDryRunQuery("/api/bots", !*force, false)
 		body, err := c.DoJSON(ctx, http.MethodPost, path, payload)
@@ -387,6 +391,7 @@ func runBotCmd(ctx context.Context, args []string, cwd string, stdout, stderr io
 		priv := fs.Bool("private-sessions", false, "enable private sessions")
 		deskTarget := fs.String("desktop-target", "", "bound desktop screen target (empty string follows default)")
 		browserMode := fs.String("browser-mode", "", "browser isolation mode (auto|isolated|attach)")
+		permMode := fs.String("permission-mode", "", "permission mode (auto|edit|ask|plan)")
 		dryRun := fs.Bool("dry-run", false, "validate and preview update without applying changes")
 		force := fs.Bool("force", false, "skip strict harness/model validation")
 		if err := fs.Parse(rest); err != nil {
@@ -434,8 +439,11 @@ func runBotCmd(ctx context.Context, args []string, cwd string, stdout, stderr io
 		if visited["browser-mode"] {
 			payload["browserMode"] = *browserMode
 		}
+		if visited["permission-mode"] {
+			payload["permissionMode"] = *permMode
+		}
 		if len(payload) == 0 {
-			return errors.New("specify at least one field to update (--name, --description, --avatar, --color, --instructions, --instructions-file, --model, --inherit-model, --harness, --private-sessions, --desktop-target, --browser-mode)")
+			return errors.New("specify at least one field to update (--name, --description, --avatar, --color, --instructions, --instructions-file, --model, --inherit-model, --harness, --private-sessions, --desktop-target, --browser-mode, --permission-mode)")
 		}
 		c := resolveClient(co, cwd)
 		target := c.ResolveBotID(*id)

@@ -33,6 +33,7 @@ struct BotStatus: Codable, Identifiable, Hashable {
     var privateSessions: Bool?
     var desktopTarget: String?
     var browserMode: String?
+    var permissionMode: String?
     var archivedSessions: Int?
     var busy: Bool?
     var queued: Int?
@@ -107,14 +108,25 @@ struct HarnessMagpie: Codable, Hashable {
     var nativeModel: String?
 }
 
+struct PermissionCapabilities: Codable, Hashable {
+    var modes: [String]?
+    var interactiveApproval: Bool?
+    var supportsAllowAlways: Bool?
+}
+
 struct HarnessInfo: Codable, Identifiable, Hashable {
     var id: String
     var label: String?
     var defaultModel: String?
     var installed: Bool?
     var magpie: HarnessMagpie?
+    var permissions: PermissionCapabilities?
 
     var title: String { (label ?? "").isEmpty ? id : label! }
+    var supportedModes: [String] {
+        let list = (permissions?.modes ?? []).filter { !$0.isEmpty }
+        return list.isEmpty ? ["auto"] : list
+    }
 }
 
 struct MagpieProvider: Codable, Identifiable, Hashable {
@@ -160,6 +172,7 @@ struct SettingsData: Codable {
     var desktopHarness: String?
     var desktopModel: String?
     var defaultHarness: String?
+    var defaultPermissionMode: String?
     var defaultModel: String?
     var defaultModels: [String: String]?
     var sharedUserMd: String?
@@ -333,6 +346,7 @@ struct RoutineItem: Codable, Identifiable, Hashable {
     var prompt: String?
     var model: String?
     var mainDelivery: String?
+    var permissionMode: String?
     var enabled: Bool?
     var running: Bool?
     var nextRunAt: String?
@@ -427,6 +441,37 @@ struct PendingQuestion: Codable, Identifiable, Hashable {
 }
 
 struct QuestionsResp: Decodable { var ok: Bool?; var items: [PendingQuestion]? }
+
+struct PermissionOption: Codable, Identifiable, Hashable {
+    var id: String
+    var kind: String
+    var label: String
+    var description: String?
+}
+
+struct PendingApproval: Codable, Identifiable, Hashable {
+    var id: String
+    var botId: String
+    var botName: String?
+    var toolName: String
+    var kind: String?
+    var title: String?
+    var summary: String?
+    var rawInput: [String: JSONValue]?
+    var options: [PermissionOption]?
+    var mode: String?
+    var createdAt: String?
+
+    var rawInputPretty: String? {
+        guard let rawInput, !rawInput.isEmpty else { return nil }
+        let enc = JSONEncoder()
+        enc.outputFormatting = [.prettyPrinted, .sortedKeys]
+        guard let data = try? enc.encode(rawInput) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+}
+
+struct ApprovalsResp: Decodable { var ok: Bool?; var items: [PendingApproval]? }
 struct RoutinesResp: Decodable { var routines: [RoutineItem]? }
 struct RunsResp: Decodable { var runs: [RoutineRun]? }
 struct ModelsResp: Decodable { var models: [String]? }

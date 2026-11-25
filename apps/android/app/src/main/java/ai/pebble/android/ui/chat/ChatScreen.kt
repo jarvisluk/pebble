@@ -159,6 +159,7 @@ fun ChatScreen(
     val botName = bot?.displayName ?: botId
     val pal = p.bot(botId, index, bot?.color)
     val messages = store.msgs[botId].orEmpty()
+    val botApprovals = store.approvals.filter { it.botId == botId }
     val botQuestions = store.questions.filter { it.botId == botId }
     val showStop = (bot?.isBusy == true) && input.trim().isEmpty()
 
@@ -200,9 +201,9 @@ fun ChatScreen(
         }
     }
 
-    LaunchedEffect(timelineEntries.size, botQuestions.size, bot?.isBusy) {
-        if (timelineEntries.isNotEmpty() || botQuestions.isNotEmpty()) {
-            val total = timelineEntries.size + botQuestions.size + 1
+    LaunchedEffect(timelineEntries.size, botApprovals.size, botQuestions.size, bot?.isBusy) {
+        if (timelineEntries.isNotEmpty() || botApprovals.isNotEmpty() || botQuestions.isNotEmpty()) {
+            val total = timelineEntries.size + botApprovals.size + botQuestions.size + 1
             runCatching { listState.animateScrollToItem(total) }
         }
     }
@@ -728,6 +729,14 @@ fun ChatScreen(
                     }
                 }
 
+                botApprovals.forEach { apr ->
+                    item(key = "apr_${apr.id}") {
+                        Box(modifier = Modifier.widthIn(max = 840.dp)) {
+                            ApprovalCardView(store = store, approval = apr, pal = pal)
+                        }
+                    }
+                }
+
                 botQuestions.forEach { q ->
                     item(key = "q_${q.id}") {
                         Box(modifier = Modifier.widthIn(max = 840.dp)) {
@@ -1009,6 +1018,73 @@ fun ChatScreen(
                                 maxLines = 6,
                                 modifier = Modifier.fillMaxWidth(),
                             )
+                        }
+                    }
+
+                    val permModes = store.supportedPermissionModes(bot?.harness)
+                    if (permModes.size > 1) {
+                        val activePermMode = store.clampPermissionMode(bot?.permissionMode, bot?.harness)
+                        var permMenuOpen by remember { mutableStateOf(false) }
+                        Box {
+                            Surface(
+                                color = when {
+                                    activePermMode == "plan" -> p.lilac
+                                    inDesktopSidebar -> p.s1
+                                    else -> p.card
+                                },
+                                shape = CircleShape,
+                                shadowElevation = if (inDesktopSidebar) 0.dp else 3.dp,
+                                modifier = Modifier
+                                    .height(44.dp)
+                                    .clip(CircleShape)
+                                    .border(0.5.dp, if (activePermMode == "plan") p.lilacInk.copy(alpha = 0.4f) else p.s2, CircleShape)
+                                    .clickable { permMenuOpen = true },
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                                ) {
+                                    Text(
+                                        text = store.t("permMode_$activePermMode"),
+                                        color = if (activePermMode == "plan") p.lilacInk else p.text2,
+                                        fontSize = PebbleFont.caption,
+                                        fontWeight = FontWeight.Medium,
+                                        maxLines = 1,
+                                    )
+                                    Icon(
+                                        painter = painterResource(PebbleIcons.ExpandMore),
+                                        contentDescription = store.t("permMode"),
+                                        tint = if (activePermMode == "plan") p.lilacInk else p.mute,
+                                        modifier = Modifier.size(14.dp),
+                                    )
+                                }
+                            }
+                            DropdownMenu(
+                                expanded = permMenuOpen,
+                                onDismissRequest = { permMenuOpen = false },
+                                containerColor = p.card,
+                            ) {
+                                permModes.forEach { m ->
+                                    DropdownMenuItem(
+                                        text = { Text(store.t("permMode_$m"), color = p.text, fontSize = PebbleFont.body) },
+                                        trailingIcon = {
+                                            if (activePermMode == m) {
+                                                Icon(painterResource(PebbleIcons.Check), contentDescription = null, tint = pal.accent, modifier = Modifier.size(16.dp))
+                                            }
+                                        },
+                                        onClick = {
+                                            permMenuOpen = false
+                                            if (m != activePermMode) {
+                                                scope.launch {
+                                                    runCatching { store.updateBot(botId, mapOf("permissionMode" to m)) }
+                                                        .onFailure { sendErr = errText(it, store.t("updateFailed")) }
+                                                }
+                                            }
+                                        },
+                                    )
+                                }
+                            }
                         }
                     }
 

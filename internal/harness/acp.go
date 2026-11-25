@@ -37,10 +37,16 @@ type ACPHarness struct {
 
 type acpProc struct {
 	*lineProc
-	workspace   string
-	sessionID   string
-	nextID      atomic.Int64
-	autoApprove atomic.Bool
+	workspace      string
+	sessionID      string
+	nextID         atomic.Int64
+	availableModes map[string]bool
+	appliedMode    string
+	turnMu         sync.Mutex
+	turnCtx        context.Context
+	turnOpts       RunOptions
+	permMu         sync.Mutex
+	activePerms    map[string]context.CancelFunc
 }
 
 type rpcMessage struct {
@@ -114,6 +120,19 @@ func NewACPHarness(opts ACPOptions) *ACPHarness {
 
 func (h *ACPHarness) Kind() string  { return h.opts.Kind }
 func (h *ACPHarness) Label() string { return h.opts.Label }
+
+func (h *ACPHarness) PermissionCapabilities() PermissionCapabilities {
+	return PermissionCapabilities{
+		Modes: []string{
+			config.PermissionModeAuto,
+			config.PermissionModeEdit,
+			config.PermissionModeAsk,
+			config.PermissionModePlan,
+		},
+		InteractiveApproval: true,
+		SupportsAllowAlways: true,
+	}
+}
 
 func (h *ACPHarness) ListCommands(_ context.Context, bot config.BotConfig) ([]SlashCommand, error) {
 	builtins := h.opts.BuiltinCommands
@@ -251,15 +270,17 @@ func (h *ACPHarness) startProc(ctx context.Context, opts RunOptions) (*acpProc, 
 		return nil, err
 	}
 	ap := &acpProc{
-		lineProc:  lp,
-		workspace: bot.Workspace,
+		lineProc:       lp,
+		workspace:      bot.Workspace,
+		availableModes: make(map[string]bool),
+		activePerms:    make(map[string]context.CancelFunc),
 	}
 
 	if err := ap.initialize(ctx); err != nil {
 		ap.kill()
 		return nil, err
 	}
-	sid, err := ap.newSession(ctx, bot.Workspace, opts, func(msg rpcMessage) {
+	sid, modes, err := ap.newSession(ctx, bot.Workspace, opts, func(msg rpcMessage) {
 		h.captureUpdateCommands(bot.ID, msg)
 	})
 	if err != nil {
@@ -267,11 +288,28 @@ func (h *ACPHarness) startProc(ctx context.Context, opts RunOptions) (*acpProc, 
 		return nil, err
 	}
 	ap.sessionID = sid
+	ap.availableModes = modes
 	return ap, nil
 }
 
 func (h *ACPHarness) dropProc(botID string, p *acpProc) {
 	h.pool.drop(botID, p)
+}
+
+func (p *acpProc) setTurn(ctx context.Context, opts RunOptions) {
+	p.turnMu.Lock()
+	p.turnCtx = ctx
+	p.turnOpts = opts
+	p.turnMu.Unlock()
+}
+
+func (p *acpProc) cancelAllPerms() {
+	p.permMu.Lock()
+	for id, cancel := range p.activePerms {
+		cancel()
+		delete(p.activePerms, id)
+	}
+	p.permMu.Unlock()
 }
 
 func (p *acpProc) call(ctx context.Context, method string, params any, onMsg func(rpcMessage)) (json.RawMessage, error) {
@@ -289,9 +327,19 @@ func (p *acpProc) call(ctx context.Context, method string, params any, onMsg fun
 	for {
 		select {
 		case <-ctx.Done():
+			p.cancelAllPerms()
+			if method == "session/prompt" && p.sessionID != "" && p.alive() {
+				_ = p.send(map[string]any{
+					"jsonrpc": "2.0",
+					"method":  "session/cancel",
+					"params":  map[string]any{"sessionId": p.sessionID},
+				})
+				drainCancelAck(p.lines, wantID, 150*time.Millisecond)
+			}
 			return nil, ctx.Err()
 		case line, ok := <-p.lines:
 			if !ok {
+				p.cancelAllPerms()
 				return nil, fmt.Errorf("acp process exited: %s", p.exitDetail())
 			}
 			var msg rpcMessage
@@ -300,7 +348,7 @@ func (p *acpProc) call(ctx context.Context, method string, params any, onMsg fun
 			}
 			// Handle server-to-client requests (e.g. session/request_permission).
 			if msg.Method != "" && len(msg.ID) > 0 && string(msg.ID) != "null" {
-				p.handleServerRequest(msg)
+				go p.handleServerRequest(msg)
 				continue
 			}
 			// Handle notifications.
@@ -323,54 +371,217 @@ func (p *acpProc) call(ctx context.Context, method string, params any, onMsg fun
 }
 
 func (p *acpProc) handleServerRequest(msg rpcMessage) {
+	rawID := append(json.RawMessage(nil), msg.ID...)
 	if msg.Method == "session/request_permission" {
-		var req struct {
-			Options []struct {
-				OptionID string `json:"optionId"`
-				Kind     string `json:"kind"`
-			} `json:"options"`
+		p.turnMu.Lock()
+		turnCtx := p.turnCtx
+		turnOpts := p.turnOpts
+		p.turnMu.Unlock()
+		if turnCtx == nil {
+			turnCtx = context.Background()
 		}
-		_ = json.Unmarshal(msg.Params, &req)
-		allow := p.autoApprove.Load()
-		selected := ""
-		for _, opt := range req.Options {
-			if allow && (opt.Kind == "allow_once" || opt.Kind == "allow_always") {
-				selected = opt.OptionID
-				break
-			}
-			if !allow && (opt.Kind == "reject_once" || opt.Kind == "reject_always") {
-				selected = opt.OptionID
-				break
-			}
+
+		_, req, acpOpts := buildACPPermissionRequest(msg.Params)
+		key := strings.TrimSpace(string(rawID))
+		pCtx, pCancel := context.WithCancel(turnCtx)
+		p.permMu.Lock()
+		if p.activePerms == nil {
+			p.activePerms = make(map[string]context.CancelFunc)
 		}
-		if allow && selected == "" && len(req.Options) > 0 {
-			selected = req.Options[0].OptionID
+		if prev, ok := p.activePerms[key]; ok {
+			prev()
 		}
-		outcome := map[string]any{"outcome": "cancelled"}
-		if selected != "" {
-			outcome = map[string]any{
-				"outcome":  "selected",
-				"optionId": selected,
-			}
+		p.activePerms[key] = pCancel
+		p.permMu.Unlock()
+
+		resp := ResolveApprovalDecision(pCtx, turnOpts, req)
+		pCancel()
+
+		p.permMu.Lock()
+		delete(p.activePerms, key)
+		p.permMu.Unlock()
+
+		outcome := buildACPPermissionOutcome(resp, acpOpts)
+		if p.alive() {
+			_ = p.send(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      rawID,
+				"result": map[string]any{
+					"outcome": outcome,
+				},
+			})
 		}
-		_ = p.send(map[string]any{
-			"jsonrpc": "2.0",
-			"id":      json.RawMessage(msg.ID),
-			"result": map[string]any{
-				"outcome": outcome,
-			},
-		})
 		return
 	}
 	// Unsupported server request: respond with method not found so server does not hang.
-	_ = p.send(map[string]any{
-		"jsonrpc": "2.0",
-		"id":      json.RawMessage(msg.ID),
-		"error": map[string]any{
-			"code":    -32601,
-			"message": "method not supported",
-		},
-	})
+	if p.alive() {
+		_ = p.send(map[string]any{
+			"jsonrpc": "2.0",
+			"id":      rawID,
+			"error": map[string]any{
+				"code":    -32601,
+				"message": "method not supported",
+			},
+		})
+	}
+}
+
+type acpPermissionOption struct {
+	OptionID string `json:"optionId"`
+	Name     string `json:"name"`
+	Kind     string `json:"kind"`
+}
+
+func buildACPPermissionRequest(raw json.RawMessage) (string, PermissionRequest, []acpPermissionOption) {
+	var params struct {
+		SessionID string                `json:"sessionId"`
+		Options   []acpPermissionOption `json:"options"`
+		ToolCall  *struct {
+			ToolCallID string         `json:"toolCallId"`
+			Name       string         `json:"name"`
+			ToolName   string         `json:"toolName"`
+			Title      string         `json:"title"`
+			Kind       string         `json:"kind"`
+			Args       map[string]any `json:"args"`
+			RawInput   map[string]any `json:"rawInput"`
+		} `json:"toolCall"`
+	}
+	_ = json.Unmarshal(raw, &params)
+
+	var toolName, title, rawKind string
+	var rawInput map[string]any
+	var callID string
+	if params.ToolCall != nil {
+		callID = params.ToolCall.ToolCallID
+		toolName = strings.TrimSpace(params.ToolCall.Name)
+		if toolName == "" {
+			toolName = strings.TrimSpace(params.ToolCall.ToolName)
+		}
+		title = strings.TrimSpace(params.ToolCall.Title)
+		if toolName == "" {
+			toolName = title
+		}
+		rawKind = params.ToolCall.Kind
+		if len(params.ToolCall.RawInput) > 0 {
+			rawInput = params.ToolCall.RawInput
+		} else if len(params.ToolCall.Args) > 0 {
+			rawInput = params.ToolCall.Args
+		}
+	}
+	if toolName == "" {
+		toolName = "tool"
+	}
+
+	kind := NormalizeToolKind(rawKind, toolName)
+	sumTitle, summary := SummarizeToolCall(toolName, rawInput)
+	if title == "" {
+		title = sumTitle
+	}
+	if summary == "" && title != "" && title != toolName {
+		summary = title
+	}
+
+	var opts []PermissionOption
+	hasAllowOnce := false
+	hasAllowAlways := false
+	hasReject := false
+	for _, o := range params.Options {
+		switch o.Kind {
+		case "allow_once":
+			hasAllowOnce = true
+			lbl := strings.TrimSpace(o.Name)
+			if lbl == "" {
+				lbl = "Allow once"
+			}
+			opts = append(opts, PermissionOption{ID: o.OptionID, Kind: "allow_once", Label: lbl})
+		case "allow_always":
+			hasAllowAlways = true
+			lbl := strings.TrimSpace(o.Name)
+			if lbl == "" {
+				lbl = "Allow for session"
+			}
+			opts = append(opts, PermissionOption{ID: o.OptionID, Kind: "allow_always", Label: lbl})
+		case "reject_once", "reject_always":
+			hasReject = true
+			lbl := strings.TrimSpace(o.Name)
+			if lbl == "" {
+				lbl = "Deny"
+			}
+			opts = append(opts, PermissionOption{ID: o.OptionID, Kind: "reject", Label: lbl})
+		}
+	}
+	if !hasAllowOnce && len(opts) == 0 {
+		opts = StandardPermissionOptions(true)
+	} else {
+		if !hasAllowAlways {
+			opts = append(opts, PermissionOption{ID: "session_allow", Kind: "allow_always", Label: "Allow for session"})
+		}
+		if !hasReject {
+			opts = append(opts, PermissionOption{ID: "reject", Kind: "reject", Label: "Deny"})
+		}
+	}
+
+	return params.SessionID, PermissionRequest{
+		ID:       callID,
+		ToolName: toolName,
+		Kind:     kind,
+		Title:    title,
+		Summary:  summary,
+		RawInput: rawInput,
+		Options:  opts,
+	}, params.Options
+}
+
+func buildACPPermissionOutcome(resp PermissionResponse, options []acpPermissionOption) map[string]any {
+	if resp.Decision == "cancelled" {
+		return map[string]any{"outcome": "cancelled"}
+	}
+
+	// Honour an explicit protocol optionId when valid (excluding synthetic session_allow).
+	if resp.OptionID != "" && resp.OptionID != "session_allow" {
+		for _, opt := range options {
+			if opt.OptionID == resp.OptionID {
+				return map[string]any{
+					"outcome":  "selected",
+					"optionId": opt.OptionID,
+				}
+			}
+		}
+	}
+
+	findByKinds := func(kinds ...string) string {
+		for _, want := range kinds {
+			for _, opt := range options {
+				if opt.Kind == want {
+					return opt.OptionID
+				}
+			}
+		}
+		return ""
+	}
+
+	var selected string
+	switch resp.Decision {
+	case "allow_always":
+		selected = findByKinds("allow_always", "allow_once")
+		if selected == "" && len(options) > 0 {
+			selected = options[0].OptionID
+		}
+	case "allow_once":
+		selected = findByKinds("allow_once", "allow_always")
+		if selected == "" && len(options) > 0 {
+			selected = options[0].OptionID
+		}
+	default:
+		selected = findByKinds("reject_once", "reject_always")
+	}
+	if selected == "" {
+		return map[string]any{"outcome": "cancelled"}
+	}
+	return map[string]any{
+		"outcome":  "selected",
+		"optionId": selected,
+	}
 }
 
 func (p *acpProc) initialize(ctx context.Context) error {
@@ -387,7 +598,7 @@ func (p *acpProc) initialize(ctx context.Context) error {
 	return err
 }
 
-func (p *acpProc) newSession(ctx context.Context, workspace string, opts RunOptions, onMsg func(rpcMessage)) (string, error) {
+func (p *acpProc) newSession(ctx context.Context, workspace string, opts RunOptions, onMsg func(rpcMessage)) (string, map[string]bool, error) {
 	sessCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	cwd := workspace
@@ -399,21 +610,59 @@ func (p *acpProc) newSession(ctx context.Context, workspace string, opts RunOpti
 		"mcpServers": acpMCPServers(opts),
 	}, onMsg)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	var out struct {
 		SessionID string `json:"sessionId"`
+		Modes     *struct {
+			AvailableModes []struct {
+				ID string `json:"id"`
+			} `json:"availableModes"`
+		} `json:"modes"`
 	}
-	if json.Unmarshal(res, &out) == nil && out.SessionID != "" {
-		return out.SessionID, nil
+	_ = json.Unmarshal(res, &out)
+	modes := make(map[string]bool)
+	if out.Modes != nil {
+		for _, m := range out.Modes.AvailableModes {
+			if m.ID != "" {
+				modes[m.ID] = true
+			}
+		}
 	}
-	return fmt.Sprintf("acp-%d", time.Now().UnixNano()), nil
+	sid := out.SessionID
+	if sid == "" {
+		sid = fmt.Sprintf("acp-%d", time.Now().UnixNano())
+	}
+	return sid, modes, nil
+}
+
+func pickACPMode(available map[string]bool, permMode string) string {
+	if len(available) == 0 {
+		return ""
+	}
+	var candidates []string
+	switch permMode {
+	case config.PermissionModeAuto:
+		candidates = []string{"bypassPermissions", "bypass", "yolo", "auto"}
+	case config.PermissionModeEdit:
+		candidates = []string{"accept-edits", "acceptEdits", "edit"}
+	case config.PermissionModeAsk:
+		candidates = []string{"default", "ask", "manual"}
+	case config.PermissionModePlan:
+		candidates = []string{"plan"}
+	}
+	for _, c := range candidates {
+		if available[c] {
+			return c
+		}
+	}
+	return ""
 }
 
 func (h *ACPHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnResult, error) {
 	started := time.Now()
 	bot := opts.Bot
-	ctx, cancel := withBotTimeout(ctx, bot.TimeoutSec)
+	ctx, cancel := withTurnTimeout(ctx, bot.TimeoutSec, opts)
 	defer cancel()
 
 	var (
@@ -441,7 +690,25 @@ func (h *ACPHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnResult,
 			h.dropProc(bot.ID, p)
 		}
 	}
-	p.autoApprove.Store(bot.ShouldAutoApprove())
+
+	mode := EffectivePermissionMode(opts)
+	p.setTurn(ctx, opts)
+	defer func() {
+		p.cancelAllPerms()
+		p.setTurn(context.Background(), RunOptions{})
+	}()
+
+	if targetMode := pickACPMode(p.availableModes, mode); targetMode != "" && p.appliedMode != targetMode {
+		mCtx, mCancel := context.WithTimeout(ctx, 5*time.Second)
+		_, mErr := p.call(mCtx, "session/set_mode", map[string]any{
+			"sessionId": p.sessionID,
+			"modeId":    targetMode,
+		}, nil)
+		mCancel()
+		if mErr == nil {
+			p.appliedMode = targetMode
+		}
+	}
 
 	promptText := AppendAttachmentContext(opts.Prompt, opts.Attachments)
 	var textBuf strings.Builder
@@ -525,6 +792,28 @@ func (h *ACPHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnResult,
 	}, strings.TrimSpace(textBuf.String()), Usage{}, started)
 	res.Tools = tools
 	return res, nil
+}
+
+func drainCancelAck(lines <-chan []byte, wantID string, maxWait time.Duration) {
+	timer := time.NewTimer(maxWait)
+	defer timer.Stop()
+	for {
+		select {
+		case <-timer.C:
+			return
+		case line, ok := <-lines:
+			if !ok {
+				return
+			}
+			var msg rpcMessage
+			if json.Unmarshal(line, &msg) != nil {
+				continue
+			}
+			if msg.Method == "" && strings.TrimSpace(string(msg.ID)) == wantID {
+				return
+			}
+		}
+	}
 }
 
 func extractACPChunkText(raw json.RawMessage) string {

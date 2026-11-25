@@ -210,9 +210,12 @@ fun SettingsDetailScreen(
     }
     val primaryHarness = harnesses.firstOrNull()?.id ?: "opencode"
     val baseDefaultHarness = store.settings?.defaultHarness?.takeIf { it.isNotEmpty() } ?: primaryHarness
+    val baseDefaultPermMode = store.settings?.defaultPermissionMode?.takeIf { it.isNotEmpty() } ?: "auto"
 
     var defaultHarness by remember { mutableStateOf(baseDefaultHarness) }
     var defaultHarnessTouched by remember { mutableStateOf(false) }
+    var defaultPermMode by remember { mutableStateOf(baseDefaultPermMode) }
+    var defaultPermModeTouched by remember { mutableStateOf(false) }
     var defaultModel by remember { mutableStateOf("") }
     var defaultTouched by remember { mutableStateOf(false) }
     val perHarness = remember { mutableStateMapOf<String, String>() }
@@ -283,6 +286,7 @@ fun SettingsDetailScreen(
     fun sync() {
         val s = store.settings ?: return
         if (!defaultHarnessTouched) defaultHarness = baseDefaultHarness
+        if (!defaultPermModeTouched) defaultPermMode = baseDefaultPermMode
         if (!defaultTouched) defaultModel = s.defaultModel.orEmpty().trim()
         if (!deskTouched) {
             deskHarness = s.desktopHarness.orEmpty()
@@ -309,6 +313,7 @@ fun SettingsDetailScreen(
         val s = store.settings ?: return@run false
         fun rtrim(x: String) = x.replace(Regex("\\s+$"), "")
         (defaultHarnessTouched && defaultHarness != baseDefaultHarness) ||
+            (defaultPermModeTouched && defaultPermMode != baseDefaultPermMode) ||
             (defaultTouched && defaultModel.trim() != s.defaultModel.orEmpty().trim()) ||
             (perTouched && cleanMap(perHarness) != cleanMap(s.defaultModels)) ||
             (userMdTouched && rtrim(userMd) != rtrim(s.sharedUserMd.orEmpty()))
@@ -359,12 +364,13 @@ fun SettingsDetailScreen(
                 store.saveSettings(
                     changed = settingsChanged,
                     defaultHarness = defaultHarness,
+                    defaultPermissionMode = defaultPermMode,
                     defaultModel = defaultModel.trim(),
                     defaultModels = cleanMap(perHarness),
                     sharedUserMd = userMd,
                     botUpdates = botUpdates,
                 )
-                defaultHarnessTouched = false; defaultTouched = false; perTouched = false; userMdTouched = false
+                defaultHarnessTouched = false; defaultPermModeTouched = false; defaultTouched = false; perTouched = false; userMdTouched = false
                 touchedBots = emptySet()
                 drafts.clear()
                 sync()
@@ -860,6 +866,40 @@ fun SettingsDetailScreen(
                                             )
                                         }
                                     }
+                                }
+                                var defPermOpen by remember { mutableStateOf(false) }
+                                val permChoices = listOf("auto", "edit", "ask", "plan")
+                                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    Box {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(PebbleDimens.rowShape)
+                                                .clickable { defPermOpen = true }
+                                                .padding(vertical = 8.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                        ) {
+                                            Text(store.t("permDefaultMode"), color = p.text2, fontSize = PebbleFont.body, modifier = Modifier.weight(1f))
+                                            Text(store.t("permMode_$defaultPermMode"), color = p.text, fontSize = PebbleFont.body, fontWeight = FontWeight.Medium)
+                                            Icon(painterResource(PebbleIcons.ArrowDropDown), contentDescription = null, tint = p.mute)
+                                        }
+                                        DropdownMenu(expanded = defPermOpen, onDismissRequest = { defPermOpen = false }, containerColor = p.card) {
+                                            permChoices.forEach { m ->
+                                                DropdownMenuItem(
+                                                    text = { Text(store.t("permMode_$m"), color = p.text) },
+                                                    onClick = {
+                                                        if (m != defaultPermMode) {
+                                                            defaultPermMode = m
+                                                            defaultPermModeTouched = true
+                                                            saved = ""
+                                                        }
+                                                        defPermOpen = false
+                                                    },
+                                                )
+                                            }
+                                        }
+                                    }
+                                    Text(store.t("permDefaultModeDesc"), color = p.mute, fontSize = PebbleFont.caption)
                                 }
                                 GlobalModelInputWithMenu(
                                     value = defaultModel,

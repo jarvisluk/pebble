@@ -136,6 +136,35 @@ object NotificationHelper {
         NotificationManagerCompat.from(context).cancel(takeoverNotificationId(id))
     }
 
+    fun showApprovalAlert(
+        context: Context,
+        id: String,
+        botId: String,
+        botName: String,
+        summary: String,
+    ) {
+        if (!hasNotificationPermission(context)) return
+        ensureChannels(context)
+        val name = botName.ifBlank { botId }.ifBlank { "Bot" }
+        val openIntent = deepLinkPendingIntent(
+            context,
+            "pebble://bot/${Uri.encode(botId)}",
+            "apr:$id".hashCode(),
+        )
+        val builder = NotificationCompat.Builder(context, CHANNEL_ALERTS)
+            .setSmallIcon(android.R.drawable.ic_dialog_alert)
+            .setContentTitle("$name · 请求批准")
+            .setContentText(summary.ifBlank { "请求批准执行操作" })
+            .setAutoCancel(true)
+            .setContentIntent(openIntent)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+        NotificationManagerCompat.from(context).notify(approvalNotificationId(id), builder.build())
+    }
+
+    fun cancelApprovalAlert(context: Context, id: String) {
+        NotificationManagerCompat.from(context).cancel(approvalNotificationId(id))
+    }
+
     private fun deepLinkPendingIntent(context: Context, uriStr: String, reqCode: Int): PendingIntent {
         val intent = Intent(Intent.ACTION_VIEW, Uri.parse(uriStr)).apply {
             setPackage(context.packageName)
@@ -152,6 +181,7 @@ object NotificationHelper {
     private fun botNotificationId(botId: String): Int = 10000 + abs(botId.hashCode() % 10000)
     private fun botDoneNotificationId(botId: String): Int = 20000 + abs(botId.hashCode() % 10000)
     private fun takeoverNotificationId(id: String): Int = 30000 + abs(id.hashCode() % 10000)
+    private fun approvalNotificationId(id: String): Int = 40000 + abs(id.hashCode() % 10000)
 }
 
 class BotActivityService : Service() {

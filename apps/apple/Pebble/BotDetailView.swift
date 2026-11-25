@@ -200,6 +200,7 @@ struct BotInfoSheet: View {
     @State private var editPrivate = false
     @State private var editDesktopTarget = ""
     @State private var editBrowserMode = ""
+    @State private var editPermMode = "auto"
     @State private var saving = false
     @State private var err = ""
     @State private var confirm: ConfirmItem?
@@ -218,11 +219,13 @@ struct BotInfoSheet: View {
 
     private var dirty: Bool {
         guard let a = active else { return false }
+        let activePerm = hub.clampPermissionMode(a.permissionMode, harnessId: a.harness)
         return editName != (a.name ?? botId) || editDesc != (a.description ?? "")
             || editAvatar != (a.avatar ?? "") || editColor != (a.color ?? "")
             || editPrivate != (a.privateSessions ?? false)
             || (canBindDesktop && editDesktopTarget != (a.desktopTarget ?? ""))
             || (canIsolateBrowser && editBrowserMode != (a.browserMode ?? ""))
+            || editPermMode != activePerm
             || editInst != (detail?.instructions ?? "")
     }
 
@@ -320,6 +323,29 @@ struct BotInfoSheet: View {
                         if canIsolateBrowser {
                             HubMenuPicker(title: hub.t("botBrowserMode"), selection: $editBrowserMode, options: browserModeOptions)
                         }
+                        let permModes = hub.supportedPermissionModes(for: active?.harness)
+                        if permModes.count <= 1 {
+                            let onlyMode = permModes.first ?? "auto"
+                            VStack(alignment: .leading, spacing: 3) {
+                                LabeledContent(hub.t("permMode")) {
+                                    Text(hub.t("permMode_\(onlyMode)")).foregroundStyle(p.text2)
+                                }
+                                Text(hub.t("permModeUnsupported", ["mode": hub.t("permMode_\(onlyMode)")]))
+                                    .font(.system(size: AppFont.caption))
+                                    .foregroundStyle(p.mute)
+                            }
+                        } else {
+                            VStack(alignment: .leading, spacing: 3) {
+                                HubMenuPicker(
+                                    title: hub.t("permMode"),
+                                    selection: $editPermMode,
+                                    options: permModes.map { ($0, hub.t("permMode_\($0)")) }
+                                )
+                                Text(hub.t("permDesc_\(editPermMode)"))
+                                    .font(.system(size: AppFont.caption))
+                                    .foregroundStyle(p.mute)
+                            }
+                        }
                         Toggle(hub.t("privateSessions"), isOn: $editPrivate).tint(pal.accent)
                         VStack(alignment: .leading, spacing: 6) {
                             Text("AGENTS.md").font(.system(size: AppFont.secondary)).foregroundStyle(.secondary)
@@ -387,6 +413,7 @@ struct BotInfoSheet: View {
         editPrivate = src?.privateSessions ?? false
         editDesktopTarget = src?.desktopTarget ?? ""
         editBrowserMode = src?.browserMode ?? ""
+        editPermMode = hub.clampPermissionMode(src?.permissionMode, harnessId: src?.harness)
         loading = true
         Task { await loadMem() }
         Task { _ = try? await hub.refreshDesktopTargets() }
@@ -404,6 +431,7 @@ struct BotInfoSheet: View {
         editPrivate = d.privateSessions ?? false
         editDesktopTarget = d.desktopTarget ?? ""
         editBrowserMode = d.browserMode ?? ""
+        editPermMode = hub.clampPermissionMode(d.permissionMode, harnessId: d.harness)
     }
 
     private func save() {
@@ -420,6 +448,7 @@ struct BotInfoSheet: View {
                     "color": editColor,
                     "instructions": editInst,
                     "privateSessions": editPrivate,
+                    "permissionMode": editPermMode,
                 ]
                 if canBindDesktop { body["desktopTarget"] = editDesktopTarget }
                 if canIsolateBrowser { body["browserMode"] = editBrowserMode }
@@ -625,7 +654,8 @@ struct RoutinesSection: View {
         let running = rt.running ?? false
         let status = running ? hub.t("rtStatusRunning") : statusText(rt.lastRun?.status)
         let open = runsOpen == rt.id
-        let meta = [trig, deliv, (rt.webhookUrl ?? "").isEmpty ? "" : hub.t("rtWebhookPushTag"), rt.model ?? ""].filter { !$0.isEmpty }.joined(separator: " · ")
+        let rtPermLabel = rt.permissionMode == "auto" ? hub.t("permMode_auto") : rt.permissionMode == "plan" ? hub.t("permMode_plan") : ""
+        let meta = [trig, deliv, rtPermLabel, (rt.webhookUrl ?? "").isEmpty ? "" : hub.t("rtWebhookPushTag"), rt.model ?? ""].filter { !$0.isEmpty }.joined(separator: " · ")
         return VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
                 Text(rt.name ?? rt.id).font(.system(size: AppFont.body, weight: .semibold)).lineLimit(1)
@@ -703,6 +733,7 @@ struct RoutinesSection: View {
 struct RoutineEditor: View {
     @Environment(HubStore.self) private var hub
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.palette) private var p
     var botId: String
     var routine: RoutineItem?
 
@@ -719,6 +750,7 @@ struct RoutineEditor: View {
     @State private var clearSecret = false
     @State private var webhookUrl = ""
     @State private var delivery = "receipt"
+    @State private var permMode = ""
     @State private var prompt = ""
     @State private var enabled = true
     @State private var saving = false
@@ -778,6 +810,19 @@ struct RoutineEditor: View {
                             ("none", hub.t("rtDeliveryNone")),
                         ]
                     )
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(hub.t("rtPermMode"))
+                            .font(.system(size: AppFont.secondary))
+                            .foregroundStyle(p.text2)
+                        HubSegmentedPicker(
+                            selection: $permMode,
+                            options: [
+                                ("", hub.t("rtPermFollow")),
+                                ("auto", hub.t("permMode_auto")),
+                                ("plan", hub.t("permMode_plan")),
+                            ]
+                        )
+                    }
                     TextField(hub.t("rtPromptPh"), text: $prompt, axis: .vertical).lineLimit(3...12)
                     Toggle(hub.t("rtEnabled"), isOn: $enabled)
                 }
@@ -801,6 +846,7 @@ struct RoutineEditor: View {
         secretSet = rt?.webhookSecretSet ?? false
         webhookUrl = rt?.webhookUrl ?? ""
         delivery = rt?.mainDelivery ?? "receipt"
+        permMode = (rt?.permissionMode == "auto" || rt?.permissionMode == "plan") ? (rt?.permissionMode ?? "") : ""
         prompt = rt?.prompt ?? ""
         enabled = rt?.enabled ?? true
     }
@@ -821,7 +867,7 @@ struct RoutineEditor: View {
             "name": n, "everyMinutes": everyMinutes, "dailyAt": dailyAt, "cron": cronExpr,
             "webhookTrigger": mode == .webhook ? true : webhookTrigger,
             "webhookUrl": webhookUrl.trimmingCharacters(in: .whitespaces),
-            "prompt": pr, "mainDelivery": delivery, "enabled": enabled,
+            "prompt": pr, "mainDelivery": delivery, "permissionMode": permMode, "enabled": enabled,
         ]
         let sec = secret.trimmingCharacters(in: .whitespaces)
         if clearSecret { body["clearWebhookSecret"] = true } else if !sec.isEmpty { body["webhookSecret"] = sec }

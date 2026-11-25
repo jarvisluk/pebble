@@ -98,6 +98,8 @@ struct SettingsView: View {
 
     @State private var defaultHarness = "opencode"
     @State private var defaultHarnessTouched = false
+    @State private var defaultPermMode = "auto"
+    @State private var defaultPermModeTouched = false
     @State private var defaultModel = ""
     @State private var defaultTouched = false
     @State private var perHarness: [String: String] = [:]
@@ -159,6 +161,11 @@ struct SettingsView: View {
         return primaryHarness
     }
 
+    private var baseDefaultPermMode: String {
+        let m = (hub.settings?.defaultPermissionMode ?? "").trimmingCharacters(in: .whitespaces)
+        return m.isEmpty ? "auto" : m
+    }
+
     private func clean(_ m: [String: String]?) -> [String: String] {
         (m ?? [:]).compactMapValues { let t = $0.trimmingCharacters(in: .whitespaces); return t.isEmpty ? nil : t }
     }
@@ -179,6 +186,7 @@ struct SettingsView: View {
         guard let s = hub.settings else { return false }
         func rtrim(_ x: String) -> String { x.replacingOccurrences(of: "\\s+$", with: "", options: .regularExpression) }
         return (defaultHarnessTouched && defaultHarness != baseDefaultHarness)
+            || (defaultPermModeTouched && defaultPermMode != baseDefaultPermMode)
             || (defaultTouched && defaultModel.trimmingCharacters(in: .whitespaces) != (s.defaultModel ?? "").trimmingCharacters(in: .whitespaces))
             || (perTouched && clean(perHarness) != clean(s.defaultModels))
             || (userMdTouched && rtrim(userMd) != rtrim(s.sharedUserMd ?? ""))
@@ -330,6 +338,7 @@ struct SettingsView: View {
         }
         .modifier(SettingsSyncModifier(
             defaultHarness: hub.settings?.defaultHarness,
+            defaultPermissionMode: hub.settings?.defaultPermissionMode,
             harnessIds: (hub.settings?.harnesses ?? []).map(\.id),
             defaultModel: hub.settings?.defaultModel,
             sharedUserMd: hub.settings?.sharedUserMd,
@@ -344,6 +353,7 @@ struct SettingsView: View {
     private func sync() {
         guard let s = hub.settings else { return }
         if !defaultHarnessTouched { defaultHarness = baseDefaultHarness }
+        if !defaultPermModeTouched { defaultPermMode = baseDefaultPermMode }
         if !defaultTouched { defaultModel = (s.defaultModel ?? "").trimmingCharacters(in: .whitespaces) }
         if !deskTouched { deskHarness = s.desktopHarness ?? ""; deskModel = s.desktopModel ?? "" }
         if !perTouched {
@@ -377,9 +387,10 @@ struct SettingsView: View {
         error = ""; saved = ""; saving = true
         Task {
             do {
-                try await hub.saveSettings(changed: settingsChanged, defaultHarness: defaultHarness, defaultModel: defaultModel.trimmingCharacters(in: .whitespaces),
+                try await hub.saveSettings(changed: settingsChanged, defaultHarness: defaultHarness, defaultPermissionMode: defaultPermMode,
+                                           defaultModel: defaultModel.trimmingCharacters(in: .whitespaces),
                                            defaultModels: clean(perHarness), sharedUserMd: userMd, botUpdates: botUpdates)
-                defaultHarnessTouched = false; defaultTouched = false; perTouched = false; userMdTouched = false
+                defaultHarnessTouched = false; defaultPermModeTouched = false; defaultTouched = false; perTouched = false; userMdTouched = false
                 touchedBots = []
                 drafts = [:]
                 sync()
@@ -1304,6 +1315,20 @@ struct SettingsView: View {
                 ),
                 options: harnesses.map { ($0.id, $0.title) }
             )
+            HubMenuPicker(
+                title: hub.t("permDefaultMode"),
+                selection: Binding(
+                    get: { defaultPermMode },
+                    set: {
+                        guard $0 != defaultPermMode else { return }
+                        defaultPermMode = $0; defaultPermModeTouched = true; saved = ""
+                    }
+                ),
+                options: ["auto", "edit", "ask", "plan"].map { ($0, hub.t("permMode_\($0)")) }
+            )
+            Text(hub.t("permDefaultModeDesc"))
+                .font(.system(size: AppFont.caption))
+                .foregroundStyle(p.mute)
             HStack {
                 TextField(hub.t("globalDefaultModel"), text: Binding(
                     get: { defaultModel },
@@ -1692,6 +1717,7 @@ struct SettingsView: View {
 
 private struct SettingsSyncModifier: ViewModifier {
     let defaultHarness: String?
+    let defaultPermissionMode: String?
     let harnessIds: [String]?
     let defaultModel: String?
     let sharedUserMd: String?
@@ -1704,6 +1730,7 @@ private struct SettingsSyncModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             .onChange(of: defaultHarness) { _, _ in onSync() }
+            .onChange(of: defaultPermissionMode) { _, _ in onSync() }
             .onChange(of: harnessIds) { _, _ in onSync() }
             .onChange(of: defaultModel) { _, _ in onSync() }
             .onChange(of: sharedUserMd) { _, _ in onSync() }
