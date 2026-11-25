@@ -36,27 +36,36 @@ struct SettingsGeneralTab: View {
 
     private var notificationsSection: some View {
         let pm = PushManager.shared
+        #if os(iOS)
+        let granted = pm.authStatus == .authorized || pm.authStatus == .provisional || pm.authStatus == .ephemeral
+        #else
+        let granted = pm.authStatus == .authorized || pm.authStatus == .provisional
+        #endif
         return Section(hub.t(platformNotificationSectionTitleKey)) {
             HStack {
                 Text(hub.t("pushSystemPerm"))
                 Spacer()
-                switch pm.authStatus {
-                case .authorized, .provisional, .ephemeral:
-                    Text(hub.t("pushGranted")).foregroundStyle(p.sageInk)
-                case .denied:
-                    Button(hub.t("pushOpenSettings")) {
-                        if let u = platformNotificationSettingsURL { openURL(u) }
+                Toggle("", isOn: Binding(
+                    get: { granted },
+                    set: { next in
+                        if next {
+                            if pm.authStatus == .denied {
+                                if let u = platformNotificationSettingsURL { openURL(u) }
+                            } else {
+                                Task { await pm.requestPermissionAndRegister() }
+                            }
+                        } else {
+                            if let u = platformNotificationSettingsURL { openURL(u) }
+                        }
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                default:
-                    Button(hub.t("pushEnable")) {
-                        Task { await pm.requestPermissionAndRegister() }
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                }
+                ))
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .tint(p.sageInk)
+                .controlSize(platformSwitchControlSize)
+                .accessibilityLabel(hub.t("pushSystemPerm"))
             }
+            .task { await pm.refreshAuthorizationStatus() }
             PlatformNotificationExtrasRows()
         }
     }
