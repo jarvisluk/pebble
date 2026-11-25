@@ -143,6 +143,8 @@ class PebbleStore(context: Context) {
         private set
     var langRevision by mutableIntStateOf(0)
         private set
+    var unboxPermsDone by mutableStateOf(prefs.getBoolean("pebble.unboxPermsDone", false))
+        private set
 
     // Connection
     var servers by mutableStateOf<List<ServerProfile>>(emptyList())
@@ -303,6 +305,11 @@ class PebbleStore(context: Context) {
         prefs.edit().putString("pebble.lang", value).apply()
         L.lang = resolvedLang
         langRevision += 1
+    }
+
+    fun markUnboxPermsDone() {
+        unboxPermsDone = true
+        prefs.edit().putBoolean("pebble.unboxPermsDone", true).apply()
     }
 
     fun updateSortMode(mode: BotSortMode) {

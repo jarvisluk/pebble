@@ -306,6 +306,24 @@ final class DesktopHostManager {
         }
     }
 
+    func fetchHostPermissions() async -> [DesktopPermissionItem] {
+        guard let data = try? await controlRequest("/control/permissions"),
+              let resp = try? JSONDecoder().decode(DesktopPermissionsResp.self, from: data) else {
+            return []
+        }
+        return resp.items ?? []
+    }
+
+    func requestHostPermission(_ permission: String, openSettings: Bool = false) async -> DesktopPermissionRequestResp? {
+        guard let data = try? await controlRequest("/control/permissions/request", method: "POST", body: [
+            "permission": permission,
+            "openSettings": openSettings,
+        ]) else {
+            return nil
+        }
+        return try? JSONDecoder().decode(DesktopPermissionRequestResp.self, from: data)
+    }
+
     private func startControlStream() {
         sseTask?.cancel()
         let base = controlURL

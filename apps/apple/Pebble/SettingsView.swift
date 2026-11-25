@@ -1122,6 +1122,9 @@ struct SettingsView: View {
             Button(hub.t("macOpenDataDir")) {
                 host.openDataDir()
             }
+            Button(hub.t("ubPermReopenBtn")) {
+                NotificationCenter.default.post(name: .hubOpenUnboxPermissions, object: nil)
+            }
             Button(hub.t("macSwitchMode")) {
                 Task { await host.resetMode() }
             }

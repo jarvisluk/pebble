@@ -119,6 +119,16 @@ var platformNotificationSettingsURL: URL? {
     #endif
 }
 
+var platformAppSettingsURL: URL? {
+    #if os(iOS)
+    return URL(string: UIApplication.openSettingsURLString)
+    #elseif os(macOS)
+    return URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy")
+    #else
+    return nil
+    #endif
+}
+
 var platformSwitchControlSize: ControlSize {
     #if os(macOS)
     return .small
@@ -537,4 +547,5 @@ extension Notification.Name {
     static let hubFocusSearch = Notification.Name("pebble.focusSearch")
     static let hubOpenSettings = Notification.Name("pebble.openSettings")
     static let hubNewBot = Notification.Name("pebble.newBot")
+    static let hubOpenUnboxPermissions = Notification.Name("pebble.openUnboxPermissions")
 }

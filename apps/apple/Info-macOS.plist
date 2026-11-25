@@ -38,5 +38,9 @@
 	<string>Pebble needs access to your Downloads folder to read and write files when remote computer control is enabled.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>连接同一局域网内的 Pebble 主电脑</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_pebble._tcp</string>
+	</array>
 </dict>
 </plist>

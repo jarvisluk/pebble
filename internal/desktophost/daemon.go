@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"bot-hub/internal/channel"
+	"bot-hub/internal/desktop"
 	"bot-hub/internal/protocol"
 )
 
@@ -284,7 +285,57 @@ func (s *controlServer) handler() http.Handler {
 		WriteJSON(w, s.host.TailscaleLogout(r.Context()))
 	})
 
+	mux.HandleFunc("/control/permissions", func(w http.ResponseWriter, r *http.Request) {
+		if !s.authorize(w, r) {
+			return
+		}
+		if r.Method != http.MethodGet {
+			writeControlJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 6*time.Second)
+		defer cancel()
+		resp, err := desktop.ListPermissions(ctx)
+		if err != nil {
+			writeControlJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+			return
+		}
+		WriteJSON(w, resp)
+	})
+
+	mux.HandleFunc("/control/permissions/request", func(w http.ResponseWriter, r *http.Request) {
+		if !s.authorize(w, r) {
+			return
+		}
+		if r.Method != http.MethodPost {
+			writeControlJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
+			return
+		}
+		var req struct {
+			Permission   string `json:"permission"`
+			OpenSettings bool   `json:"openSettings"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil || strings.TrimSpace(req.Permission) == "" {
+			writeControlJSON(w, http.StatusBadRequest, map[string]any{"error": "permission is required"})
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+		defer cancel()
+		res, err := desktop.RequestSystemPermission(ctx, req.Permission, req.OpenSettings)
+		if err != nil {
+			writeControlJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
+		WriteJSON(w, res)
+	})
+
 	return mux
+}
+
+func writeControlJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
 }
 
 func generateControlSecret() (string, error) {

@@ -27,6 +27,8 @@ struct ConnectView: View {
     @State private var manualOpen = false
     @State private var manualAdvOpen = false
 
+    private let perms = PermissionsManager.shared
+
     private var isFreshOnboarding: Bool {
         isGate && hub.servers.isEmpty && hub.activeServer == nil
     }
@@ -99,6 +101,12 @@ struct ConnectView: View {
         .animation(.spring(response: 0.34, dampingFraction: 0.88), value: showFreshHero)
         .animation(.easeOut(duration: 0.22), value: isConnectingGate)
         .confirmAlert($confirm)
+        .task(id: isFreshOnboarding) {
+            guard isFreshOnboarding, !perms.unboxDone else { return }
+            try? await Task.sleep(for: .milliseconds(350))
+            guard !Task.isCancelled else { return }
+            await perms.requestMobileUnboxIfNeeded()
+        }
         .onAppear {
             if let s = hub.activeServer, hub.connState == .unauthorized || hub.connState == .error {
                 if label.isEmpty { label = s.label }

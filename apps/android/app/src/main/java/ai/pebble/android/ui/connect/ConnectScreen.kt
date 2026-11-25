@@ -1,7 +1,12 @@
 package ai.pebble.android.ui.connect
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -59,13 +64,14 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import ai.pebble.android.data.ConnState
 import ai.pebble.android.data.PebbleStore
 import ai.pebble.android.data.ServerProfile
 import ai.pebble.android.data.TailscalePeer
 import ai.pebble.android.data.errText
 import ai.pebble.android.data.normalizeAddress
+import ai.pebble.android.notify.NotificationHelper
 import ai.pebble.android.ui.theme.BotAvatar
 import ai.pebble.android.ui.theme.PebbleFont
 import ai.pebble.android.ui.theme.CardDivider
@@ -82,6 +88,7 @@ import ai.pebble.android.ui.theme.StatusTextBanner
 import ai.pebble.android.ui.theme.TagPill
 import ai.pebble.android.ui.theme.pebbleFieldColors
 import ai.pebble.android.ui.theme.readClipboardText
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.ui.res.painterResource
 import ai.pebble.android.ui.theme.PebbleIcons
@@ -116,12 +123,39 @@ fun ConnectScreen(
     var tsControlUrl by remember { mutableStateOf(store.tsControlUrl) }
     var manualOpen by remember { mutableStateOf(false) }
     var manualAdvOpen by remember { mutableStateOf(false) }
+    var unboxPromptLaunched by remember { mutableStateOf(false) }
+
+    val multiPermLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        store.markUnboxPermsDone()
+    }
 
     val isFreshOnboarding = isGate && store.servers.isEmpty() && store.activeServer == null
     val showFreshHero = isFreshOnboarding && !manualOpen
     val isConnectingGate = isGate && store.activeServer != null &&
         store.connState == ConnState.CONNECTING && store.bots.isEmpty() &&
         !showFormWhileConnecting && !submitting
+
+    LaunchedEffect(isFreshOnboarding, store.unboxPermsDone) {
+        if (isFreshOnboarding && !store.unboxPermsDone && !unboxPromptLaunched) {
+            unboxPromptLaunched = true
+            val reqs = buildList {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                    !NotificationHelper.hasNotificationPermission(context)
+                ) {
+                    add(Manifest.permission.POST_NOTIFICATIONS)
+                }
+                if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+                    add(Manifest.permission.CAMERA)
+                }
+            }
+            if (reqs.isNotEmpty()) {
+                delay(350)
+                multiPermLauncher.launch(reqs.toTypedArray())
+            } else {
+                store.markUnboxPermsDone()
+            }
+        }
+    }
 
     LaunchedEffect(Unit) {
         val active = store.activeServer
