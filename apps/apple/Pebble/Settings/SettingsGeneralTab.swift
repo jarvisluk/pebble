@@ -27,7 +27,7 @@ struct SettingsGeneralTab: View {
                 selection: $h.langPref,
                 options: [
                     ("system", hub.t("followSystem")),
-                    ("zh-CN", "简体中文"),
+                    ("zh-CN", "简体中文"), // i18n:allow-cjk
                     ("en", "English"),
                 ]
             )

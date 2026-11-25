@@ -521,10 +521,10 @@ export const ModelsTab: React.FC<ModelsTabProps> = ({
     const installing = instTask?.state === 'running';
     const installErr = instTask?.state === 'error' ? instTask.error || t('ubInstallFailed') : '';
     const lastLog = installing ? instTask?.logs?.[instTask.logs.length - 1] || t('engineInstalling') : '';
-    const rawCmd = h.install?.command || '';
-    const isShellCmd = rawCmd.includes(' ') && !rawCmd.startsWith('查看');
-    const cmdText = isShellCmd ? rawCmd : rawCmd ? t('engineManualHint', { name: h.label }) : '';
+    const rawCmd = (h.install?.command || '').trim();
     const url = h.install?.url || '';
+    const isShellCmd = Boolean(rawCmd);
+    const cmdText = isShellCmd ? rawCmd : url ? t('engineManualHint', { name: h.label }) : '';
     const descKey = `ubDesc_${h.id}`;
     const descVal = t(descKey);
     const sub = lastLog || (descVal !== descKey ? descVal : t('ubNotInstalled'));

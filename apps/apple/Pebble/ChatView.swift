@@ -632,7 +632,8 @@ private struct ChatComposerView: View {
             } label: {
                 Image(systemName: "plus")
                     .font(.system(size: AppFont.cardTitle, weight: .semibold))
-                    .frame(width: 28, height: 28)
+                    .frame(width: composerControlHeight, height: composerControlHeight)
+                    .contentShape(Circle())
             }
             .composerGlassButton(onCard: inDesktopSidebar)
             .accessibilityLabel(hub.t("attachments"))
@@ -640,7 +641,8 @@ private struct ChatComposerView: View {
             Button { showFileImporter = true } label: {
                 Image(systemName: "plus")
                     .font(.system(size: AppFont.cardTitle, weight: .semibold))
-                    .frame(width: 28, height: 28)
+                    .frame(width: composerControlHeight, height: composerControlHeight)
+                    .contentShape(Circle())
             }
             .composerGlassButton(onCard: inDesktopSidebar)
             .help(hub.t("macChooseFileOrImage"))
@@ -653,7 +655,7 @@ private struct ChatComposerView: View {
                 .lineLimit(1...6)
                 .focused($focused)
                 .padding(.horizontal, 14)
-                .padding(.vertical, 9)
+                .padding(.vertical, 8)
                 .composerGlassField(onCard: inDesktopSidebar)
                 .hubSubmitOnReturn {
                     if showStop {
@@ -712,14 +714,8 @@ private struct ChatComposerView: View {
                         Image(systemName: "chevron.up.chevron.down")
                             .font(.system(size: AppFont.caption, weight: .regular))
                     }
-                    .foregroundStyle(isPlan ? p.lilacInk : p.text2)
-                    .padding(.horizontal, 10)
-                    .frame(height: 36)
-                    .background(isPlan ? p.lilac : (inDesktopSidebar ? p.s1 : p.card), in: Capsule())
-                    .overlay(Capsule().stroke(isPlan ? p.lilacInk.opacity(0.4) : p.s2, lineWidth: 0.5))
                 }
-                .menuStyle(.borderlessButton)
-                .fixedSize()
+                .composerPermissionMenu(isPlan: isPlan, onCard: inDesktopSidebar)
                 .accessibilityLabel(hub.t("permMode"))
             }
 
@@ -728,7 +724,8 @@ private struct ChatComposerView: View {
             } label: {
                 Image(systemName: showStop ? "stop.fill" : "arrow.up")
                     .font(.system(size: showStop ? AppFont.secondary : AppFont.cardTitle, weight: .bold))
-                    .frame(width: 28, height: 28)
+                    .frame(width: composerControlHeight, height: composerControlHeight)
+                    .contentShape(Circle())
             }
             .composerSendButton(accent: showStop ? p.danger : pal.accent)
             .disabled(!showStop && (!hasContent || hasUploading || sending))

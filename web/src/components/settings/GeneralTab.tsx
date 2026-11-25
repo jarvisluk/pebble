@@ -58,7 +58,7 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({
             onChange={(e) => onLangChange(e.target.value as LangPref)}
           >
             <option value="system">{t('followSystem')}</option>
-            <option value="zh-CN">简体中文</option>
+            <option value="zh-CN">简体中文</option>{/* i18n:allow-cjk */}
             <option value="en">English</option>
           </select>
         </div>

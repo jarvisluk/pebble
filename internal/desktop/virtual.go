@@ -238,9 +238,9 @@ func (m *virtualManager) EnsureAwake(ctx context.Context) (bool, error) {
 	}
 	if !probe.VirtualReady {
 		if len(probe.MissingDeps) > 0 {
-			return true, errors.New("虚拟桌面缺少依赖 (" + strings.Join(probe.MissingDeps, ", ") + ")，请先执行安装")
+			return true, errors.New("virtual desktop is missing dependencies (" + strings.Join(probe.MissingDeps, ", ") + "); install them first")
 		}
-		return true, errors.New("虚拟桌面环境未就绪")
+		return true, errors.New("virtual desktop environment is not ready")
 	}
 
 	switch m.state {
@@ -275,13 +275,13 @@ func (m *virtualManager) Power(ctx context.Context, action string) error {
 	defer m.mu.Unlock()
 
 	if !m.isVirtualModeLocked(probe) {
-		return errors.New("当前使用原生桌面，不支持虚拟桌面电源控制")
+		return errors.New("virtual desktop power control is not available in native desktop mode")
 	}
 
 	switch act {
 	case "wake", "start", "resume":
 		if !probe.VirtualReady {
-			return errors.New("虚拟桌面缺少依赖，请先执行安装")
+			return errors.New("virtual desktop is missing dependencies; install them first")
 		}
 		switch m.state {
 		case PowerRunning:
@@ -307,7 +307,7 @@ func (m *virtualManager) Power(ctx context.Context, action string) error {
 
 	case "freeze":
 		if m.state == PowerStopped {
-			return errors.New("虚拟桌面已处于停止状态")
+			return errors.New("virtual desktop is already stopped")
 		}
 		if m.state == PowerFrozen {
 			return nil
@@ -344,7 +344,7 @@ func (m *virtualManager) Power(ctx context.Context, action string) error {
 		return nil
 
 	default:
-		return errors.New("不支持的电源操作（支持 wake / freeze / stop / keep_awake / allow_sleep）")
+		return errors.New("unsupported power action (supported: wake / freeze / stop / keep_awake / allow_sleep)")
 	}
 }
 
@@ -464,14 +464,14 @@ func (m *virtualManager) Setup(ctx context.Context) (*SetupResult, error) {
 	if !probe.VirtualSupported {
 		return &SetupResult{
 			OK:    false,
-			Error: "当前操作系统不需要虚拟桌面安装",
+			Error: "virtual desktop installation is not required on this OS",
 		}, nil
 	}
 	if probe.VirtualReady {
 		return &SetupResult{
 			OK:           true,
 			AlreadyReady: true,
-			Output:       "虚拟桌面依赖已就绪",
+			Output:       "virtual desktop dependencies are ready",
 		}, nil
 	}
 	return m.backend.Install(ctx)

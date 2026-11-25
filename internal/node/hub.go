@@ -43,15 +43,15 @@ func ValidPerms(in []string) []string {
 	return out
 }
 
-// PermLabel returns a concise Chinese label for a permission scope.
+// PermLabel returns a concise label for a permission scope.
 func PermLabel(p string) string {
 	switch p {
 	case PermFiles:
-		return "文件读写"
+		return "File Access"
 	case PermExec:
-		return "执行命令"
+		return "Run Commands"
 	case PermDesktop:
-		return "桌面与自动化"
+		return "Desktop & Automation"
 	default:
 		return p
 	}
@@ -353,7 +353,7 @@ drained:
 	r.mu.Unlock()
 
 	for i, ch := range waiters {
-		ch <- Result{CallID: dropped[i].CallID, NodeID: id, OK: false, Error: "远端设备节点已断开"}
+		ch <- Result{CallID: dropped[i].CallID, NodeID: id, OK: false, Error: "remote device node disconnected"}
 	}
 	if wasConnected {
 		r.notify()
@@ -405,23 +405,23 @@ func (r *Registry) Call(ctx context.Context, nodeID, action string, args any, ti
 		switch len(connected) {
 		case 0:
 			r.mu.Unlock()
-			return nil, "", errors.New("当前没有已连接的远端设备节点（请在另一台电脑的 Bot Hub「设置 › 远程与设备」中开启「允许主电脑操控本机」）")
+			return nil, "", errors.New("no connected remote device nodes (enable \"Allow Primary Host to Control This Device\" in Pebble Settings -> Connection & Devices on the other computer)")
 		case 1:
 			targetID = connected[0]
 		default:
 			r.mu.Unlock()
-			return nil, "", fmt.Errorf("已连接多台设备 (%s)，请指定 nodeId", strings.Join(connected, ", "))
+			return nil, "", fmt.Errorf("multiple devices connected (%s); specify nodeId", strings.Join(connected, ", "))
 		}
 	}
 
 	e, ok := r.nodes[targetID]
 	if !ok || !isConnectedLocked(e, now) {
 		r.mu.Unlock()
-		return nil, targetID, fmt.Errorf("节点 %q 当前未连接", targetID)
+		return nil, targetID, fmt.Errorf("node %q is not connected", targetID)
 	}
 	if !slices.Contains(e.info.Permissions, reqPerm) {
 		r.mu.Unlock()
-		return nil, targetID, fmt.Errorf("节点 %q 未开启「%s」权限", targetID, PermLabel(reqPerm))
+		return nil, targetID, fmt.Errorf("node %q does not have %q permission enabled", targetID, PermLabel(reqPerm))
 	}
 
 	callID := newCallID()
@@ -448,7 +448,7 @@ func (r *Registry) Call(ctx context.Context, nodeID, action string, args any, ti
 	case cmdCh <- cmd:
 		enqTimer.Stop()
 	case <-enqTimer.C:
-		return nil, targetID, fmt.Errorf("节点 %q 指令队列已满", targetID)
+		return nil, targetID, fmt.Errorf("node %q command queue is full", targetID)
 	case <-ctx.Done():
 		enqTimer.Stop()
 		return nil, targetID, ctx.Err()
@@ -464,7 +464,7 @@ func (r *Registry) Call(ctx context.Context, nodeID, action string, args any, ti
 		}
 		return &res, targetID, nil
 	case <-waitTimer.C:
-		return nil, targetID, fmt.Errorf("节点 %q 执行超时 (%s)", targetID, timeout)
+		return nil, targetID, fmt.Errorf("node %q timed out (%s)", targetID, timeout)
 	case <-ctx.Done():
 		return nil, targetID, ctx.Err()
 	}

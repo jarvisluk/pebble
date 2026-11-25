@@ -742,7 +742,7 @@ private val footnoteRefRegex = Regex("^\\[\\^([^\\]]+)](?!:)")
 private val bareUrlRegex = Regex("^https?://[^\\s<]+")
 private val pureNumberRegex = Regex("^\\d+(?:[.,]\\d+)?$")
 private val escapableChars = "\\`*_{}[]()#+-.!|>~$".toSet()
-private val trailingUrlPunct = ".,;:!?。，；：！？、）】」』》\"'".toSet()
+private val trailingUrlPunct = ".,;:!?。，；：！？、）】」』》\"'".toSet() // i18n:allow-cjk
 
 private fun isWordChar(ch: Char?): Boolean = ch != null && (ch.isLetterOrDigit() || ch == '_')
 

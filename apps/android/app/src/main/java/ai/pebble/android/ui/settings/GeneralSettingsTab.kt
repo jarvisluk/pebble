@@ -90,7 +90,7 @@ fun GeneralSettingsTab(store: PebbleStore) {
 
             val langs = listOf(
                 "system" to store.t("followSystem"),
-                "zh-CN" to "简体中文",
+                "zh-CN" to "简体中文", // i18n:allow-cjk
                 "en" to "English",
             )
             Text(store.t("language"), color = p.text2, fontSize = PebbleFont.secondary)

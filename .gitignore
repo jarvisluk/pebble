@@ -20,10 +20,13 @@ apps/mobile/modules/bothub-tunnel/android/build/
 apps/mobile/modules/bothub-tunnel/android/.gradle/
 apps/mobile/.claude/
 apps/android/.gradle/
+apps/android/.kotlin/
 apps/android/build/
 apps/android/app/build/
 apps/android/local.properties
 apps/android/app/src/main/jniLibs/
+build/apple-mac/
+*.tsbuildinfo
 web/node_modules/
 dist/
 build/release/

@@ -288,7 +288,7 @@ function splitTrailingPunct(url: string): { url: string; trailing: string } {
   let trailing = '';
   while (u.length > 0) {
     const last = u[u.length - 1];
-    if ('.,;:!?。，；：！？、）】」』》"\''.includes(last)) {
+    if ('.,;:!?。，；：！？、）】」』》"\''.includes(last)) { // i18n:allow-cjk
       trailing = last + trailing;
       u = u.slice(0, -1);
     } else if (last === ')') {

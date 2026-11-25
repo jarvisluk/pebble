@@ -357,7 +357,7 @@ func MagpieConnect(ctx context.Context, kind, model string) error {
 	}
 	id := strings.TrimPrefix(strings.TrimSpace(model), "magpie/")
 	if id == "" {
-		return fmt.Errorf("请先选择或填写要接入的模型")
+		return fmt.Errorf("please select or enter a model")
 	}
 	out, err := runMagpieCombined(ctx, a.agent, id)
 	if err != nil {
@@ -512,7 +512,7 @@ func MagpiePresets(ctx context.Context) []MagpiePreset {
 // MagpieProviderAction runs a native `magpie provider ...` management command.
 func MagpieProviderAction(ctx context.Context, req MagpieProviderReq) (string, error) {
 	if !magpieInstalled() {
-		return "", fmt.Errorf("magpie 未安装")
+		return "", fmt.Errorf("magpie is not installed")
 	}
 	action := strings.TrimSpace(req.Action)
 	var args []string
@@ -526,7 +526,7 @@ func MagpieProviderAction(ctx context.Context, req MagpieProviderReq) (string, e
 		url := strings.TrimSpace(req.URL)
 		if preset != "" {
 			if !validMagpieIDRe.MatchString(preset) {
-				return "", fmt.Errorf("无效预设 ID: %q", preset)
+				return "", fmt.Errorf("invalid preset ID: %q", preset)
 			}
 			args = append(args, "provider", "add", preset)
 			if key != "" {
@@ -537,10 +537,10 @@ func MagpieProviderAction(ctx context.Context, req MagpieProviderReq) (string, e
 			}
 		} else {
 			if name == "" {
-				return "", fmt.Errorf("请填写名称")
+				return "", fmt.Errorf("name is required")
 			}
 			if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
-				return "", fmt.Errorf("接口地址需以 http:// 或 https:// 开头")
+				return "", fmt.Errorf("base URL must start with http:// or https://")
 			}
 			protoField := "url="
 			switch strings.TrimSpace(req.Protocol) {
@@ -563,7 +563,7 @@ func MagpieProviderAction(ctx context.Context, req MagpieProviderReq) (string, e
 	case "on", "off", "rm", "test", "refresh":
 		id := strings.TrimSpace(req.ID)
 		if id == "" || !validMagpieIDRe.MatchString(id) {
-			return "", fmt.Errorf("无效 provider ID: %q", req.ID)
+			return "", fmt.Errorf("invalid provider ID: %q", req.ID)
 		}
 		sub := action
 		if action == "refresh" {
@@ -648,7 +648,7 @@ type magpieToolEnvelope struct {
 
 func runMagpieTool(ctx context.Context, toolName string, args ...string) (*magpieToolEnvelope, string, error) {
 	if !magpieInstalled() {
-		return nil, "", fmt.Errorf("magpie 未安装")
+		return nil, "", fmt.Errorf("magpie is not installed")
 	}
 	cmdArgs := append([]string{"tool", toolName, "--json"}, args...)
 	out, err := runMagpieCombined(ctx, cmdArgs...)
@@ -969,11 +969,11 @@ func MagpieMemorySearch(ctx context.Context, scope, projectDir, botID, query, ki
 // MagpieMemorySave saves or updates a memory via `magpie tool memory_save`.
 func MagpieMemorySave(ctx context.Context, req MagpieMemorySaveReq) (string, error) {
 	if !magpieInstalled() {
-		return "", fmt.Errorf("magpie 未安装")
+		return "", fmt.Errorf("magpie is not installed")
 	}
 	text := strings.TrimSpace(req.Text)
 	if text == "" {
-		return "", fmt.Errorf("记忆内容不能为空")
+		return "", fmt.Errorf("memory content cannot be empty")
 	}
 
 	scope := strings.TrimSpace(req.Scope)
@@ -981,7 +981,7 @@ func MagpieMemorySave(ctx context.Context, req MagpieMemorySaveReq) (string, err
 	if botID != "" {
 		scope = "project"
 		if strings.TrimSpace(req.Project) == "" {
-			return "", fmt.Errorf("缺少 Bot 工作目录")
+			return "", fmt.Errorf("bot workspace is required")
 		}
 		if err := os.MkdirAll(req.Project, 0o755); err != nil {
 			return "", err
@@ -1018,7 +1018,7 @@ func MagpieMemorySave(ctx context.Context, req MagpieMemorySaveReq) (string, err
 // MagpieMemoryForget removes/forgets a memory via `magpie tool memory_forget`.
 func MagpieMemoryForget(ctx context.Context, id string) (string, error) {
 	if !magpieInstalled() {
-		return "", fmt.Errorf("magpie 未安装")
+		return "", fmt.Errorf("magpie is not installed")
 	}
 	id = strings.TrimSpace(id)
 	if id == "" {

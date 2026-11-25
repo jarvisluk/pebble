@@ -1228,7 +1228,7 @@ struct MarkdownText: View {
     private static func splitTrailingPunct(_ url: String) -> (String, String) {
         var u = url
         var trailing = ""
-        let punct: Set<Character> = Set(".,;:!?。，；：！？、）】」』》\"'")
+        let punct: Set<Character> = Set(".,;:!?。，；：！？、）】」』》\"'") // i18n:allow-cjk
         while let last = u.last {
             if punct.contains(last) {
                 trailing = String(last) + trailing

@@ -468,7 +468,7 @@ func (s *Scheduler) executeWithSlot(ctx context.Context, botID string, sched con
 	run.Output = strings.TrimSpace(res.Text)
 
 	if delivery == config.RoutineDeliveryNotify {
-		msg := fmt.Sprintf("[Routine 通知: %s]\n%s", sched.Name, run.Output)
+		msg := fmt.Sprintf("[Routine notification: %s]\n%s", sched.Name, run.Output)
 		if _, sendErr := s.hub.Send(ctx, botID, msg, hub.SendOptions{Source: "routine:" + sched.Name}); sendErr != nil {
 			log.Printf("[scheduler] main notify failed %s/%s: %v", botID, rid, sendErr)
 		} else {
@@ -604,7 +604,7 @@ func isSilentOutput(text string) bool {
 	if trimmed == "" {
 		return true
 	}
-	clean := strings.Trim(trimmed, " \t\r\n`\"'.。")
+	clean := strings.Trim(trimmed, " \t\r\n`\"'.。") // i18n:allow-cjk
 	return strings.EqualFold(clean, "NO_REPLY")
 }
 

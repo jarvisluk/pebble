@@ -446,7 +446,7 @@ fun MemorySettingsTab(
                                 onError(store.t("memContentReq"))
                                 return@Button
                             }
-                            val tags = memTags.split(',', '，').map { it.trim() }.filter { it.isNotEmpty() }
+                            val tags = memTags.split(',', '，').map { it.trim() }.filter { it.isNotEmpty() } // i18n:allow-cjk
                             runOp("mem:save", "saveMemFailed") {
                                 store.saveMemory(mapOf("scope" to "global", "kind" to memKind, "text" to txt, "tags" to tags))
                                 memText = ""

@@ -943,6 +943,7 @@ fun ChatScreen(
                 }
 
                 // Floating Input Row
+                val floatBg = if (inDesktopSidebar) p.s1 else if (p.dark) p.card else Color.White
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.Bottom,
@@ -950,13 +951,13 @@ fun ChatScreen(
                 ) {
                     Box {
                         Surface(
-                            color = if (inDesktopSidebar) p.s1 else p.card,
+                            color = floatBg,
                             shape = CircleShape,
                             shadowElevation = if (inDesktopSidebar) 0.dp else 3.dp,
                             modifier = Modifier
                                 .size(44.dp)
                                 .clip(CircleShape)
-                                .then(if (inDesktopSidebar) Modifier.border(0.5.dp, p.s2, CircleShape) else Modifier)
+                                .border(0.5.dp, p.s2, CircleShape)
                                 .clickable { attachMenuOpen = true },
                         ) {
                             Box(contentAlignment = Alignment.Center) {
@@ -988,17 +989,19 @@ fun ChatScreen(
                     }
 
                     Surface(
-                        color = if (inDesktopSidebar) p.s1 else if (p.dark) p.card else Color.White,
+                        color = floatBg,
                         shape = PebbleDimens.composerShape,
                         shadowElevation = if (inDesktopSidebar) 0.dp else 3.dp,
                         modifier = Modifier
                             .weight(1f)
+                            .heightIn(min = 44.dp)
                             .border(0.5.dp, p.s2, PebbleDimens.composerShape),
                     ) {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 11.dp),
+                                .heightIn(min = 44.dp)
+                                .padding(horizontal = 16.dp, vertical = 10.dp),
                             contentAlignment = Alignment.CenterStart,
                         ) {
                             if (input.isEmpty()) {
@@ -1027,11 +1030,7 @@ fun ChatScreen(
                         var permMenuOpen by remember { mutableStateOf(false) }
                         Box {
                             Surface(
-                                color = when {
-                                    activePermMode == "plan" -> p.lilac
-                                    inDesktopSidebar -> p.s1
-                                    else -> p.card
-                                },
+                                color = if (activePermMode == "plan") p.lilac else floatBg,
                                 shape = CircleShape,
                                 shadowElevation = if (inDesktopSidebar) 0.dp else 3.dp,
                                 modifier = Modifier

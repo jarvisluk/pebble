@@ -363,7 +363,7 @@ func (s *HTTPServer) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if subtle.ConstantTimeCompare([]byte(req.Token), []byte(token)) != 1 {
-		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "token 不正确"})
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "invalid token"})
 		return
 	}
 	http.SetCookie(w, &http.Cookie{

@@ -86,7 +86,29 @@ type UnifiedInput struct {
 }
 
 // ErrScreenRecordingDenied indicates macOS Screen Recording permission is not granted.
-var ErrScreenRecordingDenied = errors.New("缺少 macOS 屏幕录制权限，请在「系统设置 → 隐私与安全性 → 录屏与系统录音」中允许 Bot Hub 后重试")
+var ErrScreenRecordingDenied = errors.New("macOS Screen Recording permission is denied; allow Pebble in System Settings -> Privacy & Security -> Screen & System Audio Recording and retry")
+
+var screenRecordingGrantedFn = nativeScreenRecordingGranted
+
+// IsScreenRecordingDeniedError reports whether err indicates macOS Screen Recording permission denial.
+func IsScreenRecordingDeniedError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, ErrScreenRecordingDenied) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "screen_recording_denied") ||
+		strings.Contains(msg, "declined tccs") ||
+		strings.Contains(msg, "user declined") ||
+		strings.Contains(msg, "屏幕录制权限") || // i18n:allow-cjk
+		strings.Contains(msg, "screen recording permission") {
+		return true
+	}
+	return strings.Contains(msg, "screen recording") &&
+		(strings.Contains(msg, "denied") || strings.Contains(msg, "declined"))
+}
 
 // Engine drives local desktop capture, WebRTC streaming, window inspection, and input injection,
 // preferring opencode-remote-desktop's native `bot-host` sidecar with OS fallback when absent.
@@ -148,7 +170,7 @@ func (e *Engine) recordScreenRecording(state string) {
 }
 
 func (e *Engine) isScreenRecordingDenied(ctx context.Context) bool {
-	if runtime.GOOS != "darwin" || !e.host.Available() {
+	if runtime.GOOS != "darwin" {
 		return false
 	}
 	e.permMu.Lock()
@@ -159,12 +181,23 @@ func (e *Engine) isScreenRecordingDenied(ctx context.Context) bool {
 	}
 	e.permMu.Unlock()
 
-	var hs struct {
-		ScreenRecording string `json:"screenRecording"`
+	if e.host != nil && e.host.Available() {
+		var hs struct {
+			ScreenRecording string `json:"screenRecording"`
+		}
+		if err := e.host.Request(ctx, "host.status", map[string]any{}, &hs); err == nil && hs.ScreenRecording != "" {
+			e.recordScreenRecording(hs.ScreenRecording)
+			return strings.EqualFold(hs.ScreenRecording, "denied")
+		}
 	}
-	if err := e.host.Request(ctx, "host.status", map[string]any{}, &hs); err == nil && hs.ScreenRecording != "" {
-		e.recordScreenRecording(hs.ScreenRecording)
-		return strings.EqualFold(hs.ScreenRecording, "denied")
+
+	if granted, supported := screenRecordingGrantedFn(); supported {
+		if granted {
+			e.recordScreenRecording("granted")
+			return false
+		}
+		e.recordScreenRecording("denied")
+		return true
 	}
 	return false
 }
@@ -759,5 +792,5 @@ func FormatScreenError(err error) string {
 	if err == nil {
 		return ""
 	}
-	return fmt.Sprintf("桌面操作失败: %v", err)
+	return fmt.Sprintf("desktop action failed: %v", err)
 }

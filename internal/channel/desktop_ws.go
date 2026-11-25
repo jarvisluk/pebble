@@ -40,7 +40,7 @@ func (s *HTTPServer) handleDesktopStreamWS(w http.ResponseWriter, r *http.Reques
 	target := s.resolveDesktopTarget(r, "")
 	spec := desktop.ParseTarget(target)
 	if !spec.IsLocal() {
-		_ = sendWSError(r.Context(), conn, "", "远端节点暂不支持 H.264 视频流")
+		_ = sendWSError(r.Context(), conn, "", "remote node does not support H.264 video streaming")
 		_ = conn.Close(websocket.StatusUnsupportedData, "unsupported target")
 		return
 	}
@@ -448,7 +448,7 @@ func (s *HTTPServer) handleDesktopStreamWS(w http.ResponseWriter, r *http.Reques
 		}
 		if err != nil {
 			code := ""
-			if errors.Is(err, desktop.ErrScreenRecordingDenied) {
+			if desktop.IsScreenRecordingDeniedError(err) {
 				code = "screen_recording_denied"
 			}
 			_ = writeText(map[string]any{

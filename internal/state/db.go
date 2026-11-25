@@ -25,7 +25,7 @@ var (
 	// ErrSessionNotFound indicates the requested session does not exist.
 	ErrSessionNotFound = errors.New("session not found")
 
-	legacyResetSessionRe = regexp.MustCompile(`旧 Session:\s*([^\s）)]+)`)
+	legacyResetSessionRe = regexp.MustCompile(`(?:旧 Session:|previous:)\s*([^\s）)]+)`) // i18n:allow-cjk
 )
 
 const defaultRecallMaxChars = 2000
@@ -389,7 +389,7 @@ func (s *Store) migrateLegacyIfNeeded() error {
 			lastErr := ""
 			hasResetMarker := false
 			for _, m := range seg.msgs {
-				if m.Role == "system" && strings.HasPrefix(m.Text, "Session 已重置") {
+				if m.Role == "system" && (strings.HasPrefix(m.Text, "Session reset") || strings.HasPrefix(m.Text, "Session 已重置")) { // i18n:allow-cjk
 					hasResetMarker = true
 				}
 				if m.Role == "system" && m.From == "error" {
@@ -523,7 +523,7 @@ func splitLegacySegments(msgs []ChatMessage) []legacySegment {
 
 	for _, m := range msgs {
 		msgRuntime := strings.TrimSpace(m.SessionID)
-		isReset := m.Role == "system" && strings.HasPrefix(m.Text, "Session 已重置")
+		isReset := m.Role == "system" && (strings.HasPrefix(m.Text, "Session reset") || strings.HasPrefix(m.Text, "Session 已重置")) // i18n:allow-cjk
 		if isReset && msgRuntime == "" {
 			if match := legacyResetSessionRe.FindStringSubmatch(m.Text); len(match) == 2 {
 				msgRuntime = strings.TrimSpace(match[1])

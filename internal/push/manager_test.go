@@ -164,11 +164,11 @@ $$
 		"API · 旧版 正常 详见 文档",
 		"完成 deploy.sh 检查",
 		"引用内容 [1]",
-		"[图片: 架构图]",
-		"[图片]",
+		"[Image: 架构图]",
+		"[Image]",
 		"∑_i=1^n i = (n(n+1))/2",
 		"展开详情 支持 ⌘K 与 H2O",
-		"[代码]",
+		"[Code]",
 		"[1] 脚注说明，价格 $100 - $200 与 snake_case 保留。",
 	}
 	for _, part := range wantParts {
@@ -239,7 +239,7 @@ func TestManagerApprovalsAndQuestionTitle(t *testing.T) {
 		if r.PushType == PushTypeAlert && pl.Kind == "approval" && pl.APS.InterruptionLevel == "time-sensitive" {
 			sawAlert = true
 		}
-		if r.PushType == PushTypeLiveActivity && pl.APS.ContentState.Phase == "approval" && pl.APS.ContentState.StatusText == "等待批准" {
+		if r.PushType == PushTypeLiveActivity && pl.APS.ContentState.Phase == "approval" && pl.APS.ContentState.StatusText == "Approval required" {
 			sawApprovalLA = true
 		}
 	}

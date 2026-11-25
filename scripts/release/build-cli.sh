@@ -45,6 +45,15 @@ GIT_COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 LDFLAGS="-s -w -X bot-hub/internal/protocol.AppVersion=$VERSION -X bot-hub/internal/protocol.BuildCommit=$GIT_COMMIT -X bot-hub/internal/protocol.BuildDate=$BUILD_DATE"
 
+GO_TAGS="${GO_TAGS:-}"
+if [ -z "$GO_TAGS" ] && [ -f "$ROOT/scripts/go-build-tags.txt" ]; then
+  GO_TAGS="$(grep -v '^#' "$ROOT/scripts/go-build-tags.txt" | grep -v '^$' | paste -sd, - || true)"
+fi
+GO_TAG_ARGS=()
+if [ -n "$GO_TAGS" ]; then
+  GO_TAG_ARGS=(-tags="$GO_TAGS")
+fi
+
 PLATFORMS="${PLATFORMS:-linux/amd64 linux/arm64 darwin/arm64 darwin/amd64}"
 HOST_OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
 
@@ -75,7 +84,7 @@ for target in $PLATFORMS; do
 
   echo "Building $pkg_name (CGO_ENABLED=$cgo)..."
   CGO_ENABLED="$cgo" GOOS="$os" GOARCH="$arch" \
-    go build -trimpath -ldflags="$LDFLAGS" -o "$stage/$bin_name" ./cmd/pebble
+    go build -trimpath "${GO_TAG_ARGS[@]}" -ldflags="$LDFLAGS" -o "$stage/$bin_name" ./cmd/pebble
 
   cp "$ROOT/LICENSE" "$ROOT/README.md" "$ROOT/README.zh-CN.md" "$stage/"
 

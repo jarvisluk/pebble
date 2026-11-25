@@ -90,7 +90,7 @@ func (s *HTTPServer) startTailcat(handler http.Handler) {
 		}
 		t.state, t.link, t.stop = "ready", link, stop
 		t.mu.Unlock()
-		log.Printf("[tailcat] ready; open the Web UI (远程访问) for the link / QR code")
+		log.Printf("[tailcat] ready; open the Web UI (Remote Access) for the link / QR code")
 		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Printf("[tailcat] serve: %v", err)
 		}
@@ -164,7 +164,7 @@ func (s *HTTPServer) handleSetTailcat(w http.ResponseWriter, r *http.Request) {
 
 	if (req.ResetToken || req.APIToken != "") && s.hub != nil {
 		if envRef := config.RawAPITokenEnvRef(s.hub.Config().ConfigPath); envRef != "" {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"error": fmt.Sprintf("当前口令来自环境变量 %s，请修改 .env 文件", envRef)})
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": fmt.Sprintf("token is provided by environment variable %s; edit .env to change it", envRef)})
 			return
 		}
 	}
