@@ -265,7 +265,8 @@ func TestNoClientCodeCJKLeaks(t *testing.T) {
 			return strings.Contains(rel, "Tests/") ||
 				strings.HasSuffix(rel, "Tests.swift") ||
 				strings.Contains(rel, ".test.") ||
-				rel == "apps/android/app/src/main/java/ai/pebble/android/i18n/Strings.kt" ||
+				rel == "apps/android/app/src/main/java/ai/pebble/android/i18n/StringsZh.kt" ||
+				rel == "apps/android/app/src/main/java/ai/pebble/android/i18n/StringsEn.kt" ||
 				rel == "web/src/lib/i18n.ts"
 		},
 	)
@@ -308,18 +309,18 @@ func TestEnglishResourcesNoCJK(t *testing.T) {
 	}
 
 	// Check Android enStrings block.
-	ktPath := filepath.Join(root, "apps/android/app/src/main/java/ai/pebble/android/i18n/Strings.kt")
+	ktPath := filepath.Join(root, "apps/android/app/src/main/java/ai/pebble/android/i18n/StringsEn.kt")
 	ktRaw, err := os.ReadFile(ktPath)
 	if err != nil {
-		t.Fatalf("read Strings.kt: %v", err)
+		t.Fatalf("read StringsEn.kt: %v", err)
 	}
-	ktEnBlock, ktStartLine := extractBlock(string(ktRaw), `private val enStrings: Map<String, String> = mapOf(`, "\n)")
+	ktEnBlock, ktStartLine := extractBlock(string(ktRaw), `internal val enStrings: Map<String, String> = mapOf(`, "\n)")
 	if ktEnBlock == "" {
-		t.Fatal("failed to locate enStrings block in Strings.kt")
+		t.Fatal("failed to locate enStrings block in StringsEn.kt")
 	}
 	for i, line := range strings.Split(ktEnBlock, "\n") {
 		if hasCJK(line) {
-			violations = append(violations, "Strings.kt:"+itoa(ktStartLine+i)+": "+strings.TrimSpace(line))
+			violations = append(violations, "StringsEn.kt:"+itoa(ktStartLine+i)+": "+strings.TrimSpace(line))
 		}
 	}
 
@@ -352,16 +353,19 @@ func TestI18nKeyParity(t *testing.T) {
 	enApple := readJSONKeys(t, filepath.Join(root, "apps/apple/Pebble/strings-en.json"))
 	assertSameKeys(t, "Apple strings-zh.json", zhApple, "Apple strings-en.json", enApple)
 
-	// 2. Android Strings.kt.
-	ktRawBytes, err := os.ReadFile(filepath.Join(root, "apps/android/app/src/main/java/ai/pebble/android/i18n/Strings.kt"))
+	// 2. Android StringsZh.kt / StringsEn.kt.
+	zhKtRawBytes, err := os.ReadFile(filepath.Join(root, "apps/android/app/src/main/java/ai/pebble/android/i18n/StringsZh.kt"))
 	if err != nil {
-		t.Fatalf("read Strings.kt: %v", err)
+		t.Fatalf("read StringsZh.kt: %v", err)
 	}
-	ktRaw := string(ktRawBytes)
-	zhKtBlock, _ := extractBlock(ktRaw, `private val zhStrings: Map<String, String> = mapOf(`, "\n)")
-	enKtBlock, _ := extractBlock(ktRaw, `private val enStrings: Map<String, String> = mapOf(`, "\n)")
+	enKtRawBytes, err := os.ReadFile(filepath.Join(root, "apps/android/app/src/main/java/ai/pebble/android/i18n/StringsEn.kt"))
+	if err != nil {
+		t.Fatalf("read StringsEn.kt: %v", err)
+	}
+	zhKtBlock, _ := extractBlock(string(zhKtRawBytes), `internal val zhStrings: Map<String, String> = mapOf(`, "\n)")
+	enKtBlock, _ := extractBlock(string(enKtRawBytes), `internal val enStrings: Map<String, String> = mapOf(`, "\n)")
 	if zhKtBlock == "" || enKtBlock == "" {
-		t.Fatal("failed to extract zhStrings/enStrings from Strings.kt")
+		t.Fatal("failed to extract zhStrings/enStrings from StringsZh.kt/StringsEn.kt")
 	}
 	ktKeyRe := regexp.MustCompile(`"([^"]+)"\s+to\s+"`)
 	zhKt := extractRegexKeys(ktKeyRe, zhKtBlock)
