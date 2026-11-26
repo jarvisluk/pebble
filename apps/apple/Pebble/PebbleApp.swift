@@ -11,6 +11,7 @@ struct PebbleApp: App {
         WindowGroup {
             RootView()
                 .hubTrackWindowVisibility()
+                .hubApplyTheme(hub.themePref)
                 .environment(hub)
                 .environment(router)
         }
@@ -86,20 +87,10 @@ private struct MacWindowRootView: View {
     @Environment(DesktopHostManager.self) private var host
     @Environment(Router.self) private var router
     @Environment(\.openWindow) private var openWindow
-    @Environment(\.colorScheme) private var scheme
 
     var appDelegate: MacAppDelegate
     @State private var showMacPermsUnbox = false
     @State private var checkingMacPerms = false
-
-    private var scheme0: ColorScheme? {
-        hub.themePref == "light" ? .light : hub.themePref == "dark" ? .dark : nil
-    }
-
-    private var activePalette: Palette {
-        let dark = hub.themePref == "dark" || (hub.themePref == "system" && scheme == .dark)
-        return Palette(dark: dark)
-    }
 
     private var showSetup: Bool {
         !host.ready || host.snapshot.mode.isEmpty || host.snapshot.activeUrl.isEmpty
@@ -119,7 +110,8 @@ private struct MacWindowRootView: View {
 
     var body: some View {
         let isMacDesktopStage = router.desktop != nil && router.stageTab == .desktop
-        let effectivePalette = isMacDesktopStage ? Palette(dark: true) : activePalette
+        let effectiveDark = PlatformAppearance.shared.resolvedDark(themePref: hub.themePref, forceDark: isMacDesktopStage)
+        let effectivePalette = Palette(dark: effectiveDark)
         Group {
             if showSetup {
                 MacSetupView()
@@ -132,7 +124,8 @@ private struct MacWindowRootView: View {
         .environment(\.palette, effectivePalette)
         .tint(effectivePalette.accent)
         .font(.system(size: AppFont.body))
-        .preferredColorScheme(isMacDesktopStage ? .dark : scheme0)
+        .environment(\.colorScheme, effectiveDark ? .dark : .light)
+        .hubApplyTheme(hub.themePref, forceDark: isMacDesktopStage)
         .hubTrackWindowVisibility()
         .macSeamlessWindowToolbar()
         .onAppear {
@@ -443,12 +436,9 @@ final class Router {
 struct RootView: View {
     @Environment(HubStore.self) private var hub
     @Environment(Router.self) private var router
-    @Environment(\.colorScheme) private var scheme
     @Environment(\.horizontalSizeClass) private var hsc
     @Environment(\.scenePhase) private var phase
     @Environment(\.hubWindowVisible) private var windowVisible
-
-    private var scheme0: ColorScheme? { hub.themePref == "light" ? .light : hub.themePref == "dark" ? .dark : nil }
 
     private var showGate: Bool {
         if hub.managedMode {
@@ -461,8 +451,9 @@ struct RootView: View {
     }
 
     var body: some View {
-        let dark = hub.themePref == "dark" || (hub.themePref == "system" && scheme == .dark)
+        let dark = PlatformAppearance.shared.resolvedDark(themePref: hub.themePref)
         let palette = Palette(dark: dark)
+        let resolvedScheme: ColorScheme = dark ? .dark : .light
         #if os(macOS)
         let compact = false
         let macStage = true
@@ -565,7 +556,7 @@ struct RootView: View {
                         .tint(palette.accent)
                         .buttonBorderShape(.capsule)
                         .font(.system(size: AppFont.body))
-                        .preferredColorScheme(scheme0)
+                        .environment(\.colorScheme, resolvedScheme)
                     }
                 }
             }
@@ -575,7 +566,7 @@ struct RootView: View {
         .font(.system(size: AppFont.body))
         .environment(\.palette, palette)
         .environment(\.hubCompact, compact)
-        .preferredColorScheme(scheme0)
+        .environment(\.colorScheme, resolvedScheme)
         .sheet(item: $r.sheet) { route in
             SheetHost(route: route)
                 .environment(\.palette, palette)
@@ -586,7 +577,7 @@ struct RootView: View {
                 .tint(palette.accent)
                 .buttonBorderShape(.capsule)
                 .font(.system(size: AppFont.body))
-                .preferredColorScheme(scheme0)
+                .environment(\.colorScheme, resolvedScheme)
         }
         .onChange(of: router.selected) { _, id in
             if id == nil { router.detailOpen = false }
@@ -606,7 +597,7 @@ struct RootView: View {
             .environment(hub)
             .tint(palette.accent)
             .buttonBorderShape(.capsule)
-            .preferredColorScheme(scheme0)
+            .environment(\.colorScheme, resolvedScheme)
         }
         #endif
         .onChange(of: hub.pendingStageOpen) { _, ev in

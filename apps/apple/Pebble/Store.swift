@@ -9,7 +9,17 @@ import AppKit
 @Observable
 final class HubStore {
     // 偏好
-    var themePref: String { didSet { UserDefaults.standard.set(themePref, forKey: "bothub.theme") } }
+    var themePref: String {
+        didSet {
+            let normalized = normalizeThemePref(themePref)
+            if themePref != normalized {
+                themePref = normalized
+                return
+            }
+            UserDefaults.standard.set(themePref, forKey: "bothub.theme")
+            PlatformAppearance.shared.apply(themePref: themePref)
+        }
+    }
     var langPref: String {
         didSet {
             UserDefaults.standard.set(langPref, forKey: "bothub.lang")
@@ -130,11 +140,12 @@ final class HubStore {
 
     init(autoConnect: Bool = true) {
         let d = UserDefaults.standard
-        themePref = d.string(forKey: "bothub.theme") ?? "system"
+        themePref = normalizeThemePref(d.string(forKey: "bothub.theme"))
         langPref = d.string(forKey: "bothub.lang") ?? "system"
         tsBound = d.bool(forKey: "bothub.tsBound")
         tsControlUrl = d.string(forKey: "bothub.tsControlUrl") ?? ""
         dismissedUpdateVersion = d.string(forKey: "pebble.dismissedUpdate") ?? ""
+        PlatformAppearance.shared.apply(themePref: themePref)
         L.lang = lang
         #if os(iOS)
         PebbleSharedStore.setPreferredLang(lang)
