@@ -1,10 +1,10 @@
 import SwiftUI
 
 struct SettingsModelsTab: View {
-    @Environment(HubStore.self) private var hub
+    @Environment(HubStore.self) var hub
     @Environment(Router.self) private var router
-    @Environment(\.palette) private var p
-    @Environment(\.openURL) private var openURL
+    @Environment(\.palette) var p
+    @Environment(\.openURL) var openURL
 
     @Binding var error: String
     @Binding var saved: String
@@ -23,21 +23,21 @@ struct SettingsModelsTab: View {
     @State private var defaultTouched = false
     @State private var perHarness: [String: String] = [:]
     @State private var perTouched = false
-    @State private var mpWebUrl = ""
-    @State private var mpWebUrlTouched = false
+    @State var mpWebUrl = ""
+    @State var mpWebUrlTouched = false
     @State private var drafts: [String: BotDraft] = [:]
     @State private var touchedBots: Set<String> = []
 
-    @State private var moreEnginesOpen = false
+    @State var moreEnginesOpen = false
     @State private var perOverridesOpen = false
-    @State private var expandedInstall: Set<String> = []
-    @State private var installTasks: [String: SetupTaskStatus] = [:]
-    @State private var loginTasks: [String: SetupTaskStatus] = [:]
-    @State private var pollTasks: [String: Task<Void, Never>] = [:]
-    @State private var copiedKey = ""
-    @State private var busy = ""
+    @State var expandedInstall: Set<String> = []
+    @State var installTasks: [String: SetupTaskStatus] = [:]
+    @State var loginTasks: [String: SetupTaskStatus] = [:]
+    @State var pollTasks: [String: Task<Void, Never>] = [:]
+    @State var copiedKey = ""
+    @State var busy = ""
 
-    private var harnesses: [HarnessInfo] { settingsHarnessList(from: hub) }
+    var harnesses: [HarnessInfo] { settingsHarnessList(from: hub) }
     private var primaryHarness: String { harnesses.first?.id ?? "opencode" }
 
     private var baseDefaultHarness: String {
@@ -85,11 +85,11 @@ struct SettingsModelsTab: View {
 
     private var dirty: Bool { settingsChanged || !botUpdates.isEmpty }
 
-    private var installedHarnesses: [HarnessInfo] {
+    var installedHarnesses: [HarnessInfo] {
         harnesses.filter { $0.installed == true }
     }
 
-    private var uninstalledHarnesses: [HarnessInfo] {
+    var uninstalledHarnesses: [HarnessInfo] {
         harnesses.filter { $0.installed != true }
     }
 
@@ -126,376 +126,6 @@ struct SettingsModelsTab: View {
             .onChange(of: hub.settings?.magpie?.webUrl) { _, _ in sync() }
             .onChange(of: hub.settings?.harnesses) { _, _ in sync() }
             .onChange(of: botSnapshotKeys) { _, _ in syncDrafts() }
-    }
-
-    // MARK: Card 1 - Magpie Gateway
-
-    private var magpieGatewaySection: some View {
-        let mp = hub.settings?.magpie
-        let installed = mp?.installed == true
-        let providers = mp?.providers ?? []
-        let presets = mp?.presets ?? []
-
-        return Section {
-            if !installed {
-                Text(hub.t("hostNoMagpieGlobal")).foregroundStyle(.secondary)
-                Button {
-                    run("magpie:install", "opFailed") {
-                        try await hub.installMagpie()
-                        await preloadAllModels(force: true)
-                        return hub.t("mpInstallDone")
-                    }
-                } label: {
-                    if busy == "magpie:install" {
-                        HStack(spacing: 8) {
-                            ProgressView().controlSize(.small)
-                            Text(hub.t("mpInstalling"))
-                        }
-                    } else {
-                        Text(hub.t("mpInstallOnHost"))
-                    }
-                }
-                .disabled(!busy.isEmpty)
-            } else {
-                HubFormField(label: hub.t("mpWebUrl")) {
-                    TextField(
-                        hub.t("mpWebUrl"),
-                        text: Binding(
-                            get: { mpWebUrl },
-                            set: {
-                                guard $0 != mpWebUrl else { return }
-                                mpWebUrl = $0
-                                mpWebUrlTouched = true
-                                saved = ""
-                            }
-                        ),
-                        prompt: Text("https://magpie.example.com")
-                    )
-                    .monoInput()
-                    Text(hub.t("mpWebUrlHint"))
-                        .font(.system(size: AppFont.caption))
-                        .foregroundStyle(.secondary)
-                }
-
-                let configuredIds = Set(providers.map(\.id))
-                let extraPresets = presets.filter { !configuredIds.contains($0.id) }
-                if !providers.isEmpty {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(hub.t("providersTitle", ["n": providers.count]))
-                            .font(.system(size: AppFont.secondary, weight: .medium))
-                            .foregroundStyle(.secondary)
-                        FlowLayout(spacing: 6) {
-                            ForEach(providers) { prov in
-                                Tag(
-                                    text: (prov.name ?? "").isEmpty ? prov.id : prov.name!,
-                                    bg: prov.enabled == false ? p.s1 : p.sage,
-                                    fg: prov.enabled == false ? .secondary : p.sageInk
-                                )
-                            }
-                        }
-                    }
-                } else if !extraPresets.isEmpty {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(hub.t("mpPresetsTitle"))
-                            .font(.system(size: AppFont.secondary, weight: .medium))
-                            .foregroundStyle(.secondary)
-                        FlowLayout(spacing: 6) {
-                            ForEach(extraPresets) { pre in
-                                Tag(text: (pre.name ?? "").isEmpty ? pre.id : pre.name!, bg: p.s1, fg: p.text2)
-                            }
-                        }
-                    }
-                }
-
-                let addr = hub.activeServer?.address ?? hub.baseURL
-                let local = ["localhost", "127.0.0.1", "[::1]"].contains { addr.contains($0) }
-                if let web = mp?.webUrl, !web.isEmpty, !local, let url = URL(string: web) {
-                    Button(hub.t("mpOpenWeb")) { openURL(url) }
-                } else {
-                    Button(hub.t("mpOpenApp")) {
-                        run("magpie:open", "opFailed") { try await hub.openMagpie(); return nil }
-                    }
-                }
-            }
-        } header: {
-            HStack {
-                Text(hub.t("magpieGatewayTitle"))
-                Spacer()
-                Tag(
-                    text: !installed ? hub.t("notInstalled") : mp?.healthy == true ? hub.t("gatewayOk") : hub.t("gatewayDown"),
-                    bg: !installed ? p.s1 : mp?.healthy == true ? p.sage : p.pink,
-                    fg: !installed ? .secondary : mp?.healthy == true ? p.sageInk : p.danger
-                )
-                .textCase(nil)
-            }
-        } footer: {
-            if installed {
-                Text(hub.t("mpManageInApp"))
-            }
-        }
-    }
-
-    // MARK: Card 2 - Harnesses
-
-    @ViewBuilder
-    private var recheckHeaderButton: some View {
-        if busy == "recheck" {
-            ProgressView().controlSize(.small)
-        } else {
-            Button(hub.t("enginesRecheck")) {
-                recheckEnvironment()
-            }
-            .buttonStyle(.borderless)
-            .font(.system(size: AppFont.secondary))
-            .textCase(nil)
-        }
-    }
-
-    @ViewBuilder
-    private var enginesSection: some View {
-        let installed = installedHarnesses
-        let connected = installed.filter { $0.magpie?.connected == true }
-        let native = installed.filter { $0.magpie?.connected != true }
-        let available = uninstalledHarnesses
-
-        if installed.isEmpty {
-            Section {
-                Text(hub.t("engineNoInstalled")).foregroundStyle(.secondary)
-                ForEach(available) { h in
-                    uninstalledEngineRow(h)
-                }
-            } header: {
-                HStack {
-                    Text(hub.t("enginesTitle"))
-                    Spacer()
-                    recheckHeaderButton
-                }
-            } footer: {
-                Text(hub.t("enginesIntro"))
-            }
-        } else {
-            if !connected.isEmpty {
-                Section {
-                    ForEach(connected) { h in
-                        installedEngineRow(h)
-                    }
-                } header: {
-                    HStack {
-                        Text("\(hub.t("harnessGroupConnected")) (\(connected.count))")
-                            .foregroundStyle(p.sageInk)
-                        Spacer()
-                        recheckHeaderButton
-                    }
-                } footer: {
-                    if native.isEmpty {
-                        Text(hub.t("enginesIntro"))
-                    }
-                }
-            }
-
-            if !native.isEmpty || !available.isEmpty {
-                Section {
-                    ForEach(native) { h in
-                        installedEngineRow(h)
-                    }
-                    if !available.isEmpty {
-                        DisclosureGroup(hub.t("enginesMoreAvailable", ["n": available.count]), isExpanded: $moreEnginesOpen) {
-                            ForEach(available) { h in
-                                uninstalledEngineRow(h)
-                            }
-                        }
-                    }
-                } header: {
-                    HStack {
-                        Text("\(hub.t("harnessGroupNative")) (\(native.count))")
-                        Spacer()
-                        if connected.isEmpty {
-                            recheckHeaderButton
-                        }
-                    }
-                } footer: {
-                    Text(hub.t("enginesIntro"))
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func installedEngineRow(_ h: HarnessInfo) -> some View {
-        let mpConnected = h.magpie?.connected == true
-        let loginTask = loginTasks[h.id]
-        let loggingIn = loginTask?.state == "running"
-        let needsLogin = h.requiresLogin == true && h.authStatus != "ready"
-
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 10) {
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        Circle()
-                            .fill(mpConnected ? p.sageInk : needsLogin ? p.danger : p.mute.opacity(0.45))
-                            .frame(width: 7, height: 7)
-                        Text(h.title)
-                            .font(.system(size: AppFont.body, weight: .semibold))
-                            .lineLimit(1)
-                    }
-                    if mpConnected {
-                        let modelDesc = (h.magpie?.model ?? "").isEmpty ? hub.t("mpConnected") : h.magpie!.model!
-                        Text(modelDesc)
-                            .font(.system(size: AppFont.caption, design: .monospaced))
-                            .foregroundStyle(p.sageInk)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                    } else if let nativeModel = h.magpie?.nativeModel, !nativeModel.isEmpty {
-                        Text(nativeModel)
-                            .font(.system(size: AppFont.caption, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                    } else if let sum = h.summary, !sum.isEmpty {
-                        Text(sum)
-                            .font(.system(size: AppFont.caption))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    } else {
-                        Text(h.authStatus == "ready" ? hub.t("engineReady") : h.id)
-                            .font(.system(size: AppFont.caption))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                }
-                Spacer(minLength: 8)
-                if needsLogin {
-                    Button {
-                        startHarnessLogin(h.id)
-                    } label: {
-                        if loggingIn {
-                            HStack(spacing: 6) {
-                                ProgressView().controlSize(.small)
-                                Text(hub.t("engineLoggingIn"))
-                            }
-                        } else {
-                            Text(hub.t("engineLoginBtn"))
-                        }
-                    }
-                    .buttonStyle(HubPrimaryButtonStyle())
-                    .disabled(loggingIn)
-                }
-            }
-
-            if loggingIn {
-                HStack(spacing: 8) {
-                    if let urlStr = loginTask?.loginUrl, let u = URL(string: urlStr) {
-                        Button(hub.t("engineOpenLogin")) { openExternalURL(u) }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                    }
-                    Button(hub.t("engineCheckLogin")) { pollHarnessLoginNow(h.id) }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                }
-            }
-
-            if needsLogin || (loginTask?.state == "error" && !(loginTask?.authDetail ?? h.authDetail ?? "").isEmpty) {
-                HStack(spacing: 6) {
-                    if needsLogin {
-                        Tag(text: hub.t("engineNeedsLogin"), bg: p.pink, fg: p.pinkInk)
-                    }
-                    if let detail = loginTask?.authDetail ?? h.authDetail, !detail.isEmpty {
-                        Text(detail)
-                            .font(.system(size: AppFont.caption))
-                            .foregroundStyle(loginTask?.state == "error" ? p.danger : .secondary)
-                            .lineLimit(2)
-                    }
-                }
-            }
-
-            if let loginErr = loginTask?.error, !loginErr.isEmpty, loginTask?.state == "error" {
-                Text(loginErr)
-                    .font(.system(size: AppFont.caption))
-                    .foregroundStyle(p.danger)
-            }
-        }
-        .padding(.vertical, 2)
-    }
-
-    @ViewBuilder
-    private func uninstalledEngineRow(_ h: HarnessInfo) -> some View {
-        let task = installTasks[h.id]
-        let installing = task?.state == "running"
-        let cmd = (h.install?.command ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        let urlStr = (h.install?.url ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        let isExpanded = expandedInstall.contains(h.id)
-
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(h.title)
-                        .font(.system(size: AppFont.body, weight: .semibold))
-                    if let sum = h.summary, !sum.isEmpty {
-                        Text(sum)
-                            .font(.system(size: AppFont.caption))
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                Spacer()
-                if h.canAutoInstall == true {
-                    Button {
-                        startHarnessInstall(h.id)
-                    } label: {
-                        if installing {
-                            HStack(spacing: 6) {
-                                ProgressView().controlSize(.small)
-                                Text(hub.t("engineInstalling"))
-                            }
-                        } else {
-                            Text(hub.t("engineInstallBtn"))
-                        }
-                    }
-                    .buttonStyle(HubPrimaryButtonStyle())
-                    .disabled(installing)
-                } else {
-                    Button(isExpanded ? hub.t("collapse") : hub.t("engineManualInstall")) {
-                        if isExpanded { expandedInstall.remove(h.id) } else { expandedInstall.insert(h.id) }
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                }
-            }
-
-            if isExpanded || task?.state == "error" {
-                if let instErr = task?.error, !instErr.isEmpty {
-                    Text(instErr)
-                        .font(.system(size: AppFont.caption))
-                        .foregroundStyle(p.danger)
-                }
-                let shownCmd = cmd.isEmpty ? hub.t("engineManualHint", ["name": h.title]) : cmd
-                HStack(spacing: 8) {
-                    Text(shownCmd)
-                        .font(.system(size: AppFont.caption, design: .monospaced))
-                        .foregroundStyle(p.text2)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    if !cmd.isEmpty {
-                        Button(copiedKey == "eng-inst-\(h.id)" ? hub.t("copied") : hub.t("copy")) {
-                            copyToClipboard(cmd)
-                            copiedKey = "eng-inst-\(h.id)"
-                            Task {
-                                try? await Task.sleep(for: .milliseconds(1200))
-                                if copiedKey == "eng-inst-\(h.id)" { copiedKey = "" }
-                            }
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                    }
-                }
-                if !urlStr.isEmpty, let u = URL(string: urlStr) {
-                    Button(hub.t("engineViewDocs")) { openExternalURL(u) }
-                        .buttonStyle(.borderless)
-                        .font(.system(size: AppFont.secondary))
-                }
-            }
-        }
-        .padding(.vertical, 4)
     }
 
     // MARK: Card 3 - Defaults & Bot Overrides
@@ -726,7 +356,7 @@ struct SettingsModelsTab: View {
         }
     }
 
-    private func preloadAllModels(force: Bool) async {
+    func preloadAllModels(force: Bool) async {
         let ids = harnesses.filter { $0.installed != false }.map(\.id)
         await withTaskGroup(of: Void.self) { group in
             for id in ids {
@@ -737,100 +367,7 @@ struct SettingsModelsTab: View {
         }
     }
 
-    private func recheckEnvironment() {
-        run("recheck", "opFailed") {
-            _ = try await hub.loadSettings(fresh: true)
-            hub.resetModelsCache()
-            await preloadAllModels(force: true)
-            return hub.t("ubRecheckDone")
-        }
-    }
-
-    private func startHarnessInstall(_ id: String) {
-        error = ""
-        saved = ""
-        pollTasks["install:\(id)"]?.cancel()
-        pollTasks["install:\(id)"] = Task {
-            do {
-                var st = try await hub.startHarnessInstall(id)
-                installTasks[id] = st
-                while !Task.isCancelled && st.state == "running" {
-                    try await Task.sleep(for: .milliseconds(1200))
-                    if Task.isCancelled { return }
-                    st = try await hub.harnessInstallStatus(id)
-                    installTasks[id] = st
-                }
-                if Task.isCancelled { return }
-                if st.state == "done" {
-                    hub.resetModelsCache()
-                    let fresh = try await hub.loadSettings(fresh: true)
-                    await preloadAllModels(force: true)
-                    let h = fresh.harnesses?.first(where: { $0.id == id })
-                    saved = hub.t("engineInstallDone", ["label": h?.title ?? id])
-                    if h?.requiresLogin == true && h?.authStatus == "needs_login" {
-                        startHarnessLogin(id)
-                    }
-                } else if st.state == "error" {
-                    expandedInstall.insert(id)
-                }
-            } catch {
-                expandedInstall.insert(id)
-                if !(error is CancellationError) {
-                    self.error = errText(error, hub.t("opFailed"))
-                }
-            }
-        }
-    }
-
-    private func startHarnessLogin(_ id: String) {
-        error = ""
-        saved = ""
-        pollTasks["login:\(id)"]?.cancel()
-        pollTasks["login:\(id)"] = Task {
-            do {
-                var st = try await hub.startHarnessLogin(id)
-                loginTasks[id] = st
-                if let urlStr = st.loginUrl, !urlStr.isEmpty, let u = URL(string: urlStr) {
-                    openExternalURL(u)
-                }
-                while !Task.isCancelled && st.state == "running" && st.authStatus != "ready" {
-                    try await Task.sleep(for: .milliseconds(1400))
-                    if Task.isCancelled { return }
-                    st = try await hub.harnessLoginStatus(id)
-                    loginTasks[id] = st
-                }
-                if Task.isCancelled { return }
-                if st.state == "done" || st.authStatus == "ready" {
-                    hub.resetModelsCache()
-                    _ = try? await hub.loadSettings(fresh: true)
-                    await preloadAllModels(force: true)
-                    saved = hub.t("engineLoginConfirmed")
-                } else if st.state == "error", let msg = st.error, !msg.isEmpty {
-                    error = msg
-                }
-            } catch {
-                if !(error is CancellationError) {
-                    self.error = errText(error, hub.t("opFailed"))
-                }
-            }
-        }
-    }
-
-    private func pollHarnessLoginNow(_ id: String) {
-        Task {
-            if let st = try? await hub.harnessLoginStatus(id) {
-                loginTasks[id] = st
-                if st.state == "done" || st.authStatus == "ready" {
-                    hub.resetModelsCache()
-                    _ = try? await hub.loadSettings(fresh: true)
-                    await preloadAllModels(force: true)
-                    saved = hub.t("engineLoginConfirmed")
-                }
-            }
-        }
-    }
-
-    private func run(_ key: String, _ fail: String, _ op: @escaping () async throws -> String?) {
+    func run(_ key: String, _ fail: String, _ op: @escaping () async throws -> String?) {
         error = ""
         saved = ""
         busy = key
