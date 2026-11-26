@@ -128,6 +128,35 @@ func (b BotConfig) ShouldAutoApprove() bool {
 	return b.EffectivePermissionMode() == PermissionModeAuto
 }
 
+// DeviceTokenConfig defines a scoped per-device bearer credential for remote nodes.
+type DeviceTokenConfig struct {
+	ID        string   `json:"id"`
+	Name      string   `json:"name,omitempty"`
+	Token     string   `json:"token,omitempty"`
+	TokenHash string   `json:"tokenHash,omitempty"`
+	Scopes    []string `json:"scopes,omitempty"`
+	Revoked   bool     `json:"revoked,omitempty"`
+}
+
+// NodeWorkspaceConfig defines an authorized workspace directory exposed by a node.
+type NodeWorkspaceConfig struct {
+	ID            string `json:"id"`
+	Name          string `json:"name,omitempty"`
+	Path          string `json:"path"`
+	IsGit         bool   `json:"isGit,omitempty"`
+	DefaultBranch string `json:"defaultBranch,omitempty"`
+}
+
+// NodeConfig configures local node agent capabilities when acting as a remote executor.
+type NodeConfig struct {
+	Enabled           bool                  `json:"enabled,omitempty"`
+	ID                string                `json:"id,omitempty"`
+	Name              string                `json:"name,omitempty"`
+	Permissions       []string              `json:"permissions,omitempty"`
+	Workspaces        []NodeWorkspaceConfig `json:"workspaces,omitempty"`
+	MaxPermissionMode string                `json:"maxPermissionMode,omitempty"`
+}
+
 type HTTPConfig struct {
 	Enabled       *bool  `json:"enabled,omitempty"` // default: true
 	Host          string `json:"host,omitempty"`    // default: "127.0.0.1"
@@ -135,6 +164,8 @@ type HTTPConfig struct {
 	WebhookSecret string `json:"webhookSecret,omitempty"`
 	// APIToken guards the Web UI and /api/*. Required when Host is not loopback.
 	APIToken string `json:"apiToken,omitempty"`
+	// DeviceTokens stores optional scoped per-device credentials alongside APIToken.
+	DeviceTokens []DeviceTokenConfig `json:"deviceTokens,omitempty"`
 	// Tailcat exposes the same server through a Tailcat tunnel (no Tailscale account needed).
 	Tailcat *TailcatConfig `json:"tailcat,omitempty"`
 	// Tailscale exposes the same server inside the user's Tailscale tailnet via tsnet.
@@ -418,6 +449,7 @@ type HubConfig struct {
 	StateFile         string      `json:"stateFile,omitempty"`
 	MessagesDir       string      `json:"messagesDir,omitempty"`
 	HTTP              HTTPConfig  `json:"http,omitempty"`
+	Node              *NodeConfig `json:"node,omitempty"`
 	Sync              *SyncConfig `json:"sync,omitempty"`
 	Push              PushConfig  `json:"push,omitempty"`
 	Bots              []BotConfig `json:"bots"`

@@ -693,3 +693,57 @@ func TestLegacyMigrationLookupEnvAndResolveBinary(t *testing.T) {
 	}
 }
 
+func TestDeviceTokensAndNodeConfigLoad(t *testing.T) {
+	root := t.TempDir()
+	cfgDir := filepath.Join(root, "config")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("DEV_TOK_ENV", "expanded-dev-tok")
+	raw := `{
+		"http": {
+			"apiToken": "admin-tok",
+			"deviceTokens": [
+				{"id": "dev-1", "name": "Studio", "token": "${DEV_TOK_ENV}", "scopes": ["node:agent"]}
+			]
+		},
+		"node": {
+			"enabled": true,
+			"id": "studio",
+			"maxPermissionMode": "EDIT",
+			"workspaces": [
+				{"id": "repo", "name": "Repo", "path": "./repos/app", "isGit": true, "defaultBranch": "main"}
+			]
+		},
+		"bots": [{"id": "a"}]
+	}`
+	if err := os.WriteFile(filepath.Join(cfgDir, "bots.json"), []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, _, err := Load(root, "")
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if len(cfg.HTTP.DeviceTokens) != 1 || cfg.HTTP.DeviceTokens[0].Token != "expanded-dev-tok" {
+		t.Fatalf("unexpected deviceTokens: %+v", cfg.HTTP.DeviceTokens)
+	}
+	if cfg.Node == nil || cfg.Node.MaxPermissionMode != PermissionModeEdit {
+		t.Fatalf("unexpected node config: %+v", cfg.Node)
+	}
+	wantPath := filepath.Join(root, "repos", "app")
+	if len(cfg.Node.Workspaces) != 1 || cfg.Node.Workspaces[0].Path != wantPath {
+		t.Fatalf("unexpected node workspaces: %+v (want path %q)", cfg.Node.Workspaces, wantPath)
+	}
+
+	// Invalid maxPermissionMode must fail Load.
+	badRaw := `{"node": {"maxPermissionMode": "superuser"}, "bots": [{"id": "a"}]}`
+	if err := os.WriteFile(filepath.Join(cfgDir, "bots.json"), []byte(badRaw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Load(root, ""); err == nil {
+		t.Fatal("expected invalid node.maxPermissionMode to fail Load")
+	}
+}
+
+

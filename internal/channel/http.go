@@ -12,7 +12,9 @@ import (
 	"bot-hub/internal/update"
 	"bot-hub/internal/web"
 	"context"
+	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -228,6 +230,7 @@ func NewHTTPServer(h *hub.Hub, cfg config.HTTPConfig) *HTTPServer {
 
 	mux.HandleFunc("GET /api/nodes", s.handleNodes)
 	mux.HandleFunc("GET /api/local-node", s.handleLocalNodeStub)
+	mux.HandleFunc("GET /api/nodes/ws", s.handleNodeWS)
 	mux.HandleFunc("POST /api/nodes/poll", s.handleNodePoll)
 	mux.HandleFunc("POST /api/nodes/result", s.handleNodeResult)
 	mux.HandleFunc("POST /api/nodes/disconnect", s.handleNodeDisconnect)
@@ -327,7 +330,7 @@ func (s *HTTPServer) guard(next http.Handler) http.Handler {
 				return
 			}
 		}
-		if (s.apiToken() != "" || tunneled) &&
+		if (s.hasAuthConfigured() || tunneled) &&
 			r.URL.Path != "/" &&
 			!strings.HasPrefix(r.URL.Path, "/assets/") &&
 			r.URL.Path != "/api/login" &&
@@ -344,14 +347,87 @@ func (s *HTTPServer) guard(next http.Handler) http.Handler {
 	})
 }
 
+func (s *HTTPServer) hasAuthConfigured() bool {
+	s.cfgMu.RLock()
+	defer s.cfgMu.RUnlock()
+	return s.cfg.APIToken != "" || len(s.cfg.DeviceTokens) > 0
+}
+
 func (s *HTTPServer) authorized(r *http.Request) bool {
-	got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	got := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
 	if got == "" {
 		if c, err := r.Cookie(authCookie); err == nil {
 			got = c.Value
 		}
 	}
-	return subtle.ConstantTimeCompare([]byte(got), []byte(s.apiToken())) == 1
+	if got == "" {
+		return false
+	}
+
+	s.cfgMu.RLock()
+	apiTok := s.cfg.APIToken
+	deviceTokens := append([]config.DeviceTokenConfig(nil), s.cfg.DeviceTokens...)
+	s.cfgMu.RUnlock()
+
+	if apiTok != "" && subtle.ConstantTimeCompare([]byte(got), []byte(apiTok)) == 1 {
+		return true
+	}
+
+	var gotHashHex string
+	for _, dt := range deviceTokens {
+		if dt.Revoked {
+			continue
+		}
+		matched := false
+		if dt.Token != "" && subtle.ConstantTimeCompare([]byte(got), []byte(dt.Token)) == 1 {
+			matched = true
+		} else if hashSpec := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(dt.TokenHash), "sha256:")); hashSpec != "" {
+			if gotHashHex == "" {
+				sum := sha256.Sum256([]byte(got))
+				gotHashHex = hex.EncodeToString(sum[:])
+			}
+			if subtle.ConstantTimeCompare([]byte(gotHashHex), []byte(hashSpec)) == 1 {
+				matched = true
+			}
+		}
+		if matched && deviceTokenAllowsPath(dt.Scopes, r.URL.Path) {
+			return true
+		}
+	}
+	return false
+}
+
+func deviceTokenAllowsPath(scopes []string, reqPath string) bool {
+	if len(scopes) == 0 {
+		return true
+	}
+	isNodePath := strings.HasPrefix(reqPath, "/api/nodes/")
+	isMCPHubPath := strings.HasPrefix(reqPath, "/api/bots/") ||
+		strings.HasPrefix(reqPath, "/api/sessions") ||
+		strings.HasPrefix(reqPath, "/api/memory") ||
+		strings.HasPrefix(reqPath, "/api/media")
+	for _, raw := range scopes {
+		sc := strings.ToLower(strings.TrimSpace(raw))
+		switch sc {
+		case "*", "all":
+			return true
+		case "api", "hub":
+			return true
+		case "node", "nodes", "node:ws":
+			if isNodePath {
+				return true
+			}
+		case "node:agent", "agent":
+			if isNodePath || isMCPHubPath {
+				return true
+			}
+		case "mcp":
+			if isMCPHubPath {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (s *HTTPServer) handleLogin(w http.ResponseWriter, r *http.Request) {
@@ -364,7 +440,11 @@ func (s *HTTPServer) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	token := s.apiToken()
 	if token == "" {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		if !s.hasAuthConfigured() {
+			writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+			return
+		}
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "invalid token"})
 		return
 	}
 	if subtle.ConstantTimeCompare([]byte(req.Token), []byte(token)) != 1 {
