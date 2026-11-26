@@ -329,7 +329,7 @@ func TestMCPTaskToolsAndCoordinatorApproval(t *testing.T) {
 	t.Setenv("PEBBLE_TASK_ID", "tsk_parent")
 	input := strings.Join([]string{
 		`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`,
-		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"task_spawn","arguments":{"prompt":"audit repo","delivery":"wake"}}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"task_spawn","arguments":{"prompt":"audit repo","delivery":"wake","deviceId":"mac-mini","workspaceId":"repo","isolation":"worktree"}}}`,
 		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"task_status","arguments":{"taskId":"tsk_1"}}}`,
 		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"task_read","arguments":{"taskId":"tsk_1","afterSeq":0}}}`,
 		`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"task_send","arguments":{"taskId":"tsk_1","message":"more detail"}}}`,
@@ -351,7 +351,8 @@ func TestMCPTaskToolsAndCoordinatorApproval(t *testing.T) {
 	if !strings.Contains(lines[0], `"task_approve"`) {
 		t.Fatalf("expected task_approve exposed when PEBBLE_COORDINATOR_CAN_APPROVE=1:\n%s", lines[0])
 	}
-	if gotSpawn["prompt"] != "audit repo" || gotSpawn["delivery"] != "wake" || gotSpawn["parentTaskId"] != "tsk_parent" {
+	if gotSpawn["prompt"] != "audit repo" || gotSpawn["delivery"] != "wake" || gotSpawn["parentTaskId"] != "tsk_parent" ||
+		gotSpawn["deviceId"] != "mac-mini" || gotSpawn["workspaceId"] != "repo" || gotSpawn["isolation"] != "worktree" {
 		t.Fatalf("unexpected task_spawn payload: %#v", gotSpawn)
 	}
 	var readResp struct {

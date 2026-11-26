@@ -546,6 +546,7 @@ func TestBotTaskApprovalsQuestionsAndCoordinatorRace(t *testing.T) {
 
 	tk, err := h.SpawnTask(context.Background(), TaskSpawnRequest{
 		BotID:    "ops",
+		Kind:     state.TaskKindDesktop,
 		Prompt:   "need input and approval",
 		DeviceID: "mac-mini",
 		Delivery: state.TaskDeliverySilent,

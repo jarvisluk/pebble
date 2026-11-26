@@ -14,6 +14,10 @@ const (
 	TaskKindRoutine = "routine"
 	TaskKindDesktop = "desktop"
 
+	TaskIsolationCurrent  = "current"
+	TaskIsolationWorktree = "worktree"
+	TaskIsolationTempDir  = "temp_dir"
+
 	TaskStatusQueued          = "queued"
 	TaskStatusRunning         = "running"
 	TaskStatusWaitingApproval = "waiting_approval"
@@ -53,6 +57,11 @@ type BotTask struct {
 	Model            string   `json:"model,omitempty"`
 	PermissionMode   string   `json:"permissionMode,omitempty"`
 	Workdir          string   `json:"workdir,omitempty"`
+	WorkspaceID      string   `json:"workspaceId,omitempty"`
+	Isolation        string   `json:"isolation,omitempty"`
+	WorktreeBranch   string   `json:"worktreeBranch,omitempty"`
+	WorktreePath     string   `json:"worktreePath,omitempty"`
+	CheckpointRef    string   `json:"checkpointRef,omitempty"`
 	Delivery         string   `json:"delivery"`
 	DependsOn        []string `json:"dependsOn,omitempty"`
 	ParentTaskID     string   `json:"parentTaskId,omitempty"`
@@ -93,7 +102,8 @@ type TaskListFilter struct {
 
 const botTaskSelectCols = `
   id, bot_id, kind, title, prompt, status, device_id, harness, model, permission_mode,
-  workdir, delivery, depends_on_json, parent_task_id, routine_id, routine_name, trigger,
+  workdir, workspace_id, isolation, worktree_branch, worktree_path, checkpoint_ref,
+  delivery, depends_on_json, parent_task_id, routine_id, routine_name, trigger,
   slot_key, runtime_session_id, output, error, tools_json, duration_ms, cost_usd,
   input_tokens, output_tokens, created_at, started_at, finished_at, injected_at
 `
@@ -144,6 +154,11 @@ func scanBotTaskRow(scanner interface{ Scan(...any) error }) (BotTask, error) {
 		&t.Model,
 		&t.PermissionMode,
 		&t.Workdir,
+		&t.WorkspaceID,
+		&t.Isolation,
+		&t.WorktreeBranch,
+		&t.WorktreePath,
+		&t.CheckpointRef,
 		&t.Delivery,
 		&depsJSON,
 		&t.ParentTaskID,
@@ -199,10 +214,11 @@ func (s *Store) CreateBotTask(t BotTask) (BotTask, error) {
 
 	_, err := s.db.Exec(`
 		INSERT INTO bot_tasks(`+botTaskSelectCols+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		t.ID, t.BotID, t.Kind, t.Title, t.Prompt, t.Status, t.DeviceID, t.Harness, t.Model, t.PermissionMode,
-		t.Workdir, t.Delivery, encodeStringSliceJSON(t.DependsOn), t.ParentTaskID, t.RoutineID, t.RoutineName, t.Trigger,
+		t.Workdir, t.WorkspaceID, t.Isolation, t.WorktreeBranch, t.WorktreePath, t.CheckpointRef,
+		t.Delivery, encodeStringSliceJSON(t.DependsOn), t.ParentTaskID, t.RoutineID, t.RoutineName, t.Trigger,
 		t.SlotKey, t.RuntimeSessionID, t.Output, t.Error, encodeStringSliceJSON(t.Tools), t.DurationMs, t.CostUSD,
 		t.InputTokens, t.OutputTokens, t.CreatedAt, t.StartedAt, t.FinishedAt, t.InjectedAt,
 	)
@@ -234,13 +250,15 @@ func (s *Store) UpdateBotTask(t BotTask) error {
 	res, err := s.db.Exec(`
 		UPDATE bot_tasks
 		SET title = ?, prompt = ?, status = ?, device_id = ?, harness = ?, model = ?,
-		    permission_mode = ?, workdir = ?, delivery = ?, runtime_session_id = ?,
+		    permission_mode = ?, workdir = ?, workspace_id = ?, isolation = ?,
+		    worktree_branch = ?, worktree_path = ?, checkpoint_ref = ?, delivery = ?, runtime_session_id = ?,
 		    output = ?, error = ?, tools_json = ?, duration_ms = ?, cost_usd = ?,
 		    input_tokens = ?, output_tokens = ?, started_at = ?, finished_at = ?, injected_at = ?
 		WHERE id = ?
 	`,
 		t.Title, t.Prompt, t.Status, t.DeviceID, t.Harness, t.Model,
-		t.PermissionMode, t.Workdir, t.Delivery, t.RuntimeSessionID,
+		t.PermissionMode, t.Workdir, t.WorkspaceID, t.Isolation,
+		t.WorktreeBranch, t.WorktreePath, t.CheckpointRef, t.Delivery, t.RuntimeSessionID,
 		t.Output, t.Error, encodeStringSliceJSON(t.Tools), t.DurationMs, t.CostUSD,
 		t.InputTokens, t.OutputTokens, t.StartedAt, t.FinishedAt, t.InjectedAt,
 		t.ID,

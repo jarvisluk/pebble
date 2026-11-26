@@ -5,6 +5,7 @@ import (
 	"bot-hub/internal/state"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -143,4 +144,44 @@ func (s *HTTPServer) handleCancelTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, task)
+}
+
+func (s *HTTPServer) handleTaskDiff(w http.ResponseWriter, r *http.Request) {
+	if s.hub == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "hub unavailable"})
+		return
+	}
+	taskID := r.PathValue("taskId")
+	diff, err := s.hub.GetTaskDiff(r.Context(), taskID)
+	if err != nil {
+		writeHubErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, diff)
+}
+
+func (s *HTTPServer) handleTaskRollback(w http.ResponseWriter, r *http.Request) {
+	if s.hub == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "hub unavailable"})
+		return
+	}
+	taskID := r.PathValue("taskId")
+	var body struct {
+		RemoveWorktree bool `json:"removeWorktree"`
+	}
+	if r.Body != nil {
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&body); err != nil && !errors.Is(err, io.EOF) {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json body"})
+			return
+		}
+	}
+	if !body.RemoveWorktree && queryBool(r, "removeWorktree") {
+		body.RemoveWorktree = true
+	}
+	res, err := s.hub.RollbackTask(r.Context(), taskID, body.RemoveWorktree)
+	if err != nil {
+		writeHubErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
 }

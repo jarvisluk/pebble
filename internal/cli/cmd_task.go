@@ -17,7 +17,7 @@ import (
 
 func runTaskCmd(ctx context.Context, args []string, cwd string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: pebble task <list|get|spawn|read|send|cancel|approve> [flags]")
+		return errors.New("usage: pebble task <list|get|spawn|read|send|cancel|approve|diff|rollback> [flags]")
 	}
 	action := args[0]
 	rest := args[1:]
@@ -86,6 +86,8 @@ func runTaskCmd(ctx context.Context, args []string, cwd string, stdout, stderr i
 		promptFile := fs.String("prompt-file", "", "path to file containing prompt")
 		kind := fs.String("kind", "", "task kind (worker|desktop)")
 		device := fs.String("device", "", "target device ID (default local)")
+		workspaceID := fs.String("workspace-id", "", "optional authorized workspace ID on a remote node")
+		isolation := fs.String("isolation", "", "optional code isolation mode (current|worktree|temp_dir)")
 		harnessName := fs.String("harness", "", "optional harness override")
 		model := fs.String("model", "", "optional model override")
 		permMode := fs.String("permission-mode", "", "optional permission mode (auto|edit|ask|plan)")
@@ -127,6 +129,12 @@ func runTaskCmd(ctx context.Context, args []string, cwd string, stdout, stderr i
 		}
 		if strings.TrimSpace(*device) != "" {
 			payload["deviceId"] = strings.TrimSpace(*device)
+		}
+		if strings.TrimSpace(*workspaceID) != "" {
+			payload["workspaceId"] = strings.TrimSpace(*workspaceID)
+		}
+		if strings.TrimSpace(*isolation) != "" {
+			payload["isolation"] = strings.TrimSpace(*isolation)
 		}
 		if strings.TrimSpace(*harnessName) != "" {
 			payload["harness"] = strings.TrimSpace(*harnessName)
@@ -301,7 +309,50 @@ func runTaskCmd(ctx context.Context, args []string, cwd string, stdout, stderr i
 		}
 		return writeJSONOut(stdout, body)
 
+	case "diff":
+		fs := newSubFlagSet("task diff", stderr, &co)
+		id := fs.String("id", "", "task ID")
+		if err := fs.Parse(rest); err != nil {
+			return err
+		}
+		if *id == "" && fs.NArg() > 0 {
+			*id = fs.Arg(0)
+		}
+		tid := strings.TrimSpace(*id)
+		if tid == "" {
+			return errors.New("--id is required")
+		}
+		c := resolveClient(co, cwd)
+		body, err := c.DoJSON(ctx, http.MethodGet, "/api/tasks/"+url.PathEscape(tid)+"/diff", nil)
+		if err != nil {
+			return err
+		}
+		return writeJSONOut(stdout, body)
+
+	case "rollback":
+		fs := newSubFlagSet("task rollback", stderr, &co)
+		id := fs.String("id", "", "task ID")
+		removeWorktree := fs.Bool("remove-worktree", false, "remove the isolated worktree and branch")
+		if err := fs.Parse(rest); err != nil {
+			return err
+		}
+		if *id == "" && fs.NArg() > 0 {
+			*id = fs.Arg(0)
+		}
+		tid := strings.TrimSpace(*id)
+		if tid == "" {
+			return errors.New("--id is required")
+		}
+		c := resolveClient(co, cwd)
+		body, err := c.DoJSON(ctx, http.MethodPost, "/api/tasks/"+url.PathEscape(tid)+"/rollback", map[string]any{
+			"removeWorktree": *removeWorktree,
+		})
+		if err != nil {
+			return err
+		}
+		return writeJSONOut(stdout, body)
+
 	default:
-		return fmt.Errorf("unknown task action %q (expected list|get|spawn|read|send|cancel|approve)", action)
+		return fmt.Errorf("unknown task action %q (expected list|get|spawn|read|send|cancel|approve|diff|rollback)", action)
 	}
 }
