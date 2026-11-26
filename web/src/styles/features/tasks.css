@@ -242,6 +242,10 @@
   gap: 12px;
 }
 
+.task-drawer-body > * {
+  flex-shrink: 0;
+}
+
 .task-drawer-badges {
   display: flex;
   align-items: center;
