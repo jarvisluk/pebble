@@ -53,9 +53,6 @@ func (m *modelCatalogHarness) RunTurn(_ context.Context, opts harness.RunOptions
 
 func TestSetDefaultModelsBroadcastsPreviewAndValidation(t *testing.T) {
 	tmp := t.TempDir()
-	t.Setenv("MAGPIE_BIN", filepath.Join(tmp, "missing-magpie"))
-	harness.InvalidateMagpieCache()
-	t.Cleanup(harness.InvalidateMagpieCache)
 
 	store, err := state.NewStore(filepath.Join(tmp, "sessions.json"))
 	if err != nil {
@@ -149,14 +146,11 @@ func TestSetDefaultModelsBroadcastsPreviewAndValidation(t *testing.T) {
 	if err := h.ValidateModelForHarness(ctx, "opencode", "nonexistent"); err == nil || !strings.Contains(err.Error(), "--force") {
 		t.Fatalf("expected nonexistent model error with --force hint, got %v", err)
 	}
-	if err := h.ValidateModelForHarness(ctx, "codex", "magpie/gpt-5.4"); err == nil {
-		t.Fatal("expected magpie/ prefix rejected on codex")
-	}
 	if err := h.ValidateGlobalDefaultModel(ctx, "claude", "anthropic/claude-sonnet"); err == nil {
 		t.Fatal("expected provider/model rejected for defaultHarness=claude")
 	}
-	if err := h.ValidateGlobalDefaultModel(ctx, "claude", "magpie/sonnet"); err != nil {
-		t.Fatalf("expected magpie/sonnet accepted for defaultHarness=claude (stripped to sonnet): %v", err)
+	if err := h.ValidateGlobalDefaultModel(ctx, "claude", "sonnet"); err != nil {
+		t.Fatalf("expected sonnet accepted for defaultHarness=claude: %v", err)
 	}
 
 	// ValidateBotUpdate rejects switching to a harness that requires login, then succeeds once ready,
@@ -204,42 +198,14 @@ func TestSetDefaultModelsBroadcastsPreviewAndValidation(t *testing.T) {
 	}
 }
 
-func TestModelsWithSourceMagpieVsNative(t *testing.T) {
+func TestModelsQueriesHarnessDirectly(t *testing.T) {
 	tmp := t.TempDir()
-	fakeMagpie := filepath.Join(tmp, "magpie")
-	script := `#!/bin/sh
-case "$1" in
-  models)
-    printf '  acer/auto/claude-opus-5-5   Claude Opus 5.5\n'
-    printf '  acer/deepseek/v4            DeepSeek V4\n'
-    ;;
-  opencode)
-    printf '  OpenCode  magpie/acer/auto/claude-opus-5-5  ·  small\n'
-    ;;
-  codex)
-    printf '  Codex  codex/gpt-6-luna  ·  effort\n'
-    ;;
-  claude)
-    printf '  Claude Code  sonnet  ·  effort\n'
-    ;;
-  *)
-    printf '  Other  status  ·  effort\n'
-    ;;
-esac
-`
-	if err := os.WriteFile(fakeMagpie, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("MAGPIE_BIN", fakeMagpie)
-	harness.InvalidateMagpieCache()
-	t.Cleanup(harness.InvalidateMagpieCache)
-
 	store, _ := state.NewStore(filepath.Join(tmp, "sessions.json"))
 	msgStore, _ := state.NewMessageStore(filepath.Join(tmp, "messages"))
 	defer store.Close()
 
 	reg := harness.NewRegistry()
-	reg.Register(harness.NewOpenCodeHarness(""))
+	reg.Register(&modelCatalogHarness{kind: "opencode", models: []string{"anthropic/claude-sonnet-4-5", "deepseek/deepseek-chat"}})
 	reg.Register(harness.NewCodexHarness())
 	reg.Register(harness.NewClaudeHarness())
 
@@ -253,45 +219,27 @@ esac
 
 	ctx := context.Background()
 
-	// Connected harness returns Magpie models with its prefix.
-	ocModels, err := h.ModelsWithSource(ctx, "opencode", "")
+	ocModels, err := h.Models(ctx, "opencode")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(ocModels) != 2 || ocModels[0] != "magpie/acer/auto/claude-opus-5-5" {
-		t.Fatalf("unexpected connected opencode models: %#v", ocModels)
+	if len(ocModels) != 2 || ocModels[0] != "anthropic/claude-sonnet-4-5" {
+		t.Fatalf("unexpected opencode models: %#v", ocModels)
 	}
 
-	// Non-Magpie harness prepends its active NativeModel ahead of stock CLI models.
-	codexModels, err := h.ModelsWithSource(ctx, "codex", "")
+	codexModels, err := h.Models(ctx, "codex")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(codexModels) < 2 || codexModels[0] != "codex/gpt-6-luna" || codexModels[1] != "gpt-5.4" {
-		t.Fatalf("unexpected native codex models: %#v", codexModels)
+	if len(codexModels) == 0 || codexModels[0] != "gpt-5.4" {
+		t.Fatalf("unexpected codex models: %#v", codexModels)
 	}
 
-	// NativeModel already present in stock list should not be duplicated.
-	claudeModels, err := h.ModelsWithSource(ctx, "claude", "")
+	claudeModels, err := h.Models(ctx, "claude")
 	if err != nil {
 		t.Fatal(err)
 	}
-	sonnetCount := 0
-	for _, m := range claudeModels {
-		if m == "sonnet" {
-			sonnetCount++
-		}
-	}
-	if sonnetCount != 1 {
-		t.Fatalf("expected sonnet exactly once in native claude models, got %#v", claudeModels)
-	}
-
-	// source=magpie returns Magpie catalog even for non-connected harness.
-	codexMagpie, err := h.ModelsWithSource(ctx, "codex", "magpie")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(codexMagpie) != 2 || codexMagpie[0] != "acer/auto/claude-opus-5-5" {
-		t.Fatalf("unexpected codex source=magpie models: %#v", codexMagpie)
+	if len(claudeModels) != 3 || claudeModels[0] != "sonnet" {
+		t.Fatalf("unexpected claude models: %#v", claudeModels)
 	}
 }

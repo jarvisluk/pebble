@@ -69,7 +69,6 @@ export const BotTechDetailsSection: React.FC<BotTechDetailsSectionProps> = ({
 
   const resolveBotDefaultModel = (g: string, h: string) => {
     if (!g) return '';
-    if (g.startsWith('magpie/')) return h === 'claude' ? g.slice(7) : g;
     if (!g.includes('/')) return g;
     return h === '' || h === 'opencode' || h === 'pi' ? g : '';
   };

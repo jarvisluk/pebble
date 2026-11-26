@@ -301,11 +301,11 @@ func TestCLISettingsAndGuardrails(t *testing.T) {
 		t.Fatalf("settings get --fresh failed: code=%d query=%q err=%s", code, gotSettingsGetQuery, errOut)
 	}
 
-	// settings models auto-detects current bot harness ("claude"), plus explicit --harness & --source.
+	// settings models auto-detects current bot harness ("claude"), plus explicit --harness.
 	if out, errOut, code := run("settings", "models"); code != 0 || !strings.Contains(out, `"harness": "claude"`) || !strings.Contains(out, `"sonnet"`) || gotModelsQuery != "harness=claude" {
 		t.Fatalf("settings models auto failed: code=%d query=%q out=%s err=%s", code, gotModelsQuery, out, errOut)
 	}
-	if out, errOut, code := run("settings", "models", "--harness", "opencode", "--source", "magpie"); code != 0 || !strings.Contains(out, `"source": "magpie"`) || gotModelsQuery != "harness=opencode&source=magpie" {
+	if out, errOut, code := run("settings", "models", "--harness", "opencode"); code != 0 || !strings.Contains(out, `"harness": "opencode"`) || gotModelsQuery != "harness=opencode" {
 		t.Fatalf("settings models explicit failed: code=%d query=%q out=%s err=%s", code, gotModelsQuery, out, errOut)
 	}
 
@@ -318,7 +318,6 @@ func TestCLISettingsAndGuardrails(t *testing.T) {
 		"--clear-harness-model", "claude",
 		"--desktop-harness", "opencode",
 		"--desktop-model", "m-fast",
-		"--magpie-web-url", "https://magpie.local",
 		"--shared-user-md-file", "user-prefs.md",
 		"--dry-run",
 	); code != 0 {
@@ -329,7 +328,7 @@ func TestCLISettingsAndGuardrails(t *testing.T) {
 	}
 	if gotSettingsPatch["defaultHarness"] != "opencode" || gotSettingsPatch["defaultModel"] != "m1" ||
 		gotSettingsPatch["desktopHarness"] != "opencode" || gotSettingsPatch["desktopModel"] != "m-fast" ||
-		gotSettingsPatch["magpieWebUrl"] != "https://magpie.local" || gotSettingsPatch["sharedUserMd"] != "# Prefs\nConcise.\n" {
+		gotSettingsPatch["sharedUserMd"] != "# Prefs\nConcise.\n" {
 		t.Fatalf("unexpected settings patch payload: %#v", gotSettingsPatch)
 	}
 	patchMap, _ := gotSettingsPatch["defaultModelsPatch"].(map[string]any)
@@ -343,12 +342,11 @@ func TestCLISettingsAndGuardrails(t *testing.T) {
 		"--clear-default-model",
 		"--clear-desktop-harness",
 		"--clear-desktop-model",
-		"--clear-magpie-web-url",
 		"--force",
 	); code != 0 {
 		t.Fatalf("settings set clear failed: code=%d err=%s", code, errOut)
 	}
-	if gotSettingsQuery != "" || gotSettingsPatch["defaultModel"] != "" || gotSettingsPatch["desktopHarness"] != "" || gotSettingsPatch["desktopModel"] != "" || gotSettingsPatch["magpieWebUrl"] != "" {
+	if gotSettingsQuery != "" || gotSettingsPatch["defaultModel"] != "" || gotSettingsPatch["desktopHarness"] != "" || gotSettingsPatch["desktopModel"] != "" {
 		t.Fatalf("unexpected clear settings payload/query: query=%q payload=%#v", gotSettingsQuery, gotSettingsPatch)
 	}
 
@@ -362,7 +360,6 @@ func TestCLISettingsAndGuardrails(t *testing.T) {
 		{"settings", "set", "--harness-model", "opencode=m1", "--clear-harness-model", "opencode"},
 		{"settings", "set", "--desktop-model", ""},
 		{"settings", "set", "--desktop-model", "m1", "--clear-desktop-model"},
-		{"settings", "set", "--magpie-web-url", ""},
 	}
 	for _, tc := range badSettingsCases {
 		if _, _, code := run(tc...); code == 0 {

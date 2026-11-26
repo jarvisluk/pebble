@@ -399,11 +399,8 @@ type HubConfig struct {
 	OnboardingCompleted bool              `json:"onboardingCompleted,omitempty"`
 	DesktopHarness      string            `json:"desktopHarness,omitempty"`
 	DesktopModel        string            `json:"desktopModel,omitempty"`
-	Desktop             DesktopConfig     `json:"desktop,omitempty"`
-	// MagpieWebURL is where `magpie web` is reachable from other devices;
-	// clients away from the host open it instead of the local app.
-	MagpieWebURL      string      `json:"magpieWebUrl,omitempty"`
-	OpenCodeServerURL string      `json:"opencodeServerUrl,omitempty"`
+	Desktop           DesktopConfig     `json:"desktop,omitempty"`
+	OpenCodeServerURL string            `json:"opencodeServerUrl,omitempty"`
 	SharedDir         string      `json:"sharedDir,omitempty"`
 	StateFile         string      `json:"stateFile,omitempty"`
 	MessagesDir       string      `json:"messagesDir,omitempty"`
@@ -454,15 +451,8 @@ func (c *HubConfig) DefaultModelFor(harness string) string {
 	if c.DefaultModel == "" {
 		return ""
 	}
-	// A magpie model works in every harness magpie wires up (claude takes
-	// the bare gateway ID); a bare ID/alias works across all harnesses;
-	// provider/model only fits opencode and pi.
-	if strings.HasPrefix(c.DefaultModel, "magpie/") {
-		if harness == "claude" {
-			return strings.TrimPrefix(c.DefaultModel, "magpie/")
-		}
-		return c.DefaultModel
-	}
+	// A bare ID/alias works across all harnesses; provider/model only fits
+	// opencode and pi.
 	if !strings.Contains(c.DefaultModel, "/") {
 		return c.DefaultModel
 	}

@@ -23,8 +23,6 @@ struct SettingsModelsTab: View {
     @State private var defaultTouched = false
     @State private var perHarness: [String: String] = [:]
     @State private var perTouched = false
-    @State var mpWebUrl = ""
-    @State var mpWebUrlTouched = false
     @State private var drafts: [String: BotDraft] = [:]
     @State private var touchedBots: Set<String> = []
 
@@ -75,12 +73,10 @@ struct SettingsModelsTab: View {
 
     private var settingsChanged: Bool {
         guard let s = hub.settings else { return false }
-        let webDirty = mpWebUrlTouched && mpWebUrl.trimmingCharacters(in: .whitespaces) != (s.magpie?.webUrl ?? "").trimmingCharacters(in: .whitespaces)
         return (defaultHarnessTouched && defaultHarness != baseDefaultHarness)
             || (defaultPermModeTouched && defaultPermMode != baseDefaultPermMode)
             || (defaultTouched && defaultModel.trimmingCharacters(in: .whitespaces) != (s.defaultModel ?? "").trimmingCharacters(in: .whitespaces))
             || (perTouched && clean(perHarness) != clean(s.defaultModels))
-            || webDirty
     }
 
     private var dirty: Bool { settingsChanged || !botUpdates.isEmpty }
@@ -96,7 +92,6 @@ struct SettingsModelsTab: View {
     var body: some View {
         defaultsAndBotsSection
         enginesSection
-        magpieGatewaySection
             .task(id: hub.isConnected) {
                 guard hub.isConnected else { return }
                 _ = try? await hub.loadSettings()
@@ -123,7 +118,6 @@ struct SettingsModelsTab: View {
             .onChange(of: hub.settings?.defaultPermissionMode) { _, _ in sync() }
             .onChange(of: hub.settings?.defaultModel) { _, _ in sync() }
             .onChange(of: hub.settings?.defaultModels) { _, _ in sync() }
-            .onChange(of: hub.settings?.magpie?.webUrl) { _, _ in sync() }
             .onChange(of: hub.settings?.harnesses) { _, _ in sync() }
             .onChange(of: botSnapshotKeys) { _, _ in syncDrafts() }
     }
@@ -178,7 +172,7 @@ struct SettingsModelsTab: View {
                             saved = ""
                         }
                     ),
-                    placeholder: "magpie/claude-sonnet-4",
+                    placeholder: hub.t("globalDefaultPh"),
                     onError: { error = $0 }
                 )
             }
@@ -297,7 +291,6 @@ struct SettingsModelsTab: View {
         if !defaultPermModeTouched { defaultPermMode = baseDefaultPermMode }
         if !defaultTouched { defaultModel = (s.defaultModel ?? "").trimmingCharacters(in: .whitespaces) }
         if !perTouched { perHarness = clean(s.defaultModels) }
-        if !mpWebUrlTouched { mpWebUrl = (s.magpie?.webUrl ?? "").trimmingCharacters(in: .whitespaces) }
         syncDrafts()
     }
 
@@ -319,7 +312,6 @@ struct SettingsModelsTab: View {
             defaultPermModeTouched = false
             defaultTouched = false
             perTouched = false
-            mpWebUrlTouched = false
             touchedBots = []
             drafts = [:]
             sync()
@@ -336,14 +328,12 @@ struct SettingsModelsTab: View {
                 defaultPermissionMode: defaultPermMode,
                 defaultModel: defaultModel.trimmingCharacters(in: .whitespaces),
                 defaultModels: clean(perHarness),
-                magpieWebUrl: mpWebUrlTouched ? mpWebUrl.trimmingCharacters(in: .whitespaces) : nil,
                 botUpdates: botUpdates
             )
             defaultHarnessTouched = false
             defaultPermModeTouched = false
             defaultTouched = false
             perTouched = false
-            mpWebUrlTouched = false
             touchedBots = []
             drafts = [:]
             sync()

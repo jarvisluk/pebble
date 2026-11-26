@@ -3,14 +3,12 @@ package channel
 import (
 	"bot-hub/internal/config"
 	"bot-hub/internal/harness"
-	"bot-hub/internal/hub"
 	"context"
 	"encoding/json"
 	"net"
 	"net/http"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -23,7 +21,6 @@ type settingsBody struct {
 	DesktopHarness        *string           `json:"desktopHarness,omitempty"`
 	DesktopModel          *string           `json:"desktopModel,omitempty"`
 	SharedUserMD          *string           `json:"sharedUserMd,omitempty"`
-	MagpieWebURL          *string           `json:"magpieWebUrl,omitempty"`
 	OnboardingCompleted   *bool             `json:"onboardingCompleted,omitempty"`
 }
 
@@ -56,34 +53,11 @@ func (s *HTTPServer) handleSettings(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
 	if r.URL.Query().Get("fresh") == "1" {
-		harness.InvalidateMagpieCache()
 		harness.InvalidateAuthCache()
 	}
 	defaultModel, defaultModels := s.hub.DefaultModelsSnapshot()
 	deskHarness, deskModel := s.hub.DesktopWorkerSnapshot()
-	installed := harness.MagpieInstalled()
-	var (
-		healthy   bool
-		providers []harness.MagpieProvider
-		presets   []harness.MagpiePreset
-		harnesses []hub.HarnessInfo
-		wg        sync.WaitGroup
-	)
-	wg.Add(1)
-	go func() { defer wg.Done(); harnesses = s.hub.Harnesses(ctx) }()
-	if installed {
-		wg.Add(3)
-		go func() { defer wg.Done(); healthy = harness.MagpieGatewayHealthy(ctx) }()
-		go func() { defer wg.Done(); providers = harness.MagpieListProviders(ctx) }()
-		go func() { defer wg.Done(); presets = harness.MagpiePresets(ctx) }()
-	}
-	wg.Wait()
-	if providers == nil {
-		providers = []harness.MagpieProvider{}
-	}
-	if presets == nil {
-		presets = []harness.MagpiePreset{}
-	}
+	harnesses := s.hub.Harnesses(ctx)
 	installedIDs := []string{}
 	for _, hi := range harnesses {
 		if hi.Installed {
@@ -93,14 +67,6 @@ func (s *HTTPServer) handleSettings(w http.ResponseWriter, r *http.Request) {
 	completed := s.hub.OnboardingCompleted()
 	hasConversation := s.hub.HasAnyConversation()
 	writeJSON(w, http.StatusOK, map[string]any{
-		"magpie": map[string]any{
-			"installed": installed,
-			"healthy":   healthy,
-			"install":   harness.MagpieInstall,
-			"providers": providers,
-			"presets":   presets,
-			"webUrl":    s.hub.MagpieWebURL(),
-		},
 		"desktopHarness":        deskHarness,
 		"desktopModel":          deskModel,
 		"defaultHarness":        s.hub.DefaultHarness(),
@@ -222,12 +188,6 @@ func (s *HTTPServer) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if body.MagpieWebURL != nil {
-		if _, err := hub.ValidateMagpieWebURL(*body.MagpieWebURL); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
-			return
-		}
-	}
 
 	if queryBool(r, "validate") {
 		vctx, vcancel := context.WithTimeout(r.Context(), 30*time.Second)
@@ -339,12 +299,6 @@ func (s *HTTPServer) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if body.MagpieWebURL != nil {
-		if err := s.hub.SetMagpieWebURL(*body.MagpieWebURL); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
-			return
-		}
-	}
 	if body.OnboardingCompleted != nil {
 		if err := s.hub.SetOnboardingCompleted(*body.OnboardingCompleted); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
@@ -354,40 +308,9 @@ func (s *HTTPServer) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	s.handleSettings(w, r)
 }
 
-func (s *HTTPServer) handleMagpieConnect(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Action string `json:"action"` // connect (default) | disconnect
-		Model  string `json:"model"`
-	}
-	_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<12)).Decode(&body)
-	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
-	defer cancel()
-
-	kind := r.PathValue("id")
-	var err error
-	if strings.EqualFold(strings.TrimSpace(body.Action), "disconnect") {
-		err = s.hub.MagpieDisconnect(ctx, kind)
-	} else {
-		err = s.hub.MagpieConnect(ctx, kind, body.Model)
-	}
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
-		return
-	}
-	s.handleSettings(w, r)
-}
-
-func (s *HTTPServer) handleMagpieOpen(w http.ResponseWriter, r *http.Request) {
-	if err := harness.MagpieOpen(); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
-}
-
 func (s *HTTPServer) handleHarnessInstallStart(w http.ResponseWriter, r *http.Request) {
 	kind := strings.TrimSpace(r.PathValue("id"))
-	if kind == "" || kind == "magpie" {
+	if kind == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid harness id"})
 		return
 	}
@@ -401,7 +324,7 @@ func (s *HTTPServer) handleHarnessInstallStart(w http.ResponseWriter, r *http.Re
 
 func (s *HTTPServer) handleHarnessInstallStatus(w http.ResponseWriter, r *http.Request) {
 	kind := strings.TrimSpace(r.PathValue("id"))
-	if kind == "" || kind == "magpie" {
+	if kind == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid harness id"})
 		return
 	}
@@ -410,7 +333,7 @@ func (s *HTTPServer) handleHarnessInstallStatus(w http.ResponseWriter, r *http.R
 
 func (s *HTTPServer) handleHarnessLoginStart(w http.ResponseWriter, r *http.Request) {
 	kind := strings.TrimSpace(r.PathValue("id"))
-	if kind == "" || kind == "magpie" {
+	if kind == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid harness id"})
 		return
 	}
@@ -424,7 +347,7 @@ func (s *HTTPServer) handleHarnessLoginStart(w http.ResponseWriter, r *http.Requ
 
 func (s *HTTPServer) handleHarnessLoginStatus(w http.ResponseWriter, r *http.Request) {
 	kind := strings.TrimSpace(r.PathValue("id"))
-	if kind == "" || kind == "magpie" {
+	if kind == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid harness id"})
 		return
 	}
@@ -433,48 +356,10 @@ func (s *HTTPServer) handleHarnessLoginStatus(w http.ResponseWriter, r *http.Req
 	writeJSON(w, http.StatusOK, harness.GetLoginStatus(ctx, kind))
 }
 
-func (s *HTTPServer) handleMagpieInstallStart(w http.ResponseWriter, r *http.Request) {
-	task, err := harness.StartInstall("magpie")
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
-		return
-	}
-	writeJSON(w, http.StatusOK, task)
-}
-
-func (s *HTTPServer) handleMagpieInstallStatus(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, harness.GetInstallStatus("magpie"))
-}
-
-func (s *HTTPServer) handleMagpieProvider(w http.ResponseWriter, r *http.Request) {
-	var req harness.MagpieProviderReq
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<14)).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json body"})
-		return
-	}
-	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
-	defer cancel()
-	out, err := s.hub.MagpieProviderAction(ctx, req)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
-		return
-	}
-	providers := harness.MagpieListProviders(ctx)
-	if providers == nil {
-		providers = []harness.MagpieProvider{}
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":        true,
-		"output":    out,
-		"providers": providers,
-	})
-}
-
 func (s *HTTPServer) handleModels(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
-	q := r.URL.Query()
-	models, err := s.hub.ModelsWithSource(ctx, q.Get("harness"), q.Get("source"))
+	models, err := s.hub.Models(ctx, r.URL.Query().Get("harness"))
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
 		return

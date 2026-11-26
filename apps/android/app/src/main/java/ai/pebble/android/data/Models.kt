@@ -127,14 +127,6 @@ data class MemoryList(
 )
 
 @Serializable
-data class HarnessMagpie(
-    val installed: Boolean? = null,
-    val connected: Boolean? = null,
-    val model: String? = null,
-    val nativeModel: String? = null,
-)
-
-@Serializable
 data class PermissionCapabilities(
     val modes: List<String>? = null,
     val interactiveApproval: Boolean? = null,
@@ -161,39 +153,12 @@ data class HarnessInfo(
     val category: String? = null,
     val summary: String? = null,
     val install: HarnessInstallInfo? = null,
-    val magpie: HarnessMagpie? = null,
     val permissions: PermissionCapabilities? = null,
 ) {
     val title: String get() = if (label.isNullOrEmpty()) id else label
     val supportedModes: List<String>
         get() = permissions?.modes?.filter { it.isNotEmpty() }?.ifEmpty { listOf("auto") } ?: listOf("auto")
 }
-
-@Serializable
-data class MagpieProvider(
-    val id: String,
-    val name: String? = null,
-    val endpoint: String? = null,
-    val status: String? = null,
-    val modelsInfo: String? = null,
-    val usedBy: String? = null,
-    val enabled: Boolean? = null,
-)
-
-@Serializable
-data class MagpiePreset(
-    val id: String,
-    val name: String? = null,
-)
-
-@Serializable
-data class MagpieInfo(
-    val installed: Boolean? = null,
-    val healthy: Boolean? = null,
-    val providers: List<MagpieProvider>? = null,
-    val presets: List<MagpiePreset>? = null,
-    val webUrl: String? = null,
-)
 
 @Serializable
 data class SetupTaskStatus(
@@ -209,7 +174,6 @@ data class SetupTaskStatus(
 
 @Serializable
 data class SettingsData(
-    val magpie: MagpieInfo? = null,
     val desktopHarness: String? = null,
     val desktopModel: String? = null,
     val defaultHarness: String? = null,

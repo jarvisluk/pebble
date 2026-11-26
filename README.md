@@ -1,14 +1,13 @@
 <h1 align="center">Pebble</h1>
 
-<p align="center"><b>A minimal personal bot orchestrator running locally on your computer.</b></p>
+<p align="center"><b>A Bot-First Multi-Agent &amp; Multi-Device Agent Orchestrator running locally on your computer.</b></p>
 
 <p align="center">
-  <b>1 Bot = 1 Workspace = 1 Session</b>&nbsp;&nbsp;·&nbsp;&nbsp;<b>Bring Your Own Harness</b>&nbsp;&nbsp;·&nbsp;&nbsp;<b>Local-First</b>
+  <b>1 Bot = 1 Workspace = 1 Session</b>&nbsp;&nbsp;·&nbsp;&nbsp;<b>Bring Your Own Harness</b>&nbsp;&nbsp;·&nbsp;&nbsp;<b>Multi-Device &amp; Local-First</b>
 </p>
 
 <p align="center">
   <img height="26" alt="Go Standard Library" src="https://img.shields.io/badge/Go-Stdlib%20First-1d1b19?logo=go&logoColor=white&style=for-the-badge">
-  <a href="https://usemagpie.ai"><img height="26" alt="Powered by Magpie" src="https://img.shields.io/badge/Gateway-Magpie-d9774b?style=for-the-badge"></a>
   <a href="https://github.com/tailscale/tailcat"><img height="26" alt="Remote via Tailcat" src="https://img.shields.io/badge/Tunnel-Tailcat-1d1b19?style=for-the-badge"></a>
   <a href="https://wails.io"><img height="26" alt="Desktop via Wails" src="https://img.shields.io/badge/Desktop-Wails%20v3-1d1b19?style=for-the-badge"></a>
 </p>
@@ -17,9 +16,9 @@
   <b>English</b>&nbsp;&nbsp;·&nbsp;&nbsp;<a href="README.zh-CN.md">简体中文</a>
 </p>
 
-- **A persistent bot team on your machine.** Built strictly around `1 Bot = 1 Workspace = 1 Session`: every bot gets its own directory, `AGENTS.md` instructions, serialized execution queue, and long-lived session.
-- **Bring your own agent runtime.** Drives **OpenCode**, **Claude Code**, **Pi**, and **DeepSeek Harness (`dsh`)** directly on your computer—routed through **Magpie** with automatic quota fallback, or running on the CLI subscriptions you already pay for.
-- **Local data, reachable anywhere.** One Go binary ships the Web UI, scheduled routines, and a **Tailcat** peer-to-peer tunnel—no public IP, no Tailscale account, and no system VPN required.
+- **Bot-first multi-agent orchestration on your machine.** Built strictly around `1 Bot = 1 Workspace = 1 Session`: every bot gets its own directory, `AGENTS.md` instructions, serialized execution queue, and long-lived session.
+- **Bring your own agent runtime.** Drives **OpenCode**, **Claude Code**, **Pi**, **Codex**, **Grok**, **Agy**, and **DeepSeek Harness (`dsh`)** directly on your computer using each CLI's native subscriptions, API keys, and model configuration.
+- **Multi-device reach, local data.** One Go binary ships the Web UI, native desktop/mobile companion protocol, scheduled routines, remote node execution, and a **Tailcat** peer-to-peer tunnel—no public IP, no Tailscale account, and no system VPN required.
 
 ## Cool features
 
@@ -43,7 +42,7 @@ pebble/
     ├── _shared/                  # Global context (USER.md + hub-managed PEBBLE.md)
     └── assistant/                # Dedicated workspace for one bot
         ├── AGENTS.md             # Role definition and workspace rules
-        ├── memory/               # Durable local notes (complemented by Magpie Memory)
+        ├── memory/               # Durable local notes (optional Magpie Memory backend)
         ├── _shared -> ../_shared # Automatic symlink to shared context
         ├── .agents/skills/pebble-setup/SKILL.md # Managed Pebble setup/CLI skill
         └── opencode.json         # Auto-wired local pebble MCP & PEBBLE.md instructions
@@ -101,10 +100,7 @@ Bot-to-bot calls enforce `hop <= 4` loop protection and appear live in **both** 
 
 ### Bring your own harness: OpenCode, Claude Code, Pi or DeepSeek
 
-`pebble` does not lock you into a custom agent loop or provider SDK. Different bots in the same hub can run on different harnesses side by side, with two `modelAccess` modes switchable straight from the Web UI:
-
-- **Magpie gateway (`magpie`, default):** Shares [Magpie](https://usemagpie.ai)'s local model catalog, routing rules, and quota fallback across harnesses, with one-click CLI binding from the settings panel.
-- **Native CLI config (`self`):** Leaves global CLI configs untouched so each runtime uses its own subscription or API keys as-is.
+`pebble` does not lock you into a custom agent loop or provider SDK. Different bots in the same hub can run on different harnesses side by side, with each CLI using its own native subscriptions, API keys, and model list—plus per-harness or per-bot default model overrides configurable from the UI and CLI.
 
 <details>
 <summary><b>Supported harnesses:</b> process model, protocol, and session persistence</summary>
@@ -148,7 +144,7 @@ Bots do not just wait in a browser tab. Built-in `schedules` wake a bot up at a 
 
 ```json
 {
-  "defaultModel": "magpie/mac-mini/auto/hy4flash-free",
+  "defaultModel": "anthropic/claude-sonnet-4-5",
   "http": {
     "host": "127.0.0.1",
     "port": 3789,
@@ -270,11 +266,9 @@ To reach a `pebble` hub running at home or in the office from your laptop:
 - `POST /api/bots/{id}/rotate` — Archive active session immediately or after current turn (`handoffNote`, `defer`)
 - `GET  /api/sessions`, `GET /api/bots/{id}/sessions` — List or search archived and active sessions (`?query=&limit=`)
 - `GET  /api/sessions/{sessionId}`, `GET /api/bots/{id}/sessions/{sessionId}` — Sliced session transcript recall (`previous` supported)
-- `GET  /api/memory`, `POST /api/memory`, `DELETE /api/memory/{id}` — Magpie Memory pass-through (global & bot-scoped)
-- `GET  /api/settings`, `PUT /api/settings` — Read or update `modelAccess` (`magpie` / `self`), default models, and `magpieWebUrl` (where remote clients open `magpie web`; falls back to `MAGPIE_WEB_URL`)
-- `GET  /api/models` — List available model IDs for `?harness=`
-- `POST /api/harnesses/{id}/magpie` — Connect a harness CLI to Magpie with a chosen model
-- `POST /api/magpie/open` — Open the Magpie app on the host to manage providers and models
+- `GET  /api/memory`, `POST /api/memory`, `DELETE /api/memory/{id}` — Optional Magpie Memory pass-through (global & bot-scoped, gracefully disabled if absent)
+- `GET  /api/settings`, `PUT /api/settings` — Read or update default harness, permission mode, and default models
+- `GET  /api/models` — List available native model IDs for `?harness=`
 - `POST /api/login` — Exchange `http.apiToken` for an `HttpOnly` session cookie (used by Web UI)
 - `GET  /api/tailcat`, `GET /api/tailcat/qr.png` — Tailcat tunnel status, link, and QR code
 - `POST /hooks/{id}` — Wake a bot from an external webhook (optional `X-Webhook-Secret` or `Bearer` auth)
@@ -316,6 +310,5 @@ To reach a `pebble` hub running at home or in the office from your laptop:
 `Pebble` builds on these projects:
 
 - **[OpenCode](https://opencode.ai)**, **Claude Code**, **Pi**, and **DeepSeek Harness:** The agent runtimes that execute tools and turns inside each workspace.
-- **[Magpie](https://usemagpie.ai):** Local model gateway providing a unified model catalog, routing rules, and quota fallback across CLIs.
 - **[Tailcat](https://github.com/tailscale/tailcat):** Account-free peer-to-peer encrypted tunneling over WireGuard and DERP.
 - **[Wails](https://wails.io):** Lightweight native desktop window and system tray wrapper.

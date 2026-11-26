@@ -138,7 +138,6 @@ func Load(projectRoot, explicitPath string) (*HubConfig, string, error) {
 	cfg.DefaultModel = expandEnv(cfg.DefaultModel)
 	cfg.DesktopHarness = strings.TrimSpace(cfg.DesktopHarness)
 	cfg.DesktopModel = strings.TrimSpace(expandEnv(cfg.DesktopModel))
-	cfg.MagpieWebURL = strings.TrimSpace(expandEnv(cfg.MagpieWebURL))
 	cfg.OpenCodeServerURL = expandEnv(cfg.OpenCodeServerURL)
 	cfg.HTTP.WebhookSecret = expandEnv(cfg.HTTP.WebhookSecret)
 	cfg.HTTP.APIToken = expandEnv(cfg.HTTP.APIToken)

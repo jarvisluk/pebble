@@ -1,5 +1,4 @@
 {
-  "defaultModel": "magpie/mac-mini/auto/hy4flash-free",
   "sharedDir": "./workspaces/_shared",
   "stateFile": "./state/sessions.json",
   "http": {

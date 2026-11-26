@@ -14,20 +14,18 @@ func (h *AgyHarness) drop(botID string, p *agyProc) {
 	h.pool.drop(botID, p)
 }
 
-func (h *AgyHarness) proc(ctx context.Context, bin string, opts RunOptions) (*agyProc, func(), error) {
+func (h *AgyHarness) proc(bin string, opts RunOptions) (*agyProc, func(), error) {
 	bot := opts.Bot
-	viaMagpie := h.viaMagpie(ctx, bot.Model)
 	mode := EffectivePermissionMode(opts)
 	return h.pool.acquire(
 		bot.ID,
 		func(p *agyProc) bool {
 			return p.model == bot.Model &&
 				p.sessionID == opts.SessionID &&
-				p.viaMagpie == viaMagpie &&
 				p.permissionMode == mode
 		},
 		func() (*agyProc, error) {
-			return h.startProc(bin, opts, viaMagpie, false)
+			return h.startProc(bin, opts, false)
 		},
 	)
 }
@@ -45,7 +43,7 @@ func agyStreamModeArgs(mode string) []string {
 	}
 }
 
-func (h *AgyHarness) startProc(bin string, opts RunOptions, viaMagpie, ephemeral bool) (*agyProc, error) {
+func (h *AgyHarness) startProc(bin string, opts RunOptions, ephemeral bool) (*agyProc, error) {
 	bot := opts.Bot
 	mode := EffectivePermissionMode(opts)
 	if err := writeAgyWorkspaceFiles(bot.Workspace, opts); err != nil {
@@ -61,13 +59,7 @@ func (h *AgyHarness) startProc(bin string, opts RunOptions, viaMagpie, ephemeral
 	}
 	args = append(args, agyStreamModeArgs(mode)...)
 
-	var cmd *exec.Cmd
-	if viaMagpie {
-		runArgs := append([]string{"agy", "run", "--"}, args...)
-		cmd = exec.Command(magpieBin(), runArgs...)
-	} else {
-		cmd = exec.Command(bin, args...)
-	}
+	cmd := exec.Command(bin, args...)
 	cmd.Dir = bot.Workspace
 	cmd.Env = procEnv(cmd, opts)
 
@@ -79,7 +71,6 @@ func (h *AgyHarness) startProc(bin string, opts RunOptions, viaMagpie, ephemeral
 		lineProc:       lp,
 		model:          bot.Model,
 		sessionID:      opts.SessionID,
-		viaMagpie:      viaMagpie,
 		permissionMode: mode,
 	}, nil
 }
@@ -91,14 +82,14 @@ func (h *AgyHarness) runStreamTurn(ctx context.Context, bin string, opts RunOpti
 		err error
 	)
 	if opts.Ephemeral {
-		p, err = h.startProc(bin, opts, h.viaMagpie(ctx, bot.Model), true)
+		p, err = h.startProc(bin, opts, true)
 		if err != nil {
 			return nil, err
 		}
 		defer p.kill()
 	} else {
 		var release func()
-		p, release, err = h.proc(ctx, bin, opts)
+		p, release, err = h.proc(bin, opts)
 		if err != nil {
 			return nil, err
 		}

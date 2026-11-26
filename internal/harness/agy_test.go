@@ -61,7 +61,6 @@ done
 	}
 
 	t.Setenv("AGY_BIN", fakeAgy)
-	t.Setenv("MAGPIE_BIN", filepath.Join(tmp, "missing-magpie"))
 
 	h := NewAgyHarness()
 	t.Cleanup(h.Close)
@@ -179,7 +178,6 @@ done
 	if err := os.WriteFile(fakeAgy, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("MAGPIE_BIN", filepath.Join(tmp, "missing-magpie"))
 
 	h := &AgyHarness{binary: fakeAgy}
 	defer h.Close()
@@ -293,7 +291,6 @@ done
 	if err := os.WriteFile(fakeAgy, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("MAGPIE_BIN", filepath.Join(tmp, "missing-magpie"))
 
 	h := NewAgyHarness()
 	h.binary = fakeAgy
@@ -425,26 +422,18 @@ done
 	}
 }
 
-func TestAgyACPMagpieSkipsSetModelAndIsolatesEphemeral(t *testing.T) {
+func TestAgyACPSetsModelAndIsolatesEphemeral(t *testing.T) {
 	tmp := t.TempDir()
 	ws := filepath.Join(tmp, "ws")
 	if err := os.MkdirAll(ws, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	fakeAgy := filepath.Join(tmp, "agy")
-	fakeMagpie := filepath.Join(tmp, "magpie")
-	logFile := filepath.Join(tmp, "magpie-acp.log")
+	logFile := filepath.Join(tmp, "acp.log")
 
 	agyScript := `#!/bin/sh
 if [ "$1" = "acp" ] && [ "$2" = "--help" ]; then
   echo "Agent Client Protocol"
-  exit 0
-fi
-exit 1
-`
-	magpieScript := `#!/bin/sh
-if [ "$1" = "agy" ] && [ "$#" -eq 1 ]; then
-  echo "  Antigravity CLI  magpie/claude-opus  ·  fast"
   exit 0
 fi
 echo "LAUNCH:$*" >> "` + logFile + `"
@@ -456,18 +445,18 @@ while IFS= read -r line; do
       ;;
     *'"method":"session/new"'*)
       echo "NEW" >> "` + logFile + `"
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"mag-1"}}\n' "$id"
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"acp-1"}}\n' "$id"
       ;;
     *'"method":"session/resume"'*)
       echo "RESUME" >> "` + logFile + `"
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"mag-1"}}\n' "$id"
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"acp-1"}}\n' "$id"
       ;;
     *'"method":"session/set_model"'*)
       echo "SET_MODEL:$line" >> "` + logFile + `"
-      printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32602,"message":"unknown magpie model"}}\n' "$id"
+      printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id"
       ;;
     *'"method":"session/prompt"'*)
-      printf '{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"via magpie"}}}}\n'
+      printf '{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"via acp"}}}}\n'
       printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$id"
       ;;
   esac
@@ -476,12 +465,6 @@ done
 	if err := os.WriteFile(fakeAgy, []byte(agyScript), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(fakeMagpie, []byte(magpieScript), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("MAGPIE_BIN", fakeMagpie)
-	InvalidateMagpieCache()
-	t.Cleanup(InvalidateMagpieCache)
 
 	h := NewAgyHarness()
 	h.binary = fakeAgy
@@ -491,15 +474,15 @@ done
 		Bot: config.BotConfig{
 			ID:             "dev",
 			Workspace:      ws,
-			Model:          "magpie/claude-opus",
+			Model:          "claude-opus",
 			PermissionMode: config.PermissionModeAuto,
 		},
 		Prompt: "hi",
 	})
 	if err != nil {
-		t.Fatalf("magpie RunTurn failed: %v", err)
+		t.Fatalf("acp RunTurn failed: %v", err)
 	}
-	if res.Text != "via magpie" {
+	if res.Text != "via acp" {
 		t.Fatalf("unexpected text: %q", res.Text)
 	}
 
@@ -508,10 +491,10 @@ done
 		Bot: config.BotConfig{
 			ID:             "dev",
 			Workspace:      ws,
-			Model:          "magpie/claude-opus",
+			Model:          "claude-opus",
 			PermissionMode: config.PermissionModeAuto,
 		},
-		SessionID: "mag-1",
+		SessionID: "acp-1",
 		Ephemeral: true,
 		Prompt:    "routine",
 	}); err != nil {
@@ -520,11 +503,11 @@ done
 
 	raw, _ := os.ReadFile(logFile)
 	s := string(raw)
-	if strings.Contains(s, "SET_MODEL:") {
-		t.Fatalf("viaMagpie with magpie/* model must not call session/set_model:\n%s", s)
+	if !strings.Contains(s, "SET_MODEL:") {
+		t.Fatalf("expected session/set_model to be called:\n%s", s)
 	}
-	if !strings.Contains(s, "LAUNCH:agy run -- acp --dangerously-skip-permissions") {
-		t.Fatalf("expected magpie agy run launch with --dangerously-skip-permissions:\n%s", s)
+	if !strings.Contains(s, "LAUNCH:acp --dangerously-skip-permissions") {
+		t.Fatalf("expected direct agy acp launch with --dangerously-skip-permissions:\n%s", s)
 	}
 	if strings.Contains(s, "RESUME") {
 		t.Fatalf("ephemeral turn must not call session/resume:\n%s", s)
@@ -554,7 +537,6 @@ done
 	if err := os.WriteFile(fakeAgy, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("MAGPIE_BIN", filepath.Join(tmp, "missing-magpie"))
 
 	h := NewAgyHarness()
 	h.binary = fakeAgy

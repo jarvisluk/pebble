@@ -101,13 +101,6 @@ struct MemoryList: Codable {
     var items: [MemoryItem]?
 }
 
-struct HarnessMagpie: Codable, Hashable {
-    var installed: Bool?
-    var connected: Bool?
-    var model: String?
-    var nativeModel: String?
-}
-
 struct PermissionCapabilities: Codable, Hashable {
     var modes: [String]?
     var interactiveApproval: Bool?
@@ -132,7 +125,6 @@ struct HarnessInfo: Codable, Identifiable, Hashable {
     var category: String?
     var summary: String?
     var install: HarnessInstallInfo?
-    var magpie: HarnessMagpie?
     var permissions: PermissionCapabilities?
 
     var title: String { (label ?? "").isEmpty ? id : label! }
@@ -140,29 +132,6 @@ struct HarnessInfo: Codable, Identifiable, Hashable {
         let list = (permissions?.modes ?? []).filter { !$0.isEmpty }
         return list.isEmpty ? ["auto"] : list
     }
-}
-
-struct MagpieProvider: Codable, Identifiable, Hashable {
-    var id: String
-    var name: String?
-    var endpoint: String?
-    var status: String?
-    var modelsInfo: String?
-    var usedBy: String?
-    var enabled: Bool?
-}
-
-struct MagpiePreset: Codable, Identifiable, Hashable {
-    var id: String
-    var name: String?
-}
-
-struct MagpieInfo: Codable {
-    var installed: Bool?
-    var healthy: Bool?
-    var providers: [MagpieProvider]?
-    var presets: [MagpiePreset]?
-    var webUrl: String?
 }
 
 struct SetupTaskStatus: Codable {
@@ -183,7 +152,6 @@ struct OnboardingInfo: Codable {
 }
 
 struct SettingsData: Codable {
-    var magpie: MagpieInfo?
     var onboarding: OnboardingInfo?
     var desktopHarness: String?
     var desktopModel: String?

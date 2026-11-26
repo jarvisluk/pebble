@@ -398,7 +398,6 @@ class PebbleStore(context: Context) {
 
     suspend fun loadSettings(fresh: Boolean = false) : SettingsData = loadSettingsImpl(fresh)
     suspend fun loadModels(harness: String, force: Boolean = false) : List<String> = loadModelsImpl(harness, force)
-    suspend fun loadMagpieModels(harness: String) : List<String> = loadMagpieModelsImpl(harness)
     fun resetModelsCache() = resetModelsCacheImpl()
     suspend fun saveModelsSettings(
         changed: Boolean,
@@ -406,18 +405,13 @@ class PebbleStore(context: Context) {
         defaultPermissionMode: String? = null,
         defaultModel: String,
         defaultModels: Map<String, String>,
-        magpieWebUrl: String?,
         botUpdates: List<Triple<String, String, String>>,
-    ) = saveModelsSettingsImpl(changed, defaultHarness, defaultPermissionMode, defaultModel, defaultModels, magpieWebUrl, botUpdates)
+    ) = saveModelsSettingsImpl(changed, defaultHarness, defaultPermissionMode, defaultModel, defaultModels, botUpdates)
     suspend fun saveSharedUserMd(content: String) = saveSharedUserMdImpl(content)
     suspend fun startHarnessInstall(harness: String) : SetupTaskStatus = startHarnessInstallImpl(harness)
     suspend fun getHarnessInstallStatus(harness: String) : SetupTaskStatus = getHarnessInstallStatusImpl(harness)
     suspend fun startHarnessLogin(harness: String) : SetupTaskStatus = startHarnessLoginImpl(harness)
     suspend fun getHarnessLoginStatus(harness: String) : SetupTaskStatus = getHarnessLoginStatusImpl(harness)
-    suspend fun connectMagpie(harness: String, model: String) = connectMagpieImpl(harness, model)
-    suspend fun disconnectMagpie(harness: String) = disconnectMagpieImpl(harness)
-    suspend fun openMagpie() = openMagpieImpl()
-    suspend fun installMagpie() = installMagpieImpl()
     suspend fun setDesktopWorker(harness: String, model: String) = setDesktopWorkerImpl(harness, model)
     suspend fun refreshNodes() = refreshNodesImpl()
 

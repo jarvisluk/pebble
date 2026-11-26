@@ -40,12 +40,6 @@ extension HubStore {
         return models[harness] ?? list
     }
 
-    func loadMagpieModels(_ harness: String) async throws -> [String] {
-        guard !harness.isEmpty else { return [] }
-        let d: ModelsResp = try await callAPI("/api/models?harness=\(enc(harness))&source=magpie")
-        return d.models ?? []
-    }
-
     func resetModelsCache() {
         for (_, entry) in modelLoadTasks { entry.1.cancel() }
         modelLoadTasks.removeAll()
@@ -59,7 +53,6 @@ extension HubStore {
         defaultPermissionMode: String? = nil,
         defaultModel: String,
         defaultModels: [String: String],
-        magpieWebUrl: String?,
         botUpdates: [(id: String, harness: String, model: String)]
     ) async throws {
         if changed {
@@ -70,9 +63,6 @@ extension HubStore {
             ]
             if let defaultPermissionMode, !defaultPermissionMode.isEmpty {
                 body["defaultPermissionMode"] = defaultPermissionMode
-            }
-            if let magpieWebUrl {
-                body["magpieWebUrl"] = magpieWebUrl
             }
             settings = try await callAPI("/api/settings", method: "PUT", body: body)
         }
@@ -99,33 +89,6 @@ extension HubStore {
 
     func harnessLoginStatus(_ harness: String) async throws -> SetupTaskStatus {
         try await callAPI("/api/harnesses/\(enc(harness))/login")
-    }
-
-    func connectMagpie(_ harness: String, model: String) async throws {
-        settings = try await callAPI("/api/harnesses/\(enc(harness))/magpie", method: "POST", body: ["action": "connect", "model": model])
-        resetModelsCache()
-    }
-
-    func disconnectMagpie(_ harness: String) async throws {
-        settings = try await callAPI("/api/harnesses/\(enc(harness))/magpie", method: "POST", body: ["action": "disconnect"])
-        resetModelsCache()
-    }
-
-    func openMagpie() async throws {
-        let _: OkResp = try await callAPI("/api/magpie/open", method: "POST", body: [:])
-    }
-
-    func installMagpie() async throws {
-        var st: SetupTaskStatus = try await callAPI("/api/magpie/install", method: "POST", body: [:])
-        while st.state == "running" {
-            try await Task.sleep(nanoseconds: 1_200_000_000)
-            st = try await callAPI("/api/magpie/install")
-        }
-        if st.state == "error" {
-            throw NSError(domain: "Pebble", code: 400, userInfo: [NSLocalizedDescriptionKey: st.error ?? "Magpie install failed"])
-        }
-        _ = try await loadSettings()
-        resetModelsCache()
     }
 
     func setDesktopWorker(harness: String, model: String) async throws {

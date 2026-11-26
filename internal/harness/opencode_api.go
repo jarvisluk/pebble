@@ -309,3 +309,50 @@ func randHex(n int) string {
 	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
 }
+
+type ttlCache[T any] struct {
+	mu      sync.Mutex
+	val     T
+	fetched time.Time
+	ttl     time.Duration
+}
+
+func (c *ttlCache[T]) get(load func() (T, bool)) T {
+	c.mu.Lock()
+	if !c.fetched.IsZero() && time.Since(c.fetched) < c.ttl {
+		v := c.val
+		c.mu.Unlock()
+		return v
+	}
+	c.mu.Unlock()
+
+	fresh, ok := load()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if ok {
+		c.val = fresh
+		c.fetched = time.Now()
+		return fresh
+	}
+	if !c.fetched.IsZero() {
+		return c.val
+	}
+	return fresh
+}
+
+func (c *ttlCache[T]) invalidate() {
+	c.mu.Lock()
+	c.fetched = time.Time{}
+	c.mu.Unlock()
+}
+
+func parseSlashModelLines(raw string) []string {
+	var parsed []string
+	for _, line := range strings.Split(raw, "\n") {
+		f := strings.Fields(line)
+		if len(f) > 0 && strings.Contains(f[0], "/") && !strings.Contains(f[0], "://") {
+			parsed = append(parsed, f[0])
+		}
+	}
+	return parsed
+}
