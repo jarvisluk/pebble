@@ -182,6 +182,10 @@ extension HubStore {
                     }
                 }
             }
+        case "update_status":
+            if let st = decodeAny(p, as: UpdateStatus.self) {
+                updateStatus = st
+            }
         default: break
         }
     }

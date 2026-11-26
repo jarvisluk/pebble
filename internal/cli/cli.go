@@ -30,6 +30,7 @@ import (
 	"bot-hub/internal/scheduler"
 	"bot-hub/internal/state"
 	"bot-hub/internal/tunnel"
+	"bot-hub/internal/update"
 )
 
 // Main runs a pebble command; args excludes the program name.
@@ -57,7 +58,7 @@ func Main(args []string) {
 		return
 	}
 	switch sub {
-	case "bot", "settings", "session", "routine", "node", "desktop":
+	case "bot", "settings", "session", "routine", "node", "desktop", "update":
 		cwd, _ := os.Getwd()
 		os.Exit(runCommand(context.Background(), args, cwd, os.Stdout, os.Stderr))
 	}
@@ -119,6 +120,7 @@ func printUsage() {
   pebble routine  <list|upsert|delete|run> [flags]               Manage and trigger scheduled routines
   pebble node     <list|exec|file> [flags]                       List or invoke remote computer nodes
   pebble desktop  <task|takeover|setup|power|targets> [flags]    Delegate desktop GUI tasks, list targets, setup virtual desktop, or control power
+  pebble update   [check|auto|channel|proxy] [flags]             Check GitHub Releases for newer versions and configure update checks
   pebble version  [--json]                                       Print Pebble version and build metadata`)
 }
 
@@ -343,11 +345,21 @@ func runServe(parent context.Context, h *hub.Hub, cfgPath string) error {
 	h.SetOnSchedulesChanged(sched.Sync)
 	sched.Start(ctx)
 
+	upd := update.NewManager(update.Options{
+		StateDir:       filepath.Dir(h.Config().StateFile),
+		CurrentVersion: protocol.AppVersion,
+		OnChange: func(st update.Status) {
+			h.BroadcastUpdateStatus(st)
+		},
+	})
+	upd.Start(ctx)
+
 	var httpSrv *channel.HTTPServer
 	httpErr := make(chan error, 1)
 	if h.Config().HTTP.IsEnabled() {
 		httpSrv = channel.NewHTTPServer(h, h.Config().HTTP)
 		httpSrv.SetScheduler(sched)
+		httpSrv.SetUpdater(upd)
 		go func() {
 			if err := httpSrv.Start(); err != nil {
 				log.Printf("[http] server error: %v", err)
@@ -366,6 +378,7 @@ func runServe(parent context.Context, h *hub.Hub, cfgPath string) error {
 		cancel()
 	}
 	sched.Wait()
+	upd.Wait()
 	log.Printf("[hub] stopped")
 	select {
 	case err := <-httpErr:

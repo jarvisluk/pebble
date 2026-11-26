@@ -2,6 +2,7 @@ import type {
   MentionCandidate,
   MessageMedia,
   SlashCommandItem,
+  UpdateStatus,
   WorkspaceFileContent,
   WorkspaceListResult,
 } from '../types';
@@ -182,4 +183,21 @@ export function workspaceFileRawURL(
   const qs = new URLSearchParams({ path, ticket });
   if (download) qs.set('download', '1');
   return `/api/bots/${encodeURIComponent(botId)}/files/raw?${qs.toString()}`;
+}
+
+export async function fetchUpdateStatus(): Promise<UpdateStatus> {
+  return api<UpdateStatus>('/api/update');
+}
+
+export async function checkForUpdates(): Promise<UpdateStatus> {
+  return api<UpdateStatus>('/api/update/check', { method: 'POST', body: {} });
+}
+
+export async function saveUpdateConfig(patch: {
+  autoCheck?: boolean;
+  interval?: string;
+  channel?: string;
+  proxy?: string;
+}): Promise<UpdateStatus> {
+  return api<UpdateStatus>('/api/update/config', { method: 'PATCH', body: patch });
 }

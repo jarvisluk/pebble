@@ -149,4 +149,43 @@ extension HubStore {
         if !cur.isEmpty && modes.contains(cur) { return cur }
         return modes.contains("auto") ? "auto" : (modes.first ?? "auto")
     }
+
+    // MARK: 更新检测
+
+    func refreshUpdateStatus() async {
+        guard !baseURL.isEmpty, supports("update.check") else { return }
+        do {
+            let st: UpdateStatus = try await callAPI("/api/update")
+            updateStatus = st
+        } catch let e as HubError where e.isUnsupportedCapability {
+            markUnsupported("update.check")
+        } catch {}
+    }
+
+    func checkForUpdates() async {
+        guard !baseURL.isEmpty else { return }
+        updateChecking = true
+        defer { updateChecking = false }
+        do {
+            let st: UpdateStatus = try await callAPI("/api/update/check", method: "POST", body: [:])
+            updateStatus = st
+        } catch let e as HubError where e.isUnsupportedCapability {
+            markUnsupported("update.check")
+        } catch {}
+    }
+
+    func saveUpdateConfig(autoCheck: Bool? = nil, interval: String? = nil, channel: String? = nil) async {
+        guard !baseURL.isEmpty else { return }
+        var body: [String: Any] = [:]
+        if let autoCheck { body["autoCheck"] = autoCheck }
+        if let interval { body["interval"] = interval }
+        if let channel { body["channel"] = channel }
+        guard !body.isEmpty else { return }
+        do {
+            let st: UpdateStatus = try await callAPI("/api/update/config", method: "PATCH", body: body)
+            updateStatus = st
+        } catch let e as HubError where e.isUnsupportedCapability {
+            markUnsupported("update.check")
+        } catch {}
+    }
 }

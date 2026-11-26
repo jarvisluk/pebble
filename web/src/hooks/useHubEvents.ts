@@ -14,6 +14,7 @@ import type {
   StageOpenEvent,
   StageTab,
   TakeoverRequest,
+  UpdateStatus,
 } from '../types';
 
 export interface UseHubEventsOpts {
@@ -31,6 +32,7 @@ export interface UseHubEventsOpts {
   refreshActiveDesktopTarget: () => Promise<void>;
   refreshApprovals: () => Promise<void>;
   refreshQuestions: () => Promise<void>;
+  refreshUpdateStatus: () => Promise<void>;
   selectBot: (id: string) => Promise<void>;
   removeBotLocally: (id: string) => void;
   applyActiveDesktopTarget: (next: ActiveDesktopTarget, notifyFallback?: boolean) => void;
@@ -52,6 +54,7 @@ export interface UseHubEventsOpts {
   setQuestions: React.Dispatch<React.SetStateAction<PendingQuestion[]>>;
   setApprovals: React.Dispatch<React.SetStateAction<PendingApproval[]>>;
   setRoutineRefreshSeq: React.Dispatch<React.SetStateAction<number>>;
+  setUpdateStatus: React.Dispatch<React.SetStateAction<UpdateStatus | null>>;
   setUnboxStep: React.Dispatch<React.SetStateAction<1 | 2 | 3>>;
   setUnboxOpen: React.Dispatch<React.SetStateAction<boolean>>;
   setBootReady: React.Dispatch<React.SetStateAction<boolean>>;
@@ -73,6 +76,7 @@ export function useHubEvents(opts: UseHubEventsOpts) {
     refreshActiveDesktopTarget,
     refreshApprovals,
     refreshQuestions,
+    refreshUpdateStatus,
     selectBot,
     removeBotLocally,
     applyActiveDesktopTarget,
@@ -94,6 +98,7 @@ export function useHubEvents(opts: UseHubEventsOpts) {
     setQuestions,
     setApprovals,
     setRoutineRefreshSeq,
+    setUpdateStatus,
     setUnboxStep,
     setUnboxOpen,
     setBootReady,
@@ -260,6 +265,10 @@ export function useHubEvents(opts: UseHubEventsOpts) {
         setRoutineRefreshSeq((n) => n + 1);
       }
     });
+
+    on('update_status', ({ payload }: { payload?: UpdateStatus }) => {
+      if (payload) setUpdateStatus(payload);
+    });
   }, [removeBotLocally]);
 
   const maybeAutoOpenUnbox = useCallback((s: SettingsData | null) => {
@@ -279,6 +288,7 @@ export function useHubEvents(opts: UseHubEventsOpts) {
         void refreshActiveDesktopTarget();
         void refreshApprovals();
         void refreshQuestions();
+        void refreshUpdateStatus();
         maybeAutoOpenUnbox(s);
         setBootReady(true);
       })

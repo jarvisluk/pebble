@@ -154,6 +154,57 @@ var platformAppVersionString: String {
     return ver
 }
 
+var platformCurrentShortVersion: String {
+    let info = Bundle.main.infoDictionary
+    let ver = (info?["CFBundleShortVersionString"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    return ver.isEmpty ? "0.1.0" : ver
+}
+
+func isSemVerNewer(_ candidate: String, than current: String) -> Bool {
+    func parse(_ raw: String) -> (Int, Int, Int, [String])? {
+        var s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if s.hasPrefix("v") || s.hasPrefix("V") { s.removeFirst() }
+        if s.isEmpty { return nil }
+        if let plus = s.firstIndex(of: "+") { s = String(s[..<plus]) }
+        let core: String
+        let pre: [String]
+        if let dash = s.firstIndex(of: "-") {
+            core = String(s[..<dash])
+            let p = String(s[s.index(after: dash)...])
+            if p.isEmpty { return nil }
+            pre = p.split(separator: ".", omittingEmptySubsequences: false).map(String.init)
+            if pre.contains(where: { $0.isEmpty }) { return nil }
+        } else {
+            core = s
+            pre = []
+        }
+        let nums = core.split(separator: ".", omittingEmptySubsequences: false)
+        guard nums.count == 3,
+              let maj = Int(nums[0]), let min = Int(nums[1]), let pat = Int(nums[2]),
+              maj >= 0, min >= 0, pat >= 0 else { return nil }
+        return (maj, min, pat, pre)
+    }
+    guard let a = parse(candidate), let b = parse(current) else { return false }
+    if a.0 != b.0 { return a.0 > b.0 }
+    if a.1 != b.1 { return a.1 > b.1 }
+    if a.2 != b.2 { return a.2 > b.2 }
+    if a.3.isEmpty && b.3.isEmpty { return false }
+    if a.3.isEmpty != b.3.isEmpty { return a.3.isEmpty }
+    let limit = min(a.3.count, b.3.count)
+    for i in 0..<limit {
+        let ai = a.3[i], bi = b.3[i]
+        if ai == bi { continue }
+        let an = Int(ai), bn = Int(bi)
+        switch (an, bn) {
+        case let (x?, y?): return x > y
+        case (_?, nil): return false
+        case (nil, _?): return true
+        default: return ai > bi
+        }
+    }
+    return a.3.count > b.3.count
+}
+
 @MainActor
 func platformManagedHostLabel(hub: HubStore) -> String? {
     #if os(macOS)

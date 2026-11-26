@@ -185,6 +185,13 @@ struct BotListView: View {
                 )
                 .padding(.bottom, 4)
         }
+        if hub.showUpdateBanner {
+            updateBanner
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(p.s1, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .padding(.bottom, 4)
+        }
         if let to = hub.takeovers.first {
             takeoverCard(to)
                 .padding(12)
@@ -242,6 +249,13 @@ struct BotListView: View {
             Section {
                 compatBanner
                     .listRowBackground(hub.isClientUpgradeRequired ? p.pink : p.s1)
+            }
+            .selectionDisabled()
+        }
+        if hub.showUpdateBanner {
+            Section {
+                updateBanner
+                    .listRowBackground(p.s1)
             }
             .selectionDisabled()
         }
@@ -326,6 +340,36 @@ struct BotListView: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
             }
+        }
+        .padding(.vertical, 2)
+    }
+
+    private var updateBanner: some View {
+        let latest = hub.updateStatus?.latest
+        let ver = (latest?.tag.isEmpty == false ? latest?.tag : nil) ?? "v\(latest?.version ?? "")"
+        return HStack(alignment: .center, spacing: 8) {
+            Text(hub.t("updateBannerText", ["version": ver]))
+                .font(.system(size: AppFont.secondary))
+                .foregroundStyle(p.text2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if let rawURL = latest?.url, let u = URL(string: rawURL) {
+                Button {
+                    openExternalURL(u)
+                } label: {
+                    Text(hub.t("updateBannerView"))
+                        .font(.system(size: AppFont.caption, weight: .semibold))
+                        .foregroundStyle(p.page)
+                }
+                .tint(p.accent)
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+            }
+            Button(hub.t("dismiss")) {
+                hub.dismissUpdateBanner()
+            }
+            .font(.system(size: AppFont.caption, weight: .medium))
+            .buttonStyle(.bordered)
+            .controlSize(.small)
         }
         .padding(.vertical, 2)
     }

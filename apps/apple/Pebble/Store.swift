@@ -57,6 +57,9 @@ final class HubStore {
     var serverInfo: ServerInfo?
     var unsupportedCaps: Set<String> = []
     var dismissedCompatProto = 0
+    var updateStatus: UpdateStatus?
+    var updateChecking = false
+    var dismissedUpdateVersion = ""
     var routines: [String: [RoutineItem]] = [:]
     var pendingStageOpen: StageOpenEvent?
     var pendingChatInsert: PendingChatInsert?
@@ -99,6 +102,28 @@ final class HubStore {
         }
     }
 
+    var effectiveHasUpdate: Bool {
+        guard let st = updateStatus else { return false }
+        if st.hasUpdate { return true }
+        if let ver = st.latest?.version, !ver.isEmpty {
+            return isSemVerNewer(ver, than: platformCurrentShortVersion)
+        }
+        return false
+    }
+
+    var showUpdateBanner: Bool {
+        guard !isClientUpgradeRequired,
+              effectiveHasUpdate,
+              let ver = updateStatus?.latest?.version, !ver.isEmpty else { return false }
+        return dismissedUpdateVersion != ver
+    }
+
+    func dismissUpdateBanner() {
+        guard let ver = updateStatus?.latest?.version, !ver.isEmpty else { return }
+        dismissedUpdateVersion = ver
+        UserDefaults.standard.set(ver, forKey: "pebble.dismissedUpdate")
+    }
+
     static func isLocalDesktopTarget(_ target: String) -> Bool {
         target.isEmpty || target == "local" || target.hasPrefix("virtual:") || target.hasPrefix("local:virtual:")
     }
@@ -109,6 +134,7 @@ final class HubStore {
         langPref = d.string(forKey: "bothub.lang") ?? "system"
         tsBound = d.bool(forKey: "bothub.tsBound")
         tsControlUrl = d.string(forKey: "bothub.tsControlUrl") ?? ""
+        dismissedUpdateVersion = d.string(forKey: "pebble.dismissedUpdate") ?? ""
         L.lang = lang
         #if os(iOS)
         PebbleSharedStore.setPreferredLang(lang)

@@ -27,6 +27,8 @@ internal suspend fun PebbleStore.connectProfileImpl(profile: ServerProfile) {
     serverInfo = null
     unsupportedCaps = emptySet()
     dismissedCompatProto = 0
+    updateStatus = null
+    updateChecking = false
 
     try {
         connectEndpoint(profile, profile.address, profile.token, isStandby = false, seq = seq)
@@ -154,6 +156,7 @@ private suspend fun PebbleStore.connectEndpoint(
         }
         scope.launch { runCatching { client.call<QuestionsResp>("/api/questions") }.getOrNull()?.items?.let { if (seq == connSeq) questions = it } }
         scope.launch { runCatching { client.call<ApprovalsResp>("/api/approvals") }.getOrNull()?.items?.let { if (seq == connSeq) approvals = it } }
+        scope.launch { runCatching { client.call<UpdateStatus>("/api/update") }.getOrNull()?.let { if (seq == connSeq) updateStatus = it } }
         startStream(url, tok)
     } catch (err: Throwable) {
         if (seq == connSeq) {
@@ -274,6 +277,7 @@ internal suspend fun PebbleStore.removeServerImpl(id: String) {
         takeovers = emptyList(); questions = emptyList(); approvals = emptyList()
         activeTakeoverIds.clear(); activeApprovalIds.clear()
         serverInfo = null; unsupportedCaps = emptySet(); dismissedCompatProto = 0
+        updateStatus = null; updateChecking = false
         connState = ConnState.IDLE
         connError = ""
     }
