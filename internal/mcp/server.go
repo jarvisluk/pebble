@@ -434,6 +434,15 @@ func toolDefinitions() []map[string]any {
 						"type":        "string",
 						"description": "Optional target device/desktop ID (default: local).",
 					},
+					"workspaceId": map[string]any{
+						"type":        "string",
+						"description": "Optional authorized workspace ID on a remote device node.",
+					},
+					"isolation": map[string]any{
+						"type":        "string",
+						"enum":        []string{"current", "worktree", "temp_dir"},
+						"description": "Optional code isolation mode for local worker tasks (current, worktree, or temp_dir).",
+					},
 					"harness": map[string]any{
 						"type":        "string",
 						"description": "Optional harness override.",
@@ -903,6 +912,8 @@ func (s *Server) callTool(ctx context.Context, name string, rawArgs json.RawMess
 			Prompt         string   `json:"prompt"`
 			Kind           string   `json:"kind"`
 			DeviceID       string   `json:"deviceId"`
+			WorkspaceID    string   `json:"workspaceId"`
+			Isolation      string   `json:"isolation"`
 			Harness        string   `json:"harness"`
 			Model          string   `json:"model"`
 			PermissionMode string   `json:"permissionMode"`
@@ -936,6 +947,12 @@ func (s *Server) callTool(ctx context.Context, name string, rawArgs json.RawMess
 		}
 		if strings.TrimSpace(args.DeviceID) != "" {
 			payload["deviceId"] = strings.TrimSpace(args.DeviceID)
+		}
+		if strings.TrimSpace(args.WorkspaceID) != "" {
+			payload["workspaceId"] = strings.TrimSpace(args.WorkspaceID)
+		}
+		if strings.TrimSpace(args.Isolation) != "" {
+			payload["isolation"] = strings.TrimSpace(args.Isolation)
 		}
 		if strings.TrimSpace(args.Harness) != "" {
 			payload["harness"] = strings.TrimSpace(args.Harness)

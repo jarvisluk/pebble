@@ -11,6 +11,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -332,5 +334,85 @@ func TestSSEMonotonicSeqAndSinceReplay(t *testing.T) {
 	}
 	if !sawT2Completed {
 		t.Fatalf("expected ?since=%s replay to include task_completed for %s, got %v", firstSeq, t2.ID, replayed)
+	}
+}
+
+func TestHTTPTaskDiffAndRollback(t *testing.T) {
+	tmp := t.TempDir()
+	repo := filepath.Join(tmp, "repo")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v failed: %v\n%s", args, err, out)
+		}
+	}
+	git("init")
+	git("config", "user.name", "Test")
+	git("config", "user.email", "test@example.com")
+	if err := os.WriteFile(filepath.Join(repo, "app.txt"), []byte("v1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git("add", "app.txt")
+	git("commit", "--no-verify", "-m", "chore: initial commit")
+
+	store, err := state.NewStore(filepath.Join(tmp, "sessions.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := harness.NewRegistry()
+	reg.Register(&taskHTTPHarness{
+		fn: func(_ context.Context, opts harness.RunOptions) (*harness.TurnResult, error) {
+			if err := os.WriteFile(filepath.Join(opts.Bot.Workspace, "app.txt"), []byte("v2\n"), 0o644); err != nil {
+				return nil, err
+			}
+			return &harness.TurnResult{BotID: opts.Bot.ID, SessionID: "s-wt", Text: "edited"}, nil
+		},
+	})
+	cfg := &config.HubConfig{
+		ProjectRoot: tmp,
+		SharedDir:   filepath.Join(tmp, "_shared"),
+		StateFile:   filepath.Join(tmp, "sessions.json"),
+		Bots:        []config.BotConfig{{ID: "ops", Name: "Ops", Workspace: repo, Harness: "opencode"}},
+	}
+	h := hub.New(cfg, store, nil, reg)
+	defer h.Close()
+
+	srv := NewHTTPServer(h, config.HTTPConfig{Host: "127.0.0.1"})
+	defer srv.Shutdown(t.Context())
+	mux := srv.srv.Handler
+
+	doJSON := func(method, path, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		req.Host = "127.0.0.1:3789"
+		if body != "" {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		return rec
+	}
+
+	spawnRec := doJSON(http.MethodPost, "/api/bots/ops/tasks", `{"prompt":"edit","isolation":"worktree","delivery":"silent"}`)
+	if spawnRec.Code != http.StatusCreated {
+		t.Fatalf("spawn failed: %d %s", spawnRec.Code, spawnRec.Body.String())
+	}
+	var tk state.BotTask
+	_ = json.Unmarshal(spawnRec.Body.Bytes(), &tk)
+	if _, err := h.WaitTask(context.Background(), tk.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	diffRec := doJSON(http.MethodGet, "/api/tasks/"+tk.ID+"/diff", "")
+	if diffRec.Code != http.StatusOK || !strings.Contains(diffRec.Body.String(), "app.txt") || !strings.Contains(diffRec.Body.String(), "+v2") {
+		t.Fatalf("GET diff failed: %d %s", diffRec.Code, diffRec.Body.String())
+	}
+
+	rbRec := doJSON(http.MethodPost, "/api/tasks/"+tk.ID+"/rollback", `{"removeWorktree":true}`)
+	if rbRec.Code != http.StatusOK || !strings.Contains(rbRec.Body.String(), `"removedWorktree":true`) {
+		t.Fatalf("POST rollback failed: %d %s", rbRec.Code, rbRec.Body.String())
 	}
 }

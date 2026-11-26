@@ -182,6 +182,8 @@ func NewHTTPServer(h *hub.Hub, cfg config.HTTPConfig) *HTTPServer {
 	mux.HandleFunc("GET /api/tasks/{taskId}/events", s.handleListTaskEvents)
 	mux.HandleFunc("POST /api/tasks/{taskId}/send", s.handleSendToTask)
 	mux.HandleFunc("POST /api/tasks/{taskId}/cancel", s.handleCancelTask)
+	mux.HandleFunc("GET /api/tasks/{taskId}/diff", s.handleTaskDiff)
+	mux.HandleFunc("POST /api/tasks/{taskId}/rollback", s.handleTaskRollback)
 	mux.HandleFunc("GET /api/settings", s.handleSettings)
 	mux.HandleFunc("PUT /api/settings", s.handlePutSettings)
 	mux.HandleFunc("PATCH /api/settings", s.handlePutSettings)

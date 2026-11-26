@@ -23,6 +23,8 @@ type TaskSpawnRequest struct {
 	Title           string            `json:"title,omitempty"`
 	Prompt          string            `json:"prompt"`
 	DeviceID        string            `json:"deviceId,omitempty"`       // default "local"
+	WorkspaceID     string            `json:"workspaceId,omitempty"`
+	Isolation       string            `json:"isolation,omitempty"`      // "" | "current" | "worktree" | "temp_dir"
 	Harness         string            `json:"harness,omitempty"`
 	Model           string            `json:"model,omitempty"`
 	PermissionMode  string            `json:"permissionMode,omitempty"`
@@ -76,7 +78,7 @@ func (h *Hub) notifyTaskWaiters(taskID string) {
 
 // SpawnTask creates a durable BotTask, persists it, and schedules concurrent execution
 // without blocking the Bot's serial main botLane.
-func (h *Hub) SpawnTask(_ context.Context, req TaskSpawnRequest) (*state.BotTask, error) {
+func (h *Hub) SpawnTask(ctx context.Context, req TaskSpawnRequest) (*state.BotTask, error) {
 	if h.store == nil {
 		return nil, errors.New("state store unavailable")
 	}
@@ -113,6 +115,11 @@ func (h *Hub) SpawnTask(_ context.Context, req TaskSpawnRequest) (*state.BotTask
 		return nil, fmt.Errorf("invalid delivery %q (expected wake, receipt, or silent)", req.Delivery)
 	}
 
+	isolation, err := normalizeTaskIsolation(req.Isolation)
+	if err != nil {
+		return nil, err
+	}
+
 	permMode := strings.TrimSpace(req.PermissionMode)
 	if permMode != "" {
 		norm, err := config.NormalizePermissionMode(permMode)
@@ -124,12 +131,25 @@ func (h *Hub) SpawnTask(_ context.Context, req TaskSpawnRequest) (*state.BotTask
 		permMode = bot.EffectivePermissionMode()
 	}
 
+	deviceID := strings.TrimSpace(req.DeviceID)
+	if deviceID == "" || strings.EqualFold(deviceID, "local") {
+		deviceID = "local"
+	}
+	remote := isRemoteAgentTask(kind, deviceID)
+	if remote {
+		if _, err := h.validateRemoteAgentNode(deviceID); err != nil {
+			return nil, err
+		}
+	}
+
 	targetHarness := strings.TrimSpace(req.Harness)
 	if targetHarness == "" {
 		targetHarness = bot.Harness
 	}
-	if _, err := h.registry.Get(targetHarness); err != nil {
-		return nil, err
+	if !remote {
+		if _, err := h.registry.Get(targetHarness); err != nil {
+			return nil, err
+		}
 	}
 	targetModel := strings.TrimSpace(req.Model)
 	if targetModel == "" {
@@ -142,16 +162,13 @@ func (h *Hub) SpawnTask(_ context.Context, req TaskSpawnRequest) (*state.BotTask
 		}
 	}
 
-	deviceID := strings.TrimSpace(req.DeviceID)
-	if deviceID == "" {
-		deviceID = "local"
-	}
-
 	workdir := strings.TrimSpace(req.Workdir)
-	if workdir == "" {
-		workdir = bot.Workspace
-	} else if !filepath.IsAbs(workdir) && bot.Workspace != "" {
-		workdir = filepath.Join(bot.Workspace, workdir)
+	if !remote {
+		if workdir == "" {
+			workdir = bot.Workspace
+		} else if !filepath.IsAbs(workdir) && bot.Workspace != "" {
+			workdir = filepath.Join(bot.Workspace, workdir)
+		}
 	}
 
 	var deps []string
@@ -204,6 +221,8 @@ func (h *Hub) SpawnTask(_ context.Context, req TaskSpawnRequest) (*state.BotTask
 		Model:          targetModel,
 		PermissionMode: permMode,
 		Workdir:        workdir,
+		WorkspaceID:    strings.TrimSpace(req.WorkspaceID),
+		Isolation:      isolation,
 		Delivery:       delivery,
 		DependsOn:      deps,
 		ParentTaskID:   strings.TrimSpace(req.ParentTaskID),
@@ -214,6 +233,17 @@ func (h *Hub) SpawnTask(_ context.Context, req TaskSpawnRequest) (*state.BotTask
 	})
 	if err != nil {
 		return nil, err
+	}
+
+	if err := h.prepareTaskIsolation(ctx, &task); err != nil {
+		task.Status = state.TaskStatusFailed
+		task.Error = err.Error()
+		task.FinishedAt = time.Now().UTC().Format(time.RFC3339Nano)
+		_ = h.store.UpdateBotTask(task)
+		return nil, err
+	}
+	if task.WorktreePath != "" || task.WorktreeBranch != "" {
+		_ = h.store.UpdateBotTask(task)
 	}
 
 	_, _ = h.store.AppendBotTaskEvent(task.ID, task.BotID, state.TaskEventStatus, map[string]any{
@@ -280,6 +310,11 @@ func (h *Hub) SendToTask(_ context.Context, taskID, message string) (*state.BotT
 	}
 	if task.Status == state.TaskStatusCancelled {
 		return nil, errors.New("cannot send message to cancelled task")
+	}
+	if isRemoteAgentTask(task.Kind, task.DeviceID) {
+		if _, err := h.validateRemoteAgentNode(task.DeviceID); err != nil {
+			return nil, err
+		}
 	}
 
 	_, _ = h.store.AppendBotTaskEvent(task.ID, task.BotID, state.TaskEventMessage, map[string]any{
@@ -351,6 +386,8 @@ func (h *Hub) SendToTask(_ context.Context, taskID, message string) (*state.BotT
 		Title:          task.Title,
 		Prompt:         message,
 		DeviceID:       task.DeviceID,
+		WorkspaceID:    task.WorkspaceID,
+		Isolation:      task.Isolation,
 		Harness:        task.Harness,
 		Model:          task.Model,
 		PermissionMode: task.PermissionMode,
@@ -391,6 +428,12 @@ func (h *Hub) CancelTask(taskID string) (*state.BotTask, error) {
 
 	if cancelFn != nil {
 		cancelFn()
+	}
+	if isRemoteAgentTask(task.Kind, task.DeviceID) && h.nodes != nil {
+		cctx, ccancel := context.WithTimeout(context.Background(), 2*time.Second)
+		_ = h.nodes.CancelAgentTask(cctx, task.DeviceID, taskID, "task cancelled")
+		ccancel()
+		h.removeRemoteBridge(taskID)
 	}
 	h.CancelApprovalsByTask(taskID)
 	h.CancelQuestionsByTask(taskID)
@@ -661,6 +704,7 @@ func (h *Hub) runBotTask(run *activeTaskRun, task state.BotTask, initialPrompt s
 	}
 
 	prompt := initialPrompt
+	turnFollowUp := isFollowUp
 	for {
 		if run.isCancelled() || taskCtx.Err() != nil {
 			h.finalizeTaskCancelled(&task, req)
@@ -683,7 +727,7 @@ func (h *Hub) runBotTask(run *activeTaskRun, task state.BotTask, initialPrompt s
 		})
 
 		started := time.Now()
-		res, err := h.executeBotTaskTurn(taskCtx, &task, prompt, req, run.hop)
+		res, err := h.executeBotTaskTurn(taskCtx, &task, prompt, req, run.hop, turnFollowUp)
 		elapsedMs := time.Since(started).Milliseconds()
 
 		if res != nil {
@@ -741,6 +785,7 @@ func (h *Hub) runBotTask(run *activeTaskRun, task state.BotTask, initialPrompt s
 		if len(run.followUps) > 0 {
 			prompt = run.followUps[0]
 			run.followUps = run.followUps[1:]
+			turnFollowUp = true
 			run.mu.Unlock()
 			_ = h.store.UpdateBotTask(task)
 			continue
@@ -771,6 +816,7 @@ func (h *Hub) runBotTask(run *activeTaskRun, task state.BotTask, initialPrompt s
 }
 
 func (h *Hub) finalizeTaskCancelled(task *state.BotTask, req TaskSpawnRequest) {
+	h.removeRemoteBridge(task.ID)
 	task.Status = state.TaskStatusCancelled
 	if task.FinishedAt == "" {
 		task.FinishedAt = time.Now().UTC().Format(time.RFC3339Nano)
@@ -795,6 +841,7 @@ func (h *Hub) finalizeTaskCancelled(task *state.BotTask, req TaskSpawnRequest) {
 }
 
 func (h *Hub) finalizeTaskFailed(task *state.BotTask, errMsg string, req TaskSpawnRequest, hop int) {
+	h.removeRemoteBridge(task.ID)
 	task.Status = state.TaskStatusFailed
 	task.Error = errMsg
 	task.FinishedAt = time.Now().UTC().Format(time.RFC3339Nano)
@@ -819,7 +866,7 @@ func (h *Hub) finalizeTaskFailed(task *state.BotTask, errMsg string, req TaskSpa
 	}
 }
 
-func (h *Hub) executeBotTaskTurn(ctx context.Context, task *state.BotTask, prompt string, req TaskSpawnRequest, hop int) (*harness.TurnResult, error) {
+func (h *Hub) executeBotTaskTurn(ctx context.Context, task *state.BotTask, prompt string, req TaskSpawnRequest, hop int, isFollowUp bool) (*harness.TurnResult, error) {
 	h.lanesMu.RLock()
 	lane, ok := h.lanes[task.BotID]
 	var bot config.BotConfig
@@ -851,9 +898,6 @@ func (h *Hub) executeBotTaskTurn(ctx context.Context, task *state.BotTask, promp
 		bot.Model = m
 		bot.ModelInherited = false
 	}
-	if w := strings.TrimSpace(task.Workdir); w != "" {
-		bot.Workspace = w
-	}
 	if req.TimeoutSec > 0 {
 		bot.TimeoutSec = req.TimeoutSec
 	}
@@ -863,6 +907,22 @@ func (h *Hub) executeBotTaskTurn(ctx context.Context, task *state.BotTask, promp
 		bot.PermissionMode = norm
 		bot.AutoApprove = nil
 	}
+
+	if isRemoteAgentTask(task.Kind, task.DeviceID) {
+		remoteEnv := make(map[string]string, len(req.ExtraEnv)+2)
+		remoteEnv["PEBBLE_HOP"] = strconv.Itoa(hop)
+		if role := strings.TrimSpace(req.MCPRole); role != "" {
+			remoteEnv["PEBBLE_MCP_ROLE"] = role
+		}
+		for k, v := range req.ExtraEnv {
+			if k != "" && v != "" {
+				remoteEnv[k] = v
+			}
+		}
+		return h.executeRemoteBotTaskTurn(ctx, task, bot, permMode, hubURL, remoteEnv, prompt, req, isFollowUp)
+	}
+
+	bot.Workspace = h.effectiveTaskExecDir(*task, bot.Workspace)
 
 	runner, err := h.registry.Get(bot.Harness)
 	if err != nil {
@@ -1026,6 +1086,7 @@ func (h *Hub) executeBotTaskTurn(ctx context.Context, task *state.BotTask, promp
 	if res != nil && len(res.Tools) == 0 && len(tools) > 0 {
 		res.Tools = tools
 	}
+	_ = h.captureTaskCheckpoint(context.Background(), task)
 	return res, err
 }
 

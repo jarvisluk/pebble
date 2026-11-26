@@ -100,6 +100,7 @@ type Hub struct {
 	tasksMu        sync.Mutex
 	taskRuns       map[string]*activeTaskRun
 	taskWaiters    map[string][]chan struct{}
+	remoteTasks    map[string]*remoteTaskBridge
 
 	push *push.Manager
 
@@ -165,6 +166,7 @@ func New(cfg *config.HubConfig, store *state.Store, messages *state.MessageStore
 		taskBaseCancel:     taskBaseCancel,
 		taskRuns:           make(map[string]*activeTaskRun),
 		taskWaiters:        make(map[string][]chan struct{}),
+		remoteTasks:        make(map[string]*remoteTaskBridge),
 		hops:               make(map[string]int),
 		questions:          make(map[string]*pendingQuestionEntry),
 		approvals:          make(map[string]*pendingApprovalEntry),
@@ -181,6 +183,10 @@ func New(cfg *config.HubConfig, store *state.Store, messages *state.MessageStore
 			Type:    "nodes_changed",
 			Payload: map[string]any{"nodes": h.nodes.List()},
 		})
+	})
+	h.nodes.SetLifecycleHooks(node.NodeLifecycleHooks{
+		OnNodeReconnected: h.handleRemoteNodeReconnected,
+		OnNodeOffline:     h.handleRemoteNodeOffline,
 	})
 	h.desktop = desktop.NewCoordinator(
 		func(st desktop.ScreenState) {

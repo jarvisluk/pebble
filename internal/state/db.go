@@ -155,6 +155,11 @@ CREATE TABLE IF NOT EXISTS bot_tasks (
   model              TEXT NOT NULL DEFAULT '',
   permission_mode    TEXT NOT NULL DEFAULT '',
   workdir            TEXT NOT NULL DEFAULT '',
+  workspace_id       TEXT NOT NULL DEFAULT '',
+  isolation          TEXT NOT NULL DEFAULT '',
+  worktree_branch    TEXT NOT NULL DEFAULT '',
+  worktree_path      TEXT NOT NULL DEFAULT '',
+  checkpoint_ref     TEXT NOT NULL DEFAULT '',
   delivery           TEXT NOT NULL DEFAULT 'receipt',
   depends_on_json    TEXT NOT NULL DEFAULT '[]',
   parent_task_id     TEXT NOT NULL DEFAULT '',
@@ -227,7 +232,52 @@ func openSQLite(dbPath string) (*sql.DB, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("migrate routine_runs.slot_key: %w", err)
 	}
+	if err := ensureBotTasksWorktreeColumns(db); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("migrate bot_tasks worktree columns: %w", err)
+	}
 	return db, nil
+}
+
+func ensureBotTasksWorktreeColumns(db *sql.DB) error {
+	rows, err := db.Query(`PRAGMA table_info(bot_tasks)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	existing := make(map[string]bool)
+	for rows.Next() {
+		var (
+			cid        int
+			name, ctyp string
+			notnull    int
+			dflt       sql.NullString
+			pk         int
+		)
+		if err := rows.Scan(&cid, &name, &ctyp, &notnull, &dflt, &pk); err != nil {
+			return err
+		}
+		existing[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	cols := []string{
+		"workspace_id",
+		"isolation",
+		"worktree_branch",
+		"worktree_path",
+		"checkpoint_ref",
+	}
+	for _, col := range cols {
+		if existing[col] {
+			continue
+		}
+		if _, err := db.Exec(`ALTER TABLE bot_tasks ADD COLUMN ` + col + ` TEXT NOT NULL DEFAULT ''`); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func ensureRoutineRunsSlotKeyColumn(db *sql.DB) error {
