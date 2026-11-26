@@ -3,13 +3,13 @@ import type {
   ActiveDesktopTarget,
   BotDetail,
   BotStatus,
+  BotTask,
   ChatMessage,
   ConfirmOptions,
   LangPref,
   NodeInfo,
   PendingApproval,
   PendingQuestion,
-  PermissionMode,
   ResolvedLang,
   ScreenState,
   ServerInfo,
@@ -59,11 +59,17 @@ export default function App() {
   const [lastMap, setLastMap] = useState<Record<string, ChatMessage>>({});
   const [unreadMap, setUnreadMap] = useState<Record<string, number>>({});
   const [toolMap, setToolMap] = useState<Record<string, string>>({});
+  const [tasksMap, setTasksMap] = useState<Record<string, BotTask[]>>({});
+  const [taskToolMap, setTaskToolMap] = useState<Record<string, string>>({});
+  const [taskChunksMap, setTaskChunksMap] = useState<Record<string, string>>({});
+  const [taskEventSeqMap, setTaskEventSeqMap] = useState<Record<string, number>>({});
+  const [inspectedTaskId, setInspectedTaskId] = useState<string | null>(null);
   const [filter, setFilter] = useState('');
   const [settings, setSettings] = useState<SettingsData | null>(null);
   const [modelsMap, setModelsMap] = useState<Record<string, string[]>>({});
   const modelsRef = useRef<Record<string, string[]>>({});
   const modelsInFlightRef = useRef<Record<string, Promise<string[]> | undefined>>({});
+  const [nodes, setNodes] = useState<NodeInfo[]>([]);
   const [nodesFromEvents, setNodesFromEvents] = useState<NodeInfo[] | null>(null);
   const [takeovers, setTakeovers] = useState<TakeoverRequest[]>([]);
   const [approvals, setApprovals] = useState<PendingApproval[]>([]);
@@ -141,6 +147,7 @@ export default function App() {
   const toastTimerRef = useRef<number | null>(null);
   const unboxAutoPromptedRef = useRef(false);
   const esRef = useRef<EventSource | null>(null);
+  const lastEventIdRef = useRef<number>(0);
   const activeBotIdRef = useRef(activeBotId);
   const viewRef = useRef(view);
   const deskOpenRef = useRef(deskOpen);
@@ -295,16 +302,19 @@ export default function App() {
     setMobileSideOpen(false);
     setPanelOpen(false);
     setCollabPeerId(null);
+    setInspectedTaskId(null);
     setCreateOpen(false);
   }, []);
 
 
   const {
     loadMessages,
+    loadBotTasks,
     loadBots,
     loadSettings,
     loadModels,
     resetModels,
+    refreshNodes,
     refreshTakeovers,
     applyActiveDesktopTarget,
     refreshActiveDesktopTarget,
@@ -324,6 +334,8 @@ export default function App() {
     modelsRef,
     modelsInFlightRef,
     setBots,
+    setTasksMap,
+    setNodes,
     setActiveBotId,
     setMsgsMap,
     setLastMap,
@@ -361,6 +373,7 @@ export default function App() {
     closeAllOverlays,
     confirmLeaveSettingsThen,
     loadMessages,
+    loadBotTasks,
     loadBots,
     refreshApprovals,
     refreshQuestions,
@@ -386,11 +399,13 @@ export default function App() {
       setDeskTarget(activeDeskTargetRef.current.target || 'local');
     }
   }, [activeBotId, activeBot?.desktopTarget]);
-  const shadeOpen = mobileSideOpen || panelOpen || Boolean(collabPeerId);
+  const effectiveNodes = nodesFromEvents ?? nodes;
+  const shadeOpen = mobileSideOpen || panelOpen || Boolean(collabPeerId) || Boolean(inspectedTaskId);
 
 
   const { connectEvents, maybeAutoOpenUnbox } = useHubEvents({
     esRef,
+    lastEventIdRef,
     activeBotIdRef,
     deskOpenRef,
     deskTargetRef,
@@ -400,6 +415,7 @@ export default function App() {
     loginOpenRef,
     loadBots,
     loadSettings,
+    refreshNodes,
     refreshTakeovers,
     refreshActiveDesktopTarget,
     refreshApprovals,
@@ -413,6 +429,10 @@ export default function App() {
     setUnreadMap,
     setToolMap,
     setBots,
+    setTasksMap,
+    setTaskToolMap,
+    setTaskChunksMap,
+    setTaskEventSeqMap,
     setNodesFromEvents,
     setLiveScreen,
     setScreenSeq,
@@ -439,6 +459,7 @@ export default function App() {
     createOpen,
     panelOpen,
     collabPeerId,
+    inspectedTaskId,
     mobileSideOpen,
     viewRef,
     filterInputRef,
@@ -454,6 +475,7 @@ export default function App() {
     setView,
     setSideWidth,
     setSideResizing,
+    setInspectedTaskId,
   });
 
   if (unboxOpen) {
@@ -613,6 +635,9 @@ export default function App() {
               bots={bots}
             activeBot={activeBot}
             messages={activeBotId ? msgsMap[activeBotId] || [] : []}
+            tasks={activeBotId ? tasksMap[activeBotId] || [] : []}
+            taskToolMap={taskToolMap}
+            nodes={effectiveNodes}
             seenIds={seenIdsRef.current}
             toolName={activeBotId ? toolMap[activeBotId] : undefined}
             takeovers={takeovers}
@@ -659,6 +684,7 @@ export default function App() {
             onSwitchBackLocal={() => void selectDesktopTarget('local')}
             onResolveTakeover={(to) => void handleResolveTakeover(to)}
             onOpenDetail={() => void openPanel()}
+            onInspectTask={(taskId) => setInspectedTaskId(taskId)}
             onOpenCollab={(peerId) => {
               setPanelOpen(false);
               setCollabPeerId(peerId);
@@ -733,6 +759,9 @@ export default function App() {
         activeBot={activeBot}
         activeBotId={activeBotId}
         msgsMap={msgsMap}
+        tasksMap={tasksMap}
+        taskToolMap={taskToolMap}
+        nodes={effectiveNodes}
         seenIds={seenIdsRef.current}
         toolMap={toolMap}
         takeovers={takeovers}
@@ -771,6 +800,10 @@ export default function App() {
         handleResolveTakeover={handleResolveTakeover}
         handleSendMessage={handleSendMessage}
         handleInterrupt={handleInterrupt}
+        onInspectTask={(taskId) => {
+          setDeskOpen(false);
+          setInspectedTaskId(taskId);
+        }}
         onOpenPermissions={() => {
           setDeskOpen(false);
           setSettingsTab('desktop');
@@ -786,6 +819,15 @@ export default function App() {
         panelOpen={panelOpen}
         panelDetail={panelDetail}
         bots={bots}
+        nodes={effectiveNodes}
+        tasksMap={tasksMap}
+        taskToolMap={taskToolMap}
+        taskChunksMap={taskChunksMap}
+        taskEventSeqMap={taskEventSeqMap}
+        inspectedTaskId={inspectedTaskId}
+        approvals={approvals}
+        questions={questions}
+        takeovers={takeovers}
         settings={settings}
         modelsMap={modelsMap}
         routineRefreshSeq={routineRefreshSeq}
@@ -803,6 +845,8 @@ export default function App() {
         toastMsg={toastMsg}
         closeAllOverlays={closeAllOverlays}
         setPanelOpen={setPanelOpen}
+        setTasksMap={setTasksMap}
+        setInspectedTaskId={setInspectedTaskId}
         showToast={showToast}
         setConfirmOpts={setConfirmOpts}
         setBots={setBots}
@@ -819,12 +863,22 @@ export default function App() {
         setDeskOpen={setDeskOpen}
         setCollabPeerId={setCollabPeerId}
         setCreateOpen={setCreateOpen}
+        onReplyApproval={handleReplyApproval}
+        onReplyQuestion={handleReplyQuestion}
+        onResolveTakeover={handleResolveTakeover}
+        onOpenDesktopTarget={(target) => {
+          void selectDesktopTarget(target || 'local');
+          setStageKind('desktop');
+          setActiveStageTabId('desktop');
+          setDeskOpen(true);
+        }}
         onLoginSuccess={async () => {
           setLoginOpen(false);
           setUnsupportedCaps(new Set());
           setCompatDismissedProto(0);
           connectEvents();
           await loadBots();
+          void refreshNodes();
           void refreshTakeovers();
           void refreshActiveDesktopTarget();
           void refreshApprovals();

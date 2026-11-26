@@ -21,6 +21,8 @@ export interface PendingApproval {
   id: string;
   botId: string;
   botName?: string;
+  taskId?: string;
+  deviceId?: string;
   toolName: string;
   kind: 'shell' | 'write' | 'read' | 'mcp' | 'network' | 'other' | string;
   title?: string;
@@ -170,17 +172,42 @@ export interface UpdateStatus {
   config: UpdateConfig;
 }
 
+export interface NodeHarnessInfo {
+  kind: string;
+  label?: string;
+  installed: boolean;
+  authStatus?: 'ready' | 'needs_login' | 'unknown' | string;
+  authDetail?: string;
+  permissionCapabilities?: PermissionCapabilities;
+}
+
+export interface NodeWorkspace {
+  id: string;
+  name: string;
+  path: string;
+  isGit?: boolean;
+  defaultBranch?: string;
+}
+
 export interface NodeInfo {
   id: string;
   name?: string;
   os?: string;
   arch?: string;
   hostname?: string;
+  homeDir?: string;
   permissions?: string[];
   protocolVersion?: number;
   capabilities?: string[];
   version?: string;
   connected: boolean;
+  reconnecting?: boolean;
+  transport?: 'ws' | 'poll' | string;
+  lastSeenAt?: string;
+  harnesses?: NodeHarnessInfo[];
+  workspaces?: NodeWorkspace[];
+  maxPermissionMode?: PermissionMode | string;
+  activeTaskIds?: string[];
 }
 
 export interface SlashCommandItem {
@@ -311,6 +338,8 @@ export interface TakeoverRequest {
   target: string;
   botId: string;
   botName?: string;
+  taskId?: string;
+  deviceId?: string;
   reason: string;
   app?: string;
   createdAt?: string;
@@ -439,9 +468,89 @@ export interface PendingQuestion {
   id: string;
   botId: string;
   botName?: string;
+  taskId?: string;
+  deviceId?: string;
   title?: string;
   fields: QuestionField[];
   createdAt: string;
+}
+
+export type BotTaskKind = 'worker' | 'routine' | 'desktop';
+export type BotTaskStatus =
+  | 'queued'
+  | 'running'
+  | 'waiting_approval'
+  | 'waiting_question'
+  | 'waiting_takeover'
+  | 'completed'
+  | 'failed'
+  | 'cancelled';
+export type BotTaskDelivery = 'wake' | 'receipt' | 'silent';
+
+export interface BotTask {
+  id: string;
+  botId: string;
+  kind: BotTaskKind | string;
+  title?: string;
+  prompt: string;
+  status: BotTaskStatus | string;
+  deviceId: string;
+  harness?: string;
+  model?: string;
+  permissionMode?: PermissionMode | string;
+  workdir?: string;
+  delivery: BotTaskDelivery | string;
+  dependsOn?: string[];
+  parentTaskId?: string;
+  routineId?: string;
+  routineName?: string;
+  trigger?: string;
+  slotKey?: string;
+  runtimeSessionId?: string;
+  output?: string;
+  error?: string;
+  tools?: string[];
+  durationMs?: number;
+  costUsd?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  createdAt: string;
+  startedAt?: string;
+  finishedAt?: string;
+  injectedAt?: string;
+}
+
+export type BotTaskEventType =
+  | 'status'
+  | 'chunk'
+  | 'tool_use'
+  | 'message'
+  | 'approval'
+  | 'question'
+  | 'takeover'
+  | 'error';
+
+export interface BotTaskEvent {
+  seq: number;
+  taskId: string;
+  botId: string;
+  eventType: BotTaskEventType | string;
+  payload?: Record<string, unknown> | string;
+  createdAt: string;
+}
+
+export interface SpawnTaskRequest {
+  kind?: BotTaskKind | string;
+  title?: string;
+  prompt: string;
+  deviceId?: string;
+  harness?: string;
+  model?: string;
+  permissionMode?: PermissionMode | string;
+  workdir?: string;
+  delivery?: BotTaskDelivery | string;
+  dependsOn?: string[];
+  parentTaskId?: string;
 }
 
 export interface WorkspaceFileEntry {

@@ -2,8 +2,10 @@ import React from 'react';
 import type {
   ActiveDesktopTarget,
   BotStatus,
+  BotTask,
   ChatMessage,
   HarnessInfo,
+  NodeInfo,
   PendingApproval,
   PendingQuestion,
   PermissionMode,
@@ -30,6 +32,9 @@ interface StageShellProps {
   activeBot?: BotStatus;
   activeBotId: string | null;
   msgsMap: Record<string, ChatMessage[]>;
+  tasksMap: Record<string, BotTask[]>;
+  taskToolMap: Record<string, string>;
+  nodes: NodeInfo[];
   seenIds: Set<string>;
   toolMap: Record<string, string>;
   takeovers: TakeoverRequest[];
@@ -73,6 +78,7 @@ interface StageShellProps {
   handleResolveTakeover: (to: TakeoverRequest) => Promise<void>;
   handleSendMessage: (text: string, mediaIds?: string[]) => Promise<void>;
   handleInterrupt: () => Promise<void>;
+  onInspectTask: (taskId: string) => void;
   onOpenPermissions: () => void;
   showToast: (msg: string) => void;
 }
@@ -88,6 +94,9 @@ export const StageShell: React.FC<StageShellProps> = ({
   activeBot,
   activeBotId,
   msgsMap,
+  tasksMap,
+  taskToolMap,
+  nodes,
   seenIds,
   toolMap,
   takeovers,
@@ -126,6 +135,7 @@ export const StageShell: React.FC<StageShellProps> = ({
   handleResolveTakeover,
   handleSendMessage,
   handleInterrupt,
+  onInspectTask,
   onOpenPermissions,
   showToast,
 }) => {
@@ -151,6 +161,9 @@ export const StageShell: React.FC<StageShellProps> = ({
           bots={bots}
           activeBot={activeBot}
           messages={activeBotId ? msgsMap[activeBotId] || [] : []}
+          tasks={activeBotId ? tasksMap[activeBotId] || [] : []}
+          taskToolMap={taskToolMap}
+          nodes={nodes}
           seenIds={seenIds}
           toolName={activeBotId ? toolMap[activeBotId] : undefined}
           takeovers={takeovers}
@@ -174,6 +187,7 @@ export const StageShell: React.FC<StageShellProps> = ({
           }}
           onResolveTakeover={(to) => void handleResolveTakeover(to)}
           onOpenDetail={() => {}}
+          onInspectTask={onInspectTask}
           onOpenCollab={(peerId) => {
             setCollabPeerId(peerId);
           }}

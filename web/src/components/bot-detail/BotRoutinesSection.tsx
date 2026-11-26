@@ -11,6 +11,7 @@ interface BotRoutinesSectionProps {
   lang: ResolvedLang;
   onToast: (msg: string) => void;
   onConfirm: (opts: ConfirmOptions) => void;
+  onInspectTask?: (taskId: string) => void;
 }
 
 export const BotRoutinesSection: React.FC<BotRoutinesSectionProps> = ({
@@ -20,6 +21,7 @@ export const BotRoutinesSection: React.FC<BotRoutinesSectionProps> = ({
   lang,
   onToast,
   onConfirm,
+  onInspectTask,
 }) => {
   const t = (k: string, vars?: Record<string, string | number>) => translate(lang, k, vars);
   const [routines, setRoutines] = useState<RoutineItem[]>([]);
@@ -546,7 +548,11 @@ export const BotRoutinesSection: React.FC<BotRoutinesSectionProps> = ({
                             : t('rtStatusError');
                       const costTxt = r.costUsd ? ` · $${Number(r.costUsd).toFixed(4)}` : '';
                       return (
-                        <div key={r.id || idx} className="rt-run">
+                        <div
+                          key={r.id || idx}
+                          className={`rt-run${r.id && onInspectTask ? ' clickable' : ''}`}
+                          onClick={r.id && onInspectTask ? () => onInspectTask(r.id!) : undefined}
+                        >
                           <div className="rt-run-hd">
                             <span>
                               {stText} · {r.trigger} · {(r.durationMs / 1000).toFixed(1)}s{costTxt}
