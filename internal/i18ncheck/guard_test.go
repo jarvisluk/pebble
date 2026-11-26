@@ -265,8 +265,10 @@ func TestNoClientCodeCJKLeaks(t *testing.T) {
 			return strings.Contains(rel, "Tests/") ||
 				strings.HasSuffix(rel, "Tests.swift") ||
 				strings.Contains(rel, ".test.") ||
-				rel == "apps/android/app/src/main/java/ai/pebble/android/i18n/Strings.kt" ||
-				rel == "web/src/lib/i18n.ts"
+				rel == "apps/android/app/src/main/java/ai/pebble/android/i18n/StringsZh.kt" ||
+				rel == "apps/android/app/src/main/java/ai/pebble/android/i18n/StringsEn.kt" ||
+				rel == "web/src/lib/i18n/zh-CN.ts" ||
+				rel == "web/src/lib/i18n/en.ts"
 		},
 	)
 	if len(violations) > 0 {
@@ -308,34 +310,34 @@ func TestEnglishResourcesNoCJK(t *testing.T) {
 	}
 
 	// Check Android enStrings block.
-	ktPath := filepath.Join(root, "apps/android/app/src/main/java/ai/pebble/android/i18n/Strings.kt")
+	ktPath := filepath.Join(root, "apps/android/app/src/main/java/ai/pebble/android/i18n/StringsEn.kt")
 	ktRaw, err := os.ReadFile(ktPath)
 	if err != nil {
-		t.Fatalf("read Strings.kt: %v", err)
+		t.Fatalf("read StringsEn.kt: %v", err)
 	}
-	ktEnBlock, ktStartLine := extractBlock(string(ktRaw), `private val enStrings: Map<String, String> = mapOf(`, "\n)")
+	ktEnBlock, ktStartLine := extractBlock(string(ktRaw), `internal val enStrings: Map<String, String> = mapOf(`, "\n)")
 	if ktEnBlock == "" {
-		t.Fatal("failed to locate enStrings block in Strings.kt")
+		t.Fatal("failed to locate enStrings block in StringsEn.kt")
 	}
 	for i, line := range strings.Split(ktEnBlock, "\n") {
 		if hasCJK(line) {
-			violations = append(violations, "Strings.kt:"+itoa(ktStartLine+i)+": "+strings.TrimSpace(line))
+			violations = append(violations, "StringsEn.kt:"+itoa(ktStartLine+i)+": "+strings.TrimSpace(line))
 		}
 	}
 
 	// Check Web en block.
-	tsPath := filepath.Join(root, "web/src/lib/i18n.ts")
+	tsPath := filepath.Join(root, "web/src/lib/i18n/en.ts")
 	tsRaw, err := os.ReadFile(tsPath)
 	if err != nil {
-		t.Fatalf("read i18n.ts: %v", err)
+		t.Fatalf("read web/src/lib/i18n/en.ts: %v", err)
 	}
-	tsEnBlock, tsStartLine := extractBlock(string(tsRaw), "\n  en: {", "\n  },")
+	tsEnBlock, tsStartLine := extractBlock(string(tsRaw), "export const en: Record<string, string> = {", "\n};")
 	if tsEnBlock == "" {
-		t.Fatal("failed to locate en block in web/src/lib/i18n.ts")
+		t.Fatal("failed to locate en block in web/src/lib/i18n/en.ts")
 	}
 	for i, line := range strings.Split(tsEnBlock, "\n") {
 		if hasCJK(line) {
-			violations = append(violations, "web/src/lib/i18n.ts:"+itoa(tsStartLine+i)+": "+strings.TrimSpace(line))
+			violations = append(violations, "web/src/lib/i18n/en.ts:"+itoa(tsStartLine+i)+": "+strings.TrimSpace(line))
 		}
 	}
 
@@ -352,32 +354,38 @@ func TestI18nKeyParity(t *testing.T) {
 	enApple := readJSONKeys(t, filepath.Join(root, "apps/apple/Pebble/strings-en.json"))
 	assertSameKeys(t, "Apple strings-zh.json", zhApple, "Apple strings-en.json", enApple)
 
-	// 2. Android Strings.kt.
-	ktRawBytes, err := os.ReadFile(filepath.Join(root, "apps/android/app/src/main/java/ai/pebble/android/i18n/Strings.kt"))
+	// 2. Android StringsZh.kt / StringsEn.kt.
+	zhKtRawBytes, err := os.ReadFile(filepath.Join(root, "apps/android/app/src/main/java/ai/pebble/android/i18n/StringsZh.kt"))
 	if err != nil {
-		t.Fatalf("read Strings.kt: %v", err)
+		t.Fatalf("read StringsZh.kt: %v", err)
 	}
-	ktRaw := string(ktRawBytes)
-	zhKtBlock, _ := extractBlock(ktRaw, `private val zhStrings: Map<String, String> = mapOf(`, "\n)")
-	enKtBlock, _ := extractBlock(ktRaw, `private val enStrings: Map<String, String> = mapOf(`, "\n)")
+	enKtRawBytes, err := os.ReadFile(filepath.Join(root, "apps/android/app/src/main/java/ai/pebble/android/i18n/StringsEn.kt"))
+	if err != nil {
+		t.Fatalf("read StringsEn.kt: %v", err)
+	}
+	zhKtBlock, _ := extractBlock(string(zhKtRawBytes), `internal val zhStrings: Map<String, String> = mapOf(`, "\n)")
+	enKtBlock, _ := extractBlock(string(enKtRawBytes), `internal val enStrings: Map<String, String> = mapOf(`, "\n)")
 	if zhKtBlock == "" || enKtBlock == "" {
-		t.Fatal("failed to extract zhStrings/enStrings from Strings.kt")
+		t.Fatal("failed to extract zhStrings/enStrings from StringsZh.kt/StringsEn.kt")
 	}
 	ktKeyRe := regexp.MustCompile(`"([^"]+)"\s+to\s+"`)
 	zhKt := extractRegexKeys(ktKeyRe, zhKtBlock)
 	enKt := extractRegexKeys(ktKeyRe, enKtBlock)
 	assertSameKeys(t, "Android zhStrings", zhKt, "Android enStrings", enKt)
 
-	// 3. Web i18n.ts.
-	tsRawBytes, err := os.ReadFile(filepath.Join(root, "web/src/lib/i18n.ts"))
+	// 3. Web i18n/zh-CN.ts & i18n/en.ts.
+	zhTsRawBytes, err := os.ReadFile(filepath.Join(root, "web/src/lib/i18n/zh-CN.ts"))
 	if err != nil {
-		t.Fatalf("read web/src/lib/i18n.ts: %v", err)
+		t.Fatalf("read web/src/lib/i18n/zh-CN.ts: %v", err)
 	}
-	tsRaw := string(tsRawBytes)
-	zhTsBlock, _ := extractBlock(tsRaw, "\n  'zh-CN': {", "\n  },")
-	enTsBlock, _ := extractBlock(tsRaw, "\n  en: {", "\n  },")
+	enTsRawBytes, err := os.ReadFile(filepath.Join(root, "web/src/lib/i18n/en.ts"))
+	if err != nil {
+		t.Fatalf("read web/src/lib/i18n/en.ts: %v", err)
+	}
+	zhTsBlock, _ := extractBlock(string(zhTsRawBytes), "export const zhCN: Record<string, string> = {", "\n};")
+	enTsBlock, _ := extractBlock(string(enTsRawBytes), "export const en: Record<string, string> = {", "\n};")
 	if zhTsBlock == "" || enTsBlock == "" {
-		t.Fatal("failed to extract zh-CN/en blocks from web/src/lib/i18n.ts")
+		t.Fatal("failed to extract zhCN/en blocks from web/src/lib/i18n/")
 	}
 	tsKeyRe := regexp.MustCompile(`(?m)^\s+([A-Za-z0-9_]+):`)
 	zhTs := extractRegexKeys(tsKeyRe, zhTsBlock)

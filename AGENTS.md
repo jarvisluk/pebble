@@ -27,3 +27,4 @@
 - [原生客户端开发规范与静态门禁](docs/rules/native-clients.md)：**仅修改 `apps/apple` 或 `apps/android` 时阅读**（双端同步范围、6 档字号、Apple 三端单源与 `Theme.swift` 原语白名单、提交前 grep 门禁）。
 - [UI 全量页面截图报告与多端视觉回归手册](docs/rules/visual-regression.md)：**仅涉及 `web/` 或原生客户端 UI/布局/视觉/交互改动时阅读**（全量页面清单、macOS/iOS/iPadOS/Android/Web 驱动命令、Artifact 画廊报告格式与先逐张 `read_file` 自审要求）。
 - [构建入口、隔离联调与合入 main 换包规范](docs/rules/local-dev-and-release.md)：**构建特定端、启动隔离服务或合并 `main` 换包重装时阅读**。
+- [版本号管理与发版流程](docs/rules/release-and-versioning.md)：**调整版本号、校验多端版本一致性或执行 Release 打包发布时阅读**。

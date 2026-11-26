@@ -27,7 +27,7 @@
   - 系统默认 `Form`
   - 宽屏 `!compact` 侧栏 `List(.sidebar)`
   - 承载 `.sheet` / `.inspector` 外壳的 `NavigationStack` + `.toolbar`
-- 必须统一复用 `apps/apple/Pebble/Theme.swift` 原语：
+- 必须统一复用 `apps/apple/Pebble/Theme.swift`、`HubPrimitives.swift`、`HubForm.swift` 原语：
   - `HubFormStyle`
   - `HubSheetScaffold`
   - `HubSegmentedPicker`
