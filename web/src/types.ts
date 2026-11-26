@@ -171,6 +171,37 @@ export interface ServerInfo {
   capabilities?: string[];
 }
 
+export type UpdateChannel = 'stable' | 'prerelease';
+export type UpdateInterval = '30m' | '1h' | '6h' | '24h';
+
+export interface UpdateConfig {
+  autoCheck: boolean;
+  interval: UpdateInterval | string;
+  channel: UpdateChannel | string;
+  proxy?: string;
+}
+
+export interface UpdateReleaseInfo {
+  version: string;
+  tag: string;
+  name?: string;
+  url: string;
+  notes?: string;
+  publishedAt?: string;
+  prerelease?: boolean;
+}
+
+export interface UpdateStatus {
+  currentVersion: string;
+  state: 'idle' | 'checking' | 'up_to_date' | 'available' | 'error' | string;
+  hasUpdate: boolean;
+  latest?: UpdateReleaseInfo;
+  checkedAt?: string;
+  error?: string;
+  errorCode?: string;
+  config: UpdateConfig;
+}
+
 export interface NodeInfo {
   id: string;
   name?: string;

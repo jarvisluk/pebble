@@ -647,3 +647,31 @@ struct PendingChatInsert: Equatable {
     var seq: Int
     var text: String
 }
+
+struct UpdateConfig: Codable, Equatable {
+    var autoCheck: Bool
+    var interval: String
+    var channel: String
+    var proxy: String?
+}
+
+struct UpdateReleaseInfo: Codable, Equatable {
+    var version: String
+    var tag: String
+    var name: String?
+    var url: String
+    var notes: String?
+    var publishedAt: String?
+    var prerelease: Bool?
+}
+
+struct UpdateStatus: Codable, Equatable {
+    var currentVersion: String
+    var state: String
+    var hasUpdate: Bool
+    var latest: UpdateReleaseInfo?
+    var checkedAt: String?
+    var error: String?
+    var errorCode: String?
+    var config: UpdateConfig
+}

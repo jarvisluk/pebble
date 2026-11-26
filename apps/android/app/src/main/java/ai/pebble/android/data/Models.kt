@@ -632,6 +632,37 @@ data class PendingChatInsert(
     val text: String,
 )
 
+@Serializable
+data class UpdateConfig(
+    val autoCheck: Boolean = true,
+    val interval: String = "6h",
+    val channel: String = "stable",
+    val proxy: String? = null,
+)
+
+@Serializable
+data class UpdateReleaseInfo(
+    val version: String = "",
+    val tag: String = "",
+    val name: String? = null,
+    val url: String = "",
+    val notes: String? = null,
+    val publishedAt: String? = null,
+    val prerelease: Boolean? = null,
+)
+
+@Serializable
+data class UpdateStatus(
+    val currentVersion: String = "",
+    val state: String = "idle",
+    val hasUpdate: Boolean = false,
+    val latest: UpdateReleaseInfo? = null,
+    val checkedAt: String? = null,
+    val error: String? = null,
+    val errorCode: String? = null,
+    val config: UpdateConfig = UpdateConfig(),
+)
+
 fun JsonElement?.asDisplayString(): String? {
     val p = this as? JsonPrimitive ?: return null
     if (p is JsonNull) return null

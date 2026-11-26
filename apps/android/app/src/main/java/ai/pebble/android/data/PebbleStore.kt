@@ -107,6 +107,12 @@ class PebbleStore(context: Context) {
         internal set
     var dismissedCompatProto by mutableIntStateOf(0)
         internal set
+    var updateStatus by mutableStateOf<UpdateStatus?>(null)
+        internal set
+    var updateChecking by mutableStateOf(false)
+        internal set
+    var dismissedUpdateVersion by mutableStateOf(prefs.getString("pebble.dismissedUpdate", "").orEmpty())
+        internal set
     val routines = mutableStateMapOf<String, List<RoutineItem>>()
     var pendingStageOpen by mutableStateOf<StageOpenEvent?>(null)
         internal set
@@ -145,7 +151,31 @@ class PebbleStore(context: Context) {
         serverInfo?.protocolVersion?.let { dismissedCompatProto = it }
     }
 
+    val effectiveHasUpdate: Boolean
+        get() {
+            val st = updateStatus ?: return false
+            if (st.hasUpdate) return true
+            val ver = st.latest?.version.orEmpty()
+            return ver.isNotEmpty() && isSemVerNewer(ver, ai.pebble.android.BuildConfig.VERSION_NAME)
+        }
+
+    val showUpdateBanner: Boolean
+        get() {
+            if (isClientUpgradeRequired || !effectiveHasUpdate) return false
+            val ver = updateStatus?.latest?.version.orEmpty()
+            return ver.isNotEmpty() && dismissedUpdateVersion != ver
+        }
+
+    fun dismissUpdateBanner() {
+        val ver = updateStatus?.latest?.version.orEmpty()
+        if (ver.isEmpty()) return
+        dismissedUpdateVersion = ver
+        prefs.edit().putString("pebble.dismissedUpdate", ver).apply()
+    }
+
     companion object {
+        fun isSemVerNewer(candidate: String, current: String): Boolean = isSemVerNewerImpl(candidate, current)
+
         fun isLocalDesktopTarget(target: String): Boolean =
             target.isEmpty() || target == "local" || target.startsWith("virtual:") || target.startsWith("local:virtual:")
     }
@@ -431,4 +461,11 @@ class PebbleStore(context: Context) {
     suspend fun downloadWorkspaceFileToTemp(botId: String, path: String, fileName: String) : java.io.File = downloadWorkspaceFileToTempImpl(botId, path, fileName)
     fun insertIntoChat(text: String) = insertIntoChatImpl(text)
     fun consumePendingStageOpen() = consumePendingStageOpenImpl()
+    suspend fun refreshUpdateStatus() = refreshUpdateStatusImpl()
+    suspend fun checkForUpdates() = checkForUpdatesImpl()
+    suspend fun saveUpdateConfig(
+        autoCheck: Boolean? = null,
+        interval: String? = null,
+        channel: String? = null,
+    ) = saveUpdateConfigImpl(autoCheck, interval, channel)
 }

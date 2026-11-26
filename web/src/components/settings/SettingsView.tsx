@@ -8,6 +8,7 @@ import type {
   ServerInfo,
   SettingsData,
   SettingsTab,
+  UpdateStatus,
 } from '../../types';
 import { translate } from '../../lib/i18n';
 import type { ViewDir, ViewState } from '../../lib/useViewTransition';
@@ -26,12 +27,17 @@ interface SettingsViewProps {
   bots: BotStatus[];
   settings: SettingsData | null;
   serverInfo: ServerInfo | null;
+  updateStatus: UpdateStatus | null;
+  updateChecking: boolean;
+  canCheckUpdate: boolean;
   models: Record<string, string[]>;
   nodesFromEvents: NodeInfo[] | null;
   lang: ResolvedLang;
   langPref: LangPref;
   onOpenMenu: () => void;
   onLangChange: (pref: LangPref) => void;
+  onCheckUpdates: () => Promise<void>;
+  onSaveUpdateConfig: (patch: { autoCheck?: boolean; interval?: string; channel?: string }) => Promise<void>;
   onToast: (msg: string) => void;
   onConfirm: (opts: ConfirmOptions) => void;
   onSettingsUpdated: (s: SettingsData) => void;
@@ -54,12 +60,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   bots,
   settings,
   serverInfo,
+  updateStatus,
+  updateChecking,
+  canCheckUpdate,
   models,
   nodesFromEvents,
   lang,
   langPref,
   onOpenMenu,
   onLangChange,
+  onCheckUpdates,
+  onSaveUpdateConfig,
   onToast,
   onConfirm,
   onSettingsUpdated,
@@ -239,7 +250,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               lang={lang}
               langPref={langPref}
               serverInfo={serverInfo}
+              updateStatus={updateStatus}
+              updateChecking={updateChecking}
+              canCheckUpdate={canCheckUpdate}
               onLangChange={onLangChange}
+              onCheckUpdates={onCheckUpdates}
+              onSaveUpdateConfig={onSaveUpdateConfig}
               onReopenUnbox={onReopenUnbox}
             />
           )}

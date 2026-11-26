@@ -222,3 +222,53 @@
   .desk-worker-foot .btn { align-self: flex-end; }
 }
 .qr-box { width: 190px; align-self: center; border-radius: var(--r-row); background: #fff; padding: 8px; }
+.update-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.update-status-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.update-meta {
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+.update-err {
+  font-size: var(--fs-sm);
+  color: var(--danger);
+}
+.update-notes {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-radius: var(--r-row);
+  background: var(--s1);
+  color: var(--text-2);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.update-cfg-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--s2);
+}
+.update-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: var(--fs-base);
+  color: var(--text);
+}

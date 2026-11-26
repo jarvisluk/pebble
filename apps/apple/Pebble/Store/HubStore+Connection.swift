@@ -14,6 +14,8 @@ extension HubStore {
         serverInfo = nil
         unsupportedCaps = []
         dismissedCompatProto = 0
+        updateStatus = nil
+        updateChecking = false
 
         do {
             try await connectEndpoint(profile: profile, rawAddress: profile.address, rawToken: profile.token, isStandby: false, seq: seq)
@@ -131,6 +133,7 @@ extension HubStore {
             }
             Task { if let q: QuestionsResp = try? await client.call("/api/questions"), seq == connSeq { questions = q.items ?? [] } }
             Task { if let a: ApprovalsResp = try? await client.call("/api/approvals"), seq == connSeq { approvals = a.items ?? [] } }
+            Task { if let u: UpdateStatus = try? await client.call("/api/update"), seq == connSeq { updateStatus = u } }
             PushManager.shared.activeChatBotId = { [weak self] in self?.activeChat }
             PushManager.shared.configureConnection(base: url, token: tok)
             LiveActivityManager.shared.startObservingTokens()
@@ -261,6 +264,7 @@ extension HubStore {
                     }
                 }
                 Task { if let q: QuestionsResp = try? await self.callAPI("/api/questions"), seq == self.connSeq { self.questions = q.items ?? [] } }
+                Task { if let u: UpdateStatus = try? await self.callAPI("/api/update"), seq == self.connSeq { self.updateStatus = u } }
             }
             return
         }
@@ -310,6 +314,7 @@ extension HubStore {
             }
             Task { if let q: QuestionsResp = try? await client.call("/api/questions"), seq == connSeq { questions = q.items ?? [] } }
             Task { if let a: ApprovalsResp = try? await client.call("/api/approvals"), seq == connSeq { approvals = a.items ?? [] } }
+            Task { if let u: UpdateStatus = try? await client.call("/api/update"), seq == connSeq { updateStatus = u } }
             PushManager.shared.activeChatBotId = { [weak self] in self?.activeChat }
             PushManager.shared.configureConnection(base: cleanURL, token: token)
             startStream(cleanURL, token)
@@ -340,6 +345,8 @@ extension HubStore {
         serverInfo = nil
         unsupportedCaps = []
         dismissedCompatProto = 0
+        updateStatus = nil
+        updateChecking = false
         connState = .idle
         connError = ""
     }
