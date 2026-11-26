@@ -212,6 +212,26 @@ struct HostTailscaleStatus: Codable {
     var authKeyEnvRef: String?
 }
 
+struct NodeHarnessInfo: Codable, Hashable, Identifiable {
+    var kind: String
+    var label: String?
+    var installed: Bool?
+    var authStatus: String?
+    var authDetail: String?
+    var permissionCapabilities: PermissionCapabilities?
+
+    var id: String { kind }
+    var title: String { (label ?? "").isEmpty ? kind : label! }
+}
+
+struct NodeWorkspace: Codable, Hashable, Identifiable {
+    var id: String
+    var name: String
+    var path: String
+    var isGit: Bool?
+    var defaultBranch: String?
+}
+
 struct NodeInfo: Codable, Identifiable, Hashable {
     var id: String
     var name: String?
@@ -224,7 +244,13 @@ struct NodeInfo: Codable, Identifiable, Hashable {
     var capabilities: [String]?
     var version: String?
     var connected: Bool?
+    var reconnecting: Bool?
+    var transport: String?
     var lastSeenAt: String?
+    var harnesses: [NodeHarnessInfo]?
+    var workspaces: [NodeWorkspace]?
+    var maxPermissionMode: String?
+    var activeTaskIds: [String]?
 
     var isOutdated: Bool { (protocolVersion ?? 1) < ClientProtocol.current }
 }
@@ -241,6 +267,8 @@ struct TakeoverRequest: Codable, Identifiable, Hashable {
     var target: String?
     var botId: String?
     var botName: String?
+    var taskId: String?
+    var deviceId: String?
     var reason: String?
     var app: String?
     var createdAt: String?
@@ -419,6 +447,8 @@ struct PendingQuestion: Codable, Identifiable, Hashable {
     var id: String
     var botId: String
     var botName: String?
+    var taskId: String?
+    var deviceId: String?
     var title: String?
     var fields: [QuestionField]
     var createdAt: String?
@@ -437,6 +467,8 @@ struct PendingApproval: Codable, Identifiable, Hashable {
     var id: String
     var botId: String
     var botName: String?
+    var taskId: String?
+    var deviceId: String?
     var toolName: String
     var kind: String?
     var title: String?
@@ -458,6 +490,74 @@ struct PendingApproval: Codable, Identifiable, Hashable {
 struct ApprovalsResp: Decodable { var ok: Bool?; var items: [PendingApproval]? }
 struct RoutinesResp: Decodable { var routines: [RoutineItem]? }
 struct RunsResp: Decodable { var runs: [RoutineRun]? }
+
+struct BotTask: Codable, Identifiable, Hashable {
+    var id: String
+    var botId: String
+    var kind: String
+    var title: String?
+    var prompt: String
+    var status: String
+    var deviceId: String?
+    var harness: String?
+    var model: String?
+    var permissionMode: String?
+    var workdir: String?
+    var delivery: String?
+    var dependsOn: [String]?
+    var parentTaskId: String?
+    var routineId: String?
+    var routineName: String?
+    var trigger: String?
+    var slotKey: String?
+    var runtimeSessionId: String?
+    var output: String?
+    var error: String?
+    var tools: [String]?
+    var durationMs: Double?
+    var costUsd: Double?
+    var inputTokens: Int?
+    var outputTokens: Int?
+    var createdAt: String?
+    var startedAt: String?
+    var finishedAt: String?
+    var injectedAt: String?
+
+    var displayTitle: String {
+        let t = (title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !t.isEmpty { return t }
+        let rn = (routineName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !rn.isEmpty { return rn }
+        let line = prompt.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? prompt
+        return line.count > 64 ? String(line.prefix(64)) + "…" : line
+    }
+
+    var isTerminal: Bool {
+        status == "completed" || status == "failed" || status == "cancelled"
+    }
+
+    var isWaiting: Bool {
+        status == "waiting_approval" || status == "waiting_question" || status == "waiting_takeover"
+    }
+
+    var isActive: Bool {
+        !isTerminal
+    }
+}
+
+struct BotTaskEvent: Codable, Identifiable, Hashable {
+    var seq: Int64
+    var taskId: String
+    var botId: String
+    var eventType: String
+    var payload: JSONValue?
+    var createdAt: String?
+
+    var id: Int64 { seq }
+}
+
+struct TasksResp: Decodable { var tasks: [BotTask]? }
+struct TaskEventsResp: Decodable { var events: [BotTaskEvent]? }
 struct ModelsResp: Decodable { var models: [String]? }
 struct TextResp: Decodable { var text: String? }
 struct InterruptResp: Decodable { var interrupted: Bool? }

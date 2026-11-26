@@ -13,6 +13,8 @@ struct BotDetailView: View {
     @State private var previewUseFrame = false
     @State private var previewFrameImage: PlatformImage?
     @State private var previewFrameError = ""
+    @State private var inspectTask: BotTask?
+    @State private var creatingTask = false
 
     private var effectiveTarget: String {
         if let to = hub.takeovers.first(where: { $0.botId == botId }), let t = to.target, !t.isEmpty {
@@ -45,6 +47,11 @@ struct BotDetailView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     desktopPreviewCard
+                    BotTasksSection(
+                        botId: botId,
+                        onSelectTask: { inspectTask = $0 },
+                        onNewTask: { creatingTask = true }
+                    )
                     RoutinesSection(botId: botId)
                 }
                 .padding(.horizontal, 16)
@@ -91,6 +98,18 @@ struct BotDetailView: View {
             previewStream.start(request: req, trackFPS: false)
         }
         .onDisappear { previewStream.stop() }
+        .sheet(item: $inspectTask) { task in
+            TaskInspectorSheet(botId: botId, taskId: task.id) { target in
+                router.openDesktop(target)
+            }
+            .hubSheetFrame(width: 560, height: 660)
+        }
+        .sheet(isPresented: $creatingTask) {
+            NewTaskSheet(botId: botId) { created in
+                inspectTask = created
+            }
+            .hubSheetFrame(width: 520, height: 620)
+        }
     }
 
     private func pollPreviewFrames() async {

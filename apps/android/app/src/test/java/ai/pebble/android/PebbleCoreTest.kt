@@ -1,13 +1,18 @@
 package ai.pebble.android
 
 import ai.pebble.android.data.BotStatus
+import ai.pebble.android.data.BotTask
+import ai.pebble.android.data.BotTaskEvent
 import ai.pebble.android.data.BotsResp
 import ai.pebble.android.data.CLIENT_PROTOCOL
 import ai.pebble.android.data.HarnessInfo
 import ai.pebble.android.data.HubJson
 import ai.pebble.android.data.NodeInfo
 import ai.pebble.android.data.PebbleStore
+import ai.pebble.android.data.PendingApproval
+import ai.pebble.android.data.PendingQuestion
 import ai.pebble.android.data.ServerInfo
+import ai.pebble.android.data.TakeoverRequest
 import ai.pebble.android.data.countToolCalls
 import ai.pebble.android.data.formatDurationMs
 import ai.pebble.android.data.normalizeAddress
@@ -191,5 +196,70 @@ class PebbleCoreTest {
         assertTrue(PebbleStore.isLocalDesktopTarget("local:virtual:bot1"))
         assertFalse(PebbleStore.isLocalDesktopTarget("node-1"))
         assertFalse(PebbleStore.isLocalDesktopTarget("node-1:virtual:bot1"))
+    }
+
+    @Test
+    fun taskAndNodeCapabilityModelsDecodeCleanly() {
+        val task = HubJson.decodeFromString<BotTask>(
+            """
+            {
+              "id": "tsk_1",
+              "botId": "b1",
+              "kind": "worker",
+              "title": "Run tests",
+              "prompt": "go test ./...",
+              "status": "waiting_approval",
+              "deviceId": "mac-mini",
+              "harness": "claude",
+              "durationMs": 1250
+            }
+            """.trimIndent(),
+        )
+        assertEquals("Run tests", task.displayTitle)
+        assertTrue(task.isActive)
+        assertTrue(task.isWaiting)
+        assertFalse(task.isTerminal)
+
+        val ev = HubJson.decodeFromString<BotTaskEvent>(
+            """{"seq": 7, "taskId": "tsk_1", "botId": "b1", "eventType": "tool_use", "payload": {"tool": "bash"}}""",
+        )
+        assertEquals(7L, ev.seq)
+        assertEquals("tool_use", ev.eventType)
+
+        val node = HubJson.decodeFromString<NodeInfo>(
+            """
+            {
+              "id": "n1",
+              "name": "Mac Mini",
+              "permissions": ["files", "exec", "desktop", "agent"],
+              "maxPermissionMode": "edit",
+              "activeTaskIds": ["tsk_1"],
+              "harnesses": [{"kind": "claude", "label": "Claude Code", "installed": true, "authStatus": "ready"}],
+              "workspaces": [{"id": "ws1", "name": "app", "path": "/Users/dev/app", "isGit": true, "defaultBranch": "main"}]
+            }
+            """.trimIndent(),
+        )
+        assertEquals("edit", node.maxPermissionMode)
+        assertEquals(1, node.harnesses?.size)
+        assertEquals("Claude Code", node.harnesses?.first()?.title)
+        assertEquals(1, node.workspaces?.size)
+        assertEquals(listOf("tsk_1"), node.activeTaskIds)
+
+        val apr = HubJson.decodeFromString<PendingApproval>(
+            """{"id": "apr_1", "botId": "b1", "taskId": "tsk_1", "deviceId": "mac-mini", "toolName": "bash"}""",
+        )
+        assertEquals("tsk_1", apr.taskId)
+        assertEquals("mac-mini", apr.deviceId)
+
+        val q = HubJson.decodeFromString<PendingQuestion>(
+            """{"id": "q_1", "botId": "b1", "taskId": "tsk_1", "deviceId": "mac-mini", "fields": []}""",
+        )
+        assertEquals("tsk_1", q.taskId)
+
+        val to = HubJson.decodeFromString<TakeoverRequest>(
+            """{"id": "to_1", "botId": "b1", "taskId": "tsk_1", "deviceId": "mac-mini", "reason": "Sign in"}""",
+        )
+        assertEquals("tsk_1", to.taskId)
+        assertEquals("mac-mini", to.deviceId)
     }
 }

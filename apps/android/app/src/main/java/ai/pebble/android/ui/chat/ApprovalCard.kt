@@ -137,6 +137,9 @@ fun ApprovalCardView(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
+                taskDeviceLabel(approval.deviceId, store.nodes)?.let { devLabel ->
+                    TagPill(text = devLabel, bg = p.lilac, fg = p.lilacInk)
+                }
                 TagPill(
                     text = store.t("approvalWaitingBadge"),
                     bg = p.busy.copy(alpha = 0.16f),

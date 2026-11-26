@@ -164,5 +164,37 @@ private fun PebbleStore.handleEvent(type: String, p: JsonObject, url: String, to
                     .getOrNull()?.routines?.let { routines[bid] = it }
             }
         }
+        "task_created" -> {
+            val task = runCatching { HubJson.decodeFromJsonElement<BotTask>(p) }.getOrNull() ?: return
+            taskStreamText[task.id] = ""
+            upsertBotTask(task)
+        }
+        "task_updated" -> {
+            val task = runCatching { HubJson.decodeFromJsonElement<BotTask>(p) }.getOrNull() ?: return
+            upsertBotTask(task)
+            if (!task.isActive || task.status != "running") {
+                taskTools.remove(task.id)
+            }
+        }
+        "task_completed" -> {
+            val task = runCatching { HubJson.decodeFromJsonElement<BotTask>(p) }.getOrNull() ?: return
+            upsertBotTask(task)
+            taskTools.remove(task.id)
+            taskStreamText.remove(task.id)
+        }
+        "task_chunk" -> {
+            val taskId = p["taskId"]?.asDisplayString() ?: return
+            val chunk = p["chunk"]?.asDisplayString().orEmpty()
+            if (chunk.isNotEmpty()) {
+                taskStreamText[taskId] = (taskStreamText[taskId] ?: "") + chunk
+            }
+        }
+        "task_tool_use" -> {
+            val taskId = p["taskId"]?.asDisplayString() ?: return
+            val tool = p["tool"]?.asDisplayString().orEmpty()
+            if (taskTools[taskId] != tool) {
+                taskTools[taskId] = tool
+            }
+        }
     }
 }

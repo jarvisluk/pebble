@@ -238,6 +238,27 @@ data class HostTailscaleStatus(
 )
 
 @Serializable
+data class NodeHarnessInfo(
+    val kind: String,
+    val label: String? = null,
+    val installed: Boolean? = null,
+    val authStatus: String? = null,
+    val authDetail: String? = null,
+    val permissionCapabilities: PermissionCapabilities? = null,
+) {
+    val title: String get() = if (label.isNullOrEmpty()) kind else label
+}
+
+@Serializable
+data class NodeWorkspace(
+    val id: String,
+    val name: String,
+    val path: String,
+    val isGit: Boolean? = null,
+    val defaultBranch: String? = null,
+)
+
+@Serializable
 data class NodeInfo(
     val id: String,
     val name: String? = null,
@@ -250,7 +271,13 @@ data class NodeInfo(
     val capabilities: List<String>? = null,
     val version: String? = null,
     val connected: Boolean? = null,
+    val reconnecting: Boolean? = null,
+    val transport: String? = null,
     val lastSeenAt: String? = null,
+    val harnesses: List<NodeHarnessInfo>? = null,
+    val workspaces: List<NodeWorkspace>? = null,
+    val maxPermissionMode: String? = null,
+    val activeTaskIds: List<String>? = null,
 ) {
     val isOutdated: Boolean get() = (protocolVersion ?: 1) < CLIENT_PROTOCOL
 }
@@ -269,6 +296,8 @@ data class TakeoverRequest(
     val target: String? = null,
     val botId: String? = null,
     val botName: String? = null,
+    val taskId: String? = null,
+    val deviceId: String? = null,
     val reason: String? = null,
     val app: String? = null,
     val createdAt: String? = null,
@@ -399,6 +428,8 @@ data class PendingQuestion(
     val id: String,
     val botId: String,
     val botName: String? = null,
+    val taskId: String? = null,
+    val deviceId: String? = null,
     val title: String? = null,
     val fields: List<QuestionField> = emptyList(),
     val createdAt: String? = null,
@@ -487,6 +518,8 @@ data class PendingApproval(
     val id: String,
     val botId: String,
     val botName: String? = null,
+    val taskId: String? = null,
+    val deviceId: String? = null,
     val toolName: String,
     val kind: String? = null,
     val title: String? = null,
@@ -494,6 +527,69 @@ data class PendingApproval(
     val rawInput: JsonObject? = null,
     val options: List<PermissionOption>? = null,
     val mode: String? = null,
+    val createdAt: String? = null,
+)
+
+@Serializable
+data class BotTask(
+    val id: String,
+    val botId: String,
+    val kind: String,
+    val title: String? = null,
+    val prompt: String = "",
+    val status: String = "queued",
+    val deviceId: String? = null,
+    val harness: String? = null,
+    val model: String? = null,
+    val permissionMode: String? = null,
+    val workdir: String? = null,
+    val delivery: String? = null,
+    val dependsOn: List<String>? = null,
+    val parentTaskId: String? = null,
+    val routineId: String? = null,
+    val routineName: String? = null,
+    val trigger: String? = null,
+    val slotKey: String? = null,
+    val runtimeSessionId: String? = null,
+    val output: String? = null,
+    val error: String? = null,
+    val tools: List<String>? = null,
+    val durationMs: Double? = null,
+    val costUsd: Double? = null,
+    val inputTokens: Int? = null,
+    val outputTokens: Int? = null,
+    val createdAt: String? = null,
+    val startedAt: String? = null,
+    val finishedAt: String? = null,
+    val injectedAt: String? = null,
+) {
+    val displayTitle: String
+        get() {
+            val t = title.orEmpty().trim()
+            if (t.isNotEmpty()) return t
+            val rn = routineName.orEmpty().trim()
+            if (rn.isNotEmpty()) return rn
+            val line = prompt.lineSequence().firstOrNull().orEmpty().trim()
+            return if (line.length > 64) line.take(64) + "…" else line
+        }
+
+    val isTerminal: Boolean
+        get() = status == "completed" || status == "failed" || status == "cancelled"
+
+    val isWaiting: Boolean
+        get() = status == "waiting_approval" || status == "waiting_question" || status == "waiting_takeover"
+
+    val isActive: Boolean
+        get() = !isTerminal
+}
+
+@Serializable
+data class BotTaskEvent(
+    val seq: Long,
+    val taskId: String,
+    val botId: String,
+    val eventType: String,
+    val payload: JsonElement? = null,
     val createdAt: String? = null,
 )
 
@@ -506,6 +602,8 @@ data class PendingApproval(
 @Serializable data class ApprovalsResp(val ok: Boolean? = null, val items: List<PendingApproval>? = null)
 @Serializable data class RoutinesResp(val routines: List<RoutineItem>? = null)
 @Serializable data class RunsResp(val runs: List<RoutineRun>? = null)
+@Serializable data class TasksResp(val tasks: List<BotTask>? = null)
+@Serializable data class TaskEventsResp(val events: List<BotTaskEvent>? = null)
 @Serializable data class ModelsResp(val models: List<String>? = null)
 @Serializable data class TextResp(val text: String? = null)
 @Serializable data class InterruptResp(val interrupted: Boolean? = null)

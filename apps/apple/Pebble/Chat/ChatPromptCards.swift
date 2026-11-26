@@ -19,6 +19,9 @@ struct QuestionCardView: View {
                 Text((question.title ?? "").isEmpty ? hub.t("questionTitle") : question.title!)
                     .font(.system(size: AppFont.cardTitle, weight: .bold)).foregroundStyle(p.text)
                 Spacer()
+                if let devLabel = taskDeviceLabel(question.deviceId, nodes: hub.nodes) {
+                    Tag(text: devLabel, bg: p.lilac, fg: p.lilacInk)
+                }
                 Text(hub.t("questionWaitingBadge"))
                     .font(.system(size: AppFont.caption, weight: .semibold)).foregroundStyle(p.busy)
                     .padding(.horizontal, 8).padding(.vertical, 3)
@@ -266,6 +269,10 @@ struct ApprovalCardView: View {
                     .lineLimit(2)
 
                 Spacer(minLength: 8)
+
+                if let devLabel = taskDeviceLabel(approval.deviceId, nodes: hub.nodes) {
+                    Tag(text: devLabel, bg: p.lilac, fg: p.lilacInk)
+                }
 
                 Text(hub.t("approvalWaitingBadge"))
                     .font(.system(size: AppFont.caption, weight: .semibold))

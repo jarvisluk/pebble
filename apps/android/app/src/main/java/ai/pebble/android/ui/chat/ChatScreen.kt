@@ -129,6 +129,7 @@ fun ChatScreen(
     var sending by remember(botId) { mutableStateOf(false) }
     var sendErr by remember(botId) { mutableStateOf("") }
     var collabPeerId by remember(botId) { mutableStateOf<String?>(null) }
+    var inspectTaskId by remember(botId) { mutableStateOf<String?>(null) }
     var previewMedia by remember(botId) { mutableStateOf<MessageMedia?>(null) }
     var commands by remember(botId) { mutableStateOf<List<SlashCommandItem>>(emptyList()) }
     var mentions by remember(botId) { mutableStateOf<List<MentionCandidate>>(emptyList()) }
@@ -167,6 +168,7 @@ fun ChatScreen(
     LaunchedEffect(botId) {
         store.setActiveChat(botId)
         runCatching { store.loadMessages(botId) }
+        runCatching { store.fetchBotTasks(botId) }
         commands = runCatching { store.fetchCommands(botId) }.getOrDefault(emptyList())
     }
 
@@ -326,6 +328,24 @@ fun ChatScreen(
         }
     }
 
+    inspectTaskId?.let { tid ->
+        ModalBottomSheet(
+            onDismissRequest = { inspectTaskId = null },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+            containerColor = p.page,
+        ) {
+            Box(modifier = Modifier.heightIn(min = 380.dp, max = 720.dp)) {
+                TaskInspectorSheet(
+                    store = store,
+                    botId = botId,
+                    taskId = tid,
+                    onDismiss = { inspectTaskId = null },
+                    onOpenDesktop = onOpenDesktop,
+                )
+            }
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -354,6 +374,15 @@ fun ChatScreen(
             inDesktopSidebar = inDesktopSidebar,
             onOpenDesktop = onOpenDesktop,
         )
+
+        if (!inDesktopSidebar) {
+            BotChatTaskStrip(
+                store = store,
+                botId = botId,
+                pal = pal,
+                onSelectTask = { inspectTaskId = it.id },
+            )
+        }
 
         // Message List + Floating Composer overlaid cleanly without black bottom cutoff
         Box(

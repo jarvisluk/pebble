@@ -12,6 +12,7 @@ struct ChatView: View {
 
     @State private var sendErr = ""
     @State private var collabPeer: CollabTarget?
+    @State private var inspectTask: BotTask?
     @State private var previewMedia: MessageMedia?
     @State private var commands: [SlashCommandItem] = []
     @State private var pendingDrop: (seq: Int, urls: [URL])?
@@ -106,6 +107,11 @@ struct ChatView: View {
                 }
             }
             topBanners(pal)
+            if !inDesktopSidebar {
+                BotChatTaskStrip(botId: botId, pal: pal) { task in
+                    inspectTask = task
+                }
+            }
             thread(pal)
             ChatComposerView(
                 botId: botId,
@@ -145,12 +151,19 @@ struct ChatView: View {
                     CollabSheetView(botId: botId, peerId: target.id)
                 }
             }
+            .sheet(item: $inspectTask) { task in
+                TaskInspectorSheet(botId: botId, taskId: task.id) { target in
+                    router.openDesktop(target)
+                }
+                .hubSheetFrame(width: 560, height: 660)
+            }
             .sheet(item: $previewMedia) { media in
                 MediaPreviewSheet(media: media)
             }
             .task(id: botId) {
                 hub.setActiveChat(botId)
                 try? await hub.loadMessages(botId)
+                _ = try? await hub.fetchBotTasks(botId)
             }
             .onDisappear { hub.setActiveChat(nil) }
             .onChange(of: hub.bots.map(\.id)) { _, ids in
