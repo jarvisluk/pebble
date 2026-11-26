@@ -1,3 +1,4 @@
+import Observation
 import SwiftUI
 #if canImport(UIKit)
 import UIKit
@@ -725,6 +726,279 @@ extension View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: isPresented)
+        #else
+        self
+        #endif
+    }
+}
+
+func normalizeThemePref(_ raw: String?) -> String {
+    switch raw {
+    case "light", "dark": return raw!
+    default: return "system"
+    }
+}
+
+@MainActor
+@Observable
+final class PlatformAppearance {
+    static let shared = PlatformAppearance()
+
+    private(set) var systemDark: Bool
+
+    #if os(macOS)
+    @ObservationIgnored private var appearanceObservation: NSKeyValueObservation?
+    @ObservationIgnored private var themeNotificationToken: NSObjectProtocol?
+
+    private init() {
+        systemDark = Self.readSystemDark()
+        themeNotificationToken = DistributedNotificationCenter.default().addObserver(
+            forName: Notification.Name("AppleInterfaceThemeChangedNotification"),
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let dark = Self.readSystemDark()
+                if self.systemDark != dark {
+                    self.systemDark = dark
+                }
+            }
+        }
+        installAppObserverIfNeeded()
+    }
+
+    func installAppObserverIfNeeded() {
+        guard appearanceObservation == nil, let app = NSApp else { return }
+        appearanceObservation = app.observe(\.effectiveAppearance, options: [.new]) { [weak self] app, _ in
+            Task { @MainActor [weak self] in
+                guard let self, app.appearance == nil else { return }
+                let dark = app.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                if self.systemDark != dark {
+                    self.systemDark = dark
+                }
+            }
+        }
+    }
+
+    func applyNativeAppearance(themePref: String) {
+        installAppObserverIfNeeded()
+        guard let app = NSApp else { return }
+        let desired: NSAppearance?
+        switch normalizeThemePref(themePref) {
+        case "light": desired = NSAppearance(named: .aqua)
+        case "dark": desired = NSAppearance(named: .darkAqua)
+        default: desired = nil
+        }
+        if app.appearance?.name != desired?.name {
+            app.appearance = desired
+        }
+    }
+
+    func apply(themePref: String) {
+        applyNativeAppearance(themePref: themePref)
+        if normalizeThemePref(themePref) == "system" {
+            let dark = Self.readSystemDark()
+            if systemDark != dark {
+                systemDark = dark
+            }
+        }
+    }
+
+    func updateSystemDark(_ dark: Bool) {
+        if systemDark != dark {
+            systemDark = dark
+        }
+    }
+
+    private static func readSystemDark() -> Bool {
+        if let app = NSApp, app.appearance == nil {
+            return app.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        }
+        return UserDefaults.standard.string(forKey: "AppleInterfaceStyle") == "Dark"
+    }
+    #elseif os(iOS)
+    private init() {
+        systemDark = Self.readSystemDark()
+    }
+
+    func applyNativeAppearance(themePref: String, window: UIWindow? = nil) {
+        let style: UIUserInterfaceStyle
+        switch normalizeThemePref(themePref) {
+        case "light": style = .light
+        case "dark": style = .dark
+        default: style = .unspecified
+        }
+        if let window, window.overrideUserInterfaceStyle != style {
+            window.overrideUserInterfaceStyle = style
+        }
+        for scene in UIApplication.shared.connectedScenes {
+            guard let windowScene = scene as? UIWindowScene else { continue }
+            for win in windowScene.windows where win.overrideUserInterfaceStyle != style {
+                win.overrideUserInterfaceStyle = style
+            }
+        }
+    }
+
+    func apply(themePref: String) {
+        applyNativeAppearance(themePref: themePref)
+        if normalizeThemePref(themePref) == "system" {
+            let dark = Self.readSystemDark()
+            if systemDark != dark {
+                systemDark = dark
+            }
+        }
+    }
+
+    func syncSystemDark(from window: UIWindow? = nil) {
+        let dark = Self.readSystemDark(preferredWindow: window)
+        if systemDark != dark {
+            systemDark = dark
+        }
+    }
+
+    private static func readSystemDark(preferredWindow: UIWindow? = nil) -> Bool {
+        if let style = preferredWindow?.windowScene?.traitCollection.userInterfaceStyle, style != .unspecified {
+            return style == .dark
+        }
+        for scene in UIApplication.shared.connectedScenes {
+            guard let windowScene = scene as? UIWindowScene else { continue }
+            let style = windowScene.traitCollection.userInterfaceStyle
+            if style != .unspecified {
+                return style == .dark
+            }
+        }
+        return UITraitCollection.current.userInterfaceStyle == .dark
+    }
+    #else
+    private init() {
+        systemDark = false
+    }
+
+    func apply(themePref: String) {}
+    #endif
+
+    func resolvedDark(themePref: String, forceDark: Bool = false) -> Bool {
+        if forceDark { return true }
+        switch normalizeThemePref(themePref) {
+        case "dark": return true
+        case "light": return false
+        default: return systemDark
+        }
+    }
+}
+
+#if os(macOS)
+private final class MacThemeObserverView: NSView {
+    var themePref: String = "system"
+    var forceDark: Bool = false
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        apply(themePref: themePref, forceDark: forceDark)
+        syncSystemDarkIfFollowing()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        syncSystemDarkIfFollowing()
+    }
+
+    func apply(themePref: String, forceDark: Bool) {
+        self.themePref = themePref
+        self.forceDark = forceDark
+        PlatformAppearance.shared.applyNativeAppearance(themePref: themePref)
+        if let win = window {
+            let desired: NSAppearance? = forceDark ? NSAppearance(named: .darkAqua) : nil
+            if win.appearance?.name != desired?.name {
+                win.appearance = desired
+            }
+        }
+        syncSystemDarkIfFollowing()
+    }
+
+    private func syncSystemDarkIfFollowing() {
+        guard !forceDark,
+              normalizeThemePref(themePref) == "system",
+              NSApp?.appearance == nil,
+              window?.appearance == nil else { return }
+        let dark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        DispatchQueue.main.async {
+            PlatformAppearance.shared.updateSystemDark(dark)
+        }
+    }
+}
+
+private struct MacThemeObserverBridge: NSViewRepresentable {
+    var themePref: String
+    var forceDark: Bool
+
+    func makeNSView(context: Context) -> MacThemeObserverView {
+        let view = MacThemeObserverView()
+        view.apply(themePref: themePref, forceDark: forceDark)
+        return view
+    }
+
+    func updateNSView(_ nsView: MacThemeObserverView, context: Context) {
+        nsView.apply(themePref: themePref, forceDark: forceDark)
+    }
+}
+#elseif os(iOS)
+private final class IOSThemeObserverView: UIView {
+    var themePref: String = "system"
+    private var traitRegistration: (any UITraitChangeRegistration)?
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isHidden = true
+        isUserInteractionEnabled = false
+        traitRegistration = registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (view: IOSThemeObserverView, _) in
+            DispatchQueue.main.async { [weak view] in
+                PlatformAppearance.shared.syncSystemDark(from: view?.window)
+            }
+        }
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        PlatformAppearance.shared.applyNativeAppearance(themePref: themePref, window: window)
+        DispatchQueue.main.async { [weak self] in
+            PlatformAppearance.shared.syncSystemDark(from: self?.window)
+        }
+    }
+
+    func apply(themePref: String) {
+        self.themePref = themePref
+        PlatformAppearance.shared.applyNativeAppearance(themePref: themePref, window: window)
+    }
+}
+
+private struct IOSThemeObserverBridge: UIViewRepresentable {
+    var themePref: String
+
+    func makeUIView(context: Context) -> IOSThemeObserverView {
+        let view = IOSThemeObserverView()
+        view.apply(themePref: themePref)
+        return view
+    }
+
+    func updateUIView(_ uiView: IOSThemeObserverView, context: Context) {
+        uiView.apply(themePref: themePref)
+    }
+}
+#endif
+
+extension View {
+    @ViewBuilder
+    func hubApplyTheme(_ themePref: String, forceDark: Bool = false) -> some View {
+        #if os(macOS)
+        self.background(MacThemeObserverBridge(themePref: themePref, forceDark: forceDark))
+        #elseif os(iOS)
+        self.background(IOSThemeObserverBridge(themePref: themePref))
         #else
         self
         #endif
