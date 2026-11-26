@@ -15,8 +15,11 @@ import (
 )
 
 type Server struct {
-	client *Client
-	role   string
+	client                *Client
+	role                  string
+	coordinatorCanApprove bool
+	taskID                string
+	deviceID              string
 }
 
 func NewServer(hubURL, selfBotID string) *Server {
@@ -25,8 +28,11 @@ func NewServer(hubURL, selfBotID string) *Server {
 
 func NewServerWithConfig(hubURL, selfBotID, configPath string) *Server {
 	return &Server{
-		client: NewClient(hubURL, selfBotID, configPath, ""),
-		role:   config.LookupEnv("PEBBLE_MCP_ROLE", "BOT_HUB_MCP_ROLE"),
+		client:                NewClient(hubURL, selfBotID, configPath, ""),
+		role:                  config.LookupEnv("PEBBLE_MCP_ROLE", "BOT_HUB_MCP_ROLE"),
+		coordinatorCanApprove: config.LookupEnv("PEBBLE_COORDINATOR_CAN_APPROVE", "") == "1",
+		taskID:                config.LookupEnv("PEBBLE_TASK_ID", ""),
+		deviceID:              config.LookupEnv("PEBBLE_DEVICE_ID", ""),
 	}
 }
 
@@ -208,7 +214,7 @@ func toolDefinitions() []map[string]any {
 		},
 		{
 			"name":        "message_bot",
-			"description": "Send a message to another bot in Pebble and return its reply. Both bots' chat timelines will record the collaboration.",
+			"description": "Send a message to another bot in Pebble and return its reply (or dispatch asynchronously when async=true). Both bots' chat timelines will record the collaboration.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -219,6 +225,10 @@ func toolDefinitions() []map[string]any {
 					"message": map[string]any{
 						"type":        "string",
 						"description": "The message or task to send to the target bot.",
+					},
+					"async": map[string]any{
+						"type":        "boolean",
+						"description": "Optional. When true, dispatch asynchronously as a background task and return immediately with taskId.",
 					},
 				},
 				"required": []string{"botId", "message"},
@@ -397,6 +407,182 @@ func toolDefinitions() []map[string]any {
 				"required": []string{"kind"},
 			},
 		},
+		{
+			"name":        "task_spawn",
+			"description": "Spawn a concurrent background BotTask (worker or desktop) under a bot without blocking the bot's main conversation lane.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"botId": map[string]any{
+						"type":        "string",
+						"description": "Target bot ID (defaults to this bot).",
+					},
+					"title": map[string]any{
+						"type":        "string",
+						"description": "Optional short task title.",
+					},
+					"prompt": map[string]any{
+						"type":        "string",
+						"description": "Prompt/instructions for the worker task.",
+					},
+					"kind": map[string]any{
+						"type":        "string",
+						"enum":        []string{"worker", "desktop"},
+						"description": "Task kind (default: worker).",
+					},
+					"deviceId": map[string]any{
+						"type":        "string",
+						"description": "Optional target device/desktop ID (default: local).",
+					},
+					"harness": map[string]any{
+						"type":        "string",
+						"description": "Optional harness override.",
+					},
+					"model": map[string]any{
+						"type":        "string",
+						"description": "Optional model override.",
+					},
+					"permissionMode": map[string]any{
+						"type":        "string",
+						"enum":        []string{"auto", "edit", "ask", "plan"},
+						"description": "Optional permission mode override.",
+					},
+					"workdir": map[string]any{
+						"type":        "string",
+						"description": "Optional working directory.",
+					},
+					"delivery": map[string]any{
+						"type":        "string",
+						"enum":        []string{"wake", "receipt", "silent"},
+						"description": "Completion delivery mode: wake (notify and trigger main turn), receipt (timeline card, default), or silent.",
+					},
+					"dependsOn": map[string]any{
+						"type":        "array",
+						"description": "Optional list of parent task IDs that must complete before this task runs.",
+						"items":       map[string]any{"type": "string"},
+					},
+					"parentTaskId": map[string]any{
+						"type":        "string",
+						"description": "Optional parent task ID.",
+					},
+					"timeoutSec": map[string]any{
+						"type":        "integer",
+						"description": "Optional timeout in seconds.",
+					},
+				},
+				"required": []string{"prompt"},
+			},
+		},
+		{
+			"name":        "task_status",
+			"description": "Get the status of a specific BotTask by taskId, or list tasks for a bot.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"taskId": map[string]any{
+						"type":        "string",
+						"description": "Task ID to inspect. If omitted, lists tasks for botId.",
+					},
+					"botId": map[string]any{
+						"type":        "string",
+						"description": "Bot ID when listing tasks (defaults to this bot).",
+					},
+					"kind": map[string]any{
+						"type":        "string",
+						"description": "Optional kind filter when listing (worker|routine|desktop).",
+					},
+					"status": map[string]any{
+						"type":        "string",
+						"description": "Optional status filter when listing.",
+					},
+					"limit": map[string]any{
+						"type":        "integer",
+						"description": "Maximum number of tasks to return (default 50).",
+					},
+				},
+			},
+		},
+		{
+			"name":        "task_read",
+			"description": "Read a BotTask's details, output, and sequenced event log.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"taskId": map[string]any{
+						"type":        "string",
+						"description": "Task ID to read.",
+					},
+					"afterSeq": map[string]any{
+						"type":        "integer",
+						"description": "Return events with seq > afterSeq.",
+					},
+					"limit": map[string]any{
+						"type":        "integer",
+						"description": "Maximum number of events to return (default 200).",
+					},
+				},
+				"required": []string{"taskId"},
+			},
+		},
+		{
+			"name":        "task_send",
+			"description": "Send a follow-up message to an existing BotTask, preserving its runtime session.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"taskId": map[string]any{
+						"type":        "string",
+						"description": "Target task ID.",
+					},
+					"message": map[string]any{
+						"type":        "string",
+						"description": "Follow-up message for the task.",
+					},
+				},
+				"required": []string{"taskId", "message"},
+			},
+		},
+		{
+			"name":        "task_cancel",
+			"description": "Cancel an active or queued BotTask.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"taskId": map[string]any{
+						"type":        "string",
+						"description": "Task ID to cancel.",
+					},
+				},
+				"required": []string{"taskId"},
+			},
+		},
+		{
+			"name":        "task_approve",
+			"description": "Approve or reject a pending tool permission request for one of your child BotTasks (when CoordinatorCanApprove is enabled).",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"approvalId": map[string]any{
+						"type":        "string",
+						"description": "Pending approval ID.",
+					},
+					"decision": map[string]any{
+						"type":        "string",
+						"enum":        []string{"allow_once", "allow_always", "reject"},
+						"description": "Approval decision.",
+					},
+					"optionId": map[string]any{
+						"type":        "string",
+						"description": "Optional protocol option ID.",
+					},
+					"reason": map[string]any{
+						"type":        "string",
+						"description": "Optional reason (especially for reject).",
+					},
+				},
+				"required": []string{"approvalId", "decision"},
+			},
+		},
 	}
 }
 
@@ -488,6 +674,7 @@ func (s *Server) callTool(ctx context.Context, name string, rawArgs json.RawMess
 		var args struct {
 			BotID   string `json:"botId"`
 			Message string `json:"message"`
+			Async   bool   `json:"async"`
 		}
 		if err := json.Unmarshal(rawArgs, &args); err != nil || strings.TrimSpace(args.BotID) == "" || strings.TrimSpace(args.Message) == "" {
 			return "botId and message are required", true
@@ -498,9 +685,15 @@ func (s *Server) callTool(ctx context.Context, name string, rawArgs json.RawMess
 			"fromBotId": selfBotID,
 			"hop":       hop,
 		}
+		if args.Async {
+			payload["async"] = true
+		}
 		body, err := s.client.DoJSON(ctx, http.MethodPost, "/api/bots/"+url.PathEscape(args.BotID)+"/message", payload)
 		if err != nil {
 			return err.Error(), true
+		}
+		if args.Async {
+			return PrettyJSON(body), false
 		}
 		var resp struct {
 			Text      string `json:"text"`
@@ -596,12 +789,19 @@ func (s *Server) callTool(ctx context.Context, name string, rawArgs json.RawMess
 		if err := json.Unmarshal(rawArgs, &args); err != nil || strings.TrimSpace(args.Reason) == "" {
 			return "reason is required", true
 		}
-		body, err := s.client.DoJSON(ctx, http.MethodPost, "/api/desktop/takeover/request", map[string]any{
+		payload := map[string]any{
 			"target": args.NodeID,
 			"botId":  selfBotID,
 			"reason": args.Reason,
 			"app":    args.App,
-		})
+		}
+		if s.taskID != "" {
+			payload["taskId"] = s.taskID
+		}
+		if s.deviceID != "" {
+			payload["deviceId"] = s.deviceID
+		}
+		body, err := s.client.DoJSON(ctx, http.MethodPost, "/api/desktop/takeover/request", payload)
 		if err != nil {
 			return err.Error(), true
 		}
@@ -696,6 +896,214 @@ func (s *Server) callTool(ctx context.Context, name string, rawArgs json.RawMess
 		}
 		return PrettyJSON(body), false
 
+	case "task_spawn":
+		var args struct {
+			BotID          string   `json:"botId"`
+			Title          string   `json:"title"`
+			Prompt         string   `json:"prompt"`
+			Kind           string   `json:"kind"`
+			DeviceID       string   `json:"deviceId"`
+			Harness        string   `json:"harness"`
+			Model          string   `json:"model"`
+			PermissionMode string   `json:"permissionMode"`
+			Workdir        string   `json:"workdir"`
+			Delivery       string   `json:"delivery"`
+			DependsOn      []string `json:"dependsOn"`
+			ParentTaskID   string   `json:"parentTaskId"`
+			TimeoutSec     int      `json:"timeoutSec"`
+		}
+		if err := json.Unmarshal(rawArgs, &args); err != nil || strings.TrimSpace(args.Prompt) == "" {
+			return "prompt is required", true
+		}
+		targetBot := s.client.ResolveBotID(args.BotID)
+		if targetBot == "" {
+			return "caller bot ID is unknown", true
+		}
+		parentTaskID := strings.TrimSpace(args.ParentTaskID)
+		if parentTaskID == "" {
+			parentTaskID = s.taskID
+		}
+		hop, _ := strconv.Atoi(config.LookupEnv("PEBBLE_HOP", "BOT_HUB_HOP"))
+		payload := map[string]any{
+			"prompt": args.Prompt,
+			"hop":    hop,
+		}
+		if strings.TrimSpace(args.Title) != "" {
+			payload["title"] = strings.TrimSpace(args.Title)
+		}
+		if strings.TrimSpace(args.Kind) != "" {
+			payload["kind"] = strings.TrimSpace(args.Kind)
+		}
+		if strings.TrimSpace(args.DeviceID) != "" {
+			payload["deviceId"] = strings.TrimSpace(args.DeviceID)
+		}
+		if strings.TrimSpace(args.Harness) != "" {
+			payload["harness"] = strings.TrimSpace(args.Harness)
+		}
+		if strings.TrimSpace(args.Model) != "" {
+			payload["model"] = strings.TrimSpace(args.Model)
+		}
+		if strings.TrimSpace(args.PermissionMode) != "" {
+			payload["permissionMode"] = strings.TrimSpace(args.PermissionMode)
+		}
+		if strings.TrimSpace(args.Workdir) != "" {
+			payload["workdir"] = strings.TrimSpace(args.Workdir)
+		}
+		if strings.TrimSpace(args.Delivery) != "" {
+			payload["delivery"] = strings.TrimSpace(args.Delivery)
+		}
+		if len(args.DependsOn) > 0 {
+			payload["dependsOn"] = args.DependsOn
+		}
+		if parentTaskID != "" {
+			payload["parentTaskId"] = parentTaskID
+		}
+		if args.TimeoutSec > 0 {
+			payload["timeoutSec"] = args.TimeoutSec
+		}
+		body, err := s.client.DoJSON(ctx, http.MethodPost, "/api/bots/"+url.PathEscape(targetBot)+"/tasks", payload)
+		if err != nil {
+			return err.Error(), true
+		}
+		return PrettyJSON(body), false
+
+	case "task_status":
+		var args struct {
+			TaskID string `json:"taskId"`
+			BotID  string `json:"botId"`
+			Kind   string `json:"kind"`
+			Status string `json:"status"`
+			Limit  int    `json:"limit"`
+		}
+		if len(rawArgs) > 0 {
+			if err := json.Unmarshal(rawArgs, &args); err != nil {
+				return "invalid arguments", true
+			}
+		}
+		if tid := strings.TrimSpace(args.TaskID); tid != "" {
+			body, err := s.client.DoJSON(ctx, http.MethodGet, "/api/tasks/"+url.PathEscape(tid), nil)
+			if err != nil {
+				return err.Error(), true
+			}
+			return PrettyJSON(body), false
+		}
+		targetBot := s.client.ResolveBotID(args.BotID)
+		if targetBot == "" {
+			return "botId or taskId is required", true
+		}
+		q := url.Values{}
+		if strings.TrimSpace(args.Kind) != "" {
+			q.Set("kind", strings.TrimSpace(args.Kind))
+		}
+		if strings.TrimSpace(args.Status) != "" {
+			q.Set("status", strings.TrimSpace(args.Status))
+		}
+		if args.Limit > 0 {
+			q.Set("limit", strconv.Itoa(args.Limit))
+		}
+		path := "/api/bots/" + url.PathEscape(targetBot) + "/tasks"
+		if enc := q.Encode(); enc != "" {
+			path += "?" + enc
+		}
+		body, err := s.client.DoJSON(ctx, http.MethodGet, path, nil)
+		if err != nil {
+			return err.Error(), true
+		}
+		return PrettyJSON(body), false
+
+	case "task_read":
+		var args struct {
+			TaskID   string `json:"taskId"`
+			AfterSeq int64  `json:"afterSeq"`
+			Limit    int    `json:"limit"`
+		}
+		if err := json.Unmarshal(rawArgs, &args); err != nil || strings.TrimSpace(args.TaskID) == "" {
+			return "taskId is required", true
+		}
+		tid := strings.TrimSpace(args.TaskID)
+		taskBody, err := s.client.DoJSON(ctx, http.MethodGet, "/api/tasks/"+url.PathEscape(tid), nil)
+		if err != nil {
+			return err.Error(), true
+		}
+		q := url.Values{}
+		if args.AfterSeq > 0 {
+			q.Set("afterSeq", strconv.FormatInt(args.AfterSeq, 10))
+		}
+		if args.Limit > 0 {
+			q.Set("limit", strconv.Itoa(args.Limit))
+		}
+		evPath := "/api/tasks/" + url.PathEscape(tid) + "/events"
+		if enc := q.Encode(); enc != "" {
+			evPath += "?" + enc
+		}
+		evBody, err := s.client.DoJSON(ctx, http.MethodGet, evPath, nil)
+		if err != nil {
+			return err.Error(), true
+		}
+		var taskObj json.RawMessage = taskBody
+		var evDoc struct {
+			Events json.RawMessage `json:"events"`
+		}
+		_ = json.Unmarshal(evBody, &evDoc)
+		combined, _ := json.MarshalIndent(map[string]any{
+			"task":   taskObj,
+			"events": evDoc.Events,
+		}, "", "  ")
+		return string(combined), false
+
+	case "task_send":
+		var args struct {
+			TaskID  string `json:"taskId"`
+			Message string `json:"message"`
+		}
+		if err := json.Unmarshal(rawArgs, &args); err != nil || strings.TrimSpace(args.TaskID) == "" || strings.TrimSpace(args.Message) == "" {
+			return "taskId and message are required", true
+		}
+		body, err := s.client.DoJSON(ctx, http.MethodPost, "/api/tasks/"+url.PathEscape(strings.TrimSpace(args.TaskID))+"/send", map[string]any{
+			"message": args.Message,
+		})
+		if err != nil {
+			return err.Error(), true
+		}
+		return PrettyJSON(body), false
+
+	case "task_cancel":
+		var args struct {
+			TaskID string `json:"taskId"`
+		}
+		if err := json.Unmarshal(rawArgs, &args); err != nil || strings.TrimSpace(args.TaskID) == "" {
+			return "taskId is required", true
+		}
+		body, err := s.client.DoJSON(ctx, http.MethodPost, "/api/tasks/"+url.PathEscape(strings.TrimSpace(args.TaskID))+"/cancel", nil)
+		if err != nil {
+			return err.Error(), true
+		}
+		return PrettyJSON(body), false
+
+	case "task_approve":
+		if selfBotID == "" {
+			return "caller bot ID is unknown", true
+		}
+		var args struct {
+			ApprovalID string `json:"approvalId"`
+			Decision   string `json:"decision"`
+			OptionID   string `json:"optionId"`
+			Reason     string `json:"reason"`
+		}
+		if err := json.Unmarshal(rawArgs, &args); err != nil || strings.TrimSpace(args.ApprovalID) == "" || strings.TrimSpace(args.Decision) == "" {
+			return "approvalId and decision are required", true
+		}
+		body, err := s.client.DoJSON(ctx, http.MethodPost, "/api/approvals/"+url.PathEscape(strings.TrimSpace(args.ApprovalID))+"/reply", map[string]any{
+			"decision":    strings.TrimSpace(args.Decision),
+			"optionId":    strings.TrimSpace(args.OptionID),
+			"reason":      strings.TrimSpace(args.Reason),
+			"callerBotId": selfBotID,
+		})
+		if err != nil {
+			return err.Error(), true
+		}
+		return PrettyJSON(body), false
+
 	default:
 		return fmt.Sprintf("unknown tool %q", name), true
 	}
@@ -713,5 +1121,15 @@ func (s *Server) visibleTools() []map[string]any {
 		}
 		return out
 	}
-	return all
+	if s.coordinatorCanApprove {
+		return all
+	}
+	out := make([]map[string]any, 0, len(all))
+	for _, t := range all {
+		if t["name"] == "task_approve" {
+			continue
+		}
+		out = append(out, t)
+	}
+	return out
 }

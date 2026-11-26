@@ -76,18 +76,31 @@ func (s *HTTPServer) handleApprovalReply(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	var body struct {
-		Decision string `json:"decision"`
-		OptionID string `json:"optionId"`
-		Reason   string `json:"reason"`
+		Decision    string `json:"decision"`
+		OptionID    string `json:"optionId"`
+		Reason      string `json:"reason"`
+		CallerBotID string `json:"callerBotId"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json body"})
 		return
 	}
-	items, err := s.hub.ReplyApproval(id, body.Decision, body.OptionID, body.Reason)
+	var (
+		items []hub.PendingApproval
+		err   error
+	)
+	if strings.TrimSpace(body.CallerBotID) != "" {
+		items, err = s.hub.ReplyApprovalAsCoordinator(body.CallerBotID, id, body.Decision, body.OptionID, body.Reason)
+	} else {
+		items, err = s.hub.ReplyApproval(id, body.Decision, body.OptionID, body.Reason)
+	}
 	if err != nil {
 		if errors.Is(err, hub.ErrApprovalNotFound) {
 			writeJSON(w, http.StatusNotFound, map[string]any{"error": err.Error()})
+			return
+		}
+		if errors.Is(err, hub.ErrForbidden) {
+			writeJSON(w, http.StatusForbidden, map[string]any{"error": err.Error()})
 			return
 		}
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})

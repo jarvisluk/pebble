@@ -24,6 +24,8 @@ type TakeoverRequest struct {
 	Target    string `json:"target"`
 	BotID     string `json:"botId"`
 	BotName   string `json:"botName,omitempty"`
+	TaskID    string `json:"taskId,omitempty"`
+	DeviceID  string `json:"deviceId,omitempty"`
 	Reason    string `json:"reason"`
 	App       string `json:"app,omitempty"`
 	CreatedAt string `json:"createdAt"`
@@ -91,11 +93,19 @@ func (c *Coordinator) ListTakeovers() []TakeoverRequest {
 
 // RequestTakeover pauses until a human clicks "Done & Resume AI" or ctx is cancelled.
 func (c *Coordinator) RequestTakeover(ctx context.Context, target, botID, botName, reason, app string) (string, error) {
+	return c.RequestTakeoverWithTask(ctx, target, botID, botName, reason, app, "", "")
+}
+
+// RequestTakeoverWithTask pauses until a human clicks "Done & Resume AI" or ctx is cancelled,
+// optionally binding the takeover request to a specific BotTask and device ID.
+func (c *Coordinator) RequestTakeoverWithTask(ctx context.Context, target, botID, botName, reason, app, taskID, deviceID string) (string, error) {
 	t := NormalizeTarget(target)
 	reason = strings.TrimSpace(reason)
 	if reason == "" {
 		reason = "Manual confirmation or sign-in required on screen"
 	}
+	taskID = strings.TrimSpace(taskID)
+	deviceID = strings.TrimSpace(deviceID)
 	id := newTakeoverID()
 	w := &takeoverWaiter{
 		req: TakeoverRequest{
@@ -103,6 +113,8 @@ func (c *Coordinator) RequestTakeover(ctx context.Context, target, botID, botNam
 			Target:    t,
 			BotID:     botID,
 			BotName:   botName,
+			TaskID:    taskID,
+			DeviceID:  deviceID,
 			Reason:    reason,
 			App:       app,
 			CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
@@ -111,9 +123,11 @@ func (c *Coordinator) RequestTakeover(ctx context.Context, target, botID, botNam
 	}
 
 	c.mu.Lock()
-	// Cancel any stale pending request from the same bot.
+	// Cancel any stale pending request from the same task (or same bot when untagged).
 	for oldID, oldW := range c.takeovers {
-		if botID != "" && oldW.req.BotID == botID {
+		sameTask := taskID != "" && oldW.req.TaskID == taskID
+		sameUntaggedBot := taskID == "" && oldW.req.TaskID == "" && botID != "" && oldW.req.BotID == botID
+		if sameTask || sameUntaggedBot {
 			delete(c.takeovers, oldID)
 			select {
 			case oldW.doneCh <- "replaced by newer takeover request":
@@ -189,6 +203,45 @@ func (c *Coordinator) ResolveTakeover(idOrBotID, note string) bool {
 		go c.onTakeoverChange(list)
 	}
 	return true
+}
+
+// CancelTakeoversByTask aborts any pending takeover associated with taskID.
+func (c *Coordinator) CancelTakeoversByTask(taskID string) {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return
+	}
+	c.mu.Lock()
+	changed := false
+	targets := make(map[string]struct{})
+	for id, w := range c.takeovers {
+		if w.req.TaskID == taskID {
+			targets[w.req.Target] = struct{}{}
+			delete(c.takeovers, id)
+			close(w.doneCh)
+			changed = true
+		}
+	}
+	var list []TakeoverRequest
+	var states []ScreenState
+	if changed {
+		list = c.snapshotTakeoversLocked()
+		for t := range targets {
+			states = append(states, c.screenStateLocked(t))
+		}
+	}
+	c.mu.Unlock()
+	if changed {
+		if c.onScreenChange != nil {
+			for _, st := range states {
+				st := st
+				go c.onScreenChange(st)
+			}
+		}
+		if c.onTakeoverChange != nil {
+			go c.onTakeoverChange(list)
+		}
+	}
 }
 
 // CancelTakeoversByBot aborts any pending takeover associated with botID.

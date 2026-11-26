@@ -174,6 +174,12 @@ func NewHTTPServer(h *hub.Hub, cfg config.HTTPConfig) *HTTPServer {
 	mux.HandleFunc("DELETE /api/bots/{id}/routines/{routineId}", s.handleDeleteRoutine)
 	mux.HandleFunc("POST /api/bots/{id}/routines/{routineId}/run", s.handleRunRoutine)
 	mux.HandleFunc("GET /api/bots/{id}/routine-runs", s.handleListRoutineRuns)
+	mux.HandleFunc("GET /api/bots/{id}/tasks", s.handleListBotTasks)
+	mux.HandleFunc("POST /api/bots/{id}/tasks", s.handleSpawnTask)
+	mux.HandleFunc("GET /api/tasks/{taskId}", s.handleGetTask)
+	mux.HandleFunc("GET /api/tasks/{taskId}/events", s.handleListTaskEvents)
+	mux.HandleFunc("POST /api/tasks/{taskId}/send", s.handleSendToTask)
+	mux.HandleFunc("POST /api/tasks/{taskId}/cancel", s.handleCancelTask)
 	mux.HandleFunc("GET /api/settings", s.handleSettings)
 	mux.HandleFunc("PUT /api/settings", s.handlePutSettings)
 	mux.HandleFunc("PATCH /api/settings", s.handlePutSettings)
@@ -413,17 +419,48 @@ func (s *HTTPServer) handleEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	replay := false
+	var since uint64
+	if r.URL.Query().Has("since") {
+		rawSince := strings.TrimSpace(r.URL.Query().Get("since"))
+		if rawSince == "" {
+			replay = true
+		} else if v, err := strconv.ParseUint(rawSince, 10, 64); err == nil {
+			since = v
+			replay = true
+		} else {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid since cursor"})
+			return
+		}
+	} else if lastID := strings.TrimSpace(r.Header.Get("Last-Event-ID")); lastID != "" {
+		if v, err := strconv.ParseUint(lastID, 10, 64); err == nil {
+			since = v
+			replay = true
+		}
+	}
+
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
 
 	resetCh := s.sseResetChan()
-	subID, ch := s.hub.Subscribe()
+	subID, ch, missed := s.hub.SubscribeSince(since, replay)
 	defer s.hub.Unsubscribe(subID)
 
 	// Send an initial ping so clients mark connected immediately.
 	fmt.Fprintf(w, "event: ready\ndata: {}\n\n")
+	for _, evt := range missed {
+		raw, err := json.Marshal(evt)
+		if err != nil {
+			continue
+		}
+		if evt.Seq > 0 {
+			fmt.Fprintf(w, "id: %d\nevent: %s\ndata: %s\n\n", evt.Seq, evt.Type, raw)
+		} else {
+			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", evt.Type, raw)
+		}
+	}
 	flusher.Flush()
 
 	keepalive := time.NewTicker(25 * time.Second)
@@ -446,7 +483,11 @@ func (s *HTTPServer) handleEvents(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				continue
 			}
-			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", evt.Type, raw)
+			if evt.Seq > 0 {
+				fmt.Fprintf(w, "id: %d\nevent: %s\ndata: %s\n\n", evt.Seq, evt.Type, raw)
+			} else {
+				fmt.Fprintf(w, "event: %s\ndata: %s\n\n", evt.Type, raw)
+			}
 			flusher.Flush()
 		}
 	}
@@ -484,8 +525,10 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 func writeHubErr(w http.ResponseWriter, err error) {
 	status := http.StatusBadRequest
 	switch {
-	case errors.Is(err, hub.ErrBotNotFound), errors.Is(err, hub.ErrRoutineNotFound):
+	case errors.Is(err, hub.ErrBotNotFound), errors.Is(err, hub.ErrRoutineNotFound), errors.Is(err, state.ErrTaskNotFound):
 		status = http.StatusNotFound
+	case errors.Is(err, hub.ErrForbidden):
+		status = http.StatusForbidden
 	case errors.Is(err, scheduler.ErrRoutineAlreadyRunning):
 		status = http.StatusConflict
 	}

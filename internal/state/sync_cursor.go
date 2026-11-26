@@ -251,9 +251,12 @@ func (s *Store) HasRoutineSlotKey(slotKey string) bool {
 	if s == nil || s.db == nil || strings.TrimSpace(slotKey) == "" {
 		return false
 	}
+	sk := strings.TrimSpace(slotKey)
 	var dummy int
-	err := s.db.QueryRow(`SELECT 1 FROM routine_runs WHERE slot_key = ? LIMIT 1`, strings.TrimSpace(slotKey)).Scan(&dummy)
-	return err == nil
+	if err := s.db.QueryRow(`SELECT 1 FROM routine_runs WHERE slot_key = ? LIMIT 1`, sk).Scan(&dummy); err == nil {
+		return true
+	}
+	return s.db.QueryRow(`SELECT 1 FROM bot_tasks WHERE slot_key = ? LIMIT 1`, sk).Scan(&dummy) == nil
 }
 
 // RecentMessagesForHandoff returns up to limit recent user/assistant messages for botID in chronological order.

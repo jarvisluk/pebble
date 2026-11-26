@@ -142,6 +142,54 @@ CREATE TABLE IF NOT EXISTS sync_files (
   updated_by TEXT NOT NULL DEFAULT '',
   updated_at TEXT NOT NULL DEFAULT ''
 );
+
+CREATE TABLE IF NOT EXISTS bot_tasks (
+  id                 TEXT PRIMARY KEY,
+  bot_id             TEXT NOT NULL,
+  kind               TEXT NOT NULL DEFAULT 'worker',
+  title              TEXT NOT NULL DEFAULT '',
+  prompt             TEXT NOT NULL DEFAULT '',
+  status             TEXT NOT NULL DEFAULT 'queued',
+  device_id          TEXT NOT NULL DEFAULT 'local',
+  harness            TEXT NOT NULL DEFAULT '',
+  model              TEXT NOT NULL DEFAULT '',
+  permission_mode    TEXT NOT NULL DEFAULT '',
+  workdir            TEXT NOT NULL DEFAULT '',
+  delivery           TEXT NOT NULL DEFAULT 'receipt',
+  depends_on_json    TEXT NOT NULL DEFAULT '[]',
+  parent_task_id     TEXT NOT NULL DEFAULT '',
+  routine_id         TEXT NOT NULL DEFAULT '',
+  routine_name       TEXT NOT NULL DEFAULT '',
+  trigger            TEXT NOT NULL DEFAULT '',
+  slot_key           TEXT NOT NULL DEFAULT '',
+  runtime_session_id TEXT NOT NULL DEFAULT '',
+  output             TEXT NOT NULL DEFAULT '',
+  error              TEXT NOT NULL DEFAULT '',
+  tools_json         TEXT NOT NULL DEFAULT '[]',
+  duration_ms        INTEGER NOT NULL DEFAULT 0,
+  cost_usd           REAL NOT NULL DEFAULT 0,
+  input_tokens       INTEGER NOT NULL DEFAULT 0,
+  output_tokens      INTEGER NOT NULL DEFAULT 0,
+  created_at         TEXT NOT NULL,
+  started_at         TEXT NOT NULL DEFAULT '',
+  finished_at        TEXT NOT NULL DEFAULT '',
+  injected_at        TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_bot_tasks_bot_created ON bot_tasks(bot_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_bot_tasks_status      ON bot_tasks(status);
+CREATE INDEX IF NOT EXISTS idx_bot_tasks_routine     ON bot_tasks(bot_id, routine_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_bot_tasks_slot_key    ON bot_tasks(slot_key);
+CREATE INDEX IF NOT EXISTS idx_bot_tasks_pending     ON bot_tasks(bot_id, delivery, status, injected_at);
+
+CREATE TABLE IF NOT EXISTS bot_task_events (
+  seq          INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id      TEXT NOT NULL,
+  bot_id       TEXT NOT NULL,
+  event_type   TEXT NOT NULL,
+  payload_json TEXT NOT NULL DEFAULT '{}',
+  created_at   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_bot_task_events_task_seq ON bot_task_events(task_id, seq);
 `
 
 func openSQLite(dbPath string) (*sql.DB, error) {
