@@ -109,8 +109,7 @@ private struct MacWindowRootView: View {
     }
 
     var body: some View {
-        let isMacDesktopStage = router.desktop != nil && router.stageTab == .desktop
-        let effectiveDark = PlatformAppearance.shared.resolvedDark(themePref: hub.themePref, forceDark: isMacDesktopStage)
+        let effectiveDark = PlatformAppearance.shared.resolvedDark(themePref: hub.themePref)
         let effectivePalette = Palette(dark: effectiveDark)
         Group {
             if showSetup {
@@ -125,7 +124,7 @@ private struct MacWindowRootView: View {
         .tint(effectivePalette.accent)
         .font(.system(size: AppFont.body))
         .environment(\.colorScheme, effectiveDark ? .dark : .light)
-        .hubApplyTheme(hub.themePref, forceDark: isMacDesktopStage)
+        .hubApplyTheme(hub.themePref)
         .hubTrackWindowVisibility()
         .macSeamlessWindowToolbar()
         .onAppear {
@@ -307,9 +306,7 @@ enum SettingsTab: String, CaseIterable, Identifiable, Hashable {
 struct DesktopPresentation: Identifiable, Equatable {
     let id = UUID()
     var target: String
-    var initialTab: StageKind = .desktop
     var botId: String? = nil
-    var initialPath: String? = nil
 }
 
 @MainActor
@@ -320,7 +317,7 @@ final class Router {
     var sheet: SheetRoute?
     var detailOpen = false
     var desktop: DesktopPresentation?
-    var stageTab: StageKind = .files
+    var botStages: [String: BotStageState] = [:]
     var inSettings = false
     var settingsTab: SettingsTab? = nil
     var settingsDirty = false
@@ -395,35 +392,124 @@ final class Router {
         preferredColumn = selected == nil ? .sidebar : .detail
     }
 
-    func openDesktop(_ target: String = "local") {
-        let resolved = target.trimmingCharacters(in: .whitespacesAndNewlines)
-        let dest = resolved.isEmpty ? "local" : resolved
+    func hasUnreadLatestStage(_ botId: String) -> Bool {
+        guard let id = botStages[botId]?.unreadLatestStageId else { return false }
+        return !id.isEmpty
+    }
+
+    func clearUnreadLatestStage(botId: String) {
+        guard var st = botStages[botId], st.unreadLatestStageId != nil else { return }
+        st.unreadLatestStageId = nil
+        botStages[botId] = st
+    }
+
+    func selectStageTab(botId: String, tabId: String, newTabTitle: String) {
+        var st = StageStateOps.ensureNonEmpty(botStages[botId] ?? BotStageState(), newTabTitle: newTabTitle)
+        st.activeTabId = tabId
+        st.unreadLatestStageId = nil
+        botStages[botId] = st
+    }
+
+    func closeStageTab(botId: String, tabId: String, newTabTitle: String) {
+        let cur = botStages[botId] ?? BotStageState()
+        botStages[botId] = StageStateOps.close(cur, tabId: tabId, newTabTitle: newTabTitle)
+    }
+
+    func stripFileTabs(newTabTitle: String) {
+        for (bid, st) in botStages {
+            let filtered = st.tabs.filter { $0.kind != .files && $0.kind != .file }
+            if filtered.count != st.tabs.count {
+                var next = st
+                next.tabs = filtered
+                botStages[bid] = StageStateOps.ensureNonEmpty(next, newTabTitle: newTabTitle)
+            }
+        }
+    }
+
+    func openStage(botId: String?, tab: StageTab, replaceNew: Bool = false) {
+        let bid = (botId ?? selected ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         sheet = nil
         leaveSettings()
         detailOpen = false
-        stageTab = .desktop
-        desktop = DesktopPresentation(target: dest, initialTab: .desktop, botId: selected)
+        if !bid.isEmpty {
+            var cur = botStages[bid] ?? BotStageState()
+            cur = replaceNew ? StageStateOps.replaceNewOrOpen(cur, tab: tab) : StageStateOps.upsert(cur, tab: tab, activate: true)
+            cur.unreadLatestStageId = nil
+            botStages[bid] = cur
+            if selected != bid {
+                openBot(bid)
+            }
+        }
+        let target = (tab.kind == .desktop ? (tab.target ?? "local") : "local")
+        if desktop == nil || desktop?.botId != bid {
+            desktop = DesktopPresentation(target: target, botId: bid.isEmpty ? nil : bid)
+        }
+    }
+
+    func openStage(botId: String?, ref: StageRef) {
+        let tab = StageStateOps.tab(
+            from: ref,
+            botId: botId,
+            filesTitle: L.t("stageFilesTab"),
+            desktopTitle: L.t("stageDesktopTab"),
+            newTabTitle: L.t("stageNewTab")
+        )
+        openStage(botId: botId, tab: tab, replaceNew: false)
+    }
+
+    func openLatestStage(botId: String, latestStage: StageRef?) {
+        if let latestStage {
+            openStage(botId: botId, ref: latestStage)
+            return
+        }
+        if let existing = botStages[botId], !existing.tabs.isEmpty {
+            clearUnreadLatestStage(botId: botId)
+            sheet = nil
+            leaveSettings()
+            detailOpen = false
+            if desktop == nil || desktop?.botId != botId {
+                desktop = DesktopPresentation(target: existing.activeTab?.target ?? "local", botId: botId)
+            }
+            return
+        }
+        openStage(botId: botId, tab: StageStateOps.newTab(title: L.t("stageNewTab")), replaceNew: false)
+    }
+
+    func openDesktop(_ target: String = "local", botId: String? = nil) {
+        let resolved = target.trimmingCharacters(in: .whitespacesAndNewlines)
+        let dest = resolved.isEmpty ? "local" : resolved
+        let tab = StageStateOps.desktopTab(target: dest, title: L.t("stageDesktopTab"))
+        openStage(botId: botId ?? selected, tab: tab, replaceNew: false)
     }
 
     func openFiles(botId: String, path: String? = nil) {
-        sheet = nil
-        leaveSettings()
-        detailOpen = false
-        stageTab = .files
-        desktop = DesktopPresentation(target: "local", initialTab: .files, botId: botId, initialPath: path)
+        let clean = (path ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let tab = clean.isEmpty
+            ? StageStateOps.filesTab(title: L.t("stageFilesTab"))
+            : StageStateOps.fileTab(path: clean)
+        openStage(botId: botId, tab: tab, replaceNew: false)
     }
 
     func handleStageOpen(_ ev: StageOpenEvent) {
-        let targetBot = ev.botId ?? selected
-        if let bid = targetBot, !bid.isEmpty, bid != selected {
-            openBot(bid)
+        let targetBot = (ev.botId ?? selected ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !targetBot.isEmpty else { return }
+        let tab = StageStateOps.tab(
+            from: ev,
+            filesTitle: L.t("stageFilesTab"),
+            desktopTitle: L.t("stageDesktopTab"),
+            newTabTitle: L.t("stageNewTab")
+        )
+        let alreadyInStageForBot = desktop != nil && (desktop?.botId == targetBot || selected == targetBot)
+        let shouldAutoActivate = alreadyInStageForBot || (ev.autoOpen == true)
+
+        var cur = botStages[targetBot] ?? BotStageState()
+        cur = StageStateOps.upsert(cur, tab: tab, activate: shouldAutoActivate || cur.activeTabId.isEmpty)
+        cur.unreadLatestStageId = shouldAutoActivate ? nil : (ev.id ?? tab.id)
+        botStages[targetBot] = cur
+
+        if ev.autoOpen == true && !alreadyInStageForBot {
+            openStage(botId: targetBot, tab: tab, replaceNew: false)
         }
-        let kind = StageKind(rawValue: ev.kind) ?? .files
-        sheet = nil
-        leaveSettings()
-        detailOpen = false
-        stageTab = kind
-        desktop = DesktopPresentation(target: "local", initialTab: kind, botId: targetBot, initialPath: ev.path)
     }
 
     func closeStage() {
@@ -487,11 +573,6 @@ struct RootView: View {
                 DesktopView(
                     initialTarget: pres.target,
                     initialBotId: pres.botId ?? router.selected,
-                    initialTab: pres.initialTab,
-                    initialPath: pres.initialPath,
-                    onTabChange: { next in
-                        if router.stageTab != next { router.stageTab = next }
-                    },
                     onClose: { router.closeStage() }
                 )
                 .id(pres.id)
@@ -586,9 +667,7 @@ struct RootView: View {
         .fullScreenCover(item: $r.desktop) { pres in
             DesktopView(
                 initialTarget: pres.target,
-                initialBotId: pres.botId ?? router.selected,
-                initialTab: pres.initialTab,
-                initialPath: pres.initialPath
+                initialBotId: pres.botId ?? router.selected
             )
             .environment(\.palette, palette)
             .environment(\.hubCompact, compact)
@@ -603,6 +682,7 @@ struct RootView: View {
         .onChange(of: hub.pendingStageOpen) { _, ev in
             guard let ev else { return }
             router.handleStageOpen(ev)
+            hub.pendingStageOpen = nil
         }
         .onChange(of: showGate) { _, gate in
             if gate {

@@ -156,3 +156,59 @@ func TestPushDeviceStore(t *testing.T) {
 		t.Fatalf("expected deleted device, got ok=%v err=%v", ok, err)
 	}
 }
+
+func TestStageMessageAndBotLatestStagePersistence(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "sessions.json")
+	store, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ref := StageRef{
+		ID:        "file:memory/notes.md",
+		Kind:      "file",
+		Title:     "notes.md",
+		Subtitle:  "memory/notes.md",
+		Path:      "memory/notes.md",
+		CreatedAt: "2026-11-26T22:00:00Z",
+	}
+	if err := store.UpsertBotLatestStage("assistant", ref); err != nil {
+		t.Fatalf("UpsertBotLatestStage: %v", err)
+	}
+	if _, err := store.AppendMessage(ChatMessage{
+		BotID: "assistant",
+		Role:  "stage",
+		From:  "stage",
+		Text:  "notes.md",
+		Stage: &ref,
+	}); err != nil {
+		t.Fatalf("AppendMessage stage: %v", err)
+	}
+	_ = store.Close()
+
+	reopened, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("reopen store: %v", err)
+	}
+	defer reopened.Close()
+
+	gotLatest, ok := reopened.GetBotLatestStage("assistant")
+	if !ok || gotLatest == nil || gotLatest.Kind != "file" || gotLatest.Path != "memory/notes.md" || gotLatest.Title != "notes.md" {
+		t.Fatalf("unexpected reopened latestStage: ok=%v ref=%+v", ok, gotLatest)
+	}
+
+	msgs, err := reopened.ListMessages("assistant", 20)
+	if err != nil || len(msgs) != 1 {
+		t.Fatalf("ListMessages: len=%d err=%v", len(msgs), err)
+	}
+	if msgs[0].Role != "stage" || msgs[0].Stage == nil || msgs[0].Stage.ID != "file:memory/notes.md" || msgs[0].Stage.Subtitle != "memory/notes.md" {
+		t.Fatalf("unexpected persisted stage message: %+v", msgs[0])
+	}
+
+	if err := reopened.DeleteBotLatestStage("assistant"); err != nil {
+		t.Fatalf("DeleteBotLatestStage: %v", err)
+	}
+	if _, ok := reopened.GetBotLatestStage("assistant"); ok {
+		t.Fatalf("expected latestStage to be deleted")
+	}
+}

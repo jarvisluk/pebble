@@ -8,10 +8,15 @@ import ai.pebble.android.data.HubJson
 import ai.pebble.android.data.NodeInfo
 import ai.pebble.android.data.PebbleStore
 import ai.pebble.android.data.ServerInfo
+import ai.pebble.android.data.StageKind
+import ai.pebble.android.data.StageOpenEvent
+import ai.pebble.android.data.StageRef
 import ai.pebble.android.data.countToolCalls
 import ai.pebble.android.data.formatDurationMs
 import ai.pebble.android.data.normalizeAddress
 import ai.pebble.android.data.resolveDefaultModel
+import ai.pebble.android.ui.desktop.BotStageState
+import ai.pebble.android.ui.desktop.StageStateOps
 import ai.pebble.android.ui.chat.MarkdownBlock
 import ai.pebble.android.ui.chat.MarkdownParser
 import ai.pebble.android.ui.chat.TableAlign
@@ -192,5 +197,40 @@ class PebbleCoreTest {
         assertTrue(PebbleStore.isLocalDesktopTarget("local:virtual:bot1"))
         assertFalse(PebbleStore.isLocalDesktopTarget("node-1"))
         assertFalse(PebbleStore.isLocalDesktopTarget("node-1:virtual:bot1"))
+    }
+
+    @Test
+    fun stageStateOpsAndRefDecodingWork() {
+        val bot = HubJson.decodeFromString<BotStatus>(
+            """{"id":"b1","latestStage":{"id":"file:notes/plan.md","kind":"file","path":"notes/plan.md","title":"Plan"}}""",
+        )
+        assertEquals(StageKind.FILE, bot.latestStage?.resolvedKind)
+        assertEquals("Plan", bot.latestStage?.title)
+
+        val ev = StageOpenEvent(id = "file:README.md", kind = "file", path = "README.md", autoOpen = false)
+        val fileTab = StageStateOps.tabFromOpenEvent(ev, filesTitle = "Files", desktopTitle = "Desktop", newTabTitle = "New Tab")
+        assertEquals("README.md", fileTab.title)
+
+        var st = BotStageState()
+        st = StageStateOps.ensureNonEmpty(st, newTabTitle = "New Tab")
+        assertEquals(1, st.tabs.size)
+        assertEquals(StageKind.NEW, st.activeTab?.kind)
+
+        val desk = StageStateOps.desktopTab(target = "local", title = "Desktop")
+        st = StageStateOps.replaceNewOrOpen(st, desk)
+        assertEquals(1, st.tabs.size)
+        assertEquals("desktop", st.activeTabId)
+
+        st = StageStateOps.upsert(st, fileTab, activate = true)
+        assertEquals(2, st.tabs.size)
+        assertEquals("file:README.md", st.activeTabId)
+
+        st = StageStateOps.close(st, "file:README.md", newTabTitle = "New Tab")
+        assertEquals(1, st.tabs.size)
+        assertEquals("desktop", st.activeTabId)
+
+        st = StageStateOps.close(st, "desktop", newTabTitle = "New Tab")
+        assertEquals(1, st.tabs.size)
+        assertEquals(StageKind.NEW, st.activeTab?.kind)
     }
 }

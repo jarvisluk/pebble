@@ -6,7 +6,6 @@ import type {
   ConfirmOptions,
   ResolvedLang,
   SettingsData,
-  StageKind,
 } from '../types';
 import { translate } from '../lib/i18n';
 import { BotDetailPanel } from './BotDetailPanel';
@@ -44,11 +43,7 @@ interface AppOverlaysProps {
   openPanel: (botId?: string) => Promise<void>;
   setSettings: React.Dispatch<React.SetStateAction<SettingsData | null>>;
   selectBot: (id: string) => Promise<void>;
-  setStageKind: React.Dispatch<React.SetStateAction<StageKind>>;
-  setActiveStageTabId: React.Dispatch<React.SetStateAction<string>>;
-  setFilesOpenPath: React.Dispatch<React.SetStateAction<string>>;
-  setFilesOpenSeq: React.Dispatch<React.SetStateAction<number>>;
-  setDeskOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  onOpenBotFiles: (botId: string) => void;
   setCollabPeerId: React.Dispatch<React.SetStateAction<string | null>>;
   setCreateOpen: React.Dispatch<React.SetStateAction<boolean>>;
   onLoginSuccess: () => Promise<void>;
@@ -85,11 +80,7 @@ export const AppOverlays: React.FC<AppOverlaysProps> = ({
   openPanel,
   setSettings,
   selectBot,
-  setStageKind,
-  setActiveStageTabId,
-  setFilesOpenPath,
-  setFilesOpenSeq,
-  setDeskOpen,
+  onOpenBotFiles,
   setCollabPeerId,
   setCreateOpen,
   onLoginSuccess,
@@ -125,11 +116,7 @@ export const AppOverlays: React.FC<AppOverlaysProps> = ({
         if (!canUseFiles) return;
         setPanelOpen(false);
         if (botId !== activeBotId) void selectBot(botId);
-        setStageKind('files');
-        setActiveStageTabId('files');
-        setFilesOpenPath('');
-        setFilesOpenSeq((n) => n + 1);
-        setDeskOpen(true);
+        onOpenBotFiles(botId);
       }}
     />
 

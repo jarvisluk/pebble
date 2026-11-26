@@ -71,15 +71,12 @@ body.resizing-side, body.resizing-side * { cursor: col-resize !important; user-s
   inset: 0;
   z-index: var(--z-desk);
   display: flex;
-  background: var(--stage);
-}
-.desk-fs-shell[data-surface="adaptive"] {
   background: var(--page);
   color: var(--text);
 }
 .desk-fs-shell[hidden] { display: none; }
-.desk-fs-main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; position: relative; }
-.desk-fs-shell .desk-stage { border-radius: 0; }
+.desk-fs-main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; position: relative; background: var(--page); }
+.desk-fs-shell .desk-stage { border-radius: var(--r-card); }
 .desk-chat-shade { display: none; }
 .desk-chat-side {
   width: 380px;

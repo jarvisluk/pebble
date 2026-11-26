@@ -732,3 +732,71 @@ private func parseAnnexBNALURanges(_ data: Data) -> [Range<Data.Index>] {
     }
     return out
 }
+
+struct HubDesktopStageSurface: View {
+    let controller: H264StreamController
+    let isFramePolling: Bool
+    let fallbackImage: PlatformImage?
+    let boxSize: CGSize
+    let mapPoint: (CGPoint, CGSize) -> CGPoint?
+    let onInput: ([String: Any]) -> Void
+
+    @State private var pressStart = Date()
+    @State private var isDragging = false
+    @State private var lastDragSent = Date.distantPast
+
+    var body: some View {
+        ZStack {
+            #if os(macOS)
+            H264DisplayView(
+                controller: controller,
+                mapPoint: mapPoint,
+                onInput: onInput
+            )
+            #else
+            H264DisplayView(controller: controller)
+            #endif
+            if isFramePolling, let img = fallbackImage {
+                Image(platform: img)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .allowsHitTesting(false)
+            }
+        }
+        .contentShape(Rectangle())
+        #if os(iOS)
+        .gesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { v in
+                    if v.translation == .zero {
+                        pressStart = Date()
+                        isDragging = false
+                    } else if !isDragging, hypot(v.translation.width, v.translation.height) >= 10 {
+                        isDragging = true
+                        if let startPt = mapPoint(v.startLocation, boxSize) {
+                            onInput(["kind": "down", "x": startPt.x, "y": startPt.y, "button": "left"])
+                        }
+                    } else if isDragging, Date().timeIntervalSince(lastDragSent) >= 0.016 {
+                        lastDragSent = Date()
+                        if let pt = mapPoint(v.location, boxSize) {
+                            onInput(["kind": "move", "x": pt.x, "y": pt.y])
+                        }
+                    }
+                }
+                .onEnded { v in
+                    if isDragging {
+                        isDragging = false
+                        if let pt = mapPoint(v.location, boxSize) {
+                            onInput(["kind": "up", "x": pt.x, "y": pt.y, "button": "left"])
+                        }
+                        return
+                    }
+                    let kind = Date().timeIntervalSince(pressStart) > 0.5 ? "right_click" : "click"
+                    if let pt = mapPoint(v.startLocation, boxSize) {
+                        onInput(["kind": kind, "x": pt.x, "y": pt.y])
+                    }
+                }
+        )
+        #endif
+    }
+}

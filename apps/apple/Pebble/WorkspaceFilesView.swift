@@ -1,4 +1,3 @@
-import QuickLook
 import SwiftUI
 
 struct WorkspaceFilesView: View {
@@ -6,27 +5,17 @@ struct WorkspaceFilesView: View {
     @Environment(\.palette) private var p
 
     var botId: String
-    var initialPath: String? = nil
+    var initialDir: String = ""
     @Binding var showHidden: Bool
     var refreshTrigger: Int = 0
     var inWideStage: Bool = false
-    var onQuotePath: (String) -> Void
+    var onOpenFile: (String) -> Void
 
     @State private var dirPath = ""
     @State private var listResult: WorkspaceListResult?
     @State private var listLoading = false
     @State private var listErr = ""
     @State private var listSeq = 0
-
-    @State private var selectedPath: String?
-    @State private var preview: WorkspaceFileContent?
-    @State private var previewLoading = false
-    @State private var previewErr = ""
-    @State private var previewSeq = 0
-    @State private var imageURL: URL?
-    @State private var quickLookURL: URL?
-    @State private var downloading = false
-    @State private var toastMsg = ""
 
     private var segments: [String] {
         dirPath.split(separator: "/").map(String.init)
@@ -39,57 +28,21 @@ struct WorkspaceFilesView: View {
     }
 
     var body: some View {
-        GeometryReader { geo in
-            let isSplit = geo.size.width >= 680
-            Group {
-                if isSplit {
-                    HStack(spacing: 12) {
-                        listPanel(isSplit: true)
-                            .frame(width: 296)
-                            .background(p.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-                            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-
-                        previewPanel(isSplit: true)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .background(p.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-                            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-                    }
-                    .padding(12)
-                } else if inWideStage {
-                    Group {
-                        if let path = selectedPath {
-                            previewContent(path: path, isSplit: false, inCard: true)
-                        } else {
-                            listPanel(isSplit: false, inCard: true)
-                        }
-                    }
+        Group {
+            if inWideStage {
+                listPanel(inCard: true)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(p.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
                     .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
                     .padding(12)
-                } else {
-                    if let path = selectedPath {
-                        previewContent(path: path, isSplit: false)
-                            .background(p.page)
-                    } else {
-                        listPanel(isSplit: false)
-                    }
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(p.page)
-        }
-        .task(id: "\(botId)-\(initialPath ?? "")") {
-            selectedPath = nil
-            preview = nil
-            imageURL = nil
-            if let initP = initialPath, !initP.isEmpty {
-                let parent = (initP as NSString).deletingLastPathComponent
-                await loadDir(parent == "." ? "" : parent)
-                await openFile(initP)
             } else {
-                await loadDir("")
+                listPanel(inCard: false)
             }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(p.page)
+        .task(id: "\(botId)-\(initialDir)") {
+            await loadDir(initialDir)
         }
         .onChange(of: showHidden) { _, _ in
             Task { await loadDir(dirPath) }
@@ -97,12 +50,10 @@ struct WorkspaceFilesView: View {
         .onChange(of: refreshTrigger) { _, _ in
             Task { await loadDir(dirPath) }
         }
-        .quickLookPreview($quickLookURL)
     }
 
     @ViewBuilder
-    private func listPanel(isSplit: Bool, inCard: Bool = false) -> some View {
-        let flatOnCard = isSplit || inCard
+    private func listPanel(inCard: Bool) -> some View {
         VStack(spacing: 0) {
             if !dirPath.isEmpty {
                 inlineBreadcrumbs
@@ -115,7 +66,7 @@ struct WorkspaceFilesView: View {
             } else if !listErr.isEmpty && listResult == nil {
                 VStack(spacing: 10) {
                     Image(systemName: "exclamationmark.triangle")
-                        .font(.system(size: 28))
+                        .font(.system(size: AppFont.hero))
                         .foregroundStyle(p.mute)
                     Text(hub.t("workspaceFiles"))
                         .font(.system(size: AppFont.title, weight: .semibold))
@@ -134,7 +85,7 @@ struct WorkspaceFilesView: View {
             } else if let entries = listResult?.entries, entries.isEmpty, dirPath.isEmpty {
                 VStack(spacing: 8) {
                     Image(systemName: "folder")
-                        .font(.system(size: 28))
+                        .font(.system(size: AppFont.hero))
                         .foregroundStyle(p.mute)
                     Text(hub.t("emptyFolder"))
                         .font(.system(size: AppFont.secondary))
@@ -147,47 +98,42 @@ struct WorkspaceFilesView: View {
                 ScrollView {
                     if entries.isEmpty && !dirPath.isEmpty {
                         VStack(spacing: 0) {
-                            if !dirPath.isEmpty {
-                                parentBackRow(isSplit: flatOnCard)
-                            }
+                            parentBackRow(inCard: inCard)
                             Text(hub.t("emptyFolder"))
                                 .font(.system(size: AppFont.secondary))
                                 .foregroundStyle(.secondary)
                                 .frame(maxWidth: .infinity, alignment: .center)
                                 .padding(.vertical, 24)
                         }
-                        .padding(flatOnCard ? 8 : 0)
-                        .background(flatOnCard ? Color.clear : p.card, in: RoundedRectangle(cornerRadius: flatOnCard ? 0 : 18, style: .continuous))
-                        .padding(flatOnCard ? 0 : 12)
+                        .padding(inCard ? 8 : 0)
+                        .background(inCard ? Color.clear : p.card, in: RoundedRectangle(cornerRadius: inCard ? 0 : 18, style: .continuous))
+                        .padding(inCard ? 0 : 12)
                     } else {
                         LazyVStack(spacing: 0) {
                             if !dirPath.isEmpty {
-                                parentBackRow(isSplit: flatOnCard)
+                                parentBackRow(inCard: inCard)
                                 rowSeparator(inset: 14)
                             }
 
                             ForEach(Array(entries.enumerated()), id: \.element.id) { idx, ent in
-                                let isSelected = isSplit && !ent.isDir && selectedPath == ent.path
-                                let prevSelected = idx > 0 && isSplit && !entries[idx - 1].isDir && selectedPath == entries[idx - 1].path
-                                if idx > 0 && !isSelected && !prevSelected {
-                                    rowSeparator(inset: flatOnCard ? 16 : 14)
+                                if idx > 0 {
+                                    rowSeparator(inset: inCard ? 16 : 14)
                                 }
-
                                 Button {
                                     if ent.isDir {
                                         Task { await loadDir(ent.path) }
                                     } else {
-                                        Task { await openFile(ent.path) }
+                                        onOpenFile(ent.path)
                                     }
                                 } label: {
-                                    fileRow(ent, isSelected: isSelected, isSplit: flatOnCard)
+                                    fileRow(ent, inCard: inCard)
                                 }
                                 .buttonStyle(.plain)
                             }
                         }
-                        .padding(.vertical, flatOnCard ? 8 : 2)
-                        .background(flatOnCard ? Color.clear : p.card, in: RoundedRectangle(cornerRadius: flatOnCard ? 0 : 18, style: .continuous))
-                        .padding(flatOnCard ? 0 : 12)
+                        .padding(.vertical, inCard ? 8 : 2)
+                        .background(inCard ? Color.clear : p.card, in: RoundedRectangle(cornerRadius: inCard ? 0 : 18, style: .continuous))
+                        .padding(inCard ? 0 : 12)
                     }
                 }
                 .refreshable {
@@ -197,7 +143,7 @@ struct WorkspaceFilesView: View {
         }
     }
 
-    private func parentBackRow(isSplit: Bool) -> some View {
+    private func parentBackRow(inCard: Bool) -> some View {
         Button {
             let parent = listResult?.parent ?? ""
             Task { await loadDir(parent) }
@@ -217,7 +163,7 @@ struct WorkspaceFilesView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .padding(.horizontal, isSplit ? 6 : 0)
+        .padding(.horizontal, inCard ? 6 : 0)
     }
 
     private func rowSeparator(inset: CGFloat) -> some View {
@@ -260,7 +206,7 @@ struct WorkspaceFilesView: View {
         }
     }
 
-    private func fileRow(_ ent: WorkspaceFileEntry, isSelected: Bool, isSplit: Bool) -> some View {
+    private func fileRow(_ ent: WorkspaceFileEntry, inCard: Bool) -> some View {
         let meta = fileSymbol(for: ent)
         return HStack(spacing: 12) {
             Image(systemName: meta.symbol)
@@ -270,7 +216,7 @@ struct WorkspaceFilesView: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(ent.name)
-                    .font(.system(size: AppFont.body, weight: isSelected ? .semibold : .medium))
+                    .font(.system(size: AppFont.body, weight: .medium))
                     .foregroundStyle(p.text)
                     .lineLimit(1)
                 if ent.isShared == true || !ent.isDir {
@@ -292,19 +238,13 @@ struct WorkspaceFilesView: View {
                 }
             }
             Spacer(minLength: 4)
-            if ent.isDir {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: AppFont.caption, weight: .semibold))
-                    .foregroundStyle(.tertiary)
-            }
+            Image(systemName: "chevron.right")
+                .font(.system(size: AppFont.caption, weight: .semibold))
+                .foregroundStyle(.tertiary)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
-        .background(
-            RoundedRectangle(cornerRadius: isSplit ? 12 : 0, style: .continuous)
-                .fill(isSelected ? p.sel : Color.clear)
-        )
-        .padding(.horizontal, isSplit ? 8 : 2)
+        .padding(.horizontal, inCard ? 8 : 2)
         .contentShape(Rectangle())
     }
 
@@ -328,185 +268,6 @@ struct WorkspaceFilesView: View {
         }
     }
 
-    @ViewBuilder
-    private func previewPanel(isSplit: Bool) -> some View {
-        if let path = selectedPath {
-            previewContent(path: path, isSplit: isSplit)
-        } else {
-            VStack(spacing: 8) {
-                Image(systemName: "doc.text")
-                    .font(.system(size: 28))
-                    .foregroundStyle(p.mute)
-                Text(hub.t("workspaceFiles"))
-                    .font(.system(size: AppFont.title, weight: .semibold))
-                    .foregroundStyle(p.text)
-                Text(hub.t("selectFileHint"))
-                    .font(.system(size: AppFont.secondary))
-                    .foregroundStyle(p.text2)
-                    .multilineTextAlignment(.center)
-            }
-            .padding(24)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-    }
-
-    private func previewContent(path: String, isSplit: Bool, inCard: Bool = false) -> some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 10) {
-                if !isSplit {
-                    Button {
-                        selectedPath = nil
-                        preview = nil
-                        imageURL = nil
-                    } label: {
-                        Label(hub.t("back"), systemImage: "chevron.backward")
-                            .font(.system(size: AppFont.body, weight: .semibold))
-                    }
-                    .buttonStyle(.plain)
-                }
-
-                VStack(alignment: .leading, spacing: 1) {
-                    Text((path as NSString).lastPathComponent)
-                        .font(.system(size: AppFont.cardTitle, weight: .semibold))
-                        .foregroundStyle(p.text)
-                        .lineLimit(1)
-                    if path.contains("/") {
-                        Text(path)
-                            .font(.system(size: AppFont.caption, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                    }
-                }
-
-                Spacer(minLength: 8)
-
-                Button {
-                    onQuotePath(path)
-                } label: {
-                    if isSplit {
-                        Label(hub.t("insertToChat"), systemImage: "quote.bubble")
-                            .font(.system(size: AppFont.secondary, weight: .semibold))
-                            .lineLimit(1)
-                    } else {
-                        Image(systemName: "quote.bubble")
-                            .font(.system(size: AppFont.body, weight: .semibold))
-                    }
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .fixedSize()
-                .accessibilityLabel(hub.t("insertToChat"))
-
-                if downloading {
-                    ProgressView().controlSize(.small)
-                } else {
-                    Button {
-                        Task { await downloadAndPreview(path: path, name: preview?.name ?? (path as NSString).lastPathComponent) }
-                    } label: {
-                        Image(systemName: "square.and.arrow.up")
-                            .font(.system(size: AppFont.body, weight: .semibold))
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .background((isSplit || inCard) ? Color.clear : p.card)
-            .overlay(alignment: .bottom) {
-                Rectangle().fill(p.s2).frame(height: 0.5)
-            }
-
-            if !toastMsg.isEmpty {
-                Text(toastMsg)
-                    .font(.system(size: AppFont.secondary))
-                    .foregroundStyle(.secondary)
-                    .padding(.top, 8)
-            }
-
-            if previewLoading {
-                Spacer()
-                ProgressView()
-                Spacer()
-            } else if !previewErr.isEmpty {
-                VStack(spacing: 10) {
-                    Image(systemName: "exclamationmark.triangle")
-                        .font(.system(size: 28))
-                        .foregroundStyle(p.mute)
-                    Text(hub.t("workspaceFiles"))
-                        .font(.system(size: AppFont.title, weight: .semibold))
-                        .foregroundStyle(p.text)
-                    Text(previewErr)
-                        .font(.system(size: AppFont.secondary))
-                        .foregroundStyle(p.text2)
-                        .multilineTextAlignment(.center)
-                    Button(hub.t("retry")) {
-                        Task { await openFile(path) }
-                    }
-                    .buttonStyle(.borderedProminent)
-                }
-                .padding(24)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if let doc = preview {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 12) {
-                        if doc.truncated == true {
-                            Text(hub.t("fileTruncatedHint", ["size": formatByteSize(Int64(doc.content?.utf8.count ?? 0))]))
-                                .font(.system(size: AppFont.secondary))
-                                .padding(10)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(p.s1, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                        }
-
-                        if doc.kind == "image", let url = imageURL {
-                            AsyncImage(url: url) { phase in
-                                switch phase {
-                                case let .success(img):
-                                    img.resizable().scaledToFit()
-                                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                                case .failure:
-                                    Text(hub.t("downloadFailed")).foregroundStyle(p.pinkInk)
-                                default:
-                                    ProgressView().frame(maxWidth: .infinity, minHeight: 160)
-                                }
-                            }
-                        } else if doc.kind == "markdown" {
-                            MarkdownText(text: doc.content ?? "")
-                        } else if doc.kind == "text" {
-                            Text(doc.content ?? "")
-                                .font(.system(size: AppFont.secondary, design: .monospaced))
-                                .textSelection(.enabled)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        } else {
-                            VStack(spacing: 12) {
-                                Image(systemName: "doc.zipper")
-                                    .font(.system(size: 32))
-                                    .foregroundStyle(.secondary)
-                                Text(doc.name)
-                                    .font(.system(size: AppFont.title, weight: .bold))
-                                Text("\(doc.mimeType) · \(formatByteSize(doc.size))")
-                                    .font(.system(size: AppFont.caption, design: .monospaced))
-                                    .foregroundStyle(.secondary)
-                                Text(hub.t("binaryFileHint"))
-                                    .font(.system(size: AppFont.secondary))
-                                    .foregroundStyle(.secondary)
-                                    .multilineTextAlignment(.center)
-                                Button(hub.t("openQuickLook")) {
-                                    Task { await downloadAndPreview(path: doc.path, name: doc.name) }
-                                }
-                                .buttonStyle(.borderedProminent)
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 32)
-                        }
-                    }
-                    .padding(16)
-                }
-            }
-        }
-    }
-
     private func loadDir(_ path: String) async {
         guard !botId.isEmpty else { return }
         listSeq += 1
@@ -524,43 +285,6 @@ struct WorkspaceFilesView: View {
         }
         if seq == listSeq {
             listLoading = false
-        }
-    }
-
-    private func openFile(_ path: String) async {
-        guard !botId.isEmpty else { return }
-        previewSeq += 1
-        let seq = previewSeq
-        selectedPath = path
-        previewLoading = true
-        previewErr = ""
-        imageURL = nil
-        do {
-            let doc = try await hub.readWorkspaceFile(botId: botId, path: path)
-            guard seq == previewSeq else { return }
-            preview = doc
-            if doc.kind == "image" {
-                let url = try await hub.workspaceFileImageURL(botId: botId, path: path)
-                guard seq == previewSeq else { return }
-                imageURL = url
-            }
-        } catch {
-            guard seq == previewSeq else { return }
-            preview = nil
-            previewErr = error.localizedDescription
-        }
-        if seq == previewSeq {
-            previewLoading = false
-        }
-    }
-
-    private func downloadAndPreview(path: String, name: String) async {
-        downloading = true
-        defer { downloading = false }
-        do {
-            quickLookURL = try await hub.downloadWorkspaceFileToTemp(botId: botId, path: path, fileName: name)
-        } catch {
-            toastMsg = error.localizedDescription
         }
     }
 

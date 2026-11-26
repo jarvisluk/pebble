@@ -10,6 +10,7 @@ import type {
   PendingQuestion,
   PermissionMode,
   ResolvedLang,
+  StageRef,
   TakeoverRequest,
 } from '../types';
 import { uploadBotAttachment } from '../lib/api';
@@ -41,13 +42,15 @@ interface ChatViewProps {
   questions: PendingQuestion[];
   harnesses?: HarnessInfo[];
   deskOpen: boolean;
+  hasUnreadLatestStage?: boolean;
   inDesktopSidebar?: boolean;
   lang: ResolvedLang;
   inputRef: React.RefObject<HTMLTextAreaElement | null>;
   pendingInsert?: { seq: number; text: string } | null;
   onOpenMenu: () => void;
   onToggleDesktop: () => void;
-  onOpenFiles?: () => void;
+  onOpenStage?: () => void;
+  onOpenStageRef?: (ref: StageRef) => void;
   onOpenDesktopTarget: (target: string) => void;
   onSwitchBackLocal?: () => void;
   onResolveTakeover: (to: TakeoverRequest) => void;
@@ -84,13 +87,15 @@ export const ChatView: React.FC<ChatViewProps> = ({
   questions,
   harnesses,
   deskOpen,
+  hasUnreadLatestStage = false,
   inDesktopSidebar = false,
   lang,
   inputRef,
   pendingInsert,
   onOpenMenu,
   onToggleDesktop,
-  onOpenFiles,
+  onOpenStage,
+  onOpenStageRef,
   onOpenDesktopTarget,
   onSwitchBackLocal,
   onResolveTakeover,
@@ -390,10 +395,11 @@ export const ChatView: React.FC<ChatViewProps> = ({
         takeovers={takeovers}
         activeDeskTarget={activeDeskTarget}
         deskOpen={deskOpen}
+        hasUnreadLatestStage={hasUnreadLatestStage}
         lang={lang}
         onOpenMenu={onOpenMenu}
         onToggleDesktop={onToggleDesktop}
-        onOpenFiles={onOpenFiles}
+        onOpenStage={onOpenStage}
         onOpenDesktopTarget={onOpenDesktopTarget}
         onSwitchBackLocal={onSwitchBackLocal}
         onResolveTakeover={onResolveTakeover}
@@ -417,6 +423,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
             lang={lang}
             onOpenCreate={onOpenCreate}
             onOpenCollab={onOpenCollab}
+            onOpenStageRef={onOpenStageRef}
             onPreviewImage={setPreviewImg}
             onReplyApproval={onReplyApproval}
             onReplyQuestion={onReplyQuestion}

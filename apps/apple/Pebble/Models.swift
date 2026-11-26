@@ -39,6 +39,7 @@ struct BotStatus: Codable, Identifiable, Hashable {
     var queued: Int?
     var session: SessionRecord?
     var instructions: String?
+    var latestStage: StageRef?
 
     var displayName: String { (name ?? "").isEmpty ? id : name! }
     var isBusy: Bool { busy ?? false }
@@ -68,6 +69,7 @@ struct ChatMessage: Codable, Identifiable, Hashable {
     var to: String?
     var text: String?
     var media: [MessageMedia]?
+    var stage: StageRef?
     var createdAt: String?
     var tools: [String]?
     var durationMs: Double?
@@ -614,21 +616,56 @@ struct WorkspaceFileTicketResp: Decodable {
 }
 
 enum StageKind: String, Codable, Hashable {
+    case new
     case files
+    case file
     case desktop
     case browser
     case artifact
     case mcpApp = "mcp-app"
+
+    init(rawOrUnknown raw: String?) {
+        let clean = (raw ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        self = StageKind(rawValue: clean) ?? .artifact
+    }
+}
+
+struct StageRef: Codable, Hashable, Identifiable {
+    var id: String?
+    var kind: String
+    var title: String?
+    var subtitle: String?
+    var path: String?
+    var url: String?
+    var resourceUri: String?
+    var target: String?
+    var closable: Bool?
+    var createdAt: String?
+
+    var resolvedId: String {
+        if let id, !id.isEmpty { return id }
+        if let path, !path.isEmpty { return "\(kind):\(path)" }
+        if let target, !target.isEmpty { return "\(kind):\(target)" }
+        return kind
+    }
+
+    var resolvedKind: StageKind {
+        if kind == "files", let path, !path.isEmpty { return .file }
+        return StageKind(rawOrUnknown: kind)
+    }
 }
 
 struct StageTab: Identifiable, Hashable {
     var id: String
     var kind: StageKind
+    var rawKind: String
     var title: String
+    var subtitle: String?
     var botId: String?
     var path: String?
     var url: String?
     var resourceUri: String?
+    var target: String?
     var closable: Bool = true
 }
 
@@ -636,11 +673,15 @@ struct StageOpenEvent: Decodable, Equatable {
     var id: String?
     var kind: String
     var title: String?
+    var subtitle: String?
     var botId: String?
     var path: String?
     var url: String?
     var resourceUri: String?
+    var target: String?
     var closable: Bool?
+    var autoOpen: Bool?
+    var createdAt: String?
 }
 
 struct PendingChatInsert: Equatable {
