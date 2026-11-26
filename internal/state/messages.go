@@ -21,14 +21,29 @@ type MessageMedia struct {
 	Size     int64  `json:"size,omitempty"`
 }
 
+type StageRef struct {
+	ID          string         `json:"id,omitempty"`
+	Kind        string         `json:"kind"` // file | files | desktop | browser | artifact | mcp-app
+	Title       string         `json:"title,omitempty"`
+	Subtitle    string         `json:"subtitle,omitempty"`
+	Path        string         `json:"path,omitempty"`
+	URL         string         `json:"url,omitempty"`
+	ResourceURI string         `json:"resourceUri,omitempty"`
+	Target      string         `json:"target,omitempty"`
+	Closable    *bool          `json:"closable,omitempty"`
+	Payload     map[string]any `json:"payload,omitempty"`
+	CreatedAt   string         `json:"createdAt,omitempty"`
+}
+
 type ChatMessage struct {
 	ID           string         `json:"id"`
 	BotID        string         `json:"botId"`
-	Role         string         `json:"role"` // "user" | "assistant" | "bot_in" | "bot_out" | "system" | "internal"
+	Role         string         `json:"role"` // "user" | "assistant" | "bot_in" | "bot_out" | "stage" | "system" | "internal"
 	From         string         `json:"from,omitempty"`
 	To           string         `json:"to,omitempty"`
 	Text         string         `json:"text"`
 	Media        []MessageMedia `json:"media,omitempty"`
+	Stage        *StageRef      `json:"stage,omitempty"`
 	SessionID    string         `json:"sessionId,omitempty"`
 	Turn         int            `json:"turn,omitempty"`
 	Tools        []string       `json:"tools,omitempty"`

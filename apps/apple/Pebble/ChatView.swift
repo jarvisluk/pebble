@@ -191,15 +191,35 @@ struct ChatView: View {
                         .accessibilityLabel(hub.t("botDetails"))
                     }
                     ToolbarItemGroup(placement: .hubTrailing) {
-                        Button { router.openFiles(botId: botId) } label: {
-                            Label(hub.t("workspaceFiles"), systemImage: "folder")
+                        Button {
+                            router.openLatestStage(botId: botId, latestStage: bot?.latestStage)
+                        } label: {
+                            let hasUnread = router.hasUnreadLatestStage(botId)
+                            let latestTitle = (bot?.latestStage?.title ?? bot?.latestStage?.path ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                            ZStack(alignment: .topTrailing) {
+                                Label(
+                                    latestTitle.isEmpty ? hub.t("stageOpenWorkspace") : hub.t("stageLatestTab", ["title": latestTitle]),
+                                    systemImage: "sidebar.right"
+                                )
+                                .labelStyle(.iconOnly)
+                                if hasUnread {
+                                    Circle()
+                                        .fill(p.busy)
+                                        .frame(width: 7, height: 7)
+                                        .offset(x: 2, y: -2)
+                                }
+                            }
                         }
+                        .help({
+                            let latestTitle = (bot?.latestStage?.title ?? bot?.latestStage?.path ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                            return latestTitle.isEmpty ? hub.t("stageOpenWorkspace") : hub.t("stageLatestTab", ["title": latestTitle])
+                        }())
                         Button {
                             let toTarget = hub.takeovers.first(where: { $0.botId == botId })?.target
                                 ?? bot?.desktopTarget.flatMap { $0.isEmpty ? nil : $0 }
                                 ?? hub.takeovers.first?.target
                                 ?? (hub.activeDesktopTarget.target.isEmpty ? "local" : hub.activeDesktopTarget.target)
-                            router.openDesktop(toTarget)
+                            router.openDesktop(toTarget, botId: botId)
                         } label: {
                             Label(hub.t("remoteDesktop"), systemImage: hub.takeovers.isEmpty ? "display" : "exclamationmark.triangle")
                         }

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct MessageBubble: View {
     @Environment(HubStore.self) private var hub
+    @Environment(Router.self) private var router
     @Environment(\.palette) private var p
     var msg: ChatMessage
     var soft: Color
@@ -77,6 +78,16 @@ struct MessageBubble: View {
             .background(bubbleColor ?? senderCollab.bg, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
             .padding(.leading, isOut ? 24 : 0)
             .padding(.trailing, isOut ? 0 : 24)
+        case "stage":
+            if let ref = msg.stage {
+                let targetBotId = (msg.botId ?? "").isEmpty ? botId : msg.botId!
+                HStack {
+                    StageJumpCard(ref: ref, inSidebar: inSidebar) {
+                        router.openStage(botId: targetBotId, ref: ref)
+                    }
+                    Spacer(minLength: 0)
+                }
+            }
         default:
             if msg.from == "command" {
                 Text(msg.body)

@@ -9,7 +9,7 @@ import (
 
 const messageSelectCols = `
   msg_uid, session_id, bot_id, turn, role, sender, recipient,
-  text, media_json, tools_json, duration_ms, cost_usd, input_tokens, output_tokens, created_at
+  text, media_json, stage_json, tools_json, duration_ms, cost_usd, input_tokens, output_tokens, created_at
 `
 
 func (s *Store) AppendMessage(msg ChatMessage) (ChatMessage, error) {
@@ -23,6 +23,12 @@ func (s *Store) AppendMessage(msg ChatMessage) (ChatMessage, error) {
 	if len(msg.Media) > 0 {
 		if b, err := json.Marshal(msg.Media); err == nil {
 			mediaJSON = string(b)
+		}
+	}
+	stageJSON := ""
+	if msg.Stage != nil {
+		if b, err := json.Marshal(msg.Stage); err == nil {
+			stageJSON = string(b)
 		}
 	}
 	toolsJSON := "[]"
@@ -39,9 +45,9 @@ func (s *Store) AppendMessage(msg ChatMessage) (ChatMessage, error) {
 	defer func() { _ = tx.Rollback() }()
 
 	if _, err := tx.Exec(`
-		INSERT INTO messages(msg_uid, session_id, bot_id, turn, role, sender, recipient, text, media_json, tools_json, duration_ms, cost_usd, input_tokens, output_tokens, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, msg.ID, msg.SessionID, msg.BotID, msg.Turn, msg.Role, msg.From, msg.To, msg.Text, mediaJSON, toolsJSON, msg.DurationMs, msg.CostUSD, msg.InputTokens, msg.OutputTokens, msg.CreatedAt); err != nil {
+		INSERT INTO messages(msg_uid, session_id, bot_id, turn, role, sender, recipient, text, media_json, stage_json, tools_json, duration_ms, cost_usd, input_tokens, output_tokens, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, msg.ID, msg.SessionID, msg.BotID, msg.Turn, msg.Role, msg.From, msg.To, msg.Text, mediaJSON, stageJSON, toolsJSON, msg.DurationMs, msg.CostUSD, msg.InputTokens, msg.OutputTokens, msg.CreatedAt); err != nil {
 		return msg, err
 	}
 

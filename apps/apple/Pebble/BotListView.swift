@@ -416,6 +416,10 @@ struct BotRow: View {
                 return (hub.t("processing"), p.busy)
             }
             if let m = lastMsg {
+                if m.role == "stage", let st = m.stage {
+                    let lbl = (st.title ?? st.path ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                    return (lbl.isEmpty ? st.kind : lbl, p.text2)
+                }
                 let pre = m.role == "user" ? hub.t("youPrefix") : ""
                 var rawBody = m.body
                 if rawBody.isEmpty, let first = m.media?.first {

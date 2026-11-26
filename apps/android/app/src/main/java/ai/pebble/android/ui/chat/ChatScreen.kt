@@ -114,7 +114,9 @@ fun ChatScreen(
     inDesktopSidebar: Boolean = false,
     onBack: (() -> Unit)? = null,
     onOpenDesktop: (String) -> Unit = {},
-    onOpenFiles: (String) -> Unit = {},
+    onOpenStage: (String) -> Unit = {},
+    onOpenStageRef: (String, ai.pebble.android.data.StageRef) -> Unit = { _, _ -> },
+    hasUnreadLatestStage: Boolean = false,
     onToggleDetail: (() -> Unit)? = null,
     onOpenBotInfo: (() -> Unit)? = null,
     onSelectBot: ((String) -> Unit)? = null,
@@ -361,7 +363,8 @@ fun ChatScreen(
             inDesktopSidebar = inDesktopSidebar,
             onBack = onBack,
             onOpenDesktop = onOpenDesktop,
-            onOpenFiles = onOpenFiles,
+            onOpenStage = onOpenStage,
+            hasUnreadLatestStage = hasUnreadLatestStage,
             onToggleDetail = onToggleDetail,
             onOpenBotInfo = onOpenBotInfo,
             onSelectBot = onSelectBot,
@@ -408,6 +411,7 @@ fun ChatScreen(
                 isEmptyMessages = messages.isEmpty(),
                 onCollabClick = { if (it.isNotEmpty()) collabPeerId = it },
                 onPreviewMedia = { previewMedia = it },
+                onOpenStageRef = { ref -> onOpenStageRef(botId, ref) },
             )
 
             ChatComposer(

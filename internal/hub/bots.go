@@ -32,6 +32,7 @@ type BotStatus struct {
 	Busy             bool                 `json:"busy"`
 	Queued           int64                `json:"queued"`
 	Session          *state.SessionRecord `json:"session,omitempty"`
+	LatestStage      *state.StageRef      `json:"latestStage,omitempty"`
 }
 
 type BotDetail struct {
@@ -156,6 +157,7 @@ func (h *Hub) statusOfLocked(lane *botLane) BotStatus {
 		Busy:             lane.busy.Load(),
 		Queued:           lane.queued.Load(),
 		Session:          sessPtr,
+		LatestStage:      h.getBotLatestStage(lane.bot.ID),
 	}
 }
 
@@ -656,7 +658,11 @@ func (h *Hub) DeleteBot(botID string) error {
 
 	if h.store != nil {
 		_, _, _ = h.store.Reset(botID)
+		_ = h.store.DeleteBotLatestStage(botID)
 	}
+	h.stageMu.Lock()
+	delete(h.latestStages, botID)
+	h.stageMu.Unlock()
 	h.broadcast(Event{
 		Type:    "bot_deleted",
 		BotID:   botID,

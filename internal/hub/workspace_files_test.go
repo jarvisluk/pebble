@@ -176,4 +176,50 @@ func TestReadWorkspaceFileAndOpenStage(t *testing.T) {
 	if evt.Type != "stage_open" || evt.BotID != "helper" {
 		t.Fatalf("unexpected broadcast event: %+v", evt)
 	}
+
+	// OpenBotStage supports kind=file, kind=desktop, kind=browser, autoOpen, and silent flags.
+	fileSt, err := h.OpenBotStage("helper", StageOpenPayload{
+		Kind:     "file",
+		Path:     "memory/notes.md",
+		AutoOpen: true,
+	})
+	if err != nil {
+		t.Fatalf("OpenBotStage file: %v", err)
+	}
+	if fileSt.ID != "file:memory/notes.md" || fileSt.Title != "notes.md" || fileSt.Subtitle != "memory/notes.md" || !fileSt.AutoOpen {
+		t.Fatalf("unexpected file stage payload: %+v", fileSt)
+	}
+
+	deskSt, err := h.OpenBotStage("helper", StageOpenPayload{
+		Kind:   "desktop",
+		Silent: true,
+	})
+	if err != nil {
+		t.Fatalf("OpenBotStage desktop: %v", err)
+	}
+	if deskSt.ID != "desktop" || deskSt.Target != "local" {
+		t.Fatalf("unexpected desktop stage payload: %+v", deskSt)
+	}
+
+	browserSt, err := h.OpenBotStage("helper", StageOpenPayload{
+		Kind:  "browser",
+		Title: "Docs",
+		URL:   "https://example.com",
+	})
+	if err != nil {
+		t.Fatalf("OpenBotStage browser: %v", err)
+	}
+	if browserSt.Subtitle != "https://example.com" {
+		t.Fatalf("unexpected browser stage payload: %+v", browserSt)
+	}
+
+	latest := h.getBotLatestStage("helper")
+	if latest == nil || latest.Kind != "browser" || latest.URL != "https://example.com" {
+		t.Fatalf("unexpected latest stage cached on hub: %+v", latest)
+	}
+
+	statuses, err := h.Status("helper")
+	if err != nil || len(statuses) != 1 || statuses[0].LatestStage == nil || statuses[0].LatestStage.Kind != "browser" {
+		t.Fatalf("expected BotStatus.LatestStage to be populated, got %+v (err=%v)", statuses, err)
+	}
 }

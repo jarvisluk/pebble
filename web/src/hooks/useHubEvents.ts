@@ -11,9 +11,7 @@ import type {
   PendingQuestion,
   ScreenState,
   SettingsData,
-  StageKind,
   StageOpenEvent,
-  StageTab,
   TakeoverRequest,
   UpdateStatus,
 } from '../types';
@@ -37,9 +35,9 @@ export interface UseHubEventsOpts {
   refreshApprovals: () => Promise<void>;
   refreshQuestions: () => Promise<void>;
   refreshUpdateStatus: () => Promise<void>;
-  selectBot: (id: string) => Promise<void>;
   removeBotLocally: (id: string) => void;
   applyActiveDesktopTarget: (next: ActiveDesktopTarget, notifyFallback?: boolean) => void;
+  onStageOpenEvent: (botId: string, payload: StageOpenEvent) => void;
   setMsgsMap: React.Dispatch<React.SetStateAction<Record<string, ChatMessage[]>>>;
   setLastMap: React.Dispatch<React.SetStateAction<Record<string, ChatMessage>>>;
   setUnreadMap: React.Dispatch<React.SetStateAction<Record<string, number>>>;
@@ -52,12 +50,6 @@ export interface UseHubEventsOpts {
   setNodesFromEvents: React.Dispatch<React.SetStateAction<NodeInfo[] | null>>;
   setLiveScreen: React.Dispatch<React.SetStateAction<ScreenState | null>>;
   setScreenSeq: React.Dispatch<React.SetStateAction<number>>;
-  setStageKind: React.Dispatch<React.SetStateAction<StageKind>>;
-  setActiveStageTabId: React.Dispatch<React.SetStateAction<string>>;
-  setFilesOpenPath: React.Dispatch<React.SetStateAction<string>>;
-  setFilesOpenSeq: React.Dispatch<React.SetStateAction<number>>;
-  setDeskOpen: React.Dispatch<React.SetStateAction<boolean>>;
-  setStageTabs: React.Dispatch<React.SetStateAction<StageTab[]>>;
   setTakeovers: React.Dispatch<React.SetStateAction<TakeoverRequest[]>>;
   setQuestions: React.Dispatch<React.SetStateAction<PendingQuestion[]>>;
   setApprovals: React.Dispatch<React.SetStateAction<PendingApproval[]>>;
@@ -87,9 +79,9 @@ export function useHubEvents(opts: UseHubEventsOpts) {
     refreshApprovals,
     refreshQuestions,
     refreshUpdateStatus,
-    selectBot,
     removeBotLocally,
     applyActiveDesktopTarget,
+    onStageOpenEvent,
     setMsgsMap,
     setLastMap,
     setUnreadMap,
@@ -102,12 +94,6 @@ export function useHubEvents(opts: UseHubEventsOpts) {
     setNodesFromEvents,
     setLiveScreen,
     setScreenSeq,
-    setStageKind,
-    setActiveStageTabId,
-    setFilesOpenPath,
-    setFilesOpenSeq,
-    setDeskOpen,
-    setStageTabs,
     setTakeovers,
     setQuestions,
     setApprovals,
@@ -221,47 +207,9 @@ export function useHubEvents(opts: UseHubEventsOpts) {
 
     on('stage_open', ({ botId, payload }: { botId?: string; payload?: StageOpenEvent }) => {
       if (!payload?.kind) return;
-      const targetBotId = payload.botId || botId;
-      if (targetBotId && targetBotId !== activeBotIdRef.current) {
-        void selectBot(targetBotId);
-      }
-      if (payload.kind === 'files') {
-        setStageKind('files');
-        setActiveStageTabId('files');
-        setFilesOpenPath(payload.path || '');
-        setFilesOpenSeq((n) => n + 1);
-        setDeskOpen(true);
-        return;
-      }
-      if (payload.kind === 'desktop') {
-        setStageKind('desktop');
-        setActiveStageTabId('desktop');
-        setDeskOpen(true);
-        return;
-      }
-      const tabId = payload.id || `${payload.kind}:${Date.now()}`;
-      const newTab: StageTab = {
-        id: tabId,
-        kind: payload.kind,
-        title: payload.title || payload.kind,
-        botId: targetBotId,
-        path: payload.path,
-        url: payload.url,
-        resourceUri: payload.resourceUri,
-        closable: payload.closable !== false,
-      };
-      setStageTabs((prev) => {
-        const idx = prev.findIndex((x) => x.id === tabId);
-        if (idx >= 0) {
-          const copy = [...prev];
-          copy[idx] = newTab;
-          return copy;
-        }
-        return [...prev, newTab];
-      });
-      setStageKind(payload.kind);
-      setActiveStageTabId(tabId);
-      setDeskOpen(true);
+      const targetBotId = payload.botId || botId || activeBotIdRef.current || '';
+      if (!targetBotId) return;
+      onStageOpenEvent(targetBotId, payload);
     });
 
     on('takeover', ({ payload }: { payload?: { items?: TakeoverRequest[] } }) => {

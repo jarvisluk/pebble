@@ -118,7 +118,8 @@ internal fun ChatTopBar(
     inDesktopSidebar: Boolean,
     onBack: (() -> Unit)?,
     onOpenDesktop: (String) -> Unit,
-    onOpenFiles: (String) -> Unit,
+    onOpenStage: (String) -> Unit,
+    hasUnreadLatestStage: Boolean = false,
     onToggleDetail: (() -> Unit)?,
     onOpenBotInfo: (() -> Unit)?,
     onSelectBot: ((String) -> Unit)?,
@@ -236,12 +237,23 @@ internal fun ChatTopBar(
                 }
             },
             actions = {
-                IconButton(onClick = { onOpenFiles(botId) }) {
-                    Icon(
-                        painter = painterResource( PebbleIcons.Folder),
-                        contentDescription = store.t("workspaceFiles"),
-                        tint = p.text,
-                    )
+                IconButton(onClick = { onOpenStage(botId) }) {
+                    Box {
+                        Icon(
+                            painter = painterResource(PebbleIcons.ViewSidebar),
+                            contentDescription = store.t(if (bot?.latestStage != null) "stageLatestTab" else "stageOpenWorkspace"),
+                            tint = p.text,
+                        )
+                        if (hasUnreadLatestStage) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .size(7.dp)
+                                    .clip(CircleShape)
+                                    .background(p.busy),
+                            )
+                        }
+                    }
                 }
                 IconButton(onClick = {
                     val toTarget = store.takeovers.firstOrNull { it.botId == botId }?.target?.takeIf { it.isNotEmpty() }

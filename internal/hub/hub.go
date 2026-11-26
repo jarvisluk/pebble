@@ -124,6 +124,9 @@ type Hub struct {
 
 	inboundAttsMu sync.Mutex
 	inboundAtts   map[string]inboundAttEntry
+
+	stageMu      sync.RWMutex
+	latestStages map[string]*state.StageRef
 }
 
 func New(cfg *config.HubConfig, store *state.Store, messages *state.MessageStore, reg *harness.Registry) *Hub {
@@ -172,6 +175,7 @@ func New(cfg *config.HubConfig, store *state.Store, messages *state.MessageStore
 		approvals:          make(map[string]*pendingApprovalEntry),
 		sessionAllow:       make(map[string]map[string]bool),
 		inboundAtts:        make(map[string]inboundAttEntry),
+		latestStages:       make(map[string]*state.StageRef),
 		push:               push.NewManager(cfg, store),
 	}
 	if store != nil {

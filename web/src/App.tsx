@@ -15,7 +15,8 @@ import type {
   ServerInfo,
   SettingsData,
   SettingsTab,
-  StageKind,
+  StageOpenEvent,
+  StageRef,
   StageTab,
   TakeoverRequest,
   UpdateStatus,
@@ -35,6 +36,17 @@ import { useAppLayout } from './hooks/useAppLayout';
 import { useHubData } from './hooks/useHubData';
 import { useHubActions } from './hooks/useHubActions';
 import { useHubEvents } from './hooks/useHubEvents';
+import {
+  type BotStageState,
+  closeTab,
+  createDesktopTab,
+  createFilesTab,
+  createNewTab,
+  ensureNonEmptyStageState,
+  replaceNewTabOrOpen,
+  stageTabFromRef,
+  upsertTab,
+} from './lib/stageTabs';
 import { Sidebar } from './components/Sidebar';
 import { ChatView } from './components/ChatView';
 import { AppOverlays } from './components/AppOverlays';
@@ -117,11 +129,7 @@ export default function App() {
   const [mobileSideOpen, setMobileSideOpen] = useState(false);
 
   const [deskOpen, setDeskOpen] = useState(false);
-  const [stageKind, setStageKind] = useState<StageKind>('desktop');
-  const [stageTabs, setStageTabs] = useState<StageTab[]>([]);
-  const [activeStageTabId, setActiveStageTabId] = useState<string>('desktop');
-  const [filesOpenPath, setFilesOpenPath] = useState('');
-  const [filesOpenSeq, setFilesOpenSeq] = useState(0);
+  const [botStages, setBotStages] = useState<Record<string, BotStageState>>({});
   const [stageInsert, setStageInsert] = useState<{ seq: number; text: string } | null>(null);
   const [deskTarget, setDeskTarget] = useState('local');
   const [activeDeskTarget, setActiveDeskTarget] = useState<ActiveDesktopTarget>({
@@ -243,11 +251,23 @@ export default function App() {
   );
 
   useEffect(() => {
-    if (!canUseFiles && activeStageTabId === 'files') {
-      setStageKind('desktop');
-      setActiveStageTabId('desktop');
+    if (!canUseFiles) {
+      setBotStages((prev) => {
+        let changed = false;
+        const next: Record<string, BotStageState> = {};
+        for (const [bid, st] of Object.entries(prev)) {
+          const filtered = st.tabs.filter((x) => x.kind !== 'files' && x.kind !== 'file');
+          if (filtered.length !== st.tabs.length) {
+            changed = true;
+            next[bid] = ensureNonEmptyStageState({ ...st, tabs: filtered }, t);
+          } else {
+            next[bid] = st;
+          }
+        }
+        return changed ? next : prev;
+      });
     }
-  }, [activeStageTabId, canUseFiles]);
+  }, [canUseFiles, t]);
 
   useEffect(() => {
     document.documentElement.style.removeProperty('--accent');
@@ -403,6 +423,114 @@ export default function App() {
   const shadeOpen = mobileSideOpen || panelOpen || Boolean(collabPeerId) || Boolean(inspectedTaskId);
 
 
+  const openStageShell = useCallback(() => {
+    setPanelOpen(false);
+    setMobileSideOpen(false);
+    setCollabPeerId(null);
+    setCreateOpen(false);
+    if (!deskOpenRef.current) {
+      setDeskChatOpen(window.innerWidth > 820);
+      setDeskOpen(true);
+    }
+  }, []);
+
+  const clearUnreadLatestStage = useCallback((botId: string) => {
+    setBotStages((prev) => {
+      const cur = prev[botId];
+      if (!cur?.unreadLatestStageId) return prev;
+      return { ...prev, [botId]: { ...cur, unreadLatestStageId: undefined } };
+    });
+  }, []);
+
+  const openStageWithTab = useCallback(
+    (botId: string, tab: StageTab, replaceNew = false) => {
+      if (!botId) return;
+      setBotStages((prev) => {
+        const cur = prev[botId];
+        const updated = replaceNew ? replaceNewTabOrOpen(cur, tab) : upsertTab(cur, tab, true);
+        return {
+          ...prev,
+          [botId]: { ...updated, unreadLatestStageId: undefined },
+        };
+      });
+      if (tab.kind === 'desktop' && tab.target) {
+        setDeskTarget(tab.target);
+      }
+      openStageShell();
+    },
+    [openStageShell]
+  );
+
+  const openStageByRef = useCallback(
+    (botId: string, ref: StageRef) => {
+      if (!botId) return;
+      const tab = stageTabFromRef(ref, t, botId);
+      if (!canUseFiles && (tab.kind === 'files' || tab.kind === 'file')) {
+        return;
+      }
+      openStageWithTab(botId, tab, false);
+    },
+    [canUseFiles, openStageWithTab, t]
+  );
+
+  const openLatestStageForBot = useCallback(
+    (botId: string) => {
+      const bot = bots.find((b) => b.id === botId);
+      const cur = botStages[botId];
+      if (bot?.latestStage) {
+        const tab = stageTabFromRef(bot.latestStage, t, botId);
+        if (canUseFiles || (tab.kind !== 'files' && tab.kind !== 'file')) {
+          openStageWithTab(botId, tab, false);
+          return;
+        }
+      }
+      if (cur && cur.tabs.length > 0) {
+        clearUnreadLatestStage(botId);
+        openStageShell();
+        return;
+      }
+      openStageWithTab(botId, createNewTab(t), false);
+    },
+    [botStages, bots, canUseFiles, clearUnreadLatestStage, openStageShell, openStageWithTab, t]
+  );
+
+  const handleStageOpenEvent = useCallback(
+    (targetBotId: string, payload: StageOpenEvent) => {
+      const tab = stageTabFromRef(payload, t, targetBotId);
+      const alreadyViewingThisBot = deskOpenRef.current && activeBotIdRef.current === targetBotId;
+      const shouldAutoActivate = alreadyViewingThisBot || Boolean(payload.autoOpen);
+
+      setBotStages((prev) => {
+        const cur = prev[targetBotId];
+        const next = upsertTab(cur, tab, shouldAutoActivate || !cur?.activeTabId);
+        return {
+          ...prev,
+          [targetBotId]: {
+            ...next,
+            unreadLatestStageId: shouldAutoActivate
+              ? undefined
+              : payload.id || tab.id || payload.createdAt || payload.kind,
+          },
+        };
+      });
+
+      if (alreadyViewingThisBot) {
+        if (tab.kind === 'desktop' && tab.target) {
+          setDeskTarget(tab.target);
+        }
+      } else if (payload.autoOpen) {
+        if (targetBotId !== activeBotIdRef.current) {
+          void selectBot(targetBotId);
+        }
+        if (tab.kind === 'desktop' && tab.target) {
+          setDeskTarget(tab.target);
+        }
+        openStageShell();
+      }
+    },
+    [openStageShell, selectBot, t]
+  );
+
   const { connectEvents, maybeAutoOpenUnbox } = useHubEvents({
     esRef,
     lastEventIdRef,
@@ -421,9 +549,9 @@ export default function App() {
     refreshApprovals,
     refreshQuestions,
     refreshUpdateStatus,
-    selectBot,
     removeBotLocally,
     applyActiveDesktopTarget,
+    onStageOpenEvent: handleStageOpenEvent,
     setMsgsMap,
     setLastMap,
     setUnreadMap,
@@ -436,12 +564,6 @@ export default function App() {
     setNodesFromEvents,
     setLiveScreen,
     setScreenSeq,
-    setStageKind,
-    setActiveStageTabId,
-    setFilesOpenPath,
-    setFilesOpenSeq,
-    setDeskOpen,
-    setStageTabs,
     setTakeovers,
     setQuestions,
     setApprovals,
@@ -461,6 +583,7 @@ export default function App() {
     collabPeerId,
     inspectedTaskId,
     mobileSideOpen,
+    deskOpen,
     viewRef,
     filterInputRef,
     closeAllOverlays,
@@ -646,6 +769,7 @@ export default function App() {
             questions={activeBotId ? questions.filter((q) => q.botId === activeBotId) : []}
             harnesses={settings?.harnesses}
             deskOpen={deskOpen}
+            hasUnreadLatestStage={Boolean(activeBotId && botStages[activeBotId]?.unreadLatestStageId)}
             lang={lang}
             inputRef={inputRef}
             onReplyApproval={handleReplyApproval}
@@ -659,27 +783,32 @@ export default function App() {
               }
             }}
             onToggleDesktop={() => {
-              if (deskOpen && stageKind === 'desktop') {
+              if (!activeBotId) return;
+              const target = activeBot?.desktopTarget || activeDeskTarget.target || 'local';
+              const tab = createDesktopTab(t, target);
+              if (deskOpen && botStages[activeBotId]?.activeTabId === tab.id) {
                 setDeskOpen(false);
               } else {
-                setDeskTarget(activeBot?.desktopTarget || activeDeskTarget.target || 'local');
-                setStageKind('desktop');
-                setActiveStageTabId('desktop');
-                setDeskOpen(true);
+                openStageWithTab(activeBotId, tab, false);
               }
             }}
-            onOpenFiles={() => {
-              setStageKind('files');
-              setActiveStageTabId('files');
-              setFilesOpenPath('');
-              setFilesOpenSeq((n) => n + 1);
-              setDeskOpen(true);
+            onOpenStage={() => {
+              if (!activeBotId) return;
+              openLatestStageForBot(activeBotId);
+            }}
+            onOpenStageRef={(ref) => {
+              if (!activeBotId) return;
+              openStageByRef(activeBotId, ref);
             }}
             onOpenDesktopTarget={(target) => {
-              void selectDesktopTarget(target || 'local');
-              setStageKind('desktop');
-              setActiveStageTabId('desktop');
-              setDeskOpen(true);
+              const resolved = target || 'local';
+              void selectDesktopTarget(resolved);
+              if (activeBotId) {
+                openStageWithTab(activeBotId, createDesktopTab(t, resolved), false);
+              } else {
+                setDeskTarget(resolved);
+                openStageShell();
+              }
             }}
             onSwitchBackLocal={() => void selectDesktopTarget('local')}
             onResolveTakeover={(to) => void handleResolveTakeover(to)}
@@ -727,9 +856,14 @@ export default function App() {
             onLoadModels={loadModels}
             onResetModels={resetModels}
             onOpenDesktopTarget={(target) => {
+              const resolved = target || 'local';
               setView('chat');
-              setDeskTarget(target || 'local');
-              setDeskOpen(true);
+              if (activeBotId) {
+                openStageWithTab(activeBotId, createDesktopTab(t, resolved), false);
+              } else {
+                setDeskTarget(resolved);
+                openStageShell();
+              }
             }}
             onReopenUnbox={() => {
               closeAllOverlays();
@@ -751,9 +885,7 @@ export default function App() {
       <StageShell
         deskOpen={deskOpen}
         deskChatOpen={deskChatOpen}
-        stageKind={stageKind}
-        stageTabs={stageTabs}
-        activeStageTabId={activeStageTabId}
+        botStageState={activeBotId ? botStages[activeBotId] : undefined}
         canUseFiles={canUseFiles}
         bots={bots}
         activeBot={activeBot}
@@ -775,17 +907,37 @@ export default function App() {
         activeDeskTarget={activeDeskTarget}
         screenSeq={screenSeq}
         liveScreen={liveScreen}
-        filesOpenPath={filesOpenPath}
-        filesOpenSeq={filesOpenSeq}
         supportsWS={hasServerCap('desktop.ws_h264')}
         supportsHEVC={hasServerCap('desktop.ws_hevc')}
         onUnsupportedCap={markCapUnsupported}
         setDeskOpen={setDeskOpen}
         setDeskChatOpen={setDeskChatOpen}
         setDeskTarget={setDeskTarget}
-        setStageKind={setStageKind}
-        setActiveStageTabId={setActiveStageTabId}
-        setStageTabs={setStageTabs}
+        onSelectStageTab={(tabId) => {
+          if (!activeBotId) return;
+          setBotStages((prev) => {
+            const cur = ensureNonEmptyStageState(prev[activeBotId], t);
+            return {
+              ...prev,
+              [activeBotId]: { ...cur, activeTabId: tabId, unreadLatestStageId: undefined },
+            };
+          });
+        }}
+        onCloseStageTab={(tabId) => {
+          if (!activeBotId) return;
+          setBotStages((prev) => ({
+            ...prev,
+            [activeBotId]: closeTab(prev[activeBotId], tabId, t),
+          }));
+        }}
+        onOpenStageTab={(tab, replaceNew) => {
+          if (!activeBotId) return;
+          openStageWithTab(activeBotId, tab, Boolean(replaceNew));
+        }}
+        onOpenStageRef={(ref) => {
+          if (!activeBotId) return;
+          openStageByRef(activeBotId, ref);
+        }}
         setCollabPeerId={setCollabPeerId}
         setCreateOpen={setCreateOpen}
         setStageInsert={setStageInsert}
@@ -856,11 +1008,7 @@ export default function App() {
         openPanel={openPanel}
         setSettings={setSettings}
         selectBot={selectBot}
-        setStageKind={setStageKind}
-        setActiveStageTabId={setActiveStageTabId}
-        setFilesOpenPath={setFilesOpenPath}
-        setFilesOpenSeq={setFilesOpenSeq}
-        setDeskOpen={setDeskOpen}
+        onOpenBotFiles={(botId) => openStageWithTab(botId, createFilesTab(t), false)}
         setCollabPeerId={setCollabPeerId}
         setCreateOpen={setCreateOpen}
         onReplyApproval={handleReplyApproval}

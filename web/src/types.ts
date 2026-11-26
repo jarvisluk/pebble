@@ -54,6 +54,7 @@ export interface BotStatus {
   desktopTarget?: string;
   browserMode?: 'auto' | 'isolated' | 'attach' | string;
   permissionMode?: PermissionMode;
+  latestStage?: StageRef;
 }
 
 export interface BotDetail extends BotStatus {
@@ -75,11 +76,12 @@ export interface MessageMedia {
 export interface ChatMessage {
   id: string;
   botId: string;
-  role: 'user' | 'assistant' | 'bot_out' | 'bot_in' | 'system' | string;
+  role: 'user' | 'assistant' | 'bot_out' | 'bot_in' | 'stage' | 'system' | string;
   from?: string;
   to?: string;
   text: string;
   media?: MessageMedia[];
+  stage?: StageRef;
   createdAt: string;
   tools?: string[];
   durationMs?: number;
@@ -584,16 +586,32 @@ export interface WorkspaceFileContent {
   truncated?: boolean;
 }
 
-export type StageKind = 'files' | 'desktop' | 'browser' | 'artifact' | 'mcp-app';
+export type StageKind = 'new' | 'files' | 'file' | 'desktop' | 'browser' | 'artifact' | 'mcp-app' | string;
+
+export interface StageRef {
+  id?: string;
+  kind: StageKind;
+  title?: string;
+  subtitle?: string;
+  path?: string;
+  url?: string;
+  resourceUri?: string;
+  target?: string;
+  closable?: boolean;
+  payload?: Record<string, unknown>;
+  createdAt?: string;
+}
 
 export interface StageTab {
   id: string;
   kind: StageKind;
   title: string;
+  subtitle?: string;
   botId?: string;
   path?: string;
   url?: string;
   resourceUri?: string;
+  target?: string;
   closable?: boolean;
 }
 
@@ -601,9 +619,13 @@ export interface StageOpenEvent {
   id?: string;
   kind: StageKind;
   title?: string;
+  subtitle?: string;
   botId?: string;
   path?: string;
   url?: string;
   resourceUri?: string;
+  target?: string;
   closable?: boolean;
+  autoOpen?: boolean;
+  createdAt?: string;
 }

@@ -67,6 +67,7 @@ CREATE TABLE IF NOT EXISTS messages (
   recipient     TEXT NOT NULL DEFAULT '',
   text          TEXT NOT NULL,
   media_json    TEXT NOT NULL DEFAULT '[]',
+  stage_json    TEXT NOT NULL DEFAULT '',
   tools_json    TEXT NOT NULL DEFAULT '[]',
   duration_ms   INTEGER NOT NULL DEFAULT 0,
   cost_usd      REAL NOT NULL DEFAULT 0,
@@ -195,6 +196,12 @@ CREATE TABLE IF NOT EXISTS bot_task_events (
   created_at   TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_bot_task_events_task_seq ON bot_task_events(task_id, seq);
+
+CREATE TABLE IF NOT EXISTS bot_stage_latest (
+  bot_id     TEXT PRIMARY KEY,
+  stage_json TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
 `
 
 func openSQLite(dbPath string) (*sql.DB, error) {
@@ -227,6 +234,10 @@ func openSQLite(dbPath string) (*sql.DB, error) {
 	if err := ensureMessagesMediaColumn(db); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("migrate messages.media_json: %w", err)
+	}
+	if err := ensureMessagesStageColumn(db); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("migrate messages.stage_json: %w", err)
 	}
 	if err := ensureRoutineRunsSlotKeyColumn(db); err != nil {
 		_ = db.Close()
@@ -339,6 +350,34 @@ func ensureMessagesMediaColumn(db *sql.DB) error {
 		return err
 	}
 	_, err = db.Exec(`ALTER TABLE messages ADD COLUMN media_json TEXT NOT NULL DEFAULT '[]'`)
+	return err
+}
+
+func ensureMessagesStageColumn(db *sql.DB) error {
+	rows, err := db.Query(`PRAGMA table_info(messages)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			cid        int
+			name, ctyp string
+			notnull    int
+			dflt       sql.NullString
+			pk         int
+		)
+		if err := rows.Scan(&cid, &name, &ctyp, &notnull, &dflt, &pk); err != nil {
+			return err
+		}
+		if name == "stage_json" {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	_, err = db.Exec(`ALTER TABLE messages ADD COLUMN stage_json TEXT NOT NULL DEFAULT ''`)
 	return err
 }
 
@@ -776,6 +815,7 @@ func toSummary(rec SessionRecord) SessionSummary {
 func scanMessageRow(scanner interface{ Scan(...any) error }) (ChatMessage, error) {
 	var m ChatMessage
 	var mediaJSON string
+	var stageJSON string
 	var toolsJSON string
 	err := scanner.Scan(
 		&m.ID,
@@ -787,6 +827,7 @@ func scanMessageRow(scanner interface{ Scan(...any) error }) (ChatMessage, error
 		&m.To,
 		&m.Text,
 		&mediaJSON,
+		&stageJSON,
 		&toolsJSON,
 		&m.DurationMs,
 		&m.CostUSD,
@@ -798,6 +839,7 @@ func scanMessageRow(scanner interface{ Scan(...any) error }) (ChatMessage, error
 		return ChatMessage{}, err
 	}
 	m.Media = decodeMediaJSON(mediaJSON)
+	m.Stage = decodeStageJSON(stageJSON)
 	m.Tools = decodeToolsJSON(toolsJSON)
 	return m, nil
 }
@@ -811,6 +853,64 @@ func decodeMediaJSON(raw string) []MessageMedia {
 		return nil
 	}
 	return out
+}
+
+func decodeStageJSON(raw string) *StageRef {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "null" || raw == "{}" {
+		return nil
+	}
+	var out StageRef
+	if err := json.Unmarshal([]byte(raw), &out); err != nil || strings.TrimSpace(out.Kind) == "" {
+		return nil
+	}
+	return &out
+}
+
+// UpsertBotLatestStage persists the latest stage reference submitted by botID.
+func (s *Store) UpsertBotLatestStage(botID string, ref StageRef) error {
+	if s == nil || s.db == nil || strings.TrimSpace(botID) == "" {
+		return nil
+	}
+	b, err := json.Marshal(ref)
+	if err != nil {
+		return err
+	}
+	now := ref.CreatedAt
+	if now == "" {
+		now = time.Now().UTC().Format(time.RFC3339Nano)
+	}
+	_, err = s.db.Exec(`
+		INSERT INTO bot_stage_latest(bot_id, stage_json, updated_at)
+		VALUES (?, ?, ?)
+		ON CONFLICT(bot_id) DO UPDATE SET stage_json = excluded.stage_json, updated_at = excluded.updated_at
+	`, botID, string(b), now)
+	return err
+}
+
+// GetBotLatestStage returns the persisted latest stage reference for botID, if any.
+func (s *Store) GetBotLatestStage(botID string) (*StageRef, bool) {
+	if s == nil || s.db == nil || strings.TrimSpace(botID) == "" {
+		return nil, false
+	}
+	var raw string
+	if err := s.db.QueryRow(`SELECT stage_json FROM bot_stage_latest WHERE bot_id = ? LIMIT 1`, botID).Scan(&raw); err != nil {
+		return nil, false
+	}
+	ref := decodeStageJSON(raw)
+	if ref == nil {
+		return nil, false
+	}
+	return ref, true
+}
+
+// DeleteBotLatestStage removes any persisted latest stage reference for botID.
+func (s *Store) DeleteBotLatestStage(botID string) error {
+	if s == nil || s.db == nil || strings.TrimSpace(botID) == "" {
+		return nil
+	}
+	_, err := s.db.Exec(`DELETE FROM bot_stage_latest WHERE bot_id = ?`, botID)
+	return err
 }
 
 func isValidMsgRowID(id string) (int64, bool) {
