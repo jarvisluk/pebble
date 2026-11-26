@@ -4,6 +4,7 @@ import type {
   ActiveDesktopTarget,
   BotDetail,
   BotStatus,
+  BotTask,
   ChatMessage,
   NodeInfo,
   PendingApproval,
@@ -16,9 +17,11 @@ import type {
   TakeoverRequest,
   UpdateStatus,
 } from '../types';
+import { isTaskTerminal, upsertTaskList } from '../lib/tasks';
 
 export interface UseHubEventsOpts {
   esRef: React.MutableRefObject<EventSource | null>;
+  lastEventIdRef: React.MutableRefObject<number>;
   activeBotIdRef: React.MutableRefObject<string | null>;
   deskOpenRef: React.MutableRefObject<boolean>;
   deskTargetRef: React.MutableRefObject<string>;
@@ -28,6 +31,7 @@ export interface UseHubEventsOpts {
   loginOpenRef: React.MutableRefObject<boolean>;
   loadBots: () => Promise<void>;
   loadSettings: (fresh?: boolean) => Promise<SettingsData>;
+  refreshNodes: () => Promise<void>;
   refreshTakeovers: () => Promise<void>;
   refreshActiveDesktopTarget: () => Promise<void>;
   refreshApprovals: () => Promise<void>;
@@ -41,6 +45,10 @@ export interface UseHubEventsOpts {
   setUnreadMap: React.Dispatch<React.SetStateAction<Record<string, number>>>;
   setToolMap: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   setBots: React.Dispatch<React.SetStateAction<BotStatus[]>>;
+  setTasksMap: React.Dispatch<React.SetStateAction<Record<string, BotTask[]>>>;
+  setTaskToolMap: React.Dispatch<React.SetStateAction<Record<string, string>>>;
+  setTaskChunksMap: React.Dispatch<React.SetStateAction<Record<string, string>>>;
+  setTaskEventSeqMap: React.Dispatch<React.SetStateAction<Record<string, number>>>;
   setNodesFromEvents: React.Dispatch<React.SetStateAction<NodeInfo[] | null>>;
   setLiveScreen: React.Dispatch<React.SetStateAction<ScreenState | null>>;
   setScreenSeq: React.Dispatch<React.SetStateAction<number>>;
@@ -63,6 +71,7 @@ export interface UseHubEventsOpts {
 export function useHubEvents(opts: UseHubEventsOpts) {
   const {
     esRef,
+    lastEventIdRef,
     activeBotIdRef,
     deskOpenRef,
     deskTargetRef,
@@ -72,6 +81,7 @@ export function useHubEvents(opts: UseHubEventsOpts) {
     loginOpenRef,
     loadBots,
     loadSettings,
+    refreshNodes,
     refreshTakeovers,
     refreshActiveDesktopTarget,
     refreshApprovals,
@@ -85,6 +95,10 @@ export function useHubEvents(opts: UseHubEventsOpts) {
     setUnreadMap,
     setToolMap,
     setBots,
+    setTasksMap,
+    setTaskToolMap,
+    setTaskChunksMap,
+    setTaskEventSeqMap,
     setNodesFromEvents,
     setLiveScreen,
     setScreenSeq,
@@ -106,12 +120,20 @@ export function useHubEvents(opts: UseHubEventsOpts) {
 
   const connectEvents = useCallback(() => {
     esRef.current?.close();
-    const es = new EventSource('/api/events');
+    const cursor = lastEventIdRef.current;
+    const url = cursor > 0 ? `/api/events?since=${cursor}` : '/api/events';
+    const es = new EventSource(url);
     esRef.current = es;
     const on = (type: string, fn: (data: any) => void) => {
       es.addEventListener(type, (e) => {
+        const me = e as MessageEvent;
         try {
-          fn(JSON.parse((e as MessageEvent).data));
+          const parsed = JSON.parse(me.data);
+          const rawId = me.lastEventId ? Number(me.lastEventId) : parsed?.seq;
+          if (typeof rawId === 'number' && Number.isFinite(rawId) && rawId > lastEventIdRef.current) {
+            lastEventIdRef.current = rawId;
+          }
+          fn(parsed);
         } catch {}
       });
     };
@@ -269,6 +291,78 @@ export function useHubEvents(opts: UseHubEventsOpts) {
     on('update_status', ({ payload }: { payload?: UpdateStatus }) => {
       if (payload) setUpdateStatus(payload);
     });
+
+    on('task_created', ({ payload: task }: { payload?: BotTask }) => {
+      if (!task?.id || !task.botId) return;
+      setTasksMap((prev) => ({
+        ...prev,
+        [task.botId]: upsertTaskList(prev[task.botId] || [], task),
+      }));
+      setTaskEventSeqMap((prev) => ({ ...prev, [task.id]: (prev[task.id] || 0) + 1 }));
+    });
+
+    on('task_updated', ({ payload: task }: { payload?: BotTask }) => {
+      if (!task?.id || !task.botId) return;
+      setTasksMap((prev) => ({
+        ...prev,
+        [task.botId]: upsertTaskList(prev[task.botId] || [], task),
+      }));
+      if (task.status === 'queued') {
+        setTaskChunksMap((prev) => {
+          if (!prev[task.id]) return prev;
+          const copy = { ...prev };
+          delete copy[task.id];
+          return copy;
+        });
+      }
+      if (isTaskTerminal(task.status) || task.status !== 'running') {
+        setTaskToolMap((prev) => {
+          if (!prev[task.id]) return prev;
+          const copy = { ...prev };
+          delete copy[task.id];
+          return copy;
+        });
+      }
+      setTaskEventSeqMap((prev) => ({ ...prev, [task.id]: (prev[task.id] || 0) + 1 }));
+    });
+
+    on('task_completed', ({ payload: task }: { payload?: BotTask }) => {
+      if (!task?.id || !task.botId) return;
+      setTasksMap((prev) => ({
+        ...prev,
+        [task.botId]: upsertTaskList(prev[task.botId] || [], task),
+      }));
+      setTaskToolMap((prev) => {
+        if (!prev[task.id]) return prev;
+        const copy = { ...prev };
+        delete copy[task.id];
+        return copy;
+      });
+      setTaskChunksMap((prev) => {
+        if (!prev[task.id]) return prev;
+        const copy = { ...prev };
+        delete copy[task.id];
+        return copy;
+      });
+      setTaskEventSeqMap((prev) => ({ ...prev, [task.id]: (prev[task.id] || 0) + 1 }));
+      if (task.kind === 'routine' && panelOpenRef.current && panelDetailRef.current?.id === task.botId) {
+        setRoutineRefreshSeq((n) => n + 1);
+      }
+    });
+
+    on('task_chunk', ({ payload: p }: { payload?: { taskId?: string; chunk?: string } }) => {
+      if (!p?.taskId || !p.chunk) return;
+      setTaskChunksMap((prev) => ({
+        ...prev,
+        [p.taskId!]: (prev[p.taskId!] || '') + p.chunk!,
+      }));
+    });
+
+    on('task_tool_use', ({ payload: p }: { payload?: { taskId?: string; tool?: string } }) => {
+      if (!p?.taskId) return;
+      setTaskToolMap((prev) => ({ ...prev, [p.taskId!]: p.tool || '' }));
+      setTaskEventSeqMap((prev) => ({ ...prev, [p.taskId!]: (prev[p.taskId!] || 0) + 1 }));
+    });
   }, [removeBotLocally]);
 
   const maybeAutoOpenUnbox = useCallback((s: SettingsData | null) => {
@@ -284,6 +378,7 @@ export function useHubEvents(opts: UseHubEventsOpts) {
     Promise.all([loadBots(), loadSettings()])
       .then(([, s]) => {
         connectEvents();
+        void refreshNodes();
         void refreshTakeovers();
         void refreshActiveDesktopTarget();
         void refreshApprovals();

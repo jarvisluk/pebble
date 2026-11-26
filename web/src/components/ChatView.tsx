@@ -2,9 +2,11 @@ import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 're
 import type {
   ActiveDesktopTarget,
   BotStatus,
+  BotTask,
   ChatMessage,
   HarnessInfo,
   MessageMedia,
+  NodeInfo,
   PendingApproval,
   PendingAttachment,
   PendingQuestion,
@@ -20,6 +22,7 @@ import type { ViewDir, ViewState } from '../lib/useViewTransition';
 import { ChatComposer } from './chat/ChatComposer';
 import { ChatHeader } from './chat/ChatHeader';
 import { ChatMessageList, type TimelineEntry } from './chat/ChatMessageList';
+import { TaskStrip } from './chat/TaskStrip';
 import { isImageMedia, formatFileSize, MessageAttachments } from './chat/MessageAttachments';
 import { useChatAutocomplete } from './chat/useChatAutocomplete';
 
@@ -33,6 +36,9 @@ interface ChatViewProps {
   bots: BotStatus[];
   activeBot: BotStatus | undefined;
   messages: ChatMessage[];
+  tasks?: BotTask[];
+  taskToolMap?: Record<string, string>;
+  nodes?: NodeInfo[];
   seenIds: Set<string>;
   toolName?: string;
   takeovers: TakeoverRequest[];
@@ -60,6 +66,7 @@ interface ChatViewProps {
   onReplyQuestion: (id: string, answers: Record<string, unknown>, cancelled: boolean) => Promise<void>;
   onChangePermissionMode?: (botId: string, mode: PermissionMode) => Promise<void>;
   onOpenDetail: () => void;
+  onInspectTask?: (taskId: string) => void;
   onOpenCollab?: (peerId: string) => void;
   onOpenCreate: () => void;
   onSelectBot?: (id: string) => void;
@@ -76,6 +83,9 @@ export const ChatView: React.FC<ChatViewProps> = ({
   bots,
   activeBot,
   messages,
+  tasks = [],
+  taskToolMap = {},
+  nodes = [],
   seenIds,
   toolName,
   takeovers,
@@ -98,6 +108,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
   onReplyQuestion,
   onChangePermissionMode,
   onOpenDetail,
+  onInspectTask,
   onOpenCollab,
   onOpenCreate,
   onSelectBot,
@@ -404,6 +415,15 @@ export const ChatView: React.FC<ChatViewProps> = ({
 
       <div className="main-split">
         <div ref={chatColRef} className="chat-col">
+          {activeBot && onInspectTask && (
+            <TaskStrip
+              tasks={tasks}
+              taskToolMap={taskToolMap}
+              nodes={nodes}
+              lang={lang}
+              onInspectTask={onInspectTask}
+            />
+          )}
           <ChatMessageList
             scrollRef={scrollRef}
             inDesktopSidebar={inDesktopSidebar}

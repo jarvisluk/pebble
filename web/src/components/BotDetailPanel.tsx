@@ -2,8 +2,10 @@ import React, { useEffect, useState } from 'react';
 import type {
   BotDetail,
   BotStatus,
+  BotTask,
   ConfirmOptions,
   DesktopTarget,
+  NodeInfo,
   PermissionMode,
   ResolvedLang,
   SettingsData,
@@ -15,12 +17,15 @@ import { BotAppearancePicker } from './BotAppearancePicker';
 import { BotAvatar } from './BotAvatar';
 import { BotMemorySection } from './bot-detail/BotMemorySection';
 import { BotRoutinesSection } from './bot-detail/BotRoutinesSection';
+import { BotTasksSection } from './bot-detail/BotTasksSection';
 import { BotTechDetailsSection } from './bot-detail/BotTechDetailsSection';
 
 interface BotDetailPanelProps {
   open: boolean;
   detail: BotDetail | null;
   bots: BotStatus[];
+  tasks: BotTask[];
+  nodes: NodeInfo[];
   settings: SettingsData | null;
   models: Record<string, string[]>;
   routineRefreshSeq: number;
@@ -35,6 +40,9 @@ interface BotDetailPanelProps {
   onReloadBots: () => Promise<void>;
   onLoadModels: (harness: string, force?: boolean) => Promise<unknown>;
   onRefreshDetail: (id: string) => Promise<void>;
+  onTasksLoaded: (botId: string, tasks: BotTask[]) => void;
+  onTaskCreated: (task: BotTask) => void;
+  onInspectTask: (taskId: string) => void;
   onSettingsUpdated?: (s: SettingsData) => void;
   onOpenFiles?: (botId: string) => void;
 }
@@ -43,6 +51,8 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
   open,
   detail,
   bots,
+  tasks,
+  nodes,
   settings,
   models,
   routineRefreshSeq,
@@ -57,6 +67,9 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
   onReloadBots,
   onLoadModels,
   onRefreshDetail,
+  onTasksLoaded,
+  onTaskCreated,
+  onInspectTask,
   onSettingsUpdated,
   onOpenFiles,
 }) => {
@@ -287,6 +300,21 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
               onToast={onToast}
             />
 
+            <BotTasksSection
+              open={open}
+              detail={detail}
+              tasks={tasks}
+              nodes={nodes}
+              settings={settings}
+              models={models}
+              lang={lang}
+              onToast={onToast}
+              onTasksLoaded={onTasksLoaded}
+              onTaskCreated={onTaskCreated}
+              onInspectTask={onInspectTask}
+              onLoadModels={onLoadModels}
+            />
+
             <BotRoutinesSection
               open={open}
               botId={detail.id}
@@ -294,6 +322,7 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
               lang={lang}
               onToast={onToast}
               onConfirm={onConfirm}
+              onInspectTask={onInspectTask}
             />
 
             <BotTechDetailsSection

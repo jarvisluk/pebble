@@ -22,6 +22,7 @@ export interface UseHubActionsOpts {
   closeAllOverlays: () => void;
   confirmLeaveSettingsThen: (proceed: () => void, isTabSwitch?: boolean) => void;
   loadMessages: (id: string, initial?: boolean) => Promise<void>;
+  loadBotTasks: (id: string) => Promise<void>;
   loadBots: () => Promise<void>;
   refreshApprovals: () => Promise<void>;
   refreshQuestions: () => Promise<void>;
@@ -49,6 +50,7 @@ export function useHubActions(opts: UseHubActionsOpts) {
     closeAllOverlays,
     confirmLeaveSettingsThen,
     loadMessages,
+    loadBotTasks,
     loadBots,
     refreshApprovals,
     refreshQuestions,
@@ -73,7 +75,7 @@ export function useHubActions(opts: UseHubActionsOpts) {
       } catch {}
       closeAllOverlays();
       if (viewRef.current === 'settings') setView('chat');
-      await loadMessages(id, true);
+      await Promise.all([loadMessages(id, true), loadBotTasks(id)]);
       if (matchMedia('(min-width: 821px)').matches) inputRef.current?.focus();
     };
     if (viewRef.current === 'settings' && settingsDirtyRef.current) {
