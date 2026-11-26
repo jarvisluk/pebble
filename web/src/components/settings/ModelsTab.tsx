@@ -12,7 +12,6 @@ import { api } from '../../lib/api';
 import { translate } from '../../lib/i18n';
 import { BotAvatar } from '../BotAvatar';
 import { HarnessIcon } from '../HarnessIcon';
-import { MagpieInstallBanner } from '../MagpieInstallBanner';
 
 interface ModelsTabProps {
   active: boolean;
@@ -34,7 +33,6 @@ interface ModelsTabProps {
 
 const resolveDefaultModel = (g: string, h: string) => {
   if (!g) return '';
-  if (g.startsWith('magpie/')) return h === 'claude' ? g.slice(7) : g;
   if (!g.includes('/')) return g;
   return h === '' || h === 'opencode' || h === 'pi' ? g : '';
 };
@@ -61,14 +59,12 @@ export const ModelsTab: React.FC<ModelsTabProps> = ({
   const [defaultPermMode, setDefaultPermMode] = useState<PermissionMode>('auto');
   const [defaultModel, setDefaultModel] = useState('');
   const [defaultModelsDraft, setDefaultModelsDraft] = useState<Record<string, string>>({});
-  const [mpWebUrlDraft, setMpWebUrlDraft] = useState('');
   const [botDrafts, setBotDrafts] = useState<Record<string, { harness: string; model: string }>>({});
   const [touchedFields, setTouchedFields] = useState({
     defaultHarness: false,
     defaultPermMode: false,
     defaultModel: false,
     defaultModels: false,
-    magpieWebUrl: false,
   });
   const [touchedBots, setTouchedBots] = useState<Set<string>>(() => new Set());
   const [err, setErr] = useState('');
@@ -123,7 +119,6 @@ export const ModelsTab: React.FC<ModelsTabProps> = ({
       defaultPermMode: (settings?.defaultPermissionMode || 'auto') as PermissionMode,
       defaultModel: (settings?.defaultModel || '').trim(),
       defaultModels: cleanPer,
-      magpieWebUrl: (settings?.magpie?.webUrl || '').trim(),
       bots: botMap,
     };
   }, [settings, bots]);
@@ -133,7 +128,6 @@ export const ModelsTab: React.FC<ModelsTabProps> = ({
     if (touchedFields.defaultHarness && defaultHarness !== baseline.defaultHarness) return true;
     if (touchedFields.defaultPermMode && defaultPermMode !== baseline.defaultPermMode) return true;
     if (touchedFields.defaultModel && defaultModel.trim() !== baseline.defaultModel) return true;
-    if (touchedFields.magpieWebUrl && mpWebUrlDraft.trim() !== baseline.magpieWebUrl) return true;
     if (touchedFields.defaultModels) {
       const ka = Object.keys(defaultModelsDraft).filter((k) => defaultModelsDraft[k]?.trim());
       const kb = Object.keys(baseline.defaultModels);
@@ -156,7 +150,6 @@ export const ModelsTab: React.FC<ModelsTabProps> = ({
     defaultHarness,
     defaultPermMode,
     defaultModel,
-    mpWebUrlDraft,
     defaultModelsDraft,
     botDrafts,
     baseline,
@@ -180,14 +173,12 @@ export const ModelsTab: React.FC<ModelsTabProps> = ({
       defaultPermMode: false,
       defaultModel: false,
       defaultModels: false,
-      magpieWebUrl: false,
     });
     setTouchedBots(new Set());
     setDefaultHarness(baseline.defaultHarness);
     setDefaultPermMode(baseline.defaultPermMode);
     setDefaultModel(baseline.defaultModel);
     setDefaultModelsDraft({ ...baseline.defaultModels });
-    setMpWebUrlDraft(baseline.magpieWebUrl);
     setBotDrafts({ ...baseline.bots });
     setErr('');
   }, [baseline]);
@@ -198,7 +189,6 @@ export const ModelsTab: React.FC<ModelsTabProps> = ({
     if (!touchedFields.defaultPermMode) setDefaultPermMode(baseline.defaultPermMode);
     if (!touchedFields.defaultModel) setDefaultModel(baseline.defaultModel);
     if (!touchedFields.defaultModels) setDefaultModelsDraft({ ...baseline.defaultModels });
-    if (!touchedFields.magpieWebUrl) setMpWebUrlDraft(baseline.magpieWebUrl);
   }, [settings, baseline, touchedFields]);
 
   useEffect(() => {
@@ -241,7 +231,6 @@ export const ModelsTab: React.FC<ModelsTabProps> = ({
           .filter(([, v]) => Boolean(v))
       );
       const general = defaultModel.trim();
-      const webUrl = mpWebUrlDraft.trim();
       const equalPer =
         Object.keys(perHarness).length === Object.keys(baseline.defaultModels).length &&
         Object.keys(perHarness).every((k) => perHarness[k] === baseline.defaultModels[k]);
@@ -249,8 +238,7 @@ export const ModelsTab: React.FC<ModelsTabProps> = ({
         defaultHarness !== baseline.defaultHarness ||
         defaultPermMode !== baseline.defaultPermMode ||
         general !== baseline.defaultModel ||
-        !equalPer ||
-        webUrl !== baseline.magpieWebUrl
+        !equalPer
       ) {
         const next = await api<SettingsData>('/api/settings', {
           method: 'PUT',
@@ -259,7 +247,6 @@ export const ModelsTab: React.FC<ModelsTabProps> = ({
             defaultPermissionMode: defaultPermMode,
             defaultModel: general,
             defaultModels: perHarness,
-            magpieWebUrl: webUrl,
           },
         });
         onSettingsUpdated(next);
@@ -279,7 +266,6 @@ export const ModelsTab: React.FC<ModelsTabProps> = ({
         defaultPermMode: false,
         defaultModel: false,
         defaultModels: false,
-        magpieWebUrl: false,
       });
       setTouchedBots(new Set());
       onToast(t('saved'));
@@ -295,7 +281,6 @@ export const ModelsTab: React.FC<ModelsTabProps> = ({
     onSavingChange,
     defaultModelsDraft,
     defaultModel,
-    mpWebUrlDraft,
     baseline,
     defaultHarness,
     defaultPermMode,
@@ -447,18 +432,15 @@ export const ModelsTab: React.FC<ModelsTabProps> = ({
     });
   };
 
-  const mp = settings?.magpie;
   const harnesses = settings?.harnesses || [];
   const installedHarnesses = harnesses.filter((h) => h.installed !== false);
-  const connectedHarnesses = installedHarnesses.filter((h) => Boolean(h.magpie?.connected));
-  const nativeHarnesses = installedHarnesses.filter((h) => !h.magpie?.connected);
   const uninstalledHarnesses = harnesses.filter((h) => h.installed === false);
 
   const renderInstalledEngine = (h: HarnessInfo) => {
-    const connected = Boolean(h.magpie?.connected);
     const loginTask = loginTasks[h.id];
     const loggingIn = loginTask?.state === 'running';
     const needsLogin = h.authStatus === 'needs_login';
+    const authReady = h.authStatus === 'ready';
     const loginErr = loginTask?.state === 'error' ? loginTask.error || '' : '';
 
     return (
@@ -468,17 +450,11 @@ export const ModelsTab: React.FC<ModelsTabProps> = ({
             <HarnessIcon id={h.id} />
             <div className="mp-hname-meta">
               <div className="mp-hname-badges">
-                <span className={`harness-dot${connected ? ' ok' : needsLogin ? ' bad' : ''}`} />
+                <span className={`harness-dot${authReady ? ' ok' : needsLogin ? ' bad' : ''}`} />
                 <span className="nm">{h.label}</span>
                 {needsLogin && <span className="mp bad">{t('engineNeedsLogin')}</span>}
               </div>
-              {connected ? (
-                <small className="harness-sub-ok">{h.magpie?.model || t('mpConnected')}</small>
-              ) : h.magpie?.nativeModel ? (
-                <small className="harness-sub-mono">{h.magpie.nativeModel}</small>
-              ) : (
-                <small>{h.authStatus === 'ready' ? t('engineReady') : h.id}</small>
-              )}
+              <small>{authReady ? t('engineReady') : h.id}</small>
             </div>
           </div>
 
@@ -779,28 +755,9 @@ export const ModelsTab: React.FC<ModelsTabProps> = ({
           {installedHarnesses.length === 0 ? (
             <div className="set-card-desc">{t('engineNoInstalled')}</div>
           ) : (
-            <>
-              {connectedHarnesses.length > 0 && (
-                <div className="harness-group">
-                  <div className="harness-group-hd ok">
-                    <span>{t('harnessGroupConnected')} ({connectedHarnesses.length})</span>
-                  </div>
-                  <div className="harness-group-list">
-                    {connectedHarnesses.map(renderInstalledEngine)}
-                  </div>
-                </div>
-              )}
-              {nativeHarnesses.length > 0 && (
-                <div className="harness-group">
-                  <div className="harness-group-hd">
-                    <span>{t('harnessGroupNative')} ({nativeHarnesses.length})</span>
-                  </div>
-                  <div className="harness-group-list">
-                    {nativeHarnesses.map(renderInstalledEngine)}
-                  </div>
-                </div>
-              )}
-            </>
+            <div className="harness-group-list">
+              {installedHarnesses.map(renderInstalledEngine)}
+            </div>
           )}
         </div>
         {uninstalledHarnesses.length > 0 && (
@@ -821,82 +778,6 @@ export const ModelsTab: React.FC<ModelsTabProps> = ({
               </div>
             )}
           </>
-        )}
-      </section>
-
-      {/* Card 3: Magpie Gateway */}
-      <section className="set-card">
-        <div className="set-card-hd">
-          <h2>{t('magpieGatewayTitle')}</h2>
-          <span
-            id="sMagpieStatusPill"
-            className={`mp${!mp?.installed ? '' : mp.healthy ? ' ok' : ' bad'}`}
-          >
-            {!mp ? t('checking') : !mp.installed ? t('mpNotInstalled') : mp.healthy ? t('mpHealthy') : t('mpUnhealthy')}
-          </span>
-        </div>
-
-        {mp && !mp.installed && (
-          <div id="sMagpieInstall" className="note">
-            <MagpieInstallBanner
-              lang={lang}
-              hint={t('mpInstallHint')}
-              installCmds={mp.install}
-              onToast={onToast}
-              onInstalled={async () => {
-                const fresh = await api<SettingsData>('/api/settings?fresh=1');
-                onSettingsUpdated(fresh);
-                onResetModels();
-                preloadAllModels(fresh.harnesses, true);
-              }}
-            />
-          </div>
-        )}
-
-        {mp?.installed && (
-          <div id="sMagpieBox" className="set-stack">
-            <div className="mp-open">
-              <span className="set-card-desc">{t('mpManageInApp')}</span>
-              <button
-                type="button"
-                className="mp go"
-                onClick={async () => {
-                  setErr('');
-                  const local = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
-                  if (mp.webUrl && !local) {
-                    window.open(mp.webUrl, '_blank', 'noopener');
-                    return;
-                  }
-                  try {
-                    await api('/api/magpie/open', { method: 'POST' });
-                  } catch (e) {
-                    if (e instanceof Error && e.message !== 'unauthorized') setErr(e.message);
-                  }
-                }}
-              >
-                {t('mpOpenApp')}
-              </button>
-            </div>
-            <div className="fld">
-              <label>
-                {t('mpWebUrl')}
-                <em>{t('mpWebUrlHint')}</em>
-              </label>
-              <input
-                id="sMagpieWebUrl"
-                className="mono"
-                placeholder="https://magpie.example.com"
-                spellCheck={false}
-                value={mpWebUrlDraft}
-                onChange={(e) => {
-                  const nextVal = e.target.value;
-                  if (nextVal === mpWebUrlDraft) return;
-                  setTouchedFields((prev) => ({ ...prev, magpieWebUrl: true }));
-                  setMpWebUrlDraft(nextVal);
-                }}
-              />
-            </div>
-          </div>
         )}
       </section>
 

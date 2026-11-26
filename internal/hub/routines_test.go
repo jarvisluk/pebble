@@ -194,7 +194,7 @@ func TestRoutineCRUDPreservesEnvRefsOnDisk(t *testing.T) {
 	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("TEST_R_MODEL", "magpie/flash")
+	t.Setenv("TEST_R_MODEL", "openai/gpt-4o-mini")
 	rawCfg := `{"bots":[{"id":"ops","name":"Ops","schedules":[{"id":"morning","name":"Morning","dailyAt":"09:00","prompt":"check","model":"${TEST_R_MODEL}"}]}]}`
 	cfgPath := filepath.Join(cfgDir, "bots.json")
 	if err := os.WriteFile(cfgPath, []byte(rawCfg), 0o600); err != nil {
@@ -221,17 +221,17 @@ func TestRoutineCRUDPreservesEnvRefsOnDisk(t *testing.T) {
 	// Update prompt while keeping expanded model -> must preserve ${TEST_R_MODEL} on disk.
 	updated, err := h.UpdateRoutine("ops", "morning", RoutinePatch{
 		Prompt: ptrString("updated check"),
-		Model:  ptrString("magpie/flash"),
+		Model:  ptrString("openai/gpt-4o-mini"),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updated.Model != "magpie/flash" || updated.Prompt != "updated check" {
+	if updated.Model != "openai/gpt-4o-mini" || updated.Prompt != "updated check" {
 		t.Fatalf("unexpected updated routine: %+v", updated)
 	}
 	diskBytes, _ := os.ReadFile(loadedPath)
 	diskStr := string(diskBytes)
-	if !strings.Contains(diskStr, "${TEST_R_MODEL}") || strings.Contains(diskStr, "magpie/flash") {
+	if !strings.Contains(diskStr, "${TEST_R_MODEL}") || strings.Contains(diskStr, "openai/gpt-4o-mini") {
 		t.Fatalf("env refs were flattened on disk:\n%s", diskStr)
 	}
 

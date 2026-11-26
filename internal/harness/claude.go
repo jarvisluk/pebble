@@ -239,9 +239,8 @@ func (h *ClaudeHarness) startProc(opts RunOptions, ephemeral bool) (*claudeProc,
 
 	cmd := exec.Command(h.binary, args...)
 	cmd.Dir = bot.Workspace
-	// Drop a parent Claude Code session's variables (bot-hub may run inside
-	// one): they override the gateway settings magpie writes to
-	// ~/.claude/settings.json. A bot's own env still applies.
+	// Drop a parent Claude Code session's variables (pebble may run inside
+	// one) so they do not override the bot's own env or Claude CLI config.
 	cmd.Env = nil
 	for _, kv := range cmd.Environ() {
 		if !strings.HasPrefix(kv, "ANTHROPIC_") && !strings.HasPrefix(kv, "CLAUDECODE=") &&

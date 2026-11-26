@@ -137,7 +137,6 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
 
   const resolveBotDefaultModel = (g: string, h: string) => {
     if (!g) return '';
-    if (g.startsWith('magpie/')) return h === 'claude' ? g.slice(7) : g;
     if (!g.includes('/')) return g;
     return h === '' || h === 'opencode' || h === 'pi' ? g : '';
   };
@@ -284,10 +283,8 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
             <BotMemorySection
               open={open}
               botId={detail.id}
-              settings={settings}
               lang={lang}
               onToast={onToast}
-              onSettingsUpdated={onSettingsUpdated}
             />
 
             <BotRoutinesSection

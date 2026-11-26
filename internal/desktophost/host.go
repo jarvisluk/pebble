@@ -203,18 +203,11 @@ func (h *Host) Save() {
 	_ = os.WriteFile(filepath.Join(h.dir, "desktop.json"), raw, 0o600)
 }
 
-// WarmupCaches pre-warms harness auth and Magpie caches while on the setup screen.
+// WarmupCaches pre-warms harness auth caches while on the setup screen.
 func (h *Host) WarmupCaches() {
 	wctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	var wg sync.WaitGroup
-	magpieOK := harness.MagpieInstalled()
-	if magpieOK {
-		wg.Add(3)
-		go func() { defer wg.Done(); _ = harness.MagpieGatewayHealthy(wctx) }()
-		go func() { defer wg.Done(); _ = harness.MagpieListProviders(wctx) }()
-		go func() { defer wg.Done(); _ = harness.MagpiePresets(wctx) }()
-	}
 	for _, id := range []string{"opencode", "codebuddy", "qoder", "codex", "claude", "grok", "trae", "pi", "dsh", "agy"} {
 		if ok, _ := harness.DetectHarness(id); ok {
 			k := id
@@ -222,9 +215,6 @@ func (h *Host) WarmupCaches() {
 			go func() {
 				defer wg.Done()
 				_, _ = harness.DetectHarnessAuthCached(wctx, k)
-				if magpieOK {
-					_ = harness.GetMagpieStatus(wctx, k)
-				}
 			}()
 		}
 	}

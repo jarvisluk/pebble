@@ -111,13 +111,6 @@ struct SettingsMemoryTab: View {
                         fg: sem.active == true ? p.sageInk : .secondary
                     )
                     Spacer()
-                    if sem.active != true {
-                        Button(hub.t("openMagpie")) {
-                            run("magpie:open", "opFailed") { try await hub.openMagpie(); return nil }
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                    }
                 }
                 if sem.active != true {
                     Text(hub.t("memSemanticHintOff"))
@@ -177,23 +170,6 @@ struct SettingsMemoryTab: View {
 
             if mem?.installed != true {
                 Text(hub.t("hostNoMagpieGlobal")).foregroundStyle(.secondary)
-                Button {
-                    run("magpie:install", "opFailed") {
-                        try await hub.installMagpie()
-                        await loadMem(memQuery)
-                        return hub.t("mpInstallDone")
-                    }
-                } label: {
-                    if busy == "magpie:install" {
-                        HStack(spacing: 8) {
-                            ProgressView().controlSize(.small)
-                            Text(hub.t("mpInstalling"))
-                        }
-                    } else {
-                        Text(hub.t("mpInstallOnHost"))
-                    }
-                }
-                .disabled(!busy.isEmpty)
             } else if mem?.available != true {
                 Text(hub.t("magpieNoResp") + ((mem?.error ?? "").isEmpty ? "" : ": \(mem!.error!)"))
                     .foregroundStyle(p.danger)

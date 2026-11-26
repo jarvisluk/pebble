@@ -72,8 +72,9 @@ class PebbleCoreTest {
 
     @Test
     fun storeHelpersAndLenientDecodingWork() {
-        assertEquals("claude-sonnet-4", resolveDefaultModel("magpie/claude-sonnet-4", "claude"))
-        assertEquals("magpie/claude-sonnet-4", resolveDefaultModel("magpie/claude-sonnet-4", "opencode"))
+        assertEquals("claude-sonnet-4", resolveDefaultModel("claude-sonnet-4", "claude"))
+        assertEquals("openai/gpt-5", resolveDefaultModel("openai/gpt-5", "opencode"))
+        assertEquals("", resolveDefaultModel("openai/gpt-5", "claude"))
         assertEquals(5, countToolCalls(listOf("bash×3", "read_file", "grep")))
         assertEquals("1m 5s", formatDurationMs(65_000.0))
         assertEquals("pebble-2", normalizeBotAvatar("cat"))
@@ -88,8 +89,6 @@ class PebbleCoreTest {
             """{"id":"codex","label":"Codex","installed":true,"magpie":{"installed":true,"connected":false,"nativeModel":"codex/gpt-6-luna"}}""",
         )
         assertEquals(true, harness.installed)
-        assertEquals(false, harness.magpie?.connected)
-        assertEquals("codex/gpt-6-luna", harness.magpie?.nativeModel)
     }
 
     @Test

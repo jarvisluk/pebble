@@ -119,11 +119,11 @@ func TestDesktopTaskAndSettingsRoutes(t *testing.T) {
 	mux := s.srv.Handler
 
 	// PUT /api/settings persists desktopHarness & desktopModel
-	putReq := httptest.NewRequest(http.MethodPut, "/api/settings", bytes.NewBufferString(`{"desktopHarness":"opencode","desktopModel":"magpie/mac-mini/auto/flash"}`))
+	putReq := httptest.NewRequest(http.MethodPut, "/api/settings", bytes.NewBufferString(`{"desktopHarness":"opencode","desktopModel":"anthropic/claude-haiku-4-5"}`))
 	putReq.Host = "127.0.0.1:3789"
 	putRec := httptest.NewRecorder()
 	mux.ServeHTTP(putRec, putReq)
-	if putRec.Code != http.StatusOK || !strings.Contains(putRec.Body.String(), `"desktopModel":"magpie/mac-mini/auto/flash"`) {
+	if putRec.Code != http.StatusOK || !strings.Contains(putRec.Body.String(), `"desktopModel":"anthropic/claude-haiku-4-5"`) {
 		t.Fatalf("PUT /api/settings desktop failed: %d %s", putRec.Code, putRec.Body.String())
 	}
 

@@ -3,7 +3,6 @@ package channel
 import (
 	"bot-hub/internal/config"
 	"bot-hub/internal/desktop"
-	"bot-hub/internal/harness"
 	"bot-hub/internal/hub"
 	"bot-hub/internal/node"
 	"bot-hub/internal/protocol"
@@ -188,15 +187,10 @@ func NewHTTPServer(h *hub.Hub, cfg config.HTTPConfig) *HTTPServer {
 	mux.HandleFunc("DELETE /api/push/devices/{deviceId}", s.handlePushDeleteDevice)
 	mux.HandleFunc("GET /api/push/status", s.handlePushStatus)
 	mux.HandleFunc("GET /api/models", s.handleModels)
-	mux.HandleFunc("POST /api/harnesses/{id}/magpie", s.handleMagpieConnect)
 	mux.HandleFunc("POST /api/harnesses/{id}/install", s.handleHarnessInstallStart)
 	mux.HandleFunc("GET /api/harnesses/{id}/install", s.handleHarnessInstallStatus)
 	mux.HandleFunc("POST /api/harnesses/{id}/login", s.handleHarnessLoginStart)
 	mux.HandleFunc("GET /api/harnesses/{id}/login", s.handleHarnessLoginStatus)
-	mux.HandleFunc("POST /api/magpie/providers", s.handleMagpieProvider)
-	mux.HandleFunc("POST /api/magpie/open", s.handleMagpieOpen)
-	mux.HandleFunc("POST /api/magpie/install", s.handleMagpieInstallStart)
-	mux.HandleFunc("GET /api/magpie/install", s.handleMagpieInstallStatus)
 
 	mux.HandleFunc("GET /api/desktop/targets", s.handleDesktopTargets)
 	mux.HandleFunc("PUT /api/desktop/target", s.handleDesktopTargetSet)
@@ -273,11 +267,9 @@ func (s *HTTPServer) Start() error {
 	s.startTailcat(s.srv.Handler)
 	s.startTailscale(s.srv.Handler)
 	if s.hub != nil {
-		kinds := s.hub.HarnessKinds()
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
-			harness.WarmMagpieCache(ctx, kinds)
 			s.hub.WarmModelsCache(ctx)
 		}()
 	}

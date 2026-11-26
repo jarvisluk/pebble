@@ -226,11 +226,6 @@ fun MemorySettingsTab(
                         fg = if (sem.active == true) p.sageInk else p.text2,
                     )
                     Spacer(Modifier.weight(1f))
-                    if (sem.active != true) {
-                        TextButton(onClick = { runOp("magpie:open", "opFailed") { store.openMagpie(); null } }) {
-                            Text(store.t("openMagpie"), color = p.accent, fontSize = PebbleFont.secondary)
-                        }
-                    }
                 }
                 if (sem.active != true) {
                     Text(store.t("memSemanticHintOff"), color = p.text2, fontSize = PebbleFont.secondary)
@@ -322,24 +317,6 @@ fun MemorySettingsTab(
             when {
                 m?.installed != true -> {
                     Text(store.t("hostNoMagpieGlobal"), color = p.text2, fontSize = PebbleFont.secondary)
-                    OutlinedButton(
-                        onClick = {
-                            runOp("magpie:install", "opFailed") {
-                                store.installMagpie()
-                                loadMem(memQuery)
-                                store.t("mpInstallDone")
-                            }
-                        },
-                        enabled = busy.isEmpty(),
-                    ) {
-                        if (busy == "magpie:install") {
-                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = p.accent)
-                            Spacer(Modifier.width(8.dp))
-                            Text(store.t("mpInstalling"), color = p.text, fontSize = PebbleFont.secondary)
-                        } else {
-                            Text(store.t("mpInstallOnHost"), color = p.text, fontSize = PebbleFont.secondary)
-                        }
-                    }
                 }
                 m.available != true -> {
                     val detailErr = m.error?.takeIf { it.isNotEmpty() }?.let { ": $it" }.orEmpty()

@@ -19,7 +19,6 @@ enum ConnState { case idle, connecting, connected, unauthorized, error }
 
 func resolveDefaultModel(_ g: String, _ h: String) -> String {
     if g.isEmpty { return "" }
-    if g.hasPrefix("magpie/") { return h == "claude" ? String(g.dropFirst(7)) : g }
     if !g.contains("/") { return g }
     return h.isEmpty || h == "opencode" || h == "pi" ? g : ""
 }

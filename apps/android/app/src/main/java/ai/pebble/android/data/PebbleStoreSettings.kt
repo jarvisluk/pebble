@@ -4,7 +4,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-// MARK: Settings & Magpie
+// MARK: Settings
 
 internal suspend fun PebbleStore.loadSettingsImpl(fresh: Boolean = false): SettingsData {
     val s = api.call<SettingsData>(if (fresh) "/api/settings?fresh=1" else "/api/settings")
@@ -38,11 +38,6 @@ internal suspend fun PebbleStore.loadModelsImpl(harness: String, force: Boolean 
     }
 }
 
-internal suspend fun PebbleStore.loadMagpieModelsImpl(harness: String): List<String> {
-    if (harness.isEmpty()) return emptyList()
-    return api.call<ModelsResp>("/api/models?harness=${encodeURIComponent(harness)}&source=magpie").models.orEmpty()
-}
-
 internal fun PebbleStore.resetModelsCacheImpl() {
     modelLoadJobs.values.forEach { it.cancel() }
     modelLoadJobs.clear()
@@ -56,7 +51,6 @@ internal suspend fun PebbleStore.saveModelsSettingsImpl(
     defaultPermissionMode: String? = null,
     defaultModel: String,
     defaultModels: Map<String, String>,
-    magpieWebUrl: String?,
     botUpdates: List<Triple<String, String, String>>,
 ) {
     if (changed) {
@@ -67,9 +61,6 @@ internal suspend fun PebbleStore.saveModelsSettingsImpl(
         )
         if (!defaultPermissionMode.isNullOrEmpty()) {
             body["defaultPermissionMode"] = defaultPermissionMode
-        }
-        if (magpieWebUrl != null) {
-            body["magpieWebUrl"] = magpieWebUrl
         }
         settings = api.call("/api/settings", method = "PUT", body = body)
     }
@@ -95,41 +86,6 @@ internal suspend fun PebbleStore.startHarnessLoginImpl(harness: String): SetupTa
 
 internal suspend fun PebbleStore.getHarnessLoginStatusImpl(harness: String): SetupTaskStatus =
     api.call("/api/harnesses/${encodeURIComponent(harness)}/login")
-
-internal suspend fun PebbleStore.connectMagpieImpl(harness: String, model: String) {
-    settings = api.call(
-        "/api/harnesses/${encodeURIComponent(harness)}/magpie",
-        method = "POST",
-        body = mapOf("action" to "connect", "model" to model),
-    )
-    resetModelsCache()
-}
-
-internal suspend fun PebbleStore.disconnectMagpieImpl(harness: String) {
-    settings = api.call(
-        "/api/harnesses/${encodeURIComponent(harness)}/magpie",
-        method = "POST",
-        body = mapOf("action" to "disconnect"),
-    )
-    resetModelsCache()
-}
-
-internal suspend fun PebbleStore.openMagpieImpl() {
-    api.call<OkResp>("/api/magpie/open", method = "POST", body = emptyMap())
-}
-
-internal suspend fun PebbleStore.installMagpieImpl() {
-    var st = api.call<SetupTaskStatus>("/api/magpie/install", method = "POST", body = emptyMap())
-    while (st.state == "running") {
-        delay(1200)
-        st = api.call("/api/magpie/install")
-    }
-    if (st.state == "error") {
-        throw HubException(st.error ?: "Magpie install failed")
-    }
-    loadSettings()
-    resetModelsCache()
-}
 
 internal suspend fun PebbleStore.setDesktopWorkerImpl(harness: String, model: String) {
     settings = api.call(

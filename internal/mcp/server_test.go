@@ -179,7 +179,7 @@ func TestMCPDesktopTaskAndRoleFiltering(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(cfgPath), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(cfgPath, []byte(`{"desktopModel":"magpie/flash","bots":[{"id":"assistant"}]}`), 0o600); err != nil {
+	if err := os.WriteFile(cfgPath, []byte(`{"desktopModel":"anthropic/claude-haiku-4-5","bots":[{"id":"assistant"}]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 

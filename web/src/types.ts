@@ -84,21 +84,6 @@ export interface ChatMessage {
   costUsd?: number;
 }
 
-export interface MagpieProvider {
-  id: string;
-  name: string;
-  enabled: boolean;
-  endpoint?: string;
-  status?: string;
-  modelsInfo?: string;
-  usedBy?: string;
-}
-
-export interface MagpiePreset {
-  id: string;
-  name: string;
-}
-
 export interface HarnessInfo {
   id: string;
   label: string;
@@ -116,11 +101,6 @@ export interface HarnessInfo {
     command?: string;
     url?: string;
   };
-  magpie?: {
-    connected?: boolean;
-    model?: string;
-    nativeModel?: string;
-  };
 }
 
 export interface SetupTaskStatus {
@@ -136,18 +116,6 @@ export interface SetupTaskStatus {
 }
 
 export interface SettingsData {
-  magpie?: {
-    installed: boolean;
-    healthy?: boolean;
-    providers?: MagpieProvider[];
-    presets?: MagpiePreset[];
-    webUrl?: string;
-    install?: {
-      script?: string;
-      brew?: string;
-      docs?: string;
-    };
-  };
   onboarding?: {
     completed?: boolean;
     needsSetup?: boolean;
