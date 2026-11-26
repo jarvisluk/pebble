@@ -95,10 +95,22 @@ type BotConfig struct {
 	PermissionMode  string            `json:"permissionMode,omitempty"` // "auto" (default) | "edit" | "ask" | "plan"
 	TimeoutSec      int               `json:"timeoutSec,omitempty"`     // default: 300
 	PrivateSessions bool              `json:"privateSessions,omitempty"`
-	DesktopTarget   string            `json:"desktopTarget,omitempty"`
-	BrowserMode     string            `json:"browserMode,omitempty"` // "" | "auto" | "isolated" | "attach"
-	Env             map[string]string `json:"env,omitempty"`
-	Schedules       []ScheduleConfig  `json:"schedules,omitempty"`
+	DesktopTarget         string            `json:"desktopTarget,omitempty"`
+	BrowserMode           string            `json:"browserMode,omitempty"` // "" | "auto" | "isolated" | "attach"
+	CoordinatorCanApprove *bool             `json:"coordinatorCanApprove,omitempty"`
+	Env                   map[string]string `json:"env,omitempty"`
+	Schedules             []ScheduleConfig  `json:"schedules,omitempty"`
+}
+
+// CanCoordinatorApprove reports whether the bot may approve/reject its own worker tasks' permission prompts.
+func (b BotConfig) CanCoordinatorApprove(hubCfg *HubConfig) bool {
+	if b.CoordinatorCanApprove != nil {
+		return *b.CoordinatorCanApprove
+	}
+	if hubCfg != nil && hubCfg.CoordinatorCanApprove != nil {
+		return *hubCfg.CoordinatorCanApprove
+	}
+	return false
 }
 
 // EffectivePermissionMode returns the normalized permission mode ("auto", "edit", "ask", or "plan").
@@ -392,6 +404,7 @@ type HubConfig struct {
 	// DefaultHarness selects the default backend harness when creating a bot.
 	DefaultHarness        string `json:"defaultHarness,omitempty"`
 	DefaultPermissionMode string `json:"defaultPermissionMode,omitempty"`
+	CoordinatorCanApprove *bool  `json:"coordinatorCanApprove,omitempty"`
 	// DefaultModel applies to opencode and pi bots (they share provider/model
 	// IDs); DefaultModels overrides it per harness.
 	DefaultModel        string            `json:"defaultModel,omitempty"`

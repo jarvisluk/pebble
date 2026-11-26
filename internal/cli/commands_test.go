@@ -415,3 +415,67 @@ func TestCLISettingsAndGuardrails(t *testing.T) {
 		}
 	}
 }
+
+func TestCLITaskCommands(t *testing.T) {
+	var gotSpawn, gotSend, gotApprove map[string]any
+	var gotCancelPath string
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/bots/assistant/tasks":
+			_, _ = w.Write([]byte(`{"tasks":[{"id":"tsk_1","status":"running"}]}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/bots/assistant/tasks":
+			_ = json.NewDecoder(r.Body).Decode(&gotSpawn)
+			_, _ = w.Write([]byte(`{"id":"tsk_new","botId":"assistant","status":"queued"}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/tasks/tsk_1":
+			_, _ = w.Write([]byte(`{"id":"tsk_1","status":"completed","output":"ok"}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/tasks/tsk_1/events":
+			_, _ = w.Write([]byte(`{"events":[{"seq":1,"eventType":"status"}]}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/tasks/tsk_1/send":
+			_ = json.NewDecoder(r.Body).Decode(&gotSend)
+			_, _ = w.Write([]byte(`{"id":"tsk_1","status":"queued"}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/tasks/tsk_1/cancel":
+			gotCancelPath = r.URL.Path
+			_, _ = w.Write([]byte(`{"id":"tsk_1","status":"cancelled"}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/approvals/apr_9/reply":
+			_ = json.NewDecoder(r.Body).Decode(&gotApprove)
+			_, _ = w.Write([]byte(`{"ok":true,"items":[]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer api.Close()
+
+	ws := t.TempDir()
+	run := func(args ...string) (string, string, int) {
+		var out, errBuf bytes.Buffer
+		full := append([]string{args[0], args[1], "--hub-url", api.URL, "--bot-id", "assistant"}, args[2:]...)
+		code := runCommand(context.Background(), full, ws, &out, &errBuf)
+		return out.String(), errBuf.String(), code
+	}
+
+	if out, errOut, code := run("task", "list", "--kind", "worker"); code != 0 || !strings.Contains(out, "tsk_1") {
+		t.Fatalf("task list failed: code=%d out=%s err=%s", code, out, errOut)
+	}
+	if out, errOut, code := run("task", "spawn", "--title", "Audit", "--delivery", "wake", "--depends-on", "tsk_0", "--prompt", "run checks"); code != 0 || !strings.Contains(out, "tsk_new") {
+		t.Fatalf("task spawn failed: code=%d out=%s err=%s", code, out, errOut)
+	}
+	if gotSpawn["title"] != "Audit" || gotSpawn["delivery"] != "wake" || gotSpawn["prompt"] != "run checks" {
+		t.Fatalf("unexpected task spawn payload: %#v", gotSpawn)
+	}
+	if out, errOut, code := run("task", "get", "tsk_1"); code != 0 || !strings.Contains(out, "completed") {
+		t.Fatalf("task get failed: code=%d out=%s err=%s", code, out, errOut)
+	}
+	if out, errOut, code := run("task", "read", "tsk_1"); code != 0 || !strings.Contains(out, `"events"`) {
+		t.Fatalf("task read failed: code=%d out=%s err=%s", code, out, errOut)
+	}
+	if _, errOut, code := run("task", "send", "--id", "tsk_1", "--message", "continue"); code != 0 || gotSend["message"] != "continue" {
+		t.Fatalf("task send failed: code=%d payload=%#v err=%s", code, gotSend, errOut)
+	}
+	if _, errOut, code := run("task", "cancel", "tsk_1"); code != 0 || gotCancelPath != "/api/tasks/tsk_1/cancel" {
+		t.Fatalf("task cancel failed: code=%d path=%q err=%s", code, gotCancelPath, errOut)
+	}
+	if _, errOut, code := run("task", "approve", "--id", "apr_9", "--decision", "allow_once"); code != 0 || gotApprove["decision"] != "allow_once" || gotApprove["callerBotId"] != "assistant" {
+		t.Fatalf("task approve failed: code=%d payload=%#v err=%s", code, gotApprove, errOut)
+	}
+}
