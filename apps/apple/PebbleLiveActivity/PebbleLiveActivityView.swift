@@ -116,6 +116,11 @@ struct PebbleLiveActivityWidget: Widget {
     }
 
     private func subtitleText(for context: ActivityViewContext<PebbleActivityAttributes>) -> String {
+        let taskSuffix: String = {
+            let n = context.state.activeTaskCount ?? 0
+            guard n > 0 else { return "" }
+            return isEn ? (n == 1 ? " · 1 task" : " · \(n) tasks") : " · \(n) 个子任务" // i18n:allow-cjk
+        }()
         if context.state.phase == "takeover", let reason = context.state.takeoverReason, !reason.isEmpty {
             return reason
         }
@@ -123,9 +128,9 @@ struct PebbleLiveActivityWidget: Widget {
             return summary
         }
         if context.state.stepCount > 0 {
-            return "\(context.state.statusText) · \(stepText(context.state.stepCount))"
+            return "\(context.state.statusText) · \(stepText(context.state.stepCount))\(taskSuffix)"
         }
-        return context.state.statusText
+        return context.state.statusText + taskSuffix
     }
 
     private func iconName(for context: ActivityViewContext<PebbleActivityAttributes>) -> String {

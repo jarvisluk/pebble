@@ -114,6 +114,10 @@ class PebbleStore(context: Context) {
     var dismissedUpdateVersion by mutableStateOf(prefs.getString("pebble.dismissedUpdate", "").orEmpty())
         internal set
     val routines = mutableStateMapOf<String, List<RoutineItem>>()
+    val tasks = mutableStateMapOf<String, List<BotTask>>()
+    val taskEvents = mutableStateMapOf<String, List<BotTaskEvent>>()
+    val taskTools = mutableStateMapOf<String, String>()
+    val taskStreamText = mutableStateMapOf<String, String>()
     var pendingStageOpen by mutableStateOf<StageOpenEvent?>(null)
         internal set
     var pendingChatInsert by mutableStateOf<PendingChatInsert?>(null)
@@ -310,6 +314,11 @@ class PebbleStore(context: Context) {
         tools.remove(id)
         botSteps.remove(id)
         activeBusyBots.remove(id)
+        tasks.remove(id)?.forEach { t ->
+            taskEvents.remove(t.id)
+            taskTools.remove(t.id)
+            taskStreamText.remove(t.id)
+        }
     }
 
     internal fun pushIncoming(botId: String, msg: ChatMessage) {
@@ -395,6 +404,29 @@ class PebbleStore(context: Context) {
     suspend fun deleteRoutine(botId: String, rid: String) = deleteRoutineImpl(botId, rid)
     suspend fun runRoutine(botId: String, rid: String) = runRoutineImpl(botId, rid)
     suspend fun fetchRoutineRuns(botId: String, rid: String, limit: Int = 6) : List<RoutineRun> = fetchRoutineRunsImpl(botId, rid, limit)
+    fun upsertBotTask(task: BotTask) = upsertBotTaskImpl(task)
+    suspend fun fetchBotTasks(
+        botId: String,
+        kind: String? = null,
+        status: String? = null,
+        limit: Int = 50,
+    ): List<BotTask> = fetchBotTasksImpl(botId, kind, status, limit)
+    suspend fun spawnBotTask(
+        botId: String,
+        title: String? = null,
+        prompt: String,
+        kind: String = "worker",
+        deviceId: String = "local",
+        harness: String? = null,
+        model: String? = null,
+        permissionMode: String? = null,
+        workdir: String? = null,
+        delivery: String = "receipt",
+    ): BotTask = spawnBotTaskImpl(botId, title, prompt, kind, deviceId, harness, model, permissionMode, workdir, delivery)
+    suspend fun fetchTaskEvents(taskId: String, afterSeq: Long = 0L, limit: Int = 200): List<BotTaskEvent> =
+        fetchTaskEventsImpl(taskId, afterSeq, limit)
+    suspend fun sendToTask(taskId: String, message: String): BotTask = sendToTaskImpl(taskId, message)
+    suspend fun cancelTask(taskId: String): BotTask = cancelTaskImpl(taskId)
 
     suspend fun loadSettings(fresh: Boolean = false) : SettingsData = loadSettingsImpl(fresh)
     suspend fun loadModels(harness: String, force: Boolean = false) : List<String> = loadModelsImpl(harness, force)
