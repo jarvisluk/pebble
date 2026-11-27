@@ -72,6 +72,9 @@ extension SettingsMemoryTab {
             }
 
             DisclosureGroup(hub.t("memEmbeddingTitle"), isExpanded: $embedExpanded) {
+                let existingEmbed = (hub.settings?.memory ?? memStatus?.config)?.embedding
+                let hasSavedEmbedKey = (existingEmbed?.hasApiKey == true)
+                    || !(existingEmbed?.apiKey ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 VStack(alignment: .leading, spacing: 10) {
                     Toggle(hub.t("memEmbeddingEnabled"), isOn: cfgBinding($cfgEmbedEnabled))
                     HubFormField(label: hub.t("memEmbeddingBaseUrl")) {
@@ -94,7 +97,7 @@ extension SettingsMemoryTab {
                                     saved = ""
                                 }
                             ),
-                            prompt: Text(hub.t("memEmbeddingApiKeyPh"))
+                            prompt: Text(hub.t(hasSavedEmbedKey ? "memEmbeddingApiKeySetPh" : "memEmbeddingApiKeyPh"))
                         )
                         .monoInput()
                         .padding(.horizontal, 10)
