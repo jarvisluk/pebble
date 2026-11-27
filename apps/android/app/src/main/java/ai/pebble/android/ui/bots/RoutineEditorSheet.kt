@@ -30,7 +30,6 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -98,6 +97,7 @@ import ai.pebble.android.ui.theme.BotAvatar
 import ai.pebble.android.ui.theme.CardDivider
 import ai.pebble.android.ui.theme.ConfirmAlertDialog
 import ai.pebble.android.ui.theme.ConfirmItem
+import ai.pebble.android.ui.theme.LoadingContent
 import ai.pebble.android.ui.theme.LocalPalette
 import ai.pebble.android.ui.theme.MonoFont
 import ai.pebble.android.ui.theme.PebbleDimens
@@ -223,10 +223,8 @@ internal fun RoutineEditorSheet(
                 textAlign = TextAlign.Center,
                 modifier = Modifier.weight(1f),
             )
-            if (saving) {
-                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = p.accent)
-            } else {
-                TextButton(onClick = { save() }) {
+            TextButton(onClick = { save() }, enabled = !saving) {
+                LoadingContent(loading = saving, color = p.accent) {
                     Text(store.t("rtSaveBtn"), color = p.accent, fontWeight = FontWeight.SemiBold)
                 }
             }

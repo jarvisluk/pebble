@@ -55,18 +55,17 @@ struct StageFilePreviewView: View {
                 .fixedSize()
                 .accessibilityLabel(hub.t("insertToChat"))
 
-                if downloading {
-                    ProgressView().controlSize(.small)
-                } else {
-                    Button {
-                        Task { await downloadAndPreview() }
-                    } label: {
+                Button {
+                    Task { await downloadAndPreview() }
+                } label: {
+                    HubLoadingLabel(loading: downloading) {
                         Image(systemName: "square.and.arrow.up")
                             .font(.system(size: AppFont.body, weight: .semibold))
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
                 }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(downloading)
 
                 Button {
                     Task { await loadFile() }

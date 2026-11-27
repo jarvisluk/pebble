@@ -5,16 +5,15 @@ extension SettingsModelsTab {
 
     @ViewBuilder
     private var recheckHeaderButton: some View {
-        if busy == "recheck" {
-            ProgressView().controlSize(.small)
-        } else {
-            Button(hub.t("enginesRecheck")) {
-                recheckEnvironment()
-            }
-            .buttonStyle(.borderless)
-            .font(.system(size: AppFont.secondary))
-            .textCase(nil)
+        Button {
+            recheckEnvironment()
+        } label: {
+            HubLoadingLabel(loading: busy == "recheck") { Text(hub.t("enginesRecheck")) }
         }
+        .buttonStyle(.borderless)
+        .font(.system(size: AppFont.secondary))
+        .textCase(nil)
+        .disabled(busy == "recheck")
     }
 
     @ViewBuilder

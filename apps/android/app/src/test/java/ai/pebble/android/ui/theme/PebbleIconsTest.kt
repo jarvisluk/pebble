@@ -70,7 +70,7 @@ class PebbleIconsTest {
             PebbleIcons.SwapVert,
             PebbleIcons.SyncProblem,
             PebbleIcons.Tune,
-            PebbleIcons.ViewSidebar,
+            PebbleIcons.WebAsset,
             PebbleIcons.Visibility,
             PebbleIcons.VisibilityOff,
             PebbleIcons.VpnKey,

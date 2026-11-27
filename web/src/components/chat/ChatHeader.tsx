@@ -128,7 +128,7 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({
                   strokeLinejoin="round"
                 >
                   <rect x="3" y="4" width="18" height="16" rx="3" />
-                  <path d="M15 4v16" />
+                  <path d="M3 9h18" />
                 </svg>
                 <span className="stage-dot" hidden={!hasUnreadLatestStage} />
               </button>

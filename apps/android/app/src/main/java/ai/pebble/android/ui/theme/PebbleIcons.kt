@@ -66,7 +66,7 @@ object PebbleIcons {
     @DrawableRes val SwapVert: Int = R.drawable.ms_swap_vert
     @DrawableRes val SyncProblem: Int = R.drawable.ms_sync_problem
     @DrawableRes val Tune: Int = R.drawable.ms_tune
-    @DrawableRes val ViewSidebar: Int = R.drawable.ms_view_sidebar
+    @DrawableRes val WebAsset: Int = R.drawable.ms_web_asset
     @DrawableRes val Visibility: Int = R.drawable.ms_visibility
     @DrawableRes val VisibilityOff: Int = R.drawable.ms_visibility_off
     @DrawableRes val VpnKey: Int = R.drawable.ms_vpn_key

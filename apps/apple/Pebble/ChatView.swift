@@ -192,7 +192,7 @@ struct ChatView: View {
                             ZStack(alignment: .topTrailing) {
                                 Label(
                                     latestTitle.isEmpty ? hub.t("stageOpenWorkspace") : hub.t("stageLatestTab", ["title": latestTitle]),
-                                    systemImage: "sidebar.right"
+                                    systemImage: "macwindow"
                                 )
                                 .labelStyle(.iconOnly)
                                 if hasUnread {

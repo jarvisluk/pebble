@@ -59,6 +59,7 @@ import ai.pebble.android.ui.nav.PebbleRouter
 import ai.pebble.android.ui.theme.BotAvatar
 import ai.pebble.android.ui.theme.CardDivider
 import ai.pebble.android.ui.theme.ConfirmItem
+import ai.pebble.android.ui.theme.LoadingContent
 import ai.pebble.android.ui.theme.LocalPalette
 import ai.pebble.android.ui.theme.MonoFont
 import ai.pebble.android.ui.theme.PebbleDimens
@@ -572,20 +573,19 @@ fun ModelsSettingsTab(
     SectionHeader(
         title = store.t("enginesTitle"),
         trailing = {
-            if (busy == "recheck") {
-                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = p.accent)
-            } else {
-                TextButton(
-                    onClick = {
-                        runOp("recheck", "opFailed") {
-                            store.loadSettings(fresh = true)
-                            store.resetModelsCache()
-                            preloadAllModels(force = true)
-                            store.t("ubRecheckDone")
-                        }
-                    },
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                ) {
+            TextButton(
+                onClick = {
+                    runOp("recheck", "opFailed") {
+                        store.loadSettings(fresh = true)
+                        store.resetModelsCache()
+                        preloadAllModels(force = true)
+                        store.t("ubRecheckDone")
+                    }
+                },
+                enabled = busy != "recheck",
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+            ) {
+                LoadingContent(loading = busy == "recheck", color = p.accent) {
                     Text(store.t("enginesRecheck"), color = p.accent, fontSize = PebbleFont.secondary)
                 }
             }

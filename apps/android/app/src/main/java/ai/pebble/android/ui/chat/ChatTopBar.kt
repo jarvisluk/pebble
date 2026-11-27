@@ -240,7 +240,7 @@ internal fun ChatTopBar(
                 IconButton(onClick = { onOpenStage(botId) }) {
                     Box {
                         Icon(
-                            painter = painterResource(PebbleIcons.ViewSidebar),
+                            painter = painterResource(PebbleIcons.WebAsset),
                             contentDescription = store.t(if (bot?.latestStage != null) "stageLatestTab" else "stageOpenWorkspace"),
                             tint = p.text,
                         )

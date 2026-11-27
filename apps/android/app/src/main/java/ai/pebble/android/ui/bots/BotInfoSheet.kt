@@ -30,7 +30,6 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -90,6 +89,7 @@ import ai.pebble.android.ui.theme.BotAvatar
 import ai.pebble.android.ui.theme.CardDivider
 import ai.pebble.android.ui.theme.ConfirmAlertDialog
 import ai.pebble.android.ui.theme.ConfirmItem
+import ai.pebble.android.ui.theme.LoadingContent
 import ai.pebble.android.ui.theme.LocalPalette
 import ai.pebble.android.ui.theme.MonoFont
 import ai.pebble.android.ui.theme.PebbleDimens
@@ -308,13 +308,11 @@ fun BotInfoSheet(
                     Text(store.t("botDetails"), fontSize = PebbleFont.title, fontWeight = FontWeight.Bold)
                 },
                 actions = {
-                    if (saving) {
-                        CircularProgressIndicator(modifier = Modifier.padding(end = 16.dp).size(20.dp), strokeWidth = 2.dp, color = pal.accent)
-                    } else {
-                        TextButton(
-                            onClick = { save() },
-                            enabled = dirty && editName.trim().isNotEmpty(),
-                        ) {
+                    TextButton(
+                        onClick = { save() },
+                        enabled = dirty && editName.trim().isNotEmpty() && !saving,
+                    ) {
+                        LoadingContent(loading = saving, color = pal.accent) {
                             Text(
                                 text = store.t("save"),
                                 color = if (dirty && editName.trim().isNotEmpty()) pal.accent else p.mute,

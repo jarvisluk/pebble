@@ -143,15 +143,13 @@ extension SettingsMemoryTab {
                     )
                 }
                 Spacer(minLength: 8)
-                if cfgSaving {
-                    ProgressView().controlSize(.small)
-                } else {
-                    Button(hub.t("save")) {
-                        Task { _ = await saveMemorySettings() }
-                    }
-                    .buttonStyle(HubPrimaryButtonStyle())
-                    .disabled(!cfgTouched || !busy.isEmpty)
+                Button {
+                    Task { _ = await saveMemorySettings() }
+                } label: {
+                    HubLoadingLabel(loading: cfgSaving) { Text(hub.t("save")) }
                 }
+                .buttonStyle(HubPrimaryButtonStyle())
+                .disabled(!cfgTouched || !busy.isEmpty || cfgSaving)
             }
 
             if effectiveMagpie?.installed == true {

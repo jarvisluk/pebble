@@ -539,25 +539,15 @@ struct HubSplitLeadingToolbar<First: View, Second: View>: ToolbarContent {
             second()
         }
         #elseif os(macOS)
+        // 与右侧工具栏按钮一致：使用系统工具栏玻璃样式，不自定义 `.glass` 圆形按钮。
+        ToolbarItem(placement: .navigation) {
+            first()
+        }
         if #available(macOS 26.0, *) {
-            ToolbarItem(placement: .navigation) {
-                HStack(spacing: 8) {
-                    first()
-                        .buttonStyle(.glass)
-                        .buttonBorderShape(.circle)
-                    second()
-                        .buttonStyle(.glass)
-                        .buttonBorderShape(.circle)
-                }
-            }
-            .sharedBackgroundVisibility(.hidden)
-        } else {
-            ToolbarItem(placement: .navigation) {
-                first()
-            }
-            ToolbarItem(placement: .navigation) {
-                second()
-            }
+            ToolbarSpacer(.fixed, placement: .navigation)
+        }
+        ToolbarItem(placement: .navigation) {
+            second()
         }
         #endif
     }

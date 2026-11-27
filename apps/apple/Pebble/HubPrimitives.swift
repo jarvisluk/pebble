@@ -200,20 +200,16 @@ struct HubSheetScaffold<Content: View>: View {
                     }
                     Spacer()
                     if let actionTitle, let onAction {
-                        if loading {
-                            ProgressView()
-                                .controlSize(.small)
-                                .padding(.horizontal, 12)
-                        } else {
-                            Button(actionTitle, action: onAction)
-                                .font(.system(size: AppFont.body, weight: .semibold))
-                                .foregroundStyle(actionDisabled ? p.mute : p.card)
-                                .buttonStyle(.plain)
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 6)
-                                .background(Capsule().fill(actionDisabled ? p.s1 : p.accent))
-                                .disabled(actionDisabled)
+                        Button(action: onAction) {
+                            HubLoadingLabel(loading: loading) { Text(actionTitle) }
                         }
+                        .font(.system(size: AppFont.body, weight: .semibold))
+                        .foregroundStyle(actionDisabled ? p.mute : p.card)
+                        .buttonStyle(.plain)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 6)
+                        .background(Capsule().fill(actionDisabled ? p.s1 : p.accent))
+                        .disabled(actionDisabled || loading)
                     }
                 }
             }
@@ -267,6 +263,23 @@ struct HubSearchBar: View {
 }
 
 /// 跨平台高对比度主操作胶囊按钮（深色白底黑字 / 浅色黑底白字）。
+/// 按钮加载态：保留原按钮与标题占位，仅隐藏标题并原位叠加转圈。
+/// 禁止把按钮整体替换为裸 `ProgressView`，否则胶囊 / 工具栏项会塌陷变形、宽度跳动。
+struct HubLoadingLabel<Label: View>: View {
+    var loading: Bool
+    @ViewBuilder var label: () -> Label
+
+    var body: some View {
+        label()
+            .opacity(loading ? 0 : 1)
+            .overlay {
+                if loading {
+                    ProgressView().controlSize(.mini)
+                }
+            }
+    }
+}
+
 struct HubPrimaryButtonStyle: ButtonStyle {
     @Environment(\.palette) private var p
     @Environment(\.isEnabled) private var isEnabled

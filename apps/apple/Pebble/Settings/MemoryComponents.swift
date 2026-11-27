@@ -183,13 +183,11 @@ struct MemoryIndexEditorBlock: View {
                             disabled: loading || saving,
                             action: onReload
                         )
-                        if saving {
-                            ProgressView().controlSize(.small)
-                        } else {
-                            Button(hub.t("save"), action: onSave)
-                                .buttonStyle(HubPrimaryButtonStyle())
-                                .disabled(!isDirty)
+                        Button(action: onSave) {
+                            HubLoadingLabel(loading: saving) { Text(hub.t("save")) }
                         }
+                        .buttonStyle(HubPrimaryButtonStyle())
+                        .disabled(!isDirty || saving)
                     }
                 }
             }

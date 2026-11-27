@@ -148,13 +148,11 @@ struct BotMemorySectionView: View {
                     )
                     HStack {
                         Spacer()
-                        if busy == "save" {
-                            ProgressView().controlSize(.small)
-                        } else {
-                            Button(hub.t("saveMemory")) { addMem() }
-                                .buttonStyle(HubPrimaryButtonStyle())
-                                .disabled(addText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !busy.isEmpty)
+                        Button { addMem() } label: {
+                            HubLoadingLabel(loading: busy == "save") { Text(hub.t("saveMemory")) }
                         }
+                        .buttonStyle(HubPrimaryButtonStyle())
+                        .disabled(addText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !busy.isEmpty)
                     }
                 }
                 .padding(.top, 8)

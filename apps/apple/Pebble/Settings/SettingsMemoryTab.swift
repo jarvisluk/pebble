@@ -161,15 +161,13 @@ struct SettingsMemoryTab: View {
                     .font(.system(size: AppFont.secondary, design: .monospaced))
                     .foregroundStyle(.secondary)
                 Spacer()
-                if userMdSaving {
-                    ProgressView().controlSize(.small)
-                } else {
-                    Button(hub.t("save")) {
-                        Task { _ = await saveSharedUserMd() }
-                    }
-                    .buttonStyle(HubPrimaryButtonStyle())
-                    .disabled(!userMdDirty || !busy.isEmpty)
+                Button {
+                    Task { _ = await saveSharedUserMd() }
+                } label: {
+                    HubLoadingLabel(loading: userMdSaving) { Text(hub.t("save")) }
                 }
+                .buttonStyle(HubPrimaryButtonStyle())
+                .disabled(!userMdDirty || !busy.isEmpty || userMdSaving)
             }
         } header: {
             Text(hub.t("globalSharedMem"))

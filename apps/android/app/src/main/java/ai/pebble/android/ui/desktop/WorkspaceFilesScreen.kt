@@ -65,6 +65,7 @@ import ai.pebble.android.data.errText
 import ai.pebble.android.ui.chat.MarkdownText
 import ai.pebble.android.ui.theme.BotAccent
 import ai.pebble.android.ui.theme.PebbleFont
+import ai.pebble.android.ui.theme.LoadingContent
 import ai.pebble.android.ui.theme.LocalPalette
 import ai.pebble.android.ui.theme.MonoFont
 import ai.pebble.android.ui.theme.PebbleDimens
@@ -471,10 +472,8 @@ internal fun WorkspacePreviewPanel(
                     Text(store.t("insertToChat"), color = p.text, fontSize = PebbleFont.secondary, maxLines = 1)
                 }
             }
-            if (downloading) {
-                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = p.accent)
-            } else {
-                IconButton(onClick = onShare, modifier = Modifier.size(34.dp)) {
+            IconButton(onClick = onShare, enabled = !downloading, modifier = Modifier.size(34.dp)) {
+                LoadingContent(loading = downloading, color = p.accent) {
                     Icon(painterResource(PebbleIcons.IosShare), contentDescription = store.t("openQuickLook"), tint = p.accent, modifier = Modifier.size(18.dp))
                 }
             }
