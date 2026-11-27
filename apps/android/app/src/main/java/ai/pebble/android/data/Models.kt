@@ -101,11 +101,43 @@ data class ChatMessage(
 @Serializable
 data class MemoryItem(
     val id: String,
-    val kind: String? = null,
+    val path: String? = null,
     val scope: String? = null,
-    val tags: List<String>? = null,
-    val updatedAt: String? = null,
+    val botId: String? = null,
+    val kind: String? = null,
+    val title: String? = null,
     val text: String? = null,
+    val snippet: String? = null,
+    val why: String? = null,
+    val tags: List<String>? = null,
+    val status: String? = null,
+    val pin: Boolean? = null,
+    val confidence: Double? = null,
+    val validFrom: String? = null,
+    val validUntil: String? = null,
+    val supersededBy: String? = null,
+    val sourceSession: String? = null,
+    val sourceAuthor: String? = null,
+    val origin: String? = null,
+    val score: Double? = null,
+    val createdAt: String? = null,
+    val updatedAt: String? = null,
+)
+
+@Serializable
+data class MemoryMagpieStatus(
+    val installed: Boolean? = null,
+    val hasLegacyItems: Boolean? = null,
+    val legacyCount: Int? = null,
+    val injectedHarnesses: List<String>? = null,
+)
+
+@Serializable
+data class MemoryCounts(
+    val active: Int = 0,
+    val candidate: Int = 0,
+    val superseded: Int = 0,
+    val archived: Int = 0,
 )
 
 @Serializable
@@ -119,11 +151,104 @@ data class MemorySemanticStatus(
 
 @Serializable
 data class MemoryList(
+    val backend: String? = null,
     val installed: Boolean? = null,
     val available: Boolean? = null,
     val error: String? = null,
+    val magpie: MemoryMagpieStatus? = null,
     val semantic: MemorySemanticStatus? = null,
+    val counts: MemoryCounts? = null,
     val items: List<MemoryItem>? = null,
+)
+
+@Serializable
+data class MemoryIndexDoc(
+    val ok: Boolean? = null,
+    val path: String? = null,
+    val content: String = "",
+    val lines: Int = 0,
+    val maxLines: Int = 0,
+)
+
+@Serializable
+data class MemoryDreamConfig(
+    val enabled: Boolean? = null,
+    val dailyAt: String? = null,
+    val model: String? = null,
+    val minNewMessages: Int? = null,
+)
+
+@Serializable
+data class MemoryEmbeddingConfig(
+    val enabled: Boolean? = null,
+    val baseUrl: String? = null,
+    val apiKey: String? = null,
+    val model: String? = null,
+)
+
+@Serializable
+data class MemoryConfig(
+    val enabled: Boolean? = null,
+    val coexistence: String? = null,
+    val snapshotMaxChars: Int? = null,
+    val disableClaudeAutoMemory: Boolean? = null,
+    val dream: MemoryDreamConfig? = null,
+    val embedding: MemoryEmbeddingConfig? = null,
+)
+
+@Serializable
+data class MemoryDreamEntry(
+    val botId: String? = null,
+    val date: String? = null,
+    val path: String? = null,
+    val summary: String? = null,
+    val updatedAt: String? = null,
+)
+
+@Serializable
+data class MemoryStatusResp(
+    val backend: String? = null,
+    val config: MemoryConfig? = null,
+    val docCount: Int = 0,
+    val chunkCount: Int = 0,
+    val counts: MemoryCounts? = null,
+    val semantic: MemorySemanticStatus? = null,
+    val magpie: MemoryMagpieStatus? = null,
+    val recentDreams: List<MemoryDreamEntry>? = null,
+)
+
+@Serializable
+data class MemorySaveResp(
+    val ok: Boolean? = null,
+    val id: String? = null,
+    val item: MemoryItem? = null,
+    val similarExisting: JsonElement? = null,
+)
+
+@Serializable
+data class MemoryPatchResp(
+    val ok: Boolean? = null,
+    val item: MemoryItem? = null,
+)
+
+@Serializable
+data class MemoryReindexResp(
+    val ok: Boolean? = null,
+    val docsIndexed: Int = 0,
+    val chunksIndexed: Int = 0,
+)
+
+@Serializable
+data class MemoryImportResp(
+    val ok: Boolean? = null,
+    val imported: Int = 0,
+    val skipped: Int = 0,
+)
+
+@Serializable
+data class MemoryDreamRunResp(
+    val ok: Boolean? = null,
+    val results: JsonElement? = null,
 )
 
 @Serializable
@@ -218,6 +343,7 @@ data class SettingsData(
     val defaultModels: Map<String, String>? = null,
     val sharedUserMd: String? = null,
     val harnesses: List<HarnessInfo>? = null,
+    val memory: MemoryConfig? = null,
 )
 
 @Serializable

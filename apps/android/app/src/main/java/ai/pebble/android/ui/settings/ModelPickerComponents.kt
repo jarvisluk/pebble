@@ -66,12 +66,24 @@ fun orderedGlobalHarnesses(
     harnesses.filter { !anyInstalled || !models[it.id].isNullOrEmpty() }.forEach(::addUnique)
 }
 
+val MEMORY_KINDS = listOf(
+    "fact",
+    "preference",
+    "rule",
+    "decision",
+    "reference",
+    "profile",
+    "procedure",
+    "episode",
+)
+
 fun localizedMemoryKind(raw: String?, store: PebbleStore): String {
     val k = raw.orEmpty().trim()
     return when (k) {
         "fact" -> store.t("kindFact")
         "preference" -> store.t("kindPreference")
         "rule" -> store.t("kindRule")
+        "decision" -> store.t("kindDecision")
         "reference" -> store.t("kindReference")
         "profile" -> store.t("kindProfile")
         "procedure" -> store.t("kindProcedure")

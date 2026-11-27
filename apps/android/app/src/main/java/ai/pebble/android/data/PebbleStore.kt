@@ -385,10 +385,20 @@ class PebbleStore(context: Context) {
         botId: String? = null,
         query: String = "",
         kind: String = "",
-        limit: Int = 0,
-    ) : MemoryList = fetchMemoriesImpl(scope, botId, query, kind, limit)
-    suspend fun saveMemory(body: Map<String, Any?>) = saveMemoryImpl(body)
-    suspend fun deleteMemory(id: String) = deleteMemoryImpl(id)
+        tags: String = "",
+        status: String = "",
+        limit: Int = 50,
+    ): MemoryList = fetchMemoriesImpl(scope, botId, query, kind, tags, status, limit)
+    suspend fun saveMemory(body: Map<String, Any?>): MemorySaveResp = saveMemoryImpl(body)
+    suspend fun patchMemory(id: String, body: Map<String, Any?>): MemoryPatchResp = patchMemoryImpl(id, body)
+    suspend fun deleteMemory(id: String, hard: Boolean = false, dismiss: Boolean = false) = deleteMemoryImpl(id, hard, dismiss)
+    suspend fun fetchMemoryIndex(scope: String? = null, botId: String? = null): MemoryIndexDoc = fetchMemoryIndexImpl(scope, botId)
+    suspend fun saveMemoryIndex(content: String, scope: String? = null, botId: String? = null): MemoryIndexDoc = saveMemoryIndexImpl(content, scope, botId)
+    suspend fun fetchMemoryStatus(botId: String? = null): MemoryStatusResp = fetchMemoryStatusImpl(botId)
+    suspend fun runMemoryDream(botId: String? = null): MemoryDreamRunResp = runMemoryDreamImpl(botId)
+    suspend fun reindexMemory(): MemoryReindexResp = reindexMemoryImpl()
+    suspend fun importMagpieMemory(mode: String, botId: String? = null): MemoryImportResp = importMagpieMemoryImpl(mode, botId)
+    suspend fun saveMemoryConfig(memory: Map<String, Any?>): SettingsData = saveMemoryConfigImpl(memory)
     suspend fun fetchRoutines(botId: String) : List<RoutineItem> = fetchRoutinesImpl(botId)
     suspend fun createRoutine(botId: String, body: Map<String, Any?>) = createRoutineImpl(botId, body)
     suspend fun updateRoutine(botId: String, rid: String, body: Map<String, Any?>) = updateRoutineImpl(botId, rid, body)
