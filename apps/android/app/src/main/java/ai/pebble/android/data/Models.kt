@@ -183,6 +183,7 @@ data class MemoryEmbeddingConfig(
     val enabled: Boolean? = null,
     val baseUrl: String? = null,
     val apiKey: String? = null,
+    val hasApiKey: Boolean? = null,
     val model: String? = null,
 )
 

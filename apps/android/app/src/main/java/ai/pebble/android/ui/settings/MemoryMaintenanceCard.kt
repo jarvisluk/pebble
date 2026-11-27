@@ -69,6 +69,7 @@ internal fun MemoryMaintenanceCard(
     embeddingBaseUrl: String,
     embeddingModel: String,
     embeddingApiKey: String,
+    hasSavedEmbeddingApiKey: Boolean,
     configDirty: Boolean,
     busy: String,
     onCoexistenceChange: (String) -> Unit,
@@ -363,7 +364,12 @@ internal fun MemoryMaintenanceCard(
                     OutlinedTextField(
                         value = embeddingApiKey,
                         onValueChange = onEmbeddingApiKeyChange,
-                        placeholder = { Text(store.t("memEmbeddingApiKeyPh"), fontSize = PebbleFont.secondary) },
+                        placeholder = {
+                            Text(
+                                store.t(if (hasSavedEmbeddingApiKey) "memEmbeddingApiKeySetPh" else "memEmbeddingApiKeyPh"),
+                                fontSize = PebbleFont.secondary,
+                            )
+                        },
                         singleLine = true,
                         visualTransformation = if (showApiKey) VisualTransformation.None else PasswordVisualTransformation(),
                         trailingIcon = {
