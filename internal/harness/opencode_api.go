@@ -36,7 +36,7 @@ func (h *OpenCodeHarness) Models(ctx context.Context) ([]string, error) {
 			fctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 			defer cancel()
 			cmd := exec.CommandContext(fctx, bin, "models")
-			cmd.Env = augmentedEnv(nil)
+			cmd.Env = h.opencodeEnv(nil)
 			if out, err := cmd.Output(); err == nil {
 				if list := parseSlashModelLines(string(out)); len(list) > 0 {
 					return list, true
