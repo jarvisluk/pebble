@@ -115,7 +115,7 @@ class MemoryModelsTest {
                 "snapshotMaxChars": 8000,
                 "disableClaudeAutoMemory": true,
                 "dream": {"enabled": true, "dailyAt": "04:30", "model": "gpt-4o-mini", "minNewMessages": 5},
-                "embedding": {"enabled": false, "baseUrl": "https://api.openai.com/v1", "model": "text-embedding-3-small"}
+                "embedding": {"enabled": false, "baseUrl": "https://api.openai.com/v1", "hasApiKey": true, "model": "text-embedding-3-small"}
               },
               "recentDreams": [
                 {"botId": "coder", "date": "2026-11-27", "path": "coder/memory/dreams/2026-11-27.md", "summary": "Consolidated 3 decisions"}
@@ -127,6 +127,7 @@ class MemoryModelsTest {
         assertEquals(42, status.chunkCount)
         assertEquals("isolated", status.config?.coexistence)
         assertEquals("04:30", status.config?.dream?.dailyAt)
+        assertEquals(true, status.config?.embedding?.hasApiKey)
         assertEquals("Consolidated 3 decisions", status.recentDreams?.single()?.summary)
 
         val settings = HubJson.decodeFromString<SettingsData>(

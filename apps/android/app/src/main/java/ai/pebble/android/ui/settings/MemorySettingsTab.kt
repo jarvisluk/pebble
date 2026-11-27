@@ -357,6 +357,8 @@ fun MemorySettingsTab(
     }
 
     // Card 3: Pebble Memory Settings & Maintenance
+    val liveBaseCfg = currentBaseCfg()
+    val hasSavedEmbeddingApiKey = (liveBaseCfg?.embedding?.hasApiKey == true) || !liveBaseCfg?.embedding?.apiKey.isNullOrBlank()
     MemoryMaintenanceCard(
         store = store,
         status = memStatus,
@@ -370,6 +372,7 @@ fun MemorySettingsTab(
         embeddingBaseUrl = cfgEmbBaseUrl,
         embeddingModel = cfgEmbModel,
         embeddingApiKey = cfgEmbApiKey,
+        hasSavedEmbeddingApiKey = hasSavedEmbeddingApiKey,
         configDirty = configDirty,
         busy = busy,
         onCoexistenceChange = { cfgCoexistence = it; cfgTouched = true; onSaved("") },
