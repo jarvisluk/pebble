@@ -98,9 +98,6 @@ struct StageDesktopCanvas: View {
             }
         }
         .background(stageBg)
-        .clipShape(RoundedRectangle(cornerRadius: inWideStage ? 20 : 0, style: .continuous))
-        .padding(inWideStage ? 12 : 0)
-        .background(inWideStage ? p.page : stageBg)
         .onAppear {
             streamMode = preferredStreamMode
         }

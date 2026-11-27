@@ -1,7 +1,6 @@
 package ai.pebble.android.ui.desktop
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -9,8 +8,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -38,34 +39,32 @@ internal fun StageTabBar(
     store: PebbleStore,
     tabs: List<StageTab>,
     activeTabId: String,
+    inCard: Boolean = false,
     onSelect: (String) -> Unit,
     onClose: (String) -> Unit,
     onNewTab: () -> Unit,
 ) {
     val p = LocalPalette.current
 
-    Column(modifier = Modifier.fillMaxWidth().background(p.page)) {
+    Column(modifier = Modifier.fillMaxWidth().background(if (inCard) p.card else p.page)) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .height(44.dp)
                 .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 12.dp, vertical = 6.dp),
+                .padding(horizontal = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            tabs.forEach { tab ->
+            tabs.forEachIndexed { idx, tab ->
                 val active = tab.id == activeTabId
-                val shape = RoundedCornerShape(10.dp)
+                val nextActive = idx + 1 < tabs.size && tabs[idx + 1].id == activeTabId
+                val shape = RoundedCornerShape(8.dp)
                 Row(
                     modifier = Modifier
                         .widthIn(max = 210.dp)
                         .clip(shape)
-                        .background(if (active) p.card else Color.Transparent)
-                        .border(
-                            width = 0.5.dp,
-                            color = if (active) p.s2 else Color.Transparent,
-                            shape = shape,
-                        ),
+                        .background(if (active) p.s1 else Color.Transparent),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Row(
@@ -74,9 +73,9 @@ internal fun StageTabBar(
                             .clickable { onSelect(tab.id) }
                             .padding(
                                 start = 10.dp,
-                                end = if (tab.closable) 4.dp else 10.dp,
-                                top = 6.dp,
-                                bottom = 6.dp,
+                                end = if (tab.closable) 2.dp else 10.dp,
+                                top = 5.dp,
+                                bottom = 5.dp,
                             ),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -100,7 +99,7 @@ internal fun StageTabBar(
                         Box(
                             modifier = Modifier
                                 .padding(end = 4.dp)
-                                .size(22.dp)
+                                .size(20.dp)
                                 .clip(CircleShape)
                                 .clickable { onClose(tab.id) },
                             contentAlignment = Alignment.Center,
@@ -108,19 +107,29 @@ internal fun StageTabBar(
                             Icon(
                                 painter = painterResource(PebbleIcons.Close),
                                 contentDescription = store.t("stageCloseTab"),
-                                tint = p.mute,
-                                modifier = Modifier.size(13.dp),
+                                tint = p.mute.copy(alpha = if (active) 0.9f else 0.55f),
+                                modifier = Modifier.size(12.dp),
                             )
                         }
                     }
+                }
+
+                if (idx < tabs.size - 1 && !active && !nextActive) {
+                    Box(
+                        modifier = Modifier
+                            .padding(horizontal = 2.dp)
+                            .width(0.5.dp)
+                            .height(14.dp)
+                            .background(p.s2),
+                    )
                 }
             }
 
             Box(
                 modifier = Modifier
+                    .padding(start = 2.dp)
                     .size(28.dp)
                     .clip(RoundedCornerShape(8.dp))
-                    .background(p.s1.copy(alpha = 0.7f))
                     .clickable(onClick = onNewTab),
                 contentAlignment = Alignment.Center,
             ) {

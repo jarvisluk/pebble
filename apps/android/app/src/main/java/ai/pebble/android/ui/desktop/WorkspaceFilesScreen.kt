@@ -130,44 +130,21 @@ fun WorkspaceFilesView(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(p.page),
+            .background(if (inWideStage) p.card else p.page),
     ) {
-        if (inWideStage) {
-            Surface(
-                color = p.card,
-                shape = RoundedCornerShape(20.dp),
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(12.dp),
-            ) {
-                WorkspaceListPanel(
-                    store = store,
-                    botPal = botPal,
-                    dirPath = dirPath,
-                    listResult = listResult,
-                    listLoading = listLoading,
-                    listErr = listErr,
-                    selectedPath = null,
-                    isSplit = false,
-                    inCard = true,
-                    onLoadDir = { scope.launch { loadDir(it) } },
-                    onOpenFile = onOpenFile,
-                )
-            }
-        } else {
-            WorkspaceListPanel(
-                store = store,
-                botPal = botPal,
-                dirPath = dirPath,
-                listResult = listResult,
-                listLoading = listLoading,
-                listErr = listErr,
-                selectedPath = null,
-                isSplit = false,
-                onLoadDir = { scope.launch { loadDir(it) } },
-                onOpenFile = onOpenFile,
-            )
-        }
+        WorkspaceListPanel(
+            store = store,
+            botPal = botPal,
+            dirPath = dirPath,
+            listResult = listResult,
+            listLoading = listLoading,
+            listErr = listErr,
+            selectedPath = null,
+            isSplit = false,
+            inCard = inWideStage,
+            onLoadDir = { scope.launch { loadDir(it) } },
+            onOpenFile = onOpenFile,
+        )
     }
 }
 

@@ -659,24 +659,12 @@ internal fun StageTaskView(
         }
     }
 
-    if (inWideStage) {
-        Surface(
-            color = p.card,
-            shape = RoundedCornerShape(20.dp),
-            modifier = modifier
-                .fillMaxSize()
-                .padding(12.dp),
-        ) {
-            stageBody()
-        }
-    } else {
-        Box(
-            modifier = modifier
-                .fillMaxSize()
-                .background(p.page),
-        ) {
-            stageBody()
-        }
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(if (inWideStage) p.card else p.page),
+    ) {
+        stageBody()
     }
 }
 

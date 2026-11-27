@@ -580,157 +580,176 @@ fun DesktopScreen(
                     }
                 }
 
-                Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight(),
-                ) {
-                    StageTabBar(
-                        store = store,
-                        tabs = stageState.tabs,
-                        activeTabId = activeTab?.id.orEmpty(),
-                        onSelect = { tabId -> router.selectStageTab(stageBotKey, tabId) },
-                        onClose = { tabId -> router.closeStageTab(stageBotKey, tabId) },
-                        onNewTab = { router.openNewStageTab(stageBotKey) },
-                    )
+                val rightPaneContent: @Composable () -> Unit = {
+                    Column(modifier = Modifier.fillMaxSize()) {
+                        StageTabBar(
+                            store = store,
+                            tabs = stageState.tabs,
+                            activeTabId = activeTab?.id.orEmpty(),
+                            inCard = isWide,
+                            onSelect = { tabId -> router.selectStageTab(stageBotKey, tabId) },
+                            onClose = { tabId -> router.closeStageTab(stageBotKey, tabId) },
+                            onNewTab = { router.openNewStageTab(stageBotKey) },
+                        )
 
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxSize(),
-                    ) {
-                        when (activeKind) {
-                            StageKind.NEW -> StageNewTabView(
-                                store = store,
-                                botId = resolvedBotId.orEmpty(),
-                                canUseFiles = canUseFiles,
-                                inWideStage = isWide,
-                                onOpenFiles = {
-                                    router.replaceNewOrOpenStageTab(
-                                        stageBotKey,
-                                        StageStateOps.filesTab(title = store.t("stageFilesTab")),
-                                    )
-                                },
-                                onOpenDesktop = {
-                                    val preferredTarget = currentBot?.desktopTarget?.takeIf { it.isNotBlank() } ?: target
-                                    router.replaceNewOrOpenStageTab(
-                                        stageBotKey,
-                                        StageStateOps.desktopTab(target = preferredTarget, title = store.t("stageDesktopTab")),
-                                    )
-                                },
-                                onOpenTask = { task ->
-                                    router.replaceNewOrOpenStageTab(
-                                        stageBotKey,
-                                        StageStateOps.taskTab(task),
-                                    )
-                                },
-                            )
-                            StageKind.FILES -> WorkspaceFilesView(
-                                store = store,
-                                botId = resolvedBotId.orEmpty(),
-                                showHidden = showHiddenFiles,
-                                refreshTrigger = filesRefreshSeq,
-                                inWideStage = isWide,
-                                onOpenFile = { relPath ->
-                                    router.openStage(
-                                        botId = stageBotKey,
-                                        tab = StageStateOps.fileTab(path = relPath),
-                                        replaceNew = false,
-                                    )
-                                },
-                            )
-                            StageKind.FILE -> StageFilePreviewView(
-                                store = store,
-                                botId = resolvedBotId.orEmpty(),
-                                path = activeTab?.path.orEmpty(),
-                                refreshTrigger = filesRefreshSeq,
-                                inWideStage = isWide,
-                                onQuotePath = { relPath ->
-                                    store.insertIntoChat("@$relPath ")
-                                    if (isWide) showChatSidebarWide = true else showChatSidebarCompact = true
-                                },
-                                onCloseTab = {
-                                    activeTab?.id?.let { router.closeStageTab(stageBotKey, it) }
-                                },
-                            )
-                            StageKind.DESKTOP -> StageDesktopCanvas(
-                                store = store,
-                                target = target,
-                                preset = preset,
-                                streaming = streaming,
-                                isStarted = isStarted,
-                                streamMode = streamMode,
-                                wsUrl = wsUrl,
-                                fallbackBitmap = fallbackBitmap,
-                                streamMeta = streamMeta,
-                                streamConnected = streamConnected,
-                                streamCtrl = streamCtrl,
-                                displayErr = displayErr,
-                                activeTakeover = activeTakeover,
-                                showText = showText,
-                                draft = draft,
-                                inWideStage = isWide,
-                                onDraftChange = { draft = it },
-                                onCloseText = { showText = false },
-                                onSendText = ::sendText,
-                                onSendInput = ::send,
-                                onSwitchBackLocal = {
-                                    target = "local"
-                                    scope.launch { runCatching { store.setActiveDesktopTarget("local") } }
-                                },
-                                onResolveTakeover = { id ->
-                                    scope.launch { runCatching { store.resolveTakeover(id) } }
-                                },
-                                onMeta = { streamMeta = it },
-                                onStreamStatus = { conn, fps ->
-                                    streamConnected = conn
-                                    streamFps = fps
-                                    if (conn) streamErr = ""
-                                },
-                                onStreamError = { code, msg ->
-                                    if (code == "screen_recording_denied") {
-                                        streaming = false
-                                        error = store.t("deskScreenRecordingDenied")
-                                    } else if (!streamConnected) {
-                                        streamErr = ""
-                                        streamMode = when (streamMode) {
-                                            DesktopStreamMode.WS_HEVC -> DesktopStreamMode.WS_H264
-                                            DesktopStreamMode.WS_H264 -> DesktopStreamMode.FRAME_POLLING
-                                            DesktopStreamMode.FRAME_POLLING -> DesktopStreamMode.FRAME_POLLING
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxSize(),
+                        ) {
+                            when (activeKind) {
+                                StageKind.NEW -> StageNewTabView(
+                                    store = store,
+                                    botId = resolvedBotId.orEmpty(),
+                                    canUseFiles = canUseFiles,
+                                    inWideStage = isWide,
+                                    onOpenFiles = {
+                                        router.replaceNewOrOpenStageTab(
+                                            stageBotKey,
+                                            StageStateOps.filesTab(title = store.t("stageFilesTab")),
+                                        )
+                                    },
+                                    onOpenDesktop = {
+                                        val preferredTarget = currentBot?.desktopTarget?.takeIf { it.isNotBlank() } ?: target
+                                        router.replaceNewOrOpenStageTab(
+                                            stageBotKey,
+                                            StageStateOps.desktopTab(target = preferredTarget, title = store.t("stageDesktopTab")),
+                                        )
+                                    },
+                                    onOpenTask = { task ->
+                                        router.replaceNewOrOpenStageTab(
+                                            stageBotKey,
+                                            StageStateOps.taskTab(task),
+                                        )
+                                    },
+                                )
+                                StageKind.FILES -> WorkspaceFilesView(
+                                    store = store,
+                                    botId = resolvedBotId.orEmpty(),
+                                    showHidden = showHiddenFiles,
+                                    refreshTrigger = filesRefreshSeq,
+                                    inWideStage = isWide,
+                                    onOpenFile = { relPath ->
+                                        router.openStage(
+                                            botId = stageBotKey,
+                                            tab = StageStateOps.fileTab(path = relPath),
+                                            replaceNew = false,
+                                        )
+                                    },
+                                )
+                                StageKind.FILE -> StageFilePreviewView(
+                                    store = store,
+                                    botId = resolvedBotId.orEmpty(),
+                                    path = activeTab?.path.orEmpty(),
+                                    refreshTrigger = filesRefreshSeq,
+                                    inWideStage = isWide,
+                                    onQuotePath = { relPath ->
+                                        store.insertIntoChat("@$relPath ")
+                                        if (isWide) showChatSidebarWide = true else showChatSidebarCompact = true
+                                    },
+                                    onCloseTab = {
+                                        activeTab?.id?.let { router.closeStageTab(stageBotKey, it) }
+                                    },
+                                )
+                                StageKind.DESKTOP -> StageDesktopCanvas(
+                                    store = store,
+                                    target = target,
+                                    preset = preset,
+                                    streaming = streaming,
+                                    isStarted = isStarted,
+                                    streamMode = streamMode,
+                                    wsUrl = wsUrl,
+                                    fallbackBitmap = fallbackBitmap,
+                                    streamMeta = streamMeta,
+                                    streamConnected = streamConnected,
+                                    streamCtrl = streamCtrl,
+                                    displayErr = displayErr,
+                                    activeTakeover = activeTakeover,
+                                    showText = showText,
+                                    draft = draft,
+                                    onDraftChange = { draft = it },
+                                    onCloseText = { showText = false },
+                                    onSendText = ::sendText,
+                                    onSendInput = ::send,
+                                    onSwitchBackLocal = {
+                                        target = "local"
+                                        scope.launch { runCatching { store.setActiveDesktopTarget("local") } }
+                                    },
+                                    onResolveTakeover = { id ->
+                                        scope.launch { runCatching { store.resolveTakeover(id) } }
+                                    },
+                                    onMeta = { streamMeta = it },
+                                    onStreamStatus = { conn, fps ->
+                                        streamConnected = conn
+                                        streamFps = fps
+                                        if (conn) streamErr = ""
+                                    },
+                                    onStreamError = { code, msg ->
+                                        if (code == "screen_recording_denied") {
+                                            streaming = false
+                                            error = store.t("deskScreenRecordingDenied")
+                                        } else if (!streamConnected) {
+                                            streamErr = ""
+                                            streamMode = when (streamMode) {
+                                                DesktopStreamMode.WS_HEVC -> DesktopStreamMode.WS_H264
+                                                DesktopStreamMode.WS_H264 -> DesktopStreamMode.FRAME_POLLING
+                                                DesktopStreamMode.FRAME_POLLING -> DesktopStreamMode.FRAME_POLLING
+                                            }
+                                        } else {
+                                            streamErr = msg
                                         }
-                                    } else {
-                                        streamErr = msg
+                                    },
+                                    onRetryConnect = {
+                                        error = ""
+                                        streamErr = ""
+                                        fallbackBitmap = null
+                                        streamMode = preferredDesktopStreamMode(store, target)
+                                        streaming = false
+                                        streaming = true
+                                    },
+                                )
+                                StageKind.TASK -> StageTaskView(
+                                    store = store,
+                                    botId = resolvedBotId.orEmpty(),
+                                    taskId = activeTab?.taskId.orEmpty().ifEmpty { activeTab?.id?.removePrefix("task:").orEmpty() },
+                                    inWideStage = isWide,
+                                    onOpenDesktop = { dest ->
+                                        target = dest
+                                        router.openDesktop(dest)
+                                    },
+                                )
+                                StageKind.BROWSER, StageKind.ARTIFACT, StageKind.MCP_APP -> {
+                                    if (activeTab != null) {
+                                        StageExtensionPane(
+                                            store = store,
+                                            tab = activeTab,
+                                            inWideStage = isWide,
+                                        )
                                     }
-                                },
-                                onRetryConnect = {
-                                    error = ""
-                                    streamErr = ""
-                                    fallbackBitmap = null
-                                    streamMode = preferredDesktopStreamMode(store, target)
-                                    streaming = false
-                                    streaming = true
-                                },
-                            )
-                            StageKind.TASK -> StageTaskView(
-                                store = store,
-                                botId = resolvedBotId.orEmpty(),
-                                taskId = activeTab?.taskId.orEmpty().ifEmpty { activeTab?.id?.removePrefix("task:").orEmpty() },
-                                inWideStage = isWide,
-                                onOpenDesktop = { dest ->
-                                    target = dest
-                                    router.openDesktop(dest)
-                                },
-                            )
-                            StageKind.BROWSER, StageKind.ARTIFACT, StageKind.MCP_APP -> {
-                                if (activeTab != null) {
-                                    StageExtensionPane(
-                                        store = store,
-                                        tab = activeTab,
-                                        inWideStage = isWide,
-                                    )
                                 }
                             }
                         }
+                    }
+                }
+
+                if (isWide) {
+                    Surface(
+                        color = p.card,
+                        shape = RoundedCornerShape(20.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .padding(12.dp),
+                    ) {
+                        rightPaneContent()
+                    }
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight(),
+                    ) {
+                        rightPaneContent()
                     }
                 }
             }

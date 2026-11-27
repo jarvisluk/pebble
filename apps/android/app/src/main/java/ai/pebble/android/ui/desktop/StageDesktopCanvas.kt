@@ -74,7 +74,6 @@ internal fun StageDesktopCanvas(
     activeTakeover: TakeoverRequest?,
     showText: Boolean,
     draft: String,
-    inWideStage: Boolean,
     onDraftChange: (String) -> Unit,
     onCloseText: () -> Unit,
     onSendText: () -> Unit,
@@ -92,19 +91,11 @@ internal fun StageDesktopCanvas(
     val pillText = Color(0xFFF3F1EE)
     val pillMute = Color(0xFFA6A09A)
 
-    val outerModifier = if (inWideStage) {
-        modifier
+    Column(
+        modifier = modifier
             .fillMaxSize()
-            .padding(12.dp)
-            .clip(RoundedCornerShape(20.dp))
-            .background(stageBg)
-    } else {
-        modifier
-            .fillMaxSize()
-            .background(stageBg)
-    }
-
-    Column(modifier = outerModifier) {
+            .background(stageBg),
+    ) {
         if (store.activeDesktopTarget.temporary) {
             Row(
                 modifier = Modifier
@@ -435,19 +426,11 @@ internal fun StageExtensionPane(
         }
     }
 
-    if (inWideStage) {
-        Surface(
-            color = p.card,
-            shape = RoundedCornerShape(20.dp),
-            modifier = modifier
-                .fillMaxSize()
-                .padding(12.dp),
-        ) {
-            body()
-        }
-    } else {
-        Box(modifier = modifier.fillMaxSize().background(p.page)) {
-            body()
-        }
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(if (inWideStage) p.card else p.page),
+    ) {
+        body()
     }
 }

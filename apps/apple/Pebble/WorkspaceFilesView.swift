@@ -28,20 +28,10 @@ struct WorkspaceFilesView: View {
     }
 
     var body: some View {
-        Group {
-            if inWideStage {
-                listPanel(inCard: true)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(p.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-                    .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-                    .padding(12)
-            } else {
-                listPanel(inCard: false)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(p.page)
-        .task(id: "\(botId)-\(initialDir)") {
+        listPanel(inCard: inWideStage)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(inWideStage ? p.card : p.page)
+            .task(id: "\(botId)-\(initialDir)") {
             await loadDir(initialDir)
         }
         .onChange(of: showHidden) { _, _ in

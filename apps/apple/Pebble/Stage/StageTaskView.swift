@@ -196,20 +196,10 @@ struct StageTaskView: View {
             }
         }
 
-        Group {
-            if inWideStage {
-                cardContent
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(p.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-                    .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-                    .padding(12)
-            } else {
-                cardContent
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-        }
-        .background(p.page)
-        .confirmAlert($confirm)
+        cardContent
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(inWideStage ? p.card : p.page)
+            .confirmAlert($confirm)
         .task(id: taskId) {
             await loadInspectorData()
         }

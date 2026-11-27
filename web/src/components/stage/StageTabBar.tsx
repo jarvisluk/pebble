@@ -20,7 +20,6 @@ export const StageTabBar: React.FC<StageTabBarProps> = ({
   tabs,
   activeTabId,
   chatOpen,
-  botName,
   lang,
   onBack,
   onToggleChat,
@@ -47,7 +46,7 @@ export const StageTabBar: React.FC<StageTabBarProps> = ({
 
         <button
           type="button"
-          className={`stage-pill-btn${chatOpen ? ' on' : ''}`}
+          className={`stage-icon-btn stage-chat-btn${chatOpen ? ' on' : ''}`}
           title={t('deskChatSidebarTitle')}
           aria-label={t('deskChatSidebarTitle')}
           onClick={onToggleChat}
@@ -56,43 +55,49 @@ export const StageTabBar: React.FC<StageTabBarProps> = ({
             <rect x="3" y="4" width="18" height="16" rx="4" />
             <path d="M9 4v16" />
           </svg>
-          <span className="stage-pill-label">{botName || t('stageChatToggle')}</span>
         </button>
 
+        <span className="stage-topbar-sep" aria-hidden="true" />
+
         <nav className="stage-tab-strip" aria-label={t('stageTabsAria')}>
-          {tabs.map((tab) => {
+          {tabs.map((tab, idx) => {
             const active = tab.id === activeTabId;
+            const nextActive = idx + 1 < tabs.length && tabs[idx + 1].id === activeTabId;
             return (
-              <div
-                key={tab.id}
-                className={`stage-tab-pill${active ? ' active' : ''}`}
-                title={tab.subtitle || tab.title}
-              >
-                <button
-                  type="button"
-                  className="stage-tab-main"
-                  onClick={() => onSelectTab(tab.id)}
+              <React.Fragment key={tab.id}>
+                <div
+                  className={`stage-tab-pill${active ? ' active' : ''}`}
+                  title={tab.subtitle || tab.title}
                 >
-                  <StageIcon kind={tab.kind} className="stage-tab-ico" />
-                  <span className="stage-tab-title">{tab.title}</span>
-                </button>
-                {tab.closable !== false && (
                   <button
                     type="button"
-                    className="stage-tab-close"
-                    aria-label={t('stageCloseTab')}
-                    title={t('stageCloseTab')}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onCloseTab(tab.id);
-                    }}
+                    className="stage-tab-main"
+                    onClick={() => onSelectTab(tab.id)}
                   >
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
-                      <path d="M7 7l10 10M17 7 7 17" />
-                    </svg>
+                    <StageIcon kind={tab.kind} className="stage-tab-ico" />
+                    <span className="stage-tab-title">{tab.title}</span>
                   </button>
+                  {tab.closable !== false && (
+                    <button
+                      type="button"
+                      className="stage-tab-close"
+                      aria-label={t('stageCloseTab')}
+                      title={t('stageCloseTab')}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onCloseTab(tab.id);
+                      }}
+                    >
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
+                        <path d="M7 7l10 10M17 7 7 17" />
+                      </svg>
+                    </button>
+                  )}
+                </div>
+                {idx < tabs.length - 1 && !active && !nextActive && (
+                  <span className="stage-tab-sep" aria-hidden="true" />
                 )}
-              </div>
+              </React.Fragment>
             );
           })}
           <button

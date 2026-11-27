@@ -93,6 +93,7 @@ struct DesktopView: View {
                     StageTabBar(
                         tabs: stageState.tabs,
                         activeTabId: activeTab.id,
+                        inCard: isWide,
                         onSelect: { tabId in
                             router.selectStageTab(botId: resolvedBotId, tabId: tabId, newTabTitle: hub.t("stageNewTab"))
                         },
@@ -109,6 +110,11 @@ struct DesktopView: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
                 .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
+                .background(isWide ? p.card : p.page, in: RoundedRectangle(cornerRadius: isWide ? 20 : 0, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: isWide ? 20 : 0, style: .continuous))
+                .padding(.leading, isWide ? 12 : 0)
+                .padding(.trailing, isWide ? 12 : 0)
+                .padding(.vertical, isWide ? 12 : 0)
             }
             .clipped()
             .background(p.page.ignoresSafeArea())
@@ -183,6 +189,7 @@ struct DesktopView: View {
                 StageNewTabView(
                     botId: resolvedBotId,
                     canUseFiles: hub.supports("stage.files"),
+                    inWideStage: isWide,
                     onOpenFiles: {
                         let tab = StageStateOps.filesTab(title: hub.t("stageFilesTab"))
                         router.openStage(botId: resolvedBotId, tab: tab, replaceNew: true)

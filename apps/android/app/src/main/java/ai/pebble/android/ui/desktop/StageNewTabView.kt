@@ -51,14 +51,14 @@ internal fun StageNewTabView(
     val allTasks = store.tasks[botId].orEmpty()
     val launcherTasks = (allTasks.filter { it.isActive } + allTasks.filter { it.isTerminal }).take(8)
 
-    val content: @Composable () -> Unit = {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(24.dp),
-            contentAlignment = Alignment.Center,
-        ) {
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(if (inWideStage) p.card else p.page)
+            .verticalScroll(rememberScrollState())
+            .padding(24.dp),
+        contentAlignment = Alignment.Center,
+    ) {
             Column(
                 modifier = Modifier
                     .widthIn(max = 460.dp)
@@ -171,27 +171,6 @@ internal fun StageNewTabView(
                     }
                 }
             }
-        }
-    }
-
-    if (inWideStage) {
-        Surface(
-            color = p.card,
-            shape = RoundedCornerShape(20.dp),
-            modifier = modifier
-                .fillMaxSize()
-                .padding(12.dp),
-        ) {
-            content()
-        }
-    } else {
-        Box(
-            modifier = modifier
-                .fillMaxSize()
-                .background(p.page),
-        ) {
-            content()
-        }
     }
 }
 

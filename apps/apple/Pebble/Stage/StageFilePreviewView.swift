@@ -172,20 +172,10 @@ struct StageFilePreviewView: View {
             }
         }
 
-        Group {
-            if inWideStage {
-                cardContent
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(p.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-                    .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-                    .padding(12)
-            } else {
-                cardContent
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-        }
-        .background(p.page)
-        .task(id: "\(botId)|\(filePath)") {
+        cardContent
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(inWideStage ? p.card : p.page)
+            .task(id: "\(botId)|\(filePath)") {
             await loadFile()
         }
         .quickLookPreview($quickLookURL)

@@ -6,6 +6,7 @@ struct StageNewTabView: View {
 
     var botId: String
     var canUseFiles: Bool
+    var inWideStage: Bool = false
     var onOpenFiles: () -> Void
     var onOpenDesktop: () -> Void
     var onOpenTask: (BotTask) -> Void
@@ -72,7 +73,7 @@ struct StageNewTabView: View {
                                     .font(.system(size: AppFont.cardTitle, weight: .medium))
                                     .foregroundStyle(p.text)
                                     .frame(width: 34, height: 34)
-                                    .background(p.s1, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                    .background(inWideStage ? p.card : p.s1, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(item.title)
@@ -92,7 +93,11 @@ struct StageNewTabView: View {
                             }
                             .padding(.horizontal, 14)
                             .padding(.vertical, 12)
-                            .background(p.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .background(inWideStage ? p.s1 : p.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                    .strokeBorder(p.s2, lineWidth: 0.5)
+                            )
                             .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                         }
                         .buttonStyle(PressStyle())
@@ -111,7 +116,7 @@ struct StageNewTabView: View {
                                 .foregroundStyle(p.text2)
                                 .padding(.horizontal, 7)
                                 .padding(.vertical, 2)
-                                .background(p.s1, in: Capsule())
+                                .background(inWideStage ? p.s1 : p.card, in: Capsule())
                         }
                         .padding(.horizontal, 2)
 
@@ -129,7 +134,7 @@ struct StageNewTabView: View {
                                             .font(.system(size: AppFont.cardTitle, weight: .medium))
                                             .foregroundStyle(p.text)
                                             .frame(width: 34, height: 34)
-                                            .background(p.s1, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                            .background(inWideStage ? p.card : p.s1, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
                                         VStack(alignment: .leading, spacing: 2) {
                                             Text(task.displayTitle)
@@ -150,7 +155,11 @@ struct StageNewTabView: View {
                                     }
                                     .padding(.horizontal, 14)
                                     .padding(.vertical, 12)
-                                    .background(p.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                    .background(inWideStage ? p.s1 : p.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                            .strokeBorder(p.s2, lineWidth: 0.5)
+                                    )
                                     .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                                 }
                                 .buttonStyle(PressStyle())
@@ -163,6 +172,6 @@ struct StageNewTabView: View {
             .padding(24)
             .frame(maxWidth: .infinity, minHeight: 360, alignment: .center)
         }
-        .background(p.page)
+        .background(inWideStage ? p.card : p.page)
     }
 }
