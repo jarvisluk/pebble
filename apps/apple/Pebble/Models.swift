@@ -78,11 +78,58 @@ struct ChatMessage: Codable, Identifiable, Hashable {
 
 struct MemoryItem: Codable, Identifiable, Hashable {
     var id: String
-    var kind: String?
+    var path: String?
     var scope: String?
-    var tags: [String]?
-    var updatedAt: String?
+    var botId: String?
+    var kind: String?
+    var title: String?
     var text: String?
+    var snippet: String?
+    var why: String?
+    var tags: [String]?
+    var status: String?
+    var pin: Bool?
+    var confidence: Double?
+    var validFrom: String?
+    var validUntil: String?
+    var supersededBy: String?
+    var sourceSession: String?
+    var sourceAuthor: String?
+    var origin: String?
+    var score: Double?
+    var createdAt: String?
+    var updatedAt: String?
+
+    var effectiveStatus: String {
+        let s = (status ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return s.isEmpty ? "active" : s
+    }
+
+    var isPinned: Bool { pin == true }
+
+    var displayBody: String {
+        let t = (text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !t.isEmpty { return t }
+        return (snippet ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var visibleTags: [String] {
+        (tags ?? []).filter { !$0.isEmpty && !$0.hasPrefix("bot:") }
+    }
+}
+
+struct MemoryMagpieStatus: Codable, Hashable {
+    var installed: Bool?
+    var hasLegacyItems: Bool?
+    var legacyCount: Int?
+    var injectedHarnesses: [String]?
+}
+
+struct MemoryCounts: Codable, Hashable {
+    var active: Int?
+    var candidate: Int?
+    var superseded: Int?
+    var archived: Int?
 }
 
 struct MemorySemanticStatus: Codable, Hashable {
@@ -94,11 +141,96 @@ struct MemorySemanticStatus: Codable, Hashable {
 }
 
 struct MemoryList: Codable {
+    var backend: String?
     var installed: Bool?
     var available: Bool?
     var error: String?
+    var magpie: MemoryMagpieStatus?
     var semantic: MemorySemanticStatus?
+    var counts: MemoryCounts?
     var items: [MemoryItem]?
+}
+
+struct MemoryIndexDoc: Codable, Hashable {
+    var ok: Bool?
+    var path: String?
+    var content: String?
+    var lines: Int?
+    var maxLines: Int?
+}
+
+struct MemoryDreamConfig: Codable, Equatable, Hashable {
+    var enabled: Bool?
+    var dailyAt: String?
+    var model: String?
+    var minNewMessages: Int?
+}
+
+struct MemoryEmbeddingConfig: Codable, Equatable, Hashable {
+    var enabled: Bool?
+    var baseUrl: String?
+    var apiKey: String?
+    var hasApiKey: Bool?
+    var model: String?
+}
+
+struct MemoryConfig: Codable, Equatable, Hashable {
+    var enabled: Bool?
+    var coexistence: String?
+    var snapshotMaxChars: Int?
+    var disableClaudeAutoMemory: Bool?
+    var dream: MemoryDreamConfig?
+    var embedding: MemoryEmbeddingConfig?
+}
+
+struct MemoryDreamRecord: Codable, Identifiable, Hashable {
+    var botId: String?
+    var date: String?
+    var path: String?
+    var summary: String?
+    var updatedAt: String?
+
+    var id: String {
+        "\(botId ?? "global")|\(date ?? "")|\(path ?? "")|\(updatedAt ?? "")"
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case botId, date, path, summary, updatedAt
+    }
+}
+
+struct MemoryStatusResp: Codable {
+    var backend: String?
+    var config: MemoryConfig?
+    var docCount: Int?
+    var chunkCount: Int?
+    var counts: MemoryCounts?
+    var semantic: MemorySemanticStatus?
+    var magpie: MemoryMagpieStatus?
+    var recentDreams: [MemoryDreamRecord]?
+}
+
+struct MemoryDreamResp: Codable {
+    var ok: Bool?
+    var botId: String?
+    var path: String?
+    var summary: String?
+    var error: String?
+}
+
+struct MemoryReindexResp: Codable {
+    var ok: Bool?
+    var docCount: Int?
+    var chunkCount: Int?
+    var error: String?
+}
+
+struct MemoryImportResp: Codable {
+    var ok: Bool?
+    var imported: Int?
+    var skipped: Int?
+    var total: Int?
+    var error: String?
 }
 
 struct HarnessMagpie: Codable, Hashable {
@@ -193,6 +325,7 @@ struct SettingsData: Codable {
     var defaultModels: [String: String]?
     var sharedUserMd: String?
     var harnesses: [HarnessInfo]?
+    var memory: MemoryConfig?
 }
 
 struct TailcatStatus: Codable {

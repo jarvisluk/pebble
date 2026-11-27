@@ -47,6 +47,7 @@ func localizedMemoryKind(_ raw: String?, hub: HubStore) -> String {
     case "fact": return hub.t("kindFact")
     case "preference": return hub.t("kindPreference")
     case "rule": return hub.t("kindRule")
+    case "decision": return hub.t("kindDecision")
     case "reference": return hub.t("kindReference")
     case "profile": return hub.t("kindProfile")
     case "procedure": return hub.t("kindProcedure")
