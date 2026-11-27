@@ -285,6 +285,8 @@ func (s *HTTPServer) handleDesktopTakeoverRequest(w http.ResponseWriter, r *http
 	var body struct {
 		Target     string `json:"target"`
 		BotID      string `json:"botId"`
+		TaskID     string `json:"taskId"`
+		DeviceID   string `json:"deviceId"`
 		Reason     string `json:"reason"`
 		App        string `json:"app"`
 		TimeoutSec int    `json:"timeoutSec"`
@@ -309,7 +311,11 @@ func (s *HTTPServer) handleDesktopTakeoverRequest(w http.ResponseWriter, r *http
 			}
 		}
 	}
-	note, err := s.desktopCoord().RequestTakeover(ctx, body.Target, body.BotID, botName, body.Reason, body.App)
+	if s.hub != nil && strings.TrimSpace(body.TaskID) != "" {
+		s.hub.NotifyTaskTakeoverStarted(body.TaskID, body.Target)
+		defer s.hub.NotifyTaskTakeoverEnded(body.TaskID)
+	}
+	note, err := s.desktopCoord().RequestTakeoverWithTask(ctx, body.Target, body.BotID, botName, body.Reason, body.App, body.TaskID, body.DeviceID)
 	if err != nil {
 		writeJSON(w, http.StatusRequestTimeout, map[string]any{"error": err.Error()})
 		return

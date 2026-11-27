@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -24,6 +25,7 @@ import (
 type OpenCodeHarness struct {
 	binary      string
 	external    string
+	dbPath      string
 	httpClient  *http.Client
 	modelsCache ttlCache[[]string]
 
@@ -62,6 +64,13 @@ var ocEventTypes = []string{
 }
 
 func NewOpenCodeHarness(externalURL string) *OpenCodeHarness {
+	return NewOpenCodeHarnessWithDB(externalURL, "")
+}
+
+// NewOpenCodeHarnessWithDB constructs an OpenCodeHarness whose managed child
+// processes store their SQLite database at dbPath instead of the user's shared
+// ~/.local/share/opencode/opencode.db.
+func NewOpenCodeHarnessWithDB(externalURL, dbPath string) *OpenCodeHarness {
 	binary := os.Getenv("OPENCODE_BIN")
 	if binary == "" {
 		binary = "opencode"
@@ -69,10 +78,56 @@ func NewOpenCodeHarness(externalURL string) *OpenCodeHarness {
 	return &OpenCodeHarness{
 		binary:      binary,
 		external:    strings.TrimRight(externalURL, "/"),
+		dbPath:      strings.TrimSpace(dbPath),
 		httpClient:  &http.Client{Timeout: 60 * time.Second},
 		modelsCache: ttlCache[[]string]{ttl: time.Minute},
 		subs:        make(map[string]chan ocEvent),
 	}
+}
+
+func resolveOpenCodeDBPath(cfg *config.HubConfig) string {
+	if cfg != nil {
+		if sf := strings.TrimSpace(cfg.StateFile); sf != "" {
+			return filepath.Join(filepath.Dir(sf), "opencode.db")
+		}
+		if root := strings.TrimSpace(cfg.ProjectRoot); root != "" {
+			return filepath.Join(root, "state", "opencode.db")
+		}
+	}
+	return defaultIsolatedOpenCodeDBPath()
+}
+
+func defaultIsolatedOpenCodeDBPath() string {
+	if dir, err := os.UserConfigDir(); err == nil && strings.TrimSpace(dir) != "" {
+		return filepath.Join(dir, "pebble", "opencode.db")
+	}
+	return filepath.Join(os.TempDir(), "pebble", "opencode.db")
+}
+
+func (h *OpenCodeHarness) effectiveDBPath() string {
+	if p := strings.TrimSpace(h.dbPath); p != "" {
+		return p
+	}
+	return defaultIsolatedOpenCodeDBPath()
+}
+
+// opencodeEnv builds child-process environment variables with OPENCODE_DB
+// pinned to Pebble's isolated database path (unless explicitly overridden in
+// the caller's environment), preserving host auth/config files under XDG dirs.
+func (h *OpenCodeHarness) opencodeEnv(extra map[string]string) []string {
+	merged := make(map[string]string, len(extra)+2)
+	for k, v := range extra {
+		merged[k] = v
+	}
+	if strings.TrimSpace(os.Getenv("OPENCODE_DB")) == "" {
+		dbPath := h.effectiveDBPath()
+		_ = os.MkdirAll(filepath.Dir(dbPath), 0o755)
+		merged["OPENCODE_DB"] = dbPath
+	}
+	if strings.TrimSpace(os.Getenv("OPENCODE_DISABLE_CHANNEL_DB")) == "" {
+		merged["OPENCODE_DISABLE_CHANNEL_DB"] = "1"
+	}
+	return augmentedEnv(merged)
 }
 
 func (h *OpenCodeHarness) apiClient(base, pw string) *ocAPI {
@@ -125,7 +180,7 @@ func (h *OpenCodeHarness) ensure(ctx context.Context) (string, string, error) {
 			bin = h.binary
 		}
 		cmd = exec.Command(bin, "serve", "--hostname", "127.0.0.1", "--port", fmt.Sprint(port))
-		cmd.Env = augmentedEnv(map[string]string{"OPENCODE_SERVER_PASSWORD": pw})
+		cmd.Env = h.opencodeEnv(map[string]string{"OPENCODE_SERVER_PASSWORD": pw})
 		// Own process group so Close also stops the MCP servers it spawns.
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 		if err := cmd.Start(); err != nil {

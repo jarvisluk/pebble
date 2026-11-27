@@ -143,10 +143,35 @@ func Load(projectRoot, explicitPath string) (*HubConfig, string, error) {
 	cfg.DefaultModel = expandEnv(cfg.DefaultModel)
 	cfg.DesktopHarness = strings.TrimSpace(cfg.DesktopHarness)
 	cfg.DesktopModel = strings.TrimSpace(expandEnv(cfg.DesktopModel))
-	cfg.MagpieWebURL = strings.TrimSpace(expandEnv(cfg.MagpieWebURL))
 	cfg.OpenCodeServerURL = expandEnv(cfg.OpenCodeServerURL)
 	cfg.HTTP.WebhookSecret = expandEnv(cfg.HTTP.WebhookSecret)
 	cfg.HTTP.APIToken = expandEnv(cfg.HTTP.APIToken)
+	for i := range cfg.HTTP.DeviceTokens {
+		dt := &cfg.HTTP.DeviceTokens[i]
+		dt.ID = strings.TrimSpace(dt.ID)
+		dt.Name = strings.TrimSpace(dt.Name)
+		dt.Token = strings.TrimSpace(expandEnv(dt.Token))
+		dt.TokenHash = strings.TrimSpace(dt.TokenHash)
+	}
+	if cfg.Node != nil {
+		cfg.Node.ID = strings.TrimSpace(cfg.Node.ID)
+		cfg.Node.Name = strings.TrimSpace(cfg.Node.Name)
+		mpm, err := NormalizePermissionMode(cfg.Node.MaxPermissionMode)
+		if err != nil {
+			return nil, cfgPath, fmt.Errorf("node maxPermissionMode: %w", err)
+		}
+		cfg.Node.MaxPermissionMode = mpm
+		for i := range cfg.Node.Workspaces {
+			ws := &cfg.Node.Workspaces[i]
+			ws.ID = strings.TrimSpace(ws.ID)
+			ws.Name = strings.TrimSpace(ws.Name)
+			ws.Path = strings.TrimSpace(expandEnv(ws.Path))
+			ws.DefaultBranch = strings.TrimSpace(ws.DefaultBranch)
+			if ws.Path != "" && !filepath.IsAbs(ws.Path) && !strings.HasPrefix(ws.Path, "~/") && ws.Path != "~" {
+				ws.Path = absFrom(projectRoot, ws.Path)
+			}
+		}
+	}
 	if cfg.HTTP.Tailscale != nil {
 		cfg.HTTP.Tailscale.Hostname = strings.TrimSpace(cfg.HTTP.Tailscale.Hostname)
 		cfg.HTTP.Tailscale.ControlURL = strings.TrimSpace(expandEnv(cfg.HTTP.Tailscale.ControlURL))

@@ -6,6 +6,7 @@ import (
 	"bot-hub/internal/harness"
 	"bot-hub/internal/node"
 	"bot-hub/internal/protocol"
+	"bot-hub/internal/state"
 	"context"
 	"errors"
 	"fmt"
@@ -465,14 +466,24 @@ func (h *Hub) RunDesktopTask(ctx context.Context, req DesktopTaskRequest) (*harn
 		goal,
 	)
 
-	return h.RunIsolated(ctx, botID, strings.Join(lines, "\n"), IsolatedOptions{
-		Source:         "desktop_task",
-		Harness:        deskHarness,
-		Model:          deskModel,
-		PermissionMode: config.PermissionModeAuto,
-		MCPRole:        "computer_use",
-		TimeoutSec:     req.TimeoutSec,
-		ExtraEnv:       taskEnv,
+	title := firstLineSummary(goal, 80)
+	if app := strings.TrimSpace(req.App); app != "" {
+		title = app + ": " + title
+	}
+	task, err := h.SpawnTask(ctx, TaskSpawnRequest{
+		BotID:           botID,
+		Kind:            state.TaskKindDesktop,
+		Title:           title,
+		Prompt:          strings.Join(lines, "\n"),
+		DeviceID:        target,
+		Harness:         deskHarness,
+		Model:           deskModel,
+		PermissionMode:  config.PermissionModeAuto,
+		Delivery:        state.TaskDeliverySilent,
+		MCPRole:         "computer_use",
+		TimeoutSec:      req.TimeoutSec,
+		ExtraEnv:        taskEnv,
+		ManagedDelivery: true,
 		OnToolUse: func(toolName string) {
 			if toolName == "" {
 				return
@@ -487,4 +498,33 @@ func (h *Hub) RunDesktopTask(ctx context.Context, req DesktopTaskRequest) (*harn
 			})
 		},
 	})
+	if err != nil {
+		return nil, err
+	}
+
+	finished, waitErr := h.WaitTask(ctx, task.ID)
+	if waitErr != nil {
+		_, _ = h.CancelTask(task.ID)
+		return &harness.TurnResult{BotID: botID}, waitErr
+	}
+	res := &harness.TurnResult{
+		BotID:      botID,
+		SessionID:  finished.RuntimeSessionID,
+		Text:       finished.Output,
+		Tools:      finished.Tools,
+		DurationMs: finished.DurationMs,
+		Usage: harness.Usage{
+			CostUSD:      finished.CostUSD,
+			InputTokens:  finished.InputTokens,
+			OutputTokens: finished.OutputTokens,
+		},
+	}
+	switch finished.Status {
+	case state.TaskStatusCancelled:
+		return res, context.Canceled
+	case state.TaskStatusFailed:
+		return res, errors.New(finished.Error)
+	default:
+		return res, nil
+	}
 }

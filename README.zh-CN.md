@@ -1,14 +1,13 @@
 <h1 align="center">Pebble</h1>
 
-<p align="center"><b>运行在你自己电脑上的极简个人 Bot 编排底座。</b></p>
+<p align="center"><b>运行在你自己电脑上的 Bot-First 多 Agent 与多设备编排底座。</b></p>
 
 <p align="center">
-  <b>1 Bot = 1 Workspace = 1 Session</b>&nbsp;&nbsp;·&nbsp;&nbsp;<b>自带运行时</b>&nbsp;&nbsp;·&nbsp;&nbsp;<b>本机优先</b>
+  <b>1 Bot = 1 Workspace = 1 Session</b>&nbsp;&nbsp;·&nbsp;&nbsp;<b>自带运行时</b>&nbsp;&nbsp;·&nbsp;&nbsp;<b>多设备协同 · 本机优先</b>
 </p>
 
 <p align="center">
   <img height="26" alt="Go Standard Library" src="https://img.shields.io/badge/Go-Stdlib%20First-1d1b19?logo=go&logoColor=white&style=for-the-badge">
-  <a href="https://usemagpie.ai"><img height="26" alt="Powered by Magpie" src="https://img.shields.io/badge/Gateway-Magpie-d9774b?style=for-the-badge"></a>
   <a href="https://github.com/tailscale/tailcat"><img height="26" alt="Remote via Tailcat" src="https://img.shields.io/badge/Tunnel-Tailcat-1d1b19?style=for-the-badge"></a>
   <a href="https://wails.io"><img height="26" alt="Desktop via Wails" src="https://img.shields.io/badge/Desktop-Wails%20v3-1d1b19?style=for-the-badge"></a>
 </p>
@@ -17,9 +16,9 @@
   <a href="README.md">English</a>&nbsp;&nbsp;·&nbsp;&nbsp;<b>简体中文</b>
 </p>
 
-- **一支常驻本机的个人 Bot 团队。** 严格落实 `1 Bot = 1 Workspace = 1 Session`：每个 Bot 拥有独立目录、`AGENTS.md` 职责规范、串行执行队列与持久会话，互不串味。
-- **直接复用已有的 Agent 运行时与订阅。** 原生驱动本机 **OpenCode**、**Claude Code**、**Pi** 与 **DeepSeek Harness (`dsh`)**；既可通过 **Magpie** 统一模型路由与配额回退，也可保留各 CLI 自有配置。
-- **数据留在自己机器上，随处安全可达。** 单个 Go 二进制内嵌 Web UI、定时唤醒与 **Tailcat** 点对点加密隧道——无需公网 IP、无需 Tailscale 账号即可跨设备连接。
+- **以 Bot 为中心的本机多 Agent 编排。** 严格落实 `1 Bot = 1 Workspace = 1 Session`：每个 Bot 拥有独立目录、`AGENTS.md` 职责规范、串行执行队列与持久会话，互不串味。
+- **直接复用已有的 Agent 运行时与订阅。** 原生驱动本机 **OpenCode**、**Claude Code**、**Pi**、**Codex**、**Grok**、**Agy** 与 **DeepSeek Harness (`dsh`)**，直接使用各 CLI 自身的账号订阅、API Key 与原生模型配置。
+- **数据留在自己机器上，跨设备随时可达。** 单个 Go 二进制内嵌 Web UI、原生桌面/移动客户端协议、定时唤醒、远端节点执行与 **Tailcat** 点对点加密隧道——无需公网 IP、无需 Tailscale 账号即可跨设备连接。
 
 ## 核心特性
 
@@ -43,7 +42,7 @@ pebble/
     ├── _shared/                  # 共享全局上下文（USER.md 与托管版 PEBBLE.md）
     └── assistant/                # 单个 Bot 的专属工作区
         ├── AGENTS.md             # 该 Bot 的角色定义与行为边界
-        ├── memory/               # 本地笔记（配合 Magpie Memory 使用）
+        ├── memory/               # 本地笔记（可选配合 Magpie Memory 使用）
         ├── _shared -> ../_shared # 自动创建的共享目录软链
         ├── .agents/skills/pebble-setup/SKILL.md # 自动下发的 Pebble 接口与配置 Skill
         └── opencode.json         # 自动注入的 pebble MCP 与 PEBBLE.md 指令
@@ -99,12 +98,9 @@ pebble/
 
 </details>
 
-### 自带运行时（BYO Harness）与模型网关
+### 自带运行时（BYO Harness）
 
-`pebble` 不重复造 Agent Loop，而是直接编排你机器上最成熟的 Agent CLI。同一个 Hub 内的不同 Bot 可以混用不同运行时，并支持在 Web UI 设置面板中切换两种模型接入模式（`modelAccess`）：
-
-- **Magpie 网关模式（`magpie`，默认）**：复用本机 [Magpie](https://usemagpie.ai) 的模型目录、路由策略与配额 Fallback，支持在界面内一键将各 Harness 绑定到网关。
-- **自有配置模式（`self`）**：不改动任何全局配置，直接沿用各 CLI 自身的订阅账号或 API Key。
+`pebble` 不重复造 Agent Loop，而是直接编排你机器上最成熟的 Agent CLI。同一个 Hub 内的不同 Bot 可以混用不同运行时，各 CLI 直接使用自身的订阅账号、API Key 与原生模型列表，并支持按全局、按 Harness 或按 Bot 覆盖默认模型。
 
 <details>
 <summary><b>运行时一览：</b>内置支持的执行后端与通信机制</summary>
@@ -148,7 +144,7 @@ Bot 不必只在浏览器标签页里被动等待输入。通过内置调度器�
 
 ```json
 {
-  "defaultModel": "magpie/mac-mini/auto/hy4flash-free",
+  "defaultModel": "anthropic/claude-sonnet-4-5",
   "http": {
     "host": "127.0.0.1",
     "port": 3789,
@@ -270,10 +266,9 @@ macOS 桌面端采用「系统 `PATH` 优先、App 内置 `Contents/Resources/bi
 - `POST /api/bots/{id}/rotate`：立即或预约本轮结束后归档当前会话（支持 `handoffNote` / `defer`）
 - `GET  /api/sessions`、`GET /api/bots/{id}/sessions`：检索或列举历史与活跃会话（支持 `?query=&limit=`）
 - `GET  /api/sessions/{sessionId}`、`GET /api/bots/{id}/sessions/{sessionId}`：切片召回指定或 `previous` 会话内容
-- `GET  /api/memory`、`POST /api/memory`、`DELETE /api/memory/{id}`：Magpie Memory 记忆透传管理（全局与单 Bot）
-- `GET  /api/settings`、`PUT /api/settings`：读取或更新全局模型接入方式（`magpie` / `self`）与默认模型
-- `GET  /api/models`：列出指定 `?harness=` 可选的模型列表
-- `POST /api/harnesses/{id}/magpie`：通过 Magpie 将指定 Harness CLI 接入网关模型
+- `GET  /api/memory`、`POST /api/memory`、`DELETE /api/memory/{id}`：可选 Magpie Memory 记忆透传管理（全局与单 Bot，未安装时自动降级）
+- `GET  /api/settings`、`PUT /api/settings`：读取或更新默认执行后端、权限模式与默认模型
+- `GET  /api/models`：列出指定 `?harness=` 可选的原生模型列表
 - `POST /api/login`：用 `http.apiToken` 换取 `HttpOnly` 登录 Cookie（Web UI 使用）
 - `GET  /api/tailcat`、`GET /api/tailcat/qr.png`：Tailcat 状态、连接链接与二维码
 - `POST /hooks/{id}`：外部 Webhook 唤醒指定 Bot（可选 `X-Webhook-Secret` 或 `Bearer` 校验）
@@ -311,6 +306,5 @@ macOS 桌面端采用「系统 `PATH` 优先、App 内置 `Contents/Resources/bi
 `Pebble` 站在以下优秀开源项目与工具之上构建：
 
 - **[OpenCode](https://opencode.ai)**、**Claude Code**、**Pi** 与 **DeepSeek Harness**：提供强大的本地 Agent Loop 与工具执行能力。
-- **[Magpie](https://usemagpie.ai)**：统一本地模型网关、多订阅路由与配额自动回退。
 - **[Tailcat](https://github.com/tailscale/tailcat)**：提供无需账号体系的 WireGuard + DERP 点对点加密隧道。
 - **[Wails](https://wails.io)**：驱动轻量的跨平台原生桌面窗口与系统菜单栏集成。

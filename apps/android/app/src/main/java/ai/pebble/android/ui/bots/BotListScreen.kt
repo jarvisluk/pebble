@@ -608,10 +608,18 @@ private fun BotListRow(
         hasQuestion -> store.t("questionWaitingBadge")
         bot.isBusy -> if (tool.isNotEmpty()) store.t("callingTool", mapOf("tool" to tool)) else store.t("thinking")
         lastMsg != null -> {
-            val prefix = if (lastMsg.role == "user") store.t("youPrefix") else ""
-            val txt = plainPreview(lastMsg.body)
-            val display = if (txt.isEmpty() && !lastMsg.media.isNullOrEmpty()) "[${store.t("attachments")}]" else txt
-            "$prefix$display"
+            if (lastMsg.role == "stage") {
+                val st = lastMsg.stage
+                val label = st?.title?.takeIf { it.isNotBlank() }
+                    ?: st?.path?.substringAfterLast('/')?.takeIf { it.isNotBlank() }
+                    ?: store.t("stageLatestTab")
+                "${store.t("stageCardSubmitted")}: $label"
+            } else {
+                val prefix = if (lastMsg.role == "user") store.t("youPrefix") else ""
+                val txt = plainPreview(lastMsg.body)
+                val display = if (txt.isEmpty() && !lastMsg.media.isNullOrEmpty()) "[${store.t("attachments")}]" else txt
+                "$prefix$display"
+            }
         }
         else -> bot.description.orEmpty()
     }

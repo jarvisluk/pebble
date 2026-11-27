@@ -76,7 +76,7 @@ func TestRunDesktopTaskOverrideGuardAndInterrupt(t *testing.T) {
 		SharedDir:      filepath.Join(tmp, "workspaces", "_shared"),
 		StateFile:      filepath.Join(tmp, "sessions.json"),
 		DesktopHarness: "opencode",
-		DesktopModel:   "magpie/mac-mini/auto/flash",
+		DesktopModel:   "anthropic/claude-haiku-4-5",
 		Bots: []config.BotConfig{
 			{ID: "ops", Name: "Ops", Workspace: filepath.Join(tmp, "workspaces", "ops"), Harness: "claude", Model: "opus"},
 		},
@@ -143,7 +143,7 @@ func TestRunDesktopTaskOverrideGuardAndInterrupt(t *testing.T) {
 	deskH.mu.Lock()
 	lastCall := deskH.calls[len(deskH.calls)-1]
 	deskH.mu.Unlock()
-	if !lastCall.Ephemeral || lastCall.Bot.Harness != "opencode" || lastCall.Bot.Model != "magpie/mac-mini/auto/flash" {
+	if !lastCall.Ephemeral || lastCall.Bot.Harness != "opencode" || lastCall.Bot.Model != "anthropic/claude-haiku-4-5" {
 		t.Fatalf("unexpected desktop worker RunOptions: %+v", lastCall)
 	}
 	if lastCall.ExtraEnv["PEBBLE_MCP_ROLE"] != "computer_use" || lastCall.MCPEnv["PEBBLE_MCP_ROLE"] != "computer_use" {

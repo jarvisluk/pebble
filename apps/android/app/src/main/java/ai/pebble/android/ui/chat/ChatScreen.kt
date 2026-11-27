@@ -77,13 +77,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import ai.pebble.android.data.ChatMessage
 import ai.pebble.android.data.MentionCandidate
 import ai.pebble.android.data.MessageMedia
 import ai.pebble.android.data.PebbleStore
 import ai.pebble.android.data.PendingAttachment
 import ai.pebble.android.data.SlashCommandItem
+import ai.pebble.android.data.StageRef
 import ai.pebble.android.data.errText
 import ai.pebble.android.data.formatStamp
 import ai.pebble.android.data.parseIsoInstant
@@ -114,7 +114,9 @@ fun ChatScreen(
     inDesktopSidebar: Boolean = false,
     onBack: (() -> Unit)? = null,
     onOpenDesktop: (String) -> Unit = {},
-    onOpenFiles: (String) -> Unit = {},
+    onOpenStage: (String) -> Unit = {},
+    onOpenStageRef: (String, ai.pebble.android.data.StageRef) -> Unit = { _, _ -> },
+    hasUnreadLatestStage: Boolean = false,
     onToggleDetail: (() -> Unit)? = null,
     onOpenBotInfo: (() -> Unit)? = null,
     onSelectBot: ((String) -> Unit)? = null,
@@ -167,6 +169,7 @@ fun ChatScreen(
     LaunchedEffect(botId) {
         store.setActiveChat(botId)
         runCatching { store.loadMessages(botId) }
+        runCatching { store.fetchBotTasks(botId) }
         commands = runCatching { store.fetchCommands(botId) }.getOrDefault(emptyList())
     }
 
@@ -341,7 +344,8 @@ fun ChatScreen(
             inDesktopSidebar = inDesktopSidebar,
             onBack = onBack,
             onOpenDesktop = onOpenDesktop,
-            onOpenFiles = onOpenFiles,
+            onOpenStage = onOpenStage,
+            hasUnreadLatestStage = hasUnreadLatestStage,
             onToggleDetail = onToggleDetail,
             onOpenBotInfo = onOpenBotInfo,
             onSelectBot = onSelectBot,
@@ -379,6 +383,7 @@ fun ChatScreen(
                 isEmptyMessages = messages.isEmpty(),
                 onCollabClick = { if (it.isNotEmpty()) collabPeerId = it },
                 onPreviewMedia = { previewMedia = it },
+                onOpenStageRef = { ref -> onOpenStageRef(botId, ref) },
             )
 
             ChatComposer(
@@ -406,6 +411,26 @@ fun ChatScreen(
                 onInterrupt = ::interrupt,
                 onSubmit = ::submit,
                 onError = { sendErr = it },
+                topDock = if (!inDesktopSidebar) {
+                    {
+                        BotChatTaskStrip(
+                            store = store,
+                            botId = botId,
+                            pal = pal,
+                            onSelectTask = { task ->
+                                onOpenStageRef(
+                                    botId,
+                                    StageRef(
+                                        id = "task:${task.id}",
+                                        kind = "task",
+                                        taskId = task.id,
+                                        title = task.displayTitle,
+                                    ),
+                                )
+                            },
+                        )
+                    }
+                } else null,
             )
         }
     }

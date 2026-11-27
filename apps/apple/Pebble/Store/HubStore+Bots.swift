@@ -131,6 +131,121 @@ extension HubStore {
         return r.runs ?? []
     }
 
+    // MARK: 子任务 (BotTask)
+
+    func upsertBotTask(_ task: BotTask) {
+        var list = tasks[task.botId] ?? []
+        if let idx = list.firstIndex(where: { $0.id == task.id }) {
+            list[idx] = task
+        } else {
+            list.insert(task, at: 0)
+        }
+        tasks[task.botId] = list
+        LiveActivityManager.shared.handleTasks(botId: task.botId, tasks: list)
+    }
+
+    @discardableResult
+    func fetchBotTasks(_ botId: String, kind: String? = nil, status: String? = nil, limit: Int = 50) async throws -> [BotTask] {
+        var items = [URLQueryItem(name: "limit", value: "\(limit)")]
+        if let kind, !kind.isEmpty { items.append(URLQueryItem(name: "kind", value: kind)) }
+        if let status, !status.isEmpty { items.append(URLQueryItem(name: "status", value: status)) }
+        var comps = URLComponents()
+        comps.queryItems = items
+        let qs = comps.percentEncodedQuery.map { "?\($0)" } ?? ""
+        let r: TasksResp = try await callAPI("/api/bots/\(enc(botId))/tasks\(qs)")
+        let list = r.tasks ?? []
+        if (kind ?? "").isEmpty && (status ?? "").isEmpty {
+            tasks[botId] = list
+            LiveActivityManager.shared.handleTasks(botId: botId, tasks: list)
+        }
+        return list
+    }
+
+    @discardableResult
+    func spawnBotTask(
+        _ botId: String,
+        title: String? = nil,
+        prompt: String,
+        kind: String = "worker",
+        deviceId: String = "local",
+        harness: String? = nil,
+        model: String? = nil,
+        permissionMode: String? = nil,
+        workdir: String? = nil,
+        delivery: String = "receipt"
+    ) async throws -> BotTask {
+        var body: [String: Any] = [
+            "prompt": prompt,
+            "kind": kind.isEmpty ? "worker" : kind,
+            "deviceId": deviceId.isEmpty ? "local" : deviceId,
+            "delivery": delivery.isEmpty ? "receipt" : delivery,
+        ]
+        if let title = title?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty {
+            body["title"] = title
+        }
+        if let harness = harness?.trimmingCharacters(in: .whitespacesAndNewlines), !harness.isEmpty {
+            body["harness"] = harness
+        }
+        if let model = model?.trimmingCharacters(in: .whitespacesAndNewlines), !model.isEmpty {
+            body["model"] = model
+        }
+        if let permissionMode = permissionMode?.trimmingCharacters(in: .whitespacesAndNewlines), !permissionMode.isEmpty {
+            body["permissionMode"] = permissionMode
+        }
+        if let workdir = workdir?.trimmingCharacters(in: .whitespacesAndNewlines), !workdir.isEmpty {
+            body["workdir"] = workdir
+        }
+        let created: BotTask = try await callAPI("/api/bots/\(enc(botId))/tasks", method: "POST", body: body)
+        upsertBotTask(created)
+        return created
+    }
+
+    @discardableResult
+    func fetchTaskEvents(_ taskId: String, afterSeq: Int64 = 0, limit: Int = 200) async throws -> [BotTaskEvent] {
+        var qs = "?limit=\(limit)"
+        if afterSeq > 0 { qs += "&afterSeq=\(afterSeq)" }
+        let r: TaskEventsResp = try await callAPI("/api/tasks/\(enc(taskId))/events\(qs)")
+        let incoming = r.events ?? []
+        if afterSeq <= 0 {
+            taskEvents[taskId] = incoming
+            return incoming
+        }
+        if !incoming.isEmpty {
+            var existing = taskEvents[taskId] ?? []
+            let seen = Set(existing.map(\.seq))
+            for ev in incoming where !seen.contains(ev.seq) {
+                existing.append(ev)
+            }
+            existing.sort { $0.seq < $1.seq }
+            taskEvents[taskId] = existing
+        }
+        return taskEvents[taskId] ?? []
+    }
+
+    @discardableResult
+    func sendToTask(_ taskId: String, message: String) async throws -> BotTask {
+        let updated: BotTask = try await callAPI("/api/tasks/\(enc(taskId))/send", method: "POST", body: ["message": message])
+        upsertBotTask(updated)
+        return updated
+    }
+
+    @discardableResult
+    func cancelTask(_ taskId: String) async throws -> BotTask {
+        let updated: BotTask = try await callAPI("/api/tasks/\(enc(taskId))/cancel", method: "POST")
+        upsertBotTask(updated)
+        taskTools.removeValue(forKey: taskId)
+        return updated
+    }
+
+    func fetchTaskDiff(_ taskId: String) async throws -> TaskDiffResult {
+        try await callAPI("/api/tasks/\(enc(taskId))/diff")
+    }
+
+    @discardableResult
+    func rollbackTask(_ taskId: String, removeWorktree: Bool = false) async throws -> TaskRollbackResult {
+        try await callAPI("/api/tasks/\(enc(taskId))/rollback", method: "POST", body: ["removeWorktree": removeWorktree])
+    }
+
     // MARK: 工作区文件
 
     func listWorkspaceFiles(botId: String, path: String = "", showHidden: Bool = false) async throws -> WorkspaceListResult {

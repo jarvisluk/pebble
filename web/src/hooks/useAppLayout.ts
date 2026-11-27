@@ -10,6 +10,7 @@ export interface UseAppLayoutOpts {
   panelOpen: boolean;
   collabPeerId: string | null;
   mobileSideOpen: boolean;
+  deskOpen: boolean;
   viewRef: React.MutableRefObject<'chat' | 'settings'>;
   filterInputRef: React.RefObject<HTMLInputElement | null>;
   closeAllOverlays: () => void;
@@ -35,6 +36,7 @@ export function useAppLayout(opts: UseAppLayoutOpts) {
     panelOpen,
     collabPeerId,
     mobileSideOpen,
+    deskOpen,
     viewRef,
     filterInputRef,
     closeAllOverlays,
@@ -75,6 +77,7 @@ export function useAppLayout(opts: UseAppLayoutOpts) {
         if (confirmOpts) setConfirmOpts(null);
         else if (unboxOpen) setUnboxOpen(false);
         else if (createOpen || panelOpen || collabPeerId || mobileSideOpen) closeAllOverlays();
+        else if (deskOpen) setDeskOpen(false);
         else if (viewRef.current === 'settings') leaveSettings();
       }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
@@ -102,7 +105,7 @@ export function useAppLayout(opts: UseAppLayoutOpts) {
       mq.removeEventListener('change', onMq);
       document.removeEventListener('keydown', onKeyDown);
     };
-  }, [closeAllOverlays, collabPeerId, confirmOpts, createOpen, leaveSettings, loadSettings, mobileSideOpen, panelOpen, toggleDesktopSidebar, unboxOpen]);
+  }, [closeAllOverlays, collabPeerId, confirmOpts, createOpen, deskOpen, leaveSettings, loadSettings, mobileSideOpen, panelOpen, toggleDesktopSidebar, unboxOpen]);
 
   const handleSideResizeStart = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {

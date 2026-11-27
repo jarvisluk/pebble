@@ -249,7 +249,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     ? `[${t('fileAltFallback')}] ${att.name || ''}`.trim()
                     : `[${t('imageAltFallback')}]`
                   : '';
-                const previewTxt = plainPreviewText(m.text, lang) || attPreview;
+                const stagePreview =
+                  m.role === 'stage' && m.stage
+                    ? m.stage.title ||
+                      m.stage.path ||
+                      (m.stage.kind === 'desktop'
+                        ? t('stageDesktopTab')
+                        : m.stage.kind === 'files'
+                          ? t('stageFilesTab')
+                          : m.stage.kind)
+                    : '';
+                const previewTxt = stagePreview || plainPreviewText(m.text, lang) || attPreview;
                 previewNode = (
                   <div className="pv">
                     <span>

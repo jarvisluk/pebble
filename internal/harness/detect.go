@@ -295,9 +295,6 @@ func DetectHarnessAuth(ctx context.Context, kind string) (status string, detail 
 		if home != "" && nonEmptyFile(filepath.Join(home, ".claude", ".credentials.json")) {
 			return "ready", "Signed in"
 		}
-		if GetMagpieStatus(ctx, "claude").Connected {
-			return "ready", "Magpie"
-		}
 		if code, out, err := runAuthCheckFunc(ctx, binPath, "auth", "status"); err == nil && code == 0 {
 			low := strings.ToLower(out)
 			if !strings.Contains(low, "not logged in") && !strings.Contains(low, `"loggedin":false`) && !strings.Contains(low, `"loggedIn": false`) {
@@ -312,9 +309,6 @@ func DetectHarnessAuth(ctx context.Context, kind string) (status string, detail 
 		}
 		if home != "" && nonEmptyFile(filepath.Join(home, ".codex", "auth.json")) {
 			return "ready", "Signed in"
-		}
-		if GetMagpieStatus(ctx, "codex").Connected {
-			return "ready", "Magpie"
 		}
 		if code, out, err := runAuthCheckFunc(ctx, binPath, "login", "status"); err == nil && code == 0 {
 			low := strings.ToLower(out)

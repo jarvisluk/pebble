@@ -19,10 +19,15 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import ai.pebble.android.data.StageRef
+import ai.pebble.android.data.StageTab
+import ai.pebble.android.ui.desktop.BotStageState
+import ai.pebble.android.ui.desktop.StageStateOps
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -55,9 +60,7 @@ sealed interface SheetRoute {
 
 data class DesktopPresentation(
     val target: String,
-    val initialTab: StageKind = StageKind.DESKTOP,
     val botId: String? = null,
-    val initialPath: String? = null,
 )
 
 class PebbleRouter {
@@ -65,6 +68,8 @@ class PebbleRouter {
     var sheet by mutableStateOf<SheetRoute?>(null)
     var detailOpen by mutableStateOf(false)
     var desktop by mutableStateOf<DesktopPresentation?>(null)
+    var botStages by mutableStateOf<Map<String, BotStageState>>(emptyMap())
+    var translate: (String) -> String = { it }
     var inSettings by mutableStateOf(false)
     var settingsTab by mutableStateOf<SettingsTab?>(null)
     var settingsDirty by mutableStateOf(false)
@@ -78,6 +83,9 @@ class PebbleRouter {
         if (sheet is SheetRoute.BotInfo) sheet = null
         leaveSettings()
         selectedBotId = id
+        if (desktop != null && desktop?.botId != id) {
+            desktop = desktop?.copy(botId = id)
+        }
     }
 
     fun closeBot() {
@@ -134,28 +142,142 @@ class PebbleRouter {
         clearSettingsDirty()
     }
 
-    fun openDesktop(target: String = "local") {
-        val resolved = target.trim().ifEmpty { "local" }
+    fun hasUnreadLatestStage(botId: String): Boolean =
+        !botStages[botId]?.unreadLatestStageId.isNullOrEmpty()
+
+    fun selectStageTab(botId: String, tabId: String) {
+        val st = StageStateOps.ensureNonEmpty(botStages[botId] ?: BotStageState(), newTabTitle = translate("stageNewTab"))
+        botStages = botStages + (botId to st.copy(activeTabId = tabId, unreadLatestStageId = null))
+    }
+
+    fun closeStageTab(botId: String, tabId: String) {
+        val cur = botStages[botId] ?: BotStageState()
+        botStages = botStages + (botId to StageStateOps.close(cur, tabId = tabId, newTabTitle = translate("stageNewTab")))
+    }
+
+    fun openNewStageTab(botId: String) {
+        val cur = botStages[botId] ?: BotStageState()
+        val tab = StageStateOps.newTab(title = translate("stageNewTab"))
+        botStages = botStages + (botId to StageStateOps.upsert(cur, tab, activate = true))
+    }
+
+    fun replaceNewOrOpenStageTab(botId: String, tab: StageTab) {
+        val cur = botStages[botId] ?: BotStageState()
+        val next = StageStateOps.replaceNewOrOpen(cur, tab).copy(unreadLatestStageId = null)
+        botStages = botStages + (botId to next)
+    }
+
+    fun stripFileTabs() {
+        val updated = mutableMapOf<String, BotStageState>()
+        botStages.forEach { (bid, st) ->
+            val filtered = st.tabs.filter { it.kind != StageKind.FILES && it.kind != StageKind.FILE }
+            if (filtered.size != st.tabs.size) {
+                updated[bid] = StageStateOps.ensureNonEmpty(st.copy(tabs = filtered), newTabTitle = translate("stageNewTab"))
+            } else {
+                updated[bid] = st
+            }
+        }
+        botStages = updated
+    }
+
+    fun openStage(botId: String?, tab: StageTab, replaceNew: Boolean = false) {
+        val bid = (botId ?: selectedBotId.orEmpty()).trim()
         sheet = null
         leaveSettings()
-        desktop = DesktopPresentation(target = resolved, initialTab = StageKind.DESKTOP, botId = selectedBotId)
+        detailOpen = false
+        if (bid.isNotEmpty() && bid != "__global__") {
+            val cur = botStages[bid] ?: BotStageState()
+            val next = (if (replaceNew) StageStateOps.replaceNewOrOpen(cur, tab) else StageStateOps.upsert(cur, tab, activate = true))
+                .copy(unreadLatestStageId = null)
+            botStages = botStages + (bid to next)
+            if (selectedBotId != bid) {
+                selectedBotId = bid
+            }
+        } else if (bid == "__global__") {
+            val cur = botStages[bid] ?: BotStageState()
+            val next = if (replaceNew) StageStateOps.replaceNewOrOpen(cur, tab) else StageStateOps.upsert(cur, tab, activate = true)
+            botStages = botStages + (bid to next)
+        }
+        val target = if (tab.kind == StageKind.DESKTOP) (tab.target?.ifBlank { "local" } ?: "local") else "local"
+        val presBotId = bid.takeIf { it.isNotEmpty() && it != "__global__" }
+        if (desktop == null || desktop?.botId != presBotId || tab.kind == StageKind.DESKTOP) {
+            desktop = DesktopPresentation(target = target, botId = presBotId)
+        }
+    }
+
+    fun openStageRef(botId: String?, ref: StageRef) {
+        val tab = StageStateOps.tabFromRef(
+            ref = ref,
+            botId = botId,
+            filesTitle = translate("stageFilesTab"),
+            desktopTitle = translate("stageDesktopTab"),
+            newTabTitle = translate("stageNewTab"),
+        )
+        openStage(botId = botId, tab = tab, replaceNew = false)
+    }
+
+    fun openLatestStage(botId: String, latestStage: StageRef?) {
+        if (latestStage != null) {
+            openStageRef(botId = botId, ref = latestStage)
+            return
+        }
+        val existing = botStages[botId]
+        if (existing != null && existing.tabs.isNotEmpty()) {
+            botStages = botStages + (botId to existing.copy(unreadLatestStageId = null))
+            sheet = null
+            leaveSettings()
+            detailOpen = false
+            if (desktop == null || desktop?.botId != botId) {
+                desktop = DesktopPresentation(target = existing.activeTab?.target ?: "local", botId = botId)
+            }
+            return
+        }
+        openStage(botId = botId, tab = StageStateOps.newTab(title = translate("stageNewTab")), replaceNew = false)
+    }
+
+    fun openDesktop(target: String = "local") {
+        val resolved = target.trim().ifEmpty { "local" }
+        val tab = StageStateOps.desktopTab(target = resolved, title = translate("stageDesktopTab"))
+        openStage(botId = selectedBotId, tab = tab, replaceNew = false)
     }
 
     fun openFiles(botId: String, path: String? = null) {
-        sheet = null
-        leaveSettings()
-        desktop = DesktopPresentation(target = "local", initialTab = StageKind.FILES, botId = botId, initialPath = path)
+        val clean = path.orEmpty().trim()
+        val tab = if (clean.isEmpty()) {
+            StageStateOps.filesTab(title = translate("stageFilesTab"))
+        } else {
+            StageStateOps.fileTab(path = clean)
+        }
+        openStage(botId = botId, tab = tab, replaceNew = false)
+    }
+
+    fun openTask(botId: String, task: ai.pebble.android.data.BotTask, replaceNew: Boolean = false) {
+        openStage(botId = botId, tab = StageStateOps.taskTab(task), replaceNew = replaceNew)
     }
 
     fun handleStageOpen(ev: StageOpenEvent) {
-        val targetBot = ev.botId?.takeIf { it.isNotEmpty() } ?: selectedBotId
-        if (targetBot != null && targetBot != selectedBotId) {
-            openBot(targetBot)
+        val bid = ev.botId?.takeIf { it.isNotBlank() } ?: selectedBotId.orEmpty()
+        val tab = StageStateOps.tabFromOpenEvent(
+            ev = ev,
+            filesTitle = translate("stageFilesTab"),
+            desktopTitle = translate("stageDesktopTab"),
+            newTabTitle = translate("stageNewTab"),
+        )
+        val inBotStage = desktop != null && (desktop?.botId == bid || bid.isEmpty())
+        val shouldActivate = inBotStage || ev.autoOpen == true
+        if (bid.isNotEmpty()) {
+            val cur = botStages[bid] ?: BotStageState()
+            val next = StageStateOps.upsert(cur, tab, activate = shouldActivate)
+                .copy(unreadLatestStageId = if (shouldActivate) null else tab.id)
+            botStages = botStages + (bid to next)
         }
-        val kind = StageKind.fromRaw(ev.kind)
-        sheet = null
-        leaveSettings()
-        desktop = DesktopPresentation(target = "local", initialTab = kind, botId = targetBot, initialPath = ev.path)
+        if (inBotStage) {
+            if (tab.kind == StageKind.DESKTOP) {
+                desktop = DesktopPresentation(target = tab.target ?: "local", botId = bid.ifEmpty { null })
+            }
+        } else if (ev.autoOpen == true) {
+            openStage(botId = bid.ifEmpty { null }, tab = tab, replaceNew = false)
+        }
     }
 }
 
@@ -166,6 +288,11 @@ fun RootScaffold(
     router: PebbleRouter,
 ) {
     val p = LocalPalette.current
+    SideEffect { router.translate = store::t }
+    val canUseFiles = store.supports("stage.files")
+    LaunchedEffect(canUseFiles) {
+        if (!canUseFiles) router.stripFileTabs()
+    }
 
     val showGate = store.activeServer == null ||
         store.connState == ConnState.UNAUTHORIZED ||
@@ -260,6 +387,7 @@ fun RootScaffold(
                             botId = bid,
                             onClose = { router.detailOpen = false },
                             onOpenDesktop = { router.openDesktop(it) },
+                            onOpenTask = { router.openTask(bid, it) },
                         )
                     } else {
                         ChatScreen(
@@ -268,7 +396,9 @@ fun RootScaffold(
                             compact = true,
                             onBack = { router.closeBot() },
                             onOpenDesktop = { router.openDesktop(it) },
-                            onOpenFiles = { router.openFiles(it) },
+                            onOpenStage = { router.openLatestStage(it, store.bots.firstOrNull { b -> b.id == it }?.latestStage) },
+                            onOpenStageRef = { id, ref -> router.openStageRef(id, ref) },
+                            hasUnreadLatestStage = router.hasUnreadLatestStage(bid),
                             onToggleDetail = { router.detailOpen = true },
                             onOpenBotInfo = { router.sheet = SheetRoute.BotInfo(bid) },
                         )
@@ -336,7 +466,9 @@ fun RootScaffold(
                                 botId = selId,
                                 compact = false,
                                 onOpenDesktop = { router.openDesktop(it) },
-                                onOpenFiles = { router.openFiles(it) },
+                                onOpenStage = { router.openLatestStage(it, store.bots.firstOrNull { b -> b.id == it }?.latestStage) },
+                                onOpenStageRef = { id, ref -> router.openStageRef(id, ref) },
+                                hasUnreadLatestStage = router.hasUnreadLatestStage(selId),
                                 onToggleDetail = { router.detailOpen = !router.detailOpen },
                                 onOpenBotInfo = { router.sheet = SheetRoute.BotInfo(selId) },
                             )
@@ -376,6 +508,7 @@ fun RootScaffold(
                                 botId = selId,
                                 onClose = { router.detailOpen = false },
                                 onOpenDesktop = { router.openDesktop(it) },
+                                onOpenTask = { router.openTask(selId, it) },
                             )
                         }
                     }
@@ -394,6 +527,7 @@ fun RootScaffold(
                             botId = selId,
                             onClose = { router.detailOpen = false },
                             onOpenDesktop = { router.openDesktop(it) },
+                            onOpenTask = { router.openTask(selId, it) },
                         )
                     }
                 }
@@ -458,14 +592,13 @@ fun RootScaffold(
             null -> Unit
         }
 
-        // Fullscreen Stage Cover (Remote Desktop + Workspace Files)
+        // Fullscreen Stage Cover (Side Tabs + Collapsible Bot Chat)
         router.desktop?.let { pres ->
             DesktopScreen(
                 store = store,
+                router = router,
                 initialTarget = pres.target,
                 initialBotId = pres.botId ?: router.selectedBotId,
-                initialTab = pres.initialTab,
-                initialPath = pres.initialPath,
                 onClose = { router.desktop = null },
             )
         }

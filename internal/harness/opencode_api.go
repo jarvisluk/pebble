@@ -36,7 +36,7 @@ func (h *OpenCodeHarness) Models(ctx context.Context) ([]string, error) {
 			fctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 			defer cancel()
 			cmd := exec.CommandContext(fctx, bin, "models")
-			cmd.Env = augmentedEnv(nil)
+			cmd.Env = h.opencodeEnv(nil)
 			if out, err := cmd.Output(); err == nil {
 				if list := parseSlashModelLines(string(out)); len(list) > 0 {
 					return list, true
@@ -308,4 +308,51 @@ func randHex(n int) string {
 	b := make([]byte, n)
 	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
+}
+
+type ttlCache[T any] struct {
+	mu      sync.Mutex
+	val     T
+	fetched time.Time
+	ttl     time.Duration
+}
+
+func (c *ttlCache[T]) get(load func() (T, bool)) T {
+	c.mu.Lock()
+	if !c.fetched.IsZero() && time.Since(c.fetched) < c.ttl {
+		v := c.val
+		c.mu.Unlock()
+		return v
+	}
+	c.mu.Unlock()
+
+	fresh, ok := load()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if ok {
+		c.val = fresh
+		c.fetched = time.Now()
+		return fresh
+	}
+	if !c.fetched.IsZero() {
+		return c.val
+	}
+	return fresh
+}
+
+func (c *ttlCache[T]) invalidate() {
+	c.mu.Lock()
+	c.fetched = time.Time{}
+	c.mu.Unlock()
+}
+
+func parseSlashModelLines(raw string) []string {
+	var parsed []string
+	for _, line := range strings.Split(raw, "\n") {
+		f := strings.Fields(line)
+		if len(f) > 0 && strings.Contains(f[0], "/") && !strings.Contains(f[0], "://") {
+			parsed = append(parsed, f[0])
+		}
+	}
+	return parsed
 }

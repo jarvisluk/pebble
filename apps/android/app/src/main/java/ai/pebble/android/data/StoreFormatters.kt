@@ -13,7 +13,6 @@ enum class BotSortMode(val raw: String) { RECENT("recent"), MANUAL("manual") }
 
 fun resolveDefaultModel(g: String, h: String): String {
     if (g.isEmpty()) return ""
-    if (g.startsWith("magpie/")) return if (h == "claude") g.removePrefix("magpie/") else g
     if (!g.contains("/")) return g
     return if (h.isEmpty() || h == "opencode" || h == "pi") g else ""
 }

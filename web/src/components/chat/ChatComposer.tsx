@@ -44,6 +44,7 @@ interface ChatComposerProps {
   onSwitchMode: (next: PermissionMode) => Promise<void>;
   onApplySlashCommand: (cmd: SlashCommandItem) => void;
   onApplyMention: (item: MentionCandidate) => void;
+  topDock?: React.ReactNode;
 }
 
 export const ChatComposer: React.FC<ChatComposerProps> = ({
@@ -80,11 +81,13 @@ export const ChatComposer: React.FC<ChatComposerProps> = ({
   onSwitchMode,
   onApplySlashCommand,
   onApplyMention,
+  topDock,
 }) => {
   const t = (k: string, vars?: Record<string, string | number>) => translate(lang, k, vars);
 
   return (
     <div ref={composerWrapRef} className="composer-wrap">
+      {topDock}
       {attachments.length > 0 && (
         <div className="composer-attachments">
           {attachments.map((att) => (

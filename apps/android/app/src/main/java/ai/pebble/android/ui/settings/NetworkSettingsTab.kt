@@ -720,12 +720,16 @@ fun NetworkSettingsTab(
                     "files" to store.t("permFiles"),
                     "exec" to store.t("permExec"),
                     "desktop" to store.t("permDesktop"),
+                    "agent" to store.t("permAgent"),
                 )
                 store.nodes.forEachIndexed { idx, node ->
                     if (idx > 0) CardDivider()
                     val on = node.connected == true
                     val outdated = store.serverInfo != null && node.isOutdated
                     val perms = node.permissions.orEmpty()
+                    val harnesses = node.harnesses.orEmpty()
+                    val workspaces = node.workspaces.orEmpty()
+                    val activeCount = node.activeTaskIds?.size ?: 0
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -733,6 +737,9 @@ fun NetworkSettingsTab(
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
                         ) {
                             Text(node.name ?: node.id, color = p.text, fontSize = PebbleFont.cardTitle, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                            if (activeCount > 0) {
+                                TagPill(store.t("nodeActiveTasks", mapOf("n" to activeCount)), p.sage, p.sageInk)
+                            }
                             if (outdated) {
                                 TagPill(store.t("nodeOutdatedTag"), p.pink, p.pinkInk)
                             }
@@ -744,6 +751,11 @@ fun NetworkSettingsTab(
                         }
                         val host = node.hostname?.takeIf { it.isNotEmpty() }?.let { " · $it" }.orEmpty()
                         Text("${node.os.orEmpty()}/${node.arch.orEmpty()}$host", color = p.text2, fontSize = PebbleFont.secondary, fontFamily = MonoFont)
+                        node.maxPermissionMode?.takeIf { it.isNotEmpty() }?.let { maxMode ->
+                            val modeKey = "permMode_$maxMode"
+                            val modeLabel = store.t(modeKey).let { if (it == modeKey) maxMode else it }
+                            Text(store.t("nodeMaxPermMode", mapOf("mode" to modeLabel)), color = p.mute, fontSize = PebbleFont.caption)
+                        }
                         if (outdated) {
                             Text(store.t("nodeOutdatedHint"), color = p.mute, fontSize = PebbleFont.caption)
                         }
@@ -759,7 +771,12 @@ fun NetworkSettingsTab(
                                     verticalArrangement = Arrangement.spacedBy(6.dp),
                                 ) {
                                     perms.forEach { perm ->
-                                        TagPill(permLabels[perm] ?: perm, p.s1, p.text2)
+                                        val isAgent = perm == "agent"
+                                        TagPill(
+                                            text = permLabels[perm] ?: perm,
+                                            bg = if (isAgent) p.lilac else p.s1,
+                                            fg = if (isAgent) p.lilacInk else p.text2,
+                                        )
                                     }
                                 }
                                 if (on && "desktop" in perms) {
@@ -768,6 +785,63 @@ fun NetworkSettingsTab(
                                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
                                     ) {
                                         Text(store.t("openDesktop"), fontSize = PebbleFont.secondary, color = p.text)
+                                    }
+                                }
+                            }
+                        }
+                        if (harnesses.isNotEmpty()) {
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(store.t("nodeHarnesses"), color = p.mute, fontSize = PebbleFont.caption, fontWeight = FontWeight.Medium)
+                                FlowRow(
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                                ) {
+                                    harnesses.forEach { h ->
+                                        val installed = h.installed == true
+                                        val ready = installed && h.authStatus == "ready"
+                                        val needsLogin = installed && h.authStatus == "needs_login"
+                                        val suffix = when {
+                                            !installed -> store.t("nodeNotInstalled")
+                                            ready -> store.t("nodeAuthReady")
+                                            needsLogin -> store.t("nodeAuthNeedsLogin")
+                                            else -> ""
+                                        }
+                                        val label = if (suffix.isEmpty()) h.title else "${h.title} · $suffix"
+                                        TagPill(
+                                            text = label,
+                                            bg = if (ready) p.sage else if (needsLogin) p.pink else p.s1,
+                                            fg = if (ready) p.sageInk else if (needsLogin) p.pinkInk else p.text2,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        if (workspaces.isNotEmpty()) {
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(store.t("nodeWorkspaces"), color = p.mute, fontSize = PebbleFont.caption, fontWeight = FontWeight.Medium)
+                                workspaces.forEach { ws ->
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    ) {
+                                        Text(
+                                            text = ws.name.ifEmpty { ws.id },
+                                            color = p.text,
+                                            fontSize = PebbleFont.caption,
+                                            fontWeight = FontWeight.SemiBold,
+                                        )
+                                        Text(
+                                            text = ws.path,
+                                            color = p.text2,
+                                            fontFamily = MonoFont,
+                                            fontSize = PebbleFont.caption,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f, fill = false),
+                                        )
+                                        if (ws.isGit == true) {
+                                            TagPill(ws.defaultBranch?.takeIf { it.isNotEmpty() } ?: "git", p.s1, p.text2)
+                                        }
                                     }
                                 }
                             }

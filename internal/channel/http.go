@@ -3,7 +3,6 @@ package channel
 import (
 	"bot-hub/internal/config"
 	"bot-hub/internal/desktop"
-	"bot-hub/internal/harness"
 	"bot-hub/internal/hub"
 	"bot-hub/internal/node"
 	"bot-hub/internal/protocol"
@@ -13,7 +12,9 @@ import (
 	"bot-hub/internal/update"
 	"bot-hub/internal/web"
 	"context"
+	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -183,6 +184,14 @@ func NewHTTPServer(h *hub.Hub, cfg config.HTTPConfig) *HTTPServer {
 	mux.HandleFunc("DELETE /api/bots/{id}/routines/{routineId}", s.handleDeleteRoutine)
 	mux.HandleFunc("POST /api/bots/{id}/routines/{routineId}/run", s.handleRunRoutine)
 	mux.HandleFunc("GET /api/bots/{id}/routine-runs", s.handleListRoutineRuns)
+	mux.HandleFunc("GET /api/bots/{id}/tasks", s.handleListBotTasks)
+	mux.HandleFunc("POST /api/bots/{id}/tasks", s.handleSpawnTask)
+	mux.HandleFunc("GET /api/tasks/{taskId}", s.handleGetTask)
+	mux.HandleFunc("GET /api/tasks/{taskId}/events", s.handleListTaskEvents)
+	mux.HandleFunc("POST /api/tasks/{taskId}/send", s.handleSendToTask)
+	mux.HandleFunc("POST /api/tasks/{taskId}/cancel", s.handleCancelTask)
+	mux.HandleFunc("GET /api/tasks/{taskId}/diff", s.handleTaskDiff)
+	mux.HandleFunc("POST /api/tasks/{taskId}/rollback", s.handleTaskRollback)
 	mux.HandleFunc("GET /api/settings", s.handleSettings)
 	mux.HandleFunc("PUT /api/settings", s.handlePutSettings)
 	mux.HandleFunc("PATCH /api/settings", s.handlePutSettings)
@@ -196,15 +205,10 @@ func NewHTTPServer(h *hub.Hub, cfg config.HTTPConfig) *HTTPServer {
 	mux.HandleFunc("DELETE /api/push/devices/{deviceId}", s.handlePushDeleteDevice)
 	mux.HandleFunc("GET /api/push/status", s.handlePushStatus)
 	mux.HandleFunc("GET /api/models", s.handleModels)
-	mux.HandleFunc("POST /api/harnesses/{id}/magpie", s.handleMagpieConnect)
 	mux.HandleFunc("POST /api/harnesses/{id}/install", s.handleHarnessInstallStart)
 	mux.HandleFunc("GET /api/harnesses/{id}/install", s.handleHarnessInstallStatus)
 	mux.HandleFunc("POST /api/harnesses/{id}/login", s.handleHarnessLoginStart)
 	mux.HandleFunc("GET /api/harnesses/{id}/login", s.handleHarnessLoginStatus)
-	mux.HandleFunc("POST /api/magpie/providers", s.handleMagpieProvider)
-	mux.HandleFunc("POST /api/magpie/open", s.handleMagpieOpen)
-	mux.HandleFunc("POST /api/magpie/install", s.handleMagpieInstallStart)
-	mux.HandleFunc("GET /api/magpie/install", s.handleMagpieInstallStatus)
 
 	mux.HandleFunc("GET /api/desktop/targets", s.handleDesktopTargets)
 	mux.HandleFunc("PUT /api/desktop/target", s.handleDesktopTargetSet)
@@ -236,6 +240,7 @@ func NewHTTPServer(h *hub.Hub, cfg config.HTTPConfig) *HTTPServer {
 
 	mux.HandleFunc("GET /api/nodes", s.handleNodes)
 	mux.HandleFunc("GET /api/local-node", s.handleLocalNodeStub)
+	mux.HandleFunc("GET /api/nodes/ws", s.handleNodeWS)
 	mux.HandleFunc("POST /api/nodes/poll", s.handleNodePoll)
 	mux.HandleFunc("POST /api/nodes/result", s.handleNodeResult)
 	mux.HandleFunc("POST /api/nodes/disconnect", s.handleNodeDisconnect)
@@ -281,11 +286,9 @@ func (s *HTTPServer) Start() error {
 	s.startTailcat(s.srv.Handler)
 	s.startTailscale(s.srv.Handler)
 	if s.hub != nil {
-		kinds := s.hub.HarnessKinds()
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
-			harness.WarmMagpieCache(ctx, kinds)
 			s.hub.WarmModelsCache(ctx)
 		}()
 	}
@@ -337,7 +340,7 @@ func (s *HTTPServer) guard(next http.Handler) http.Handler {
 				return
 			}
 		}
-		if (s.apiToken() != "" || tunneled) &&
+		if (s.hasAuthConfigured() || tunneled) &&
 			r.URL.Path != "/" &&
 			!strings.HasPrefix(r.URL.Path, "/assets/") &&
 			r.URL.Path != "/api/login" &&
@@ -354,14 +357,87 @@ func (s *HTTPServer) guard(next http.Handler) http.Handler {
 	})
 }
 
+func (s *HTTPServer) hasAuthConfigured() bool {
+	s.cfgMu.RLock()
+	defer s.cfgMu.RUnlock()
+	return s.cfg.APIToken != "" || len(s.cfg.DeviceTokens) > 0
+}
+
 func (s *HTTPServer) authorized(r *http.Request) bool {
-	got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	got := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
 	if got == "" {
 		if c, err := r.Cookie(authCookie); err == nil {
 			got = c.Value
 		}
 	}
-	return subtle.ConstantTimeCompare([]byte(got), []byte(s.apiToken())) == 1
+	if got == "" {
+		return false
+	}
+
+	s.cfgMu.RLock()
+	apiTok := s.cfg.APIToken
+	deviceTokens := append([]config.DeviceTokenConfig(nil), s.cfg.DeviceTokens...)
+	s.cfgMu.RUnlock()
+
+	if apiTok != "" && subtle.ConstantTimeCompare([]byte(got), []byte(apiTok)) == 1 {
+		return true
+	}
+
+	var gotHashHex string
+	for _, dt := range deviceTokens {
+		if dt.Revoked {
+			continue
+		}
+		matched := false
+		if dt.Token != "" && subtle.ConstantTimeCompare([]byte(got), []byte(dt.Token)) == 1 {
+			matched = true
+		} else if hashSpec := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(dt.TokenHash), "sha256:")); hashSpec != "" {
+			if gotHashHex == "" {
+				sum := sha256.Sum256([]byte(got))
+				gotHashHex = hex.EncodeToString(sum[:])
+			}
+			if subtle.ConstantTimeCompare([]byte(gotHashHex), []byte(hashSpec)) == 1 {
+				matched = true
+			}
+		}
+		if matched && deviceTokenAllowsPath(dt.Scopes, r.URL.Path) {
+			return true
+		}
+	}
+	return false
+}
+
+func deviceTokenAllowsPath(scopes []string, reqPath string) bool {
+	if len(scopes) == 0 {
+		return true
+	}
+	isNodePath := strings.HasPrefix(reqPath, "/api/nodes/")
+	isMCPHubPath := strings.HasPrefix(reqPath, "/api/bots/") ||
+		strings.HasPrefix(reqPath, "/api/sessions") ||
+		strings.HasPrefix(reqPath, "/api/memory") ||
+		strings.HasPrefix(reqPath, "/api/media")
+	for _, raw := range scopes {
+		sc := strings.ToLower(strings.TrimSpace(raw))
+		switch sc {
+		case "*", "all":
+			return true
+		case "api", "hub":
+			return true
+		case "node", "nodes", "node:ws":
+			if isNodePath {
+				return true
+			}
+		case "node:agent", "agent":
+			if isNodePath || isMCPHubPath {
+				return true
+			}
+		case "mcp":
+			if isMCPHubPath {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (s *HTTPServer) handleLogin(w http.ResponseWriter, r *http.Request) {
@@ -374,7 +450,11 @@ func (s *HTTPServer) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	token := s.apiToken()
 	if token == "" {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		if !s.hasAuthConfigured() {
+			writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+			return
+		}
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "invalid token"})
 		return
 	}
 	if subtle.ConstantTimeCompare([]byte(req.Token), []byte(token)) != 1 {
@@ -429,17 +509,48 @@ func (s *HTTPServer) handleEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	replay := false
+	var since uint64
+	if r.URL.Query().Has("since") {
+		rawSince := strings.TrimSpace(r.URL.Query().Get("since"))
+		if rawSince == "" {
+			replay = true
+		} else if v, err := strconv.ParseUint(rawSince, 10, 64); err == nil {
+			since = v
+			replay = true
+		} else {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid since cursor"})
+			return
+		}
+	} else if lastID := strings.TrimSpace(r.Header.Get("Last-Event-ID")); lastID != "" {
+		if v, err := strconv.ParseUint(lastID, 10, 64); err == nil {
+			since = v
+			replay = true
+		}
+	}
+
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
 
 	resetCh := s.sseResetChan()
-	subID, ch := s.hub.Subscribe()
+	subID, ch, missed := s.hub.SubscribeSince(since, replay)
 	defer s.hub.Unsubscribe(subID)
 
 	// Send an initial ping so clients mark connected immediately.
 	fmt.Fprintf(w, "event: ready\ndata: {}\n\n")
+	for _, evt := range missed {
+		raw, err := json.Marshal(evt)
+		if err != nil {
+			continue
+		}
+		if evt.Seq > 0 {
+			fmt.Fprintf(w, "id: %d\nevent: %s\ndata: %s\n\n", evt.Seq, evt.Type, raw)
+		} else {
+			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", evt.Type, raw)
+		}
+	}
 	flusher.Flush()
 
 	keepalive := time.NewTicker(25 * time.Second)
@@ -462,7 +573,11 @@ func (s *HTTPServer) handleEvents(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				continue
 			}
-			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", evt.Type, raw)
+			if evt.Seq > 0 {
+				fmt.Fprintf(w, "id: %d\nevent: %s\ndata: %s\n\n", evt.Seq, evt.Type, raw)
+			} else {
+				fmt.Fprintf(w, "event: %s\ndata: %s\n\n", evt.Type, raw)
+			}
 			flusher.Flush()
 		}
 	}
@@ -500,8 +615,10 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 func writeHubErr(w http.ResponseWriter, err error) {
 	status := http.StatusBadRequest
 	switch {
-	case errors.Is(err, hub.ErrBotNotFound), errors.Is(err, hub.ErrRoutineNotFound):
+	case errors.Is(err, hub.ErrBotNotFound), errors.Is(err, hub.ErrRoutineNotFound), errors.Is(err, state.ErrTaskNotFound):
 		status = http.StatusNotFound
+	case errors.Is(err, hub.ErrForbidden):
+		status = http.StatusForbidden
 	case errors.Is(err, scheduler.ErrRoutineAlreadyRunning):
 		status = http.StatusConflict
 	}

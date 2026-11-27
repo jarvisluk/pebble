@@ -128,6 +128,7 @@ private suspend fun PebbleStore.connectEndpoint(
         val list = data.bots.orEmpty()
         bots = list
         msgs.clear(); last.clear(); unread.clear(); tools.clear(); routines.clear()
+        tasks.clear(); taskEvents.clear(); taskTools.clear(); taskStreamText.clear()
         resetModelsCache()
         usingStandby = isStandby
         connState = ConnState.CONNECTED
@@ -138,6 +139,12 @@ private suspend fun PebbleStore.connectEndpoint(
                 runCatching { client.call<MessagesResp>("/api/bots/${encodeURIComponent(b.id)}/messages?limit=1") }
                     .getOrNull()?.messages?.lastOrNull()?.let { m ->
                         if (seq == connSeq) last[b.id] = m
+                    }
+            }
+            scope.launch {
+                runCatching { client.call<TasksResp>("/api/bots/${encodeURIComponent(b.id)}/tasks?limit=50") }
+                    .getOrNull()?.tasks?.let { t ->
+                        if (seq == connSeq) tasks[b.id] = t
                     }
             }
         }
@@ -274,6 +281,7 @@ internal suspend fun PebbleStore.removeServerImpl(id: String) {
         PebbleTunnel.stop()
         baseURL = ""; authToken = ""
         bots = emptyList(); msgs.clear(); last.clear()
+        tasks.clear(); taskEvents.clear(); taskTools.clear(); taskStreamText.clear()
         takeovers = emptyList(); questions = emptyList(); approvals = emptyList()
         activeTakeoverIds.clear(); activeApprovalIds.clear()
         serverInfo = null; unsupportedCaps = emptySet(); dismissedCompatProto = 0

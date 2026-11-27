@@ -602,3 +602,97 @@ func TestOpenCodeModelsCLIAndMissingBinary(t *testing.T) {
 		t.Fatalf("expected empty models when opencode binary is missing, got %#v", modelsMissing)
 	}
 }
+
+func envLookup(env []string, key string) (string, bool) {
+	prefix := key + "="
+	for _, entry := range env {
+		if strings.HasPrefix(entry, prefix) {
+			return strings.TrimPrefix(entry, prefix), true
+		}
+	}
+	return "", false
+}
+
+func TestResolveOpenCodeDBPath(t *testing.T) {
+	if got, want := resolveOpenCodeDBPath(&config.HubConfig{StateFile: "/tmp/hub/state/hub.db"}), filepath.Join("/tmp/hub/state", "opencode.db"); got != want {
+		t.Fatalf("StateFile resolved %q, want %q", got, want)
+	}
+	if got, want := resolveOpenCodeDBPath(&config.HubConfig{ProjectRoot: "/tmp/hub2"}), filepath.Join("/tmp/hub2", "state", "opencode.db"); got != want {
+		t.Fatalf("ProjectRoot resolved %q, want %q", got, want)
+	}
+	for _, cfg := range []*config.HubConfig{nil, {}} {
+		got := resolveOpenCodeDBPath(cfg)
+		if !strings.HasSuffix(got, filepath.Join("pebble", "opencode.db")) {
+			t.Fatalf("fallback path %q should end with pebble/opencode.db", got)
+		}
+		if strings.Contains(got, filepath.Join(".local", "share", "opencode")) {
+			t.Fatalf("fallback path %q must not point inside user shared opencode dir", got)
+		}
+	}
+}
+
+func TestOpenCodeIsolatesDBEnvInModelsAndServe(t *testing.T) {
+	tmp := t.TempDir()
+	dbPath := filepath.Join(tmp, "nested", "state", "opencode.db")
+	captureFile := filepath.Join(tmp, "captured.env")
+	fakeOC := filepath.Join(tmp, "opencode")
+	script := "#!/bin/sh\n" +
+		"if [ \"$1\" = \"models\" ]; then\n" +
+		"  printf '%s|%s\\n' \"$OPENCODE_DB\" \"$OPENCODE_DISABLE_CHANNEL_DB\" > " + fmt.Sprintf("%q", captureFile) + "\n" +
+		"  printf 'anthropic/claude-sonnet-4\\n'\n" +
+		"  exit 0\n" +
+		"fi\n" +
+		"exit 1\n"
+	if err := os.WriteFile(fakeOC, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("OPENCODE_BIN", fakeOC)
+	t.Setenv("OPENCODE_DB", "")
+	t.Setenv("OPENCODE_DISABLE_CHANNEL_DB", "")
+
+	h := NewOpenCodeHarnessWithDB("", dbPath)
+	defer h.Close()
+
+	models, err := h.Models(context.Background())
+	if err != nil {
+		t.Fatalf("Models failed: %v", err)
+	}
+	if len(models) != 1 || models[0] != "anthropic/claude-sonnet-4" {
+		t.Fatalf("unexpected models: %#v", models)
+	}
+	raw, err := os.ReadFile(captureFile)
+	if err != nil {
+		t.Fatalf("read capture file: %v", err)
+	}
+	if got, want := strings.TrimSpace(string(raw)), dbPath+"|1"; got != want {
+		t.Fatalf("models env captured %q, want %q", got, want)
+	}
+	if _, err := os.Stat(filepath.Dir(dbPath)); err != nil {
+		t.Fatalf("expected isolated DB parent dir to exist: %v", err)
+	}
+
+	// Serve env preserves extra variables alongside isolated OPENCODE_DB.
+	serveEnv := h.opencodeEnv(map[string]string{"OPENCODE_SERVER_PASSWORD": "secret"})
+	if got, ok := envLookup(serveEnv, "OPENCODE_DB"); !ok || got != dbPath {
+		t.Fatalf("serve env OPENCODE_DB = (%q, %v), want %q", got, ok, dbPath)
+	}
+	if got, ok := envLookup(serveEnv, "OPENCODE_DISABLE_CHANNEL_DB"); !ok || got != "1" {
+		t.Fatalf("serve env OPENCODE_DISABLE_CHANNEL_DB = (%q, %v), want 1", got, ok)
+	}
+	if got, ok := envLookup(serveEnv, "OPENCODE_SERVER_PASSWORD"); !ok || got != "secret" {
+		t.Fatalf("serve env OPENCODE_SERVER_PASSWORD = (%q, %v), want secret", got, ok)
+	}
+
+	// Explicit caller OPENCODE_DB override is respected.
+	customDB := filepath.Join(tmp, "custom.db")
+	t.Setenv("OPENCODE_DB", customDB)
+	t.Setenv("OPENCODE_DISABLE_CHANNEL_DB", "0")
+	overrideEnv := h.opencodeEnv(nil)
+	if got, _ := envLookup(overrideEnv, "OPENCODE_DB"); got != customDB {
+		t.Fatalf("explicit OPENCODE_DB overridden to %q, want %q", got, customDB)
+	}
+	if got, _ := envLookup(overrideEnv, "OPENCODE_DISABLE_CHANNEL_DB"); got != "0" {
+		t.Fatalf("explicit OPENCODE_DISABLE_CHANNEL_DB overridden to %q, want 0", got)
+	}
+}

@@ -47,7 +47,8 @@ var ErrQuestionNotFound = errors.New("question not found")
 var ErrApprovalNotFound = errors.New("approval not found")
 
 type Event struct {
-	Type    string `json:"type"` // "message" | "tool_use" | "bot_status" | "bot_created" | "bot_deleted"
+	Seq     uint64 `json:"seq,omitempty"`
+	Type    string `json:"type"` // "message" | "tool_use" | "bot_status" | "bot_created" | "bot_deleted" | "task_*"
 	BotID   string `json:"botId,omitempty"`
 	Payload any    `json:"payload"`
 }
@@ -94,9 +95,20 @@ type Hub struct {
 	schedMu            sync.RWMutex
 	onSchedulesChanged func()
 
-	subsMu sync.Mutex
-	subs   map[uint64]chan Event
-	subSeq atomic.Uint64
+	subsMu       sync.Mutex
+	subs         map[uint64]chan Event
+	subSeq       atomic.Uint64
+	eventSeq     uint64
+	eventRing    []Event
+	eventRingCap int
+
+	taskBaseCtx    context.Context
+	taskBaseCancel context.CancelFunc
+	taskWg         sync.WaitGroup
+	tasksMu        sync.Mutex
+	taskRuns       map[string]*activeTaskRun
+	taskWaiters    map[string][]chan struct{}
+	remoteTasks    map[string]*remoteTaskBridge
 
 	push *push.Manager
 
@@ -120,6 +132,9 @@ type Hub struct {
 
 	inboundAttsMu sync.Mutex
 	inboundAtts   map[string]inboundAttEntry
+
+	stageMu      sync.RWMutex
+	latestStages map[string]*state.StageRef
 }
 
 func New(cfg *config.HubConfig, store *state.Store, messages *state.MessageStore, reg *harness.Registry) *Hub {
@@ -149,6 +164,7 @@ func New(cfg *config.HubConfig, store *state.Store, messages *state.MessageStore
 			memStore = ms
 		}
 	}
+	taskBaseCtx, taskBaseCancel := context.WithCancel(context.Background())
 	h := &Hub{
 		cfg:                cfg,
 		store:              store,
@@ -167,12 +183,22 @@ func New(cfg *config.HubConfig, store *state.Store, messages *state.MessageStore
 		isolatedCancels:    make(map[string]map[uint64]context.CancelFunc),
 		activeDesktopTasks: make(map[string]string),
 		subs:               make(map[uint64]chan Event),
+		eventRingCap:       2048,
+		taskBaseCtx:        taskBaseCtx,
+		taskBaseCancel:     taskBaseCancel,
+		taskRuns:           make(map[string]*activeTaskRun),
+		taskWaiters:        make(map[string][]chan struct{}),
+		remoteTasks:        make(map[string]*remoteTaskBridge),
 		hops:               make(map[string]int),
 		questions:          make(map[string]*pendingQuestionEntry),
 		approvals:          make(map[string]*pendingApprovalEntry),
 		sessionAllow:       make(map[string]map[string]bool),
 		inboundAtts:        make(map[string]inboundAttEntry),
+		latestStages:       make(map[string]*state.StageRef),
 		push:               push.NewManager(cfg, store),
+	}
+	if store != nil {
+		_, _ = store.SettleInterruptedTasks("interrupted by hub restart")
 	}
 	h.nodes = node.NewRegistry(func() {
 		h.reconcileActiveDesktopTarget()
@@ -180,6 +206,10 @@ func New(cfg *config.HubConfig, store *state.Store, messages *state.MessageStore
 			Type:    "nodes_changed",
 			Payload: map[string]any{"nodes": h.nodes.List()},
 		})
+	})
+	h.nodes.SetLifecycleHooks(node.NodeLifecycleHooks{
+		OnNodeReconnected: h.handleRemoteNodeReconnected,
+		OnNodeOffline:     h.handleRemoteNodeOffline,
 	})
 	h.desktop = desktop.NewCoordinator(
 		func(st desktop.ScreenState) {
@@ -228,6 +258,11 @@ func (h *Hub) Close() {
 	for _, lane := range lanes {
 		lane.stop()
 	}
+	if h.taskBaseCancel != nil {
+		h.taskBaseCancel()
+	}
+	h.CancelApprovalsByBot("")
+	h.taskWg.Wait()
 	h.bgWG.Wait()
 	h.desktopTargetMu.Lock()
 	if h.activeDesktopTimer != nil {
@@ -284,12 +319,27 @@ func (h *Hub) SetAPIToken(token string) {
 }
 
 func (h *Hub) Subscribe() (uint64, <-chan Event) {
+	id, ch, _ := h.SubscribeSince(0, false)
+	return id, ch
+}
+
+// SubscribeSince registers an event subscriber and, when replay is true, atomically
+// snapshots buffered events with Seq > since before live delivery resumes.
+func (h *Hub) SubscribeSince(since uint64, replay bool) (uint64, <-chan Event, []Event) {
 	id := h.subSeq.Add(1)
-	ch := make(chan Event, 64)
+	ch := make(chan Event, 128)
 	h.subsMu.Lock()
+	var missed []Event
+	if replay && len(h.eventRing) > 0 {
+		for _, ev := range h.eventRing {
+			if ev.Seq > since {
+				missed = append(missed, ev)
+			}
+		}
+	}
 	h.subs[id] = ch
 	h.subsMu.Unlock()
-	return id, ch
+	return id, ch, missed
 }
 
 func (h *Hub) Unsubscribe(id uint64) {
@@ -302,17 +352,27 @@ func (h *Hub) Unsubscribe(id uint64) {
 }
 
 func (h *Hub) broadcast(evt Event) {
-	if h.push != nil {
-		h.push.EnqueueEvent(evt.Type, evt.BotID, evt.Payload)
-	}
 	h.subsMu.Lock()
-	defer h.subsMu.Unlock()
+	h.eventSeq++
+	evt.Seq = h.eventSeq
+	if h.eventRingCap > 0 {
+		h.eventRing = append(h.eventRing, evt)
+		if len(h.eventRing) > h.eventRingCap {
+			drop := len(h.eventRing) - h.eventRingCap
+			copy(h.eventRing, h.eventRing[drop:])
+			h.eventRing = h.eventRing[:h.eventRingCap]
+		}
+	}
 	for _, ch := range h.subs {
 		select {
 		case ch <- evt:
 		default:
 			// Drop if a slow web client lags behind.
 		}
+	}
+	h.subsMu.Unlock()
+	if h.push != nil {
+		h.push.EnqueueEvent(evt.Type, evt.BotID, evt.Payload)
 	}
 }
 

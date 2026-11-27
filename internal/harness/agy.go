@@ -38,7 +38,6 @@ type agyProc struct {
 	*lineProc
 	model          string
 	sessionID      string
-	viaMagpie      bool
 	permissionMode string
 	prevInput      int
 	prevOutput     int
@@ -239,7 +238,7 @@ func (h *AgyHarness) Close() {
 }
 
 // Reload terminates cached agy processes and clears the cached model and
-// protocol capability state so updated provider or Magpie settings apply cleanly.
+// protocol capability state so updated settings apply cleanly.
 func (h *AgyHarness) Reload() {
 	h.pool.clear()
 	h.acpPool.clear()
@@ -249,14 +248,6 @@ func (h *AgyHarness) Reload() {
 	h.acpProbeMu.Lock()
 	h.acpSupported = make(map[string]bool)
 	h.acpProbeMu.Unlock()
-}
-
-func (h *AgyHarness) viaMagpie(ctx context.Context, model string) bool {
-	if !magpieInstalled() {
-		return false
-	}
-	st := GetMagpieStatus(ctx, "agy")
-	return st.Connected && (model == "" || strings.HasPrefix(model, "magpie/"))
 }
 
 func (h *AgyHarness) supportsACP(bin string) bool {

@@ -2,8 +2,10 @@ import React, { useEffect, useState } from 'react';
 import type {
   BotDetail,
   BotStatus,
+  BotTask,
   ConfirmOptions,
   DesktopTarget,
+  NodeInfo,
   PermissionMode,
   ResolvedLang,
   SettingsData,
@@ -15,12 +17,15 @@ import { BotAppearancePicker } from './BotAppearancePicker';
 import { BotAvatar } from './BotAvatar';
 import { BotMemorySection } from './bot-detail/BotMemorySection';
 import { BotRoutinesSection } from './bot-detail/BotRoutinesSection';
+import { BotTasksSection } from './bot-detail/BotTasksSection';
 import { BotTechDetailsSection } from './bot-detail/BotTechDetailsSection';
 
 interface BotDetailPanelProps {
   open: boolean;
   detail: BotDetail | null;
   bots: BotStatus[];
+  tasks: BotTask[];
+  nodes: NodeInfo[];
   settings: SettingsData | null;
   models: Record<string, string[]>;
   routineRefreshSeq: number;
@@ -35,6 +40,8 @@ interface BotDetailPanelProps {
   onReloadBots: () => Promise<void>;
   onLoadModels: (harness: string, force?: boolean) => Promise<unknown>;
   onRefreshDetail: (id: string) => Promise<void>;
+  onTasksLoaded: (botId: string, tasks: BotTask[]) => void;
+  onInspectTask: (taskId: string) => void;
   onSettingsUpdated?: (s: SettingsData) => void;
   onOpenFiles?: (botId: string) => void;
 }
@@ -43,6 +50,8 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
   open,
   detail,
   bots,
+  tasks,
+  nodes,
   settings,
   models,
   routineRefreshSeq,
@@ -57,6 +66,8 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
   onReloadBots,
   onLoadModels,
   onRefreshDetail,
+  onTasksLoaded,
+  onInspectTask,
   onSettingsUpdated,
   onOpenFiles,
 }) => {
@@ -137,7 +148,6 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
 
   const resolveBotDefaultModel = (g: string, h: string) => {
     if (!g) return '';
-    if (g.startsWith('magpie/')) return h === 'claude' ? g.slice(7) : g;
     if (!g.includes('/')) return g;
     return h === '' || h === 'opencode' || h === 'pi' ? g : '';
   };
@@ -284,10 +294,8 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
             <BotMemorySection
               open={open}
               botId={detail.id}
-              settings={settings}
               lang={lang}
               onToast={onToast}
-              onSettingsUpdated={onSettingsUpdated}
             />
 
             <BotRoutinesSection
@@ -297,6 +305,16 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
               lang={lang}
               onToast={onToast}
               onConfirm={onConfirm}
+            />
+
+            <BotTasksSection
+              open={open}
+              detail={detail}
+              tasks={tasks}
+              nodes={nodes}
+              lang={lang}
+              onTasksLoaded={onTasksLoaded}
+              onInspectTask={onInspectTask}
             />
 
             <BotTechDetailsSection

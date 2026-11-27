@@ -23,14 +23,16 @@ type BotStatus struct {
 	Model       string `json:"model,omitempty"`
 	// ModelInherited: the model is the hub default for the bot's harness.
 	ModelInherited   bool                 `json:"modelInherited"`
-	PrivateSessions  bool                 `json:"privateSessions,omitempty"`
-	DesktopTarget    string               `json:"desktopTarget,omitempty"`
-	BrowserMode      string               `json:"browserMode,omitempty"`
-	PermissionMode   string               `json:"permissionMode,omitempty"`
-	ArchivedSessions int                  `json:"archivedSessions,omitempty"`
+	PrivateSessions       bool                 `json:"privateSessions,omitempty"`
+	DesktopTarget         string               `json:"desktopTarget,omitempty"`
+	BrowserMode           string               `json:"browserMode,omitempty"`
+	PermissionMode        string               `json:"permissionMode,omitempty"`
+	CoordinatorCanApprove *bool                `json:"coordinatorCanApprove,omitempty"`
+	ArchivedSessions      int                  `json:"archivedSessions,omitempty"`
 	Busy             bool                 `json:"busy"`
 	Queued           int64                `json:"queued"`
 	Session          *state.SessionRecord `json:"session,omitempty"`
+	LatestStage      *state.StageRef      `json:"latestStage,omitempty"`
 }
 
 type BotDetail struct {
@@ -47,26 +49,28 @@ type CreateBotRequest struct {
 	Harness         string `json:"harness,omitempty"`
 	Model           string `json:"model,omitempty"`
 	Instructions    string `json:"instructions,omitempty"`
-	PrivateSessions bool   `json:"privateSessions,omitempty"`
-	DesktopTarget   string `json:"desktopTarget,omitempty"`
-	BrowserMode     string `json:"browserMode,omitempty"`
-	PermissionMode  string `json:"permissionMode,omitempty"`
+	PrivateSessions       bool   `json:"privateSessions,omitempty"`
+	DesktopTarget         string `json:"desktopTarget,omitempty"`
+	BrowserMode           string `json:"browserMode,omitempty"`
+	PermissionMode        string `json:"permissionMode,omitempty"`
+	CoordinatorCanApprove *bool  `json:"coordinatorCanApprove,omitempty"`
 }
 
 // BotUpdate changes a bot's settings; nil fields stay as they are. An empty
 // Model means "inherit the hub default".
 type BotUpdate struct {
-	Name            *string `json:"name,omitempty"`
-	Description     *string `json:"description,omitempty"`
-	Avatar          *string `json:"avatar,omitempty"`
-	Color           *string `json:"color,omitempty"`
-	Harness         *string `json:"harness,omitempty"`
-	Model           *string `json:"model,omitempty"`
-	Instructions    *string `json:"instructions,omitempty"`
-	PrivateSessions *bool   `json:"privateSessions,omitempty"`
-	DesktopTarget   *string `json:"desktopTarget,omitempty"`
-	BrowserMode     *string `json:"browserMode,omitempty"`
-	PermissionMode  *string `json:"permissionMode,omitempty"`
+	Name                  *string `json:"name,omitempty"`
+	Description           *string `json:"description,omitempty"`
+	Avatar                *string `json:"avatar,omitempty"`
+	Color                 *string `json:"color,omitempty"`
+	Harness               *string `json:"harness,omitempty"`
+	Model                 *string `json:"model,omitempty"`
+	Instructions          *string `json:"instructions,omitempty"`
+	PrivateSessions       *bool   `json:"privateSessions,omitempty"`
+	DesktopTarget         *string `json:"desktopTarget,omitempty"`
+	BrowserMode           *string `json:"browserMode,omitempty"`
+	PermissionMode        *string `json:"permissionMode,omitempty"`
+	CoordinatorCanApprove *bool   `json:"coordinatorCanApprove,omitempty"`
 }
 
 func (h *Hub) BotName(botID string) string {
@@ -145,13 +149,15 @@ func (h *Hub) statusOfLocked(lane *botLane) BotStatus {
 		Model:            lane.bot.Model,
 		ModelInherited:   lane.bot.ModelInherited,
 		PrivateSessions:  lane.bot.PrivateSessions,
-		DesktopTarget:    lane.bot.DesktopTarget,
-		BrowserMode:      lane.bot.BrowserMode,
-		PermissionMode:   lane.bot.EffectivePermissionMode(),
-		ArchivedSessions: archivedCount,
+		DesktopTarget:         lane.bot.DesktopTarget,
+		BrowserMode:           lane.bot.BrowserMode,
+		PermissionMode:        lane.bot.EffectivePermissionMode(),
+		CoordinatorCanApprove: lane.bot.CoordinatorCanApprove,
+		ArchivedSessions:      archivedCount,
 		Busy:             lane.busy.Load(),
 		Queued:           lane.queued.Load(),
 		Session:          sessPtr,
+		LatestStage:      h.getBotLatestStage(lane.bot.ID),
 	}
 }
 
@@ -236,9 +242,10 @@ func (h *Hub) CreateBot(req CreateBotRequest) (*BotStatus, error) {
 		Model:           req.Model,
 		Harness:         req.Harness,
 		PrivateSessions: req.PrivateSessions,
-		DesktopTarget:   req.DesktopTarget,
-		BrowserMode:     req.BrowserMode,
-		PermissionMode:  req.PermissionMode,
+		DesktopTarget:         req.DesktopTarget,
+		BrowserMode:           req.BrowserMode,
+		PermissionMode:        req.PermissionMode,
+		CoordinatorCanApprove: req.CoordinatorCanApprove,
 	}
 	config.NormalizeBot(&bot, h.cfg)
 	if !harness.CapabilitiesOf(runner).SupportsMode(bot.EffectivePermissionMode()) {
@@ -471,6 +478,10 @@ func (h *Hub) UpdateBot(botID string, upd BotUpdate) (*BotStatus, error) {
 	if upd.BrowserMode != nil {
 		bot.BrowserMode = *upd.BrowserMode
 	}
+	if upd.CoordinatorCanApprove != nil {
+		v := *upd.CoordinatorCanApprove
+		bot.CoordinatorCanApprove = &v
+	}
 	if upd.PermissionMode != nil {
 		pm := *upd.PermissionMode
 		if pm == "" {
@@ -508,6 +519,9 @@ func (h *Hub) UpdateBot(botID string, upd BotUpdate) (*BotStatus, error) {
 				rb.PrivateSessions = bot.PrivateSessions
 				rb.DesktopTarget = bot.DesktopTarget
 				rb.BrowserMode = bot.BrowserMode
+				if upd.CoordinatorCanApprove != nil {
+					rb.CoordinatorCanApprove = bot.CoordinatorCanApprove
+				}
 				if upd.PermissionMode != nil || harnessChanged {
 					rb.PermissionMode = bot.PermissionMode
 					if upd.PermissionMode != nil || rb.PermissionMode != "" {
@@ -630,6 +644,7 @@ func (h *Hub) DeleteBot(botID string) error {
 		cancel()
 	}
 	h.cancelIsolatedByBot(botID)
+	h.cancelTasksByBot(botID)
 	if h.desktop != nil {
 		h.desktop.CancelTakeoversByBot(botID)
 	}
@@ -643,7 +658,11 @@ func (h *Hub) DeleteBot(botID string) error {
 
 	if h.store != nil {
 		_, _, _ = h.store.Reset(botID)
+		_ = h.store.DeleteBotLatestStage(botID)
 	}
+	h.stageMu.Lock()
+	delete(h.latestStages, botID)
+	h.stageMu.Unlock()
 	h.broadcast(Event{
 		Type:    "bot_deleted",
 		BotID:   botID,

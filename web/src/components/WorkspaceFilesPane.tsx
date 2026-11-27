@@ -1,37 +1,30 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type {
   ResolvedLang,
-  WorkspaceFileContent,
   WorkspaceFileEntry,
   WorkspaceListResult,
 } from '../types';
-import {
-  fetchWorkspaceFileContent,
-  fetchWorkspaceFiles,
-  requestWorkspaceFileTicket,
-  workspaceFileRawURL,
-} from '../lib/api';
+import { fetchWorkspaceFiles } from '../lib/api';
 import { translate } from '../lib/i18n';
-import { renderMarkdownHtml } from '../lib/markdown';
 import { formatStamp } from '../lib/theme';
 import { formatFileSize } from './ChatView';
 
 interface WorkspaceFilesPaneProps {
   botId: string;
-  initialPath?: string;
+  initialDir?: string;
   openSeq?: number;
+  selectedFilePath?: string;
   lang: ResolvedLang;
-  onQuotePath: (relPath: string) => void;
-  onToast: (msg: string) => void;
+  onOpenFileTab: (relPath: string) => void;
 }
 
 export const WorkspaceFilesPane: React.FC<WorkspaceFilesPaneProps> = ({
   botId,
-  initialPath = '',
+  initialDir = '',
   openSeq = 0,
+  selectedFilePath = '',
   lang,
-  onQuotePath,
-  onToast,
+  onOpenFileTab,
 }) => {
   const t = (k: string, vars?: Record<string, string | number>) => translate(lang, k, vars);
 
@@ -40,15 +33,7 @@ export const WorkspaceFilesPane: React.FC<WorkspaceFilesPaneProps> = ({
   const [listData, setListData] = useState<WorkspaceListResult | null>(null);
   const [listLoading, setListLoading] = useState(false);
   const [listErr, setListErr] = useState('');
-
-  const [selectedPath, setSelectedPath] = useState('');
-  const [preview, setPreview] = useState<WorkspaceFileContent | null>(null);
-  const [previewLoading, setPreviewLoading] = useState(false);
-  const [previewErr, setPreviewErr] = useState('');
-  const [imageUrl, setImageUrl] = useState('');
-
   const listSeqRef = useRef(0);
-  const previewSeqRef = useRef(0);
 
   const loadDir = useCallback(
     async (targetPath: string, hidden: boolean) => {
@@ -71,49 +56,10 @@ export const WorkspaceFilesPane: React.FC<WorkspaceFilesPaneProps> = ({
     [botId]
   );
 
-  const openFile = useCallback(
-    async (relPath: string) => {
-      if (!botId || !relPath) return;
-      const seq = ++previewSeqRef.current;
-      setSelectedPath(relPath);
-      setPreviewLoading(true);
-      setPreviewErr('');
-      setImageUrl('');
-      try {
-        const doc = await fetchWorkspaceFileContent(botId, relPath);
-        if (seq !== previewSeqRef.current) return;
-        setPreview(doc);
-        if (doc.kind === 'image') {
-          const tk = await requestWorkspaceFileTicket(botId, relPath);
-          if (seq !== previewSeqRef.current) return;
-          setImageUrl(workspaceFileRawURL(botId, relPath, tk.ticket, false));
-        }
-      } catch (e) {
-        if (seq !== previewSeqRef.current) return;
-        setPreview(null);
-        setPreviewErr(e instanceof Error ? e.message : t('opFailed'));
-      } finally {
-        if (seq === previewSeqRef.current) setPreviewLoading(false);
-      }
-    },
-    [botId]
-  );
-
   useEffect(() => {
-    setSelectedPath('');
-    setPreview(null);
-    setPreviewErr('');
-    setImageUrl('');
     if (!botId) return;
-    if (initialPath) {
-      const idx = initialPath.lastIndexOf('/');
-      const parent = idx >= 0 ? initialPath.slice(0, idx) : '';
-      void loadDir(parent, showHidden);
-      void openFile(initialPath);
-    } else {
-      void loadDir('', showHidden);
-    }
-  }, [botId, initialPath, openSeq]);
+    void loadDir(initialDir, showHidden);
+  }, [botId, initialDir, openSeq]);
 
   const handleToggleHidden = () => {
     const next = !showHidden;
@@ -125,40 +71,15 @@ export const WorkspaceFilesPane: React.FC<WorkspaceFilesPaneProps> = ({
     if (ent.isDir) {
       void loadDir(ent.path, showHidden);
     } else {
-      void openFile(ent.path);
-    }
-  };
-
-  const handleDownload = async (relPath: string, fileName: string) => {
-    try {
-      const tk = await requestWorkspaceFileTicket(botId, relPath);
-      const url = workspaceFileRawURL(botId, relPath, tk.ticket, true);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = fileName;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-    } catch (e) {
-      onToast(e instanceof Error ? e.message : t('opFailed'));
-    }
-  };
-
-  const handleCopyPath = async (relPath: string) => {
-    try {
-      await navigator.clipboard.writeText(relPath);
-      onToast(t('pathCopied'));
-    } catch {
-      onToast(relPath);
+      onOpenFileTab(ent.path);
     }
   };
 
   const segments = dirPath ? dirPath.split('/').filter(Boolean) : [];
-  const hasPreview = Boolean(selectedPath);
 
   return (
-    <div className={`ws-explorer${hasPreview ? ' has-preview' : ''}`}>
-      <div className="ws-tree-col">
+    <div className="ws-browser-wrap">
+      <div className="ws-tree-col ws-browser-card">
         <div className="ws-toolbar">
           <div className="ws-crumbs" role="navigation" aria-label={t('workspaceFiles')}>
             <button
@@ -248,7 +169,7 @@ export const WorkspaceFilesPane: React.FC<WorkspaceFilesPaneProps> = ({
                 </button>
               )}
               {listData.entries.map((ent) => {
-                const active = !ent.isDir && ent.path === selectedPath;
+                const active = !ent.isDir && ent.path === selectedFilePath;
                 return (
                   <button
                     key={ent.path}
@@ -286,114 +207,20 @@ export const WorkspaceFilesPane: React.FC<WorkspaceFilesPaneProps> = ({
                         {ent.modTime && <span>{formatStamp(ent.modTime, lang)}</span>}
                       </span>
                     </span>
+                    {!ent.isDir && (
+                      <span className="ws-row-chev">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="m9 18 6-6-6-6" />
+                        </svg>
+                      </span>
+                    )}
                   </button>
                 );
               })}
-              {listData.truncated && (
-                <div className="ws-empty">{t('filesTruncatedHint')}</div>
-              )}
+              {listData.truncated && <div className="ws-empty">{t('filesTruncatedHint')}</div>}
             </>
           )}
         </div>
-      </div>
-
-      <div className="ws-preview-col">
-        {!selectedPath ? (
-          <div className="ws-preview-empty">{t('selectFileHint')}</div>
-        ) : (
-          <>
-            <div className="ws-preview-hd">
-              <button
-                type="button"
-                className="ghost ws-back-btn"
-                aria-label={t('stageBackToList')}
-                onClick={() => {
-                  setSelectedPath('');
-                  setPreview(null);
-                  setImageUrl('');
-                }}
-              >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M15 18l-6-6 6-6" />
-                </svg>
-              </button>
-              <div className="ws-preview-title" title={selectedPath}>
-                {selectedPath}
-              </div>
-              <div className="ws-preview-acts">
-                <button
-                  type="button"
-                  className="btn"
-                  onClick={() => onQuotePath(selectedPath)}
-                >
-                  {t('insertToChat')}
-                </button>
-                <button
-                  type="button"
-                  className="btn"
-                  onClick={() => void handleCopyPath(selectedPath)}
-                >
-                  {t('copyPath')}
-                </button>
-                <button
-                  type="button"
-                  className="btn"
-                  onClick={() => void handleDownload(selectedPath, preview?.name || selectedPath.split('/').pop() || 'file')}
-                >
-                  {t('downloadFile')}
-                </button>
-              </div>
-            </div>
-
-            <div className="ws-preview-body">
-              {previewLoading ? (
-                <div className="ws-empty">{t('loading')}</div>
-              ) : previewErr ? (
-                <div className="ws-empty ws-err">{previewErr}</div>
-              ) : !preview ? null : preview.kind === 'image' ? (
-                <div className="ws-img-wrap">
-                  {imageUrl && <img src={imageUrl} alt={preview.name} className="ws-img" />}
-                </div>
-              ) : preview.kind === 'binary' ? (
-                <div className="ws-binary-card">
-                  <div className="ws-binary-name">{preview.name}</div>
-                  <div className="ws-binary-meta">
-                    {preview.mimeType} · {formatFileSize(preview.size) || '0 B'}
-                  </div>
-                  <p className="ws-binary-hint">{t('binaryFileHint')}</p>
-                  <button
-                    type="button"
-                    className="btn go"
-                    onClick={() => void handleDownload(preview.path, preview.name)}
-                  >
-                    {t('downloadFile')}
-                  </button>
-                </div>
-              ) : (
-                <>
-                  {preview.truncated && (
-                    <div className="note ws-trunc-note">
-                      {t('fileTruncatedHint', { size: formatFileSize(preview.content?.length || 0) || '256 KB' })}
-                    </div>
-                  )}
-                  {preview.kind === 'markdown' ? (
-                    <div
-                      className="md ws-md"
-                      dangerouslySetInnerHTML={{
-                        __html: renderMarkdownHtml(preview.content || '', t('copy'), {
-                          details: t('mdDetails'),
-                          image: t('mdImage'),
-                        }),
-                      }}
-                    />
-                  ) : (
-                    <pre className="ws-code">{preview.content || ''}</pre>
-                  )}
-                </>
-              )}
-            </div>
-          </>
-        )}
       </div>
     </div>
   );

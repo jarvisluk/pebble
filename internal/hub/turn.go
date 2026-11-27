@@ -125,6 +125,10 @@ func (h *Hub) platformInstructionsPath() string {
 }
 
 func (h *Hub) buildTurnPrompt(bot config.BotConfig, prompt string, isFirstTurn bool, platPath string, pendingReceipts []state.RoutineRun, memorySnapshot string) string {
+	return h.buildTurnPromptWithTasks(bot, prompt, isFirstTurn, platPath, pendingReceipts, nil, memorySnapshot)
+}
+
+func (h *Hub) buildTurnPromptWithTasks(bot config.BotConfig, prompt string, isFirstTurn bool, platPath string, pendingReceipts []state.RoutineRun, pendingTasks []state.BotTask, memorySnapshot string) string {
 	// Slash commands must stay at the start of the prompt so harnesses recognize them.
 	if strings.HasPrefix(strings.TrimSpace(prompt), "/") {
 		return prompt
@@ -160,6 +164,9 @@ func (h *Hub) buildTurnPrompt(bot config.BotConfig, prompt string, isFirstTurn b
 	if len(pendingReceipts) > 0 {
 		prefixParts = append(prefixParts, formatRoutineReceiptsPrefix(pendingReceipts))
 	}
+	if len(pendingTasks) > 0 {
+		prefixParts = append(prefixParts, formatTaskReceiptsPrefix(pendingTasks))
+	}
 	if len(prefixParts) == 0 {
 		return prompt
 	}
@@ -191,6 +198,26 @@ func formatRoutineReceiptsPrefix(receipts []state.RoutineRun) string {
 		}
 		excerpt := truncateRunes(strings.TrimSpace(r.Output), 1500)
 		lines = append(lines, fmt.Sprintf("- [%s @ %s]: %s", name, ts, excerpt))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func formatTaskReceiptsPrefix(tasks []state.BotTask) string {
+	var lines []string
+	lines = append(lines, "[Background task receipt — results from earlier background tasks, for context only; no need to repeat]")
+	for _, t := range tasks {
+		name := strings.TrimSpace(t.Title)
+		if name == "" {
+			name = t.ID
+		}
+		ts := t.FinishedAt
+		if parsed, err := time.Parse(time.RFC3339Nano, ts); err == nil {
+			ts = parsed.In(time.Local).Format("01-02 15:04")
+		} else if parsed, err := time.Parse(time.RFC3339, ts); err == nil {
+			ts = parsed.In(time.Local).Format("01-02 15:04")
+		}
+		excerpt := truncateRunes(strings.TrimSpace(t.Output), 1500)
+		lines = append(lines, fmt.Sprintf("- [%s (%s) @ %s]: %s", name, t.ID, ts, excerpt))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -318,6 +345,13 @@ func (h *Hub) executeTurn(ctx context.Context, lane *botLane, bot config.BotConf
 	if apiToken != "" {
 		mcpEnv = map[string]string{"PEBBLE_API_TOKEN": apiToken}
 	}
+	if h.canCoordinatorApprove(bot.ID) {
+		extraEnv["PEBBLE_COORDINATOR_CAN_APPROVE"] = "1"
+		if mcpEnv == nil {
+			mcpEnv = make(map[string]string, 1)
+		}
+		mcpEnv["PEBBLE_COORDINATOR_CAN_APPROVE"] = "1"
+	}
 
 	for attempt := 0; attempt < 2; attempt++ {
 		gen := lane.sessionGen.Load()
@@ -335,14 +369,16 @@ func (h *Hub) executeTurn(ctx context.Context, lane *botLane, bot config.BotConf
 		}
 		turnNum := sess.TurnCount + 1
 		var pendingReceipts []state.RoutineRun
+		var pendingTasks []state.BotTask
 		if h.store != nil {
 			pendingReceipts, _ = h.store.ListPendingReceipts(bot.ID, 5)
+			pendingTasks, _ = h.store.ListPendingTaskReceipts(bot.ID, 5)
 		}
 		var memSnapshot string
 		if sess.TurnCount == 0 && !strings.HasPrefix(strings.TrimSpace(prompt), "/") {
 			memSnapshot = h.buildMemorySnapshot(ctx, bot, 0)
 		}
-		effectivePrompt := h.buildTurnPrompt(bot, prompt, sess.TurnCount == 0, platPath, pendingReceipts, memSnapshot)
+		effectivePrompt := h.buildTurnPromptWithTasks(bot, prompt, sess.TurnCount == 0, platPath, pendingReceipts, pendingTasks, memSnapshot)
 
 		var toolMu sync.Mutex
 		var toolOrder []string
@@ -511,10 +547,13 @@ func (h *Hub) executeTurn(ctx context.Context, lane *botLane, bot config.BotConf
 				return res, fmt.Errorf("turn succeeded but failed to persist session: %w", saveErr)
 			}
 		}
-		if h.store != nil && len(pendingReceipts) > 0 {
-			receiptIDs := make([]string, 0, len(pendingReceipts))
+		if h.store != nil && (len(pendingReceipts) > 0 || len(pendingTasks) > 0) {
+			receiptIDs := make([]string, 0, len(pendingReceipts)+len(pendingTasks))
 			for _, pr := range pendingReceipts {
 				receiptIDs = append(receiptIDs, pr.ID)
+			}
+			for _, pt := range pendingTasks {
+				receiptIDs = append(receiptIDs, pt.ID)
 			}
 			_ = h.store.MarkReceiptsInjected(receiptIDs)
 		}

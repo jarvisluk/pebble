@@ -44,11 +44,7 @@ fun settingsHarnessList(store: PebbleStore): List<HarnessInfo> {
     }
 }
 
-fun harnessDisplayLabel(h: HarnessInfo, store: PebbleStore): String = when {
-    h.magpie?.connected == true -> "${h.title} · Magpie"
-    store.settings?.magpie?.installed == true -> "${h.title} · ${store.t("mpNative")}"
-    else -> h.title
-}
+fun harnessDisplayLabel(h: HarnessInfo, store: PebbleStore): String = h.title
 
 fun orderedGlobalHarnesses(
     harnesses: List<HarnessInfo>,
@@ -61,8 +57,7 @@ fun orderedGlobalHarnesses(
         if (seen.add(h.id)) add(h)
     }
     harnesses.firstOrNull { it.id == defaultHarness }?.let(::addUnique)
-    harnesses.filter { (!anyInstalled || it.installed == true) && it.magpie?.connected != true }.forEach(::addUnique)
-    harnesses.filter { (!anyInstalled || it.installed == true) && it.magpie?.connected == true }.forEach(::addUnique)
+    harnesses.filter { !anyInstalled || it.installed == true }.forEach(::addUnique)
     harnesses.filter { !anyInstalled || !models[it.id].isNullOrEmpty() }.forEach(::addUnique)
 }
 

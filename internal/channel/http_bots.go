@@ -122,6 +122,7 @@ type messageReq struct {
 	Hop       int      `json:"hop,omitempty"`
 	Source    string   `json:"source,omitempty"`
 	MediaIDs  []string `json:"mediaIds,omitempty"`
+	Async     bool     `json:"async,omitempty"`
 }
 
 func (s *HTTPServer) handleMessage(w http.ResponseWriter, r *http.Request) {
@@ -137,6 +138,15 @@ func (s *HTTPServer) handleMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.FromBotID != "" {
+		if req.Async {
+			task, err := s.hub.MessageBotAsync(r.Context(), req.FromBotID, botID, req.Message, req.Hop)
+			if err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+				return
+			}
+			writeJSON(w, http.StatusAccepted, map[string]any{"async": true, "task": task})
+			return
+		}
 		res, err := s.hub.MessageBot(r.Context(), req.FromBotID, botID, req.Message, req.Hop)
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})

@@ -56,18 +56,22 @@ const (
 	CapDesktopWSHEVC       = "desktop.ws_hevc"
 	CapDesktopFramePolling = "desktop.frame_polling"
 	CapStageFiles          = "stage.files"
+	CapStageTabs           = "stage.tabs"
 	CapQuestions           = "questions"
 	CapRoutines            = "routines"
 	CapUpdateCheck         = "update.check"
 )
 
-// Remote node capabilities advertised in POST /api/nodes/poll.
+// Remote node capabilities advertised in POST /api/nodes/poll and WS hello.
 const (
 	CapNodeExecEnv            = "node.exec_env"
 	CapNodeBrowserProfile     = "node.browser_profile"
 	CapNodeDesktopPermissions = "node.desktop_permissions"
 	CapNodeDesktopPower       = "node.desktop_power"
 	CapNodeVirtualSlots       = "node.virtual_slots"
+	CapNodeWS                 = "node.ws"
+	CapNodeAgentExec          = "node.agent_exec"
+	CapNodeWorkspaces         = "node.workspaces"
 )
 
 // Local desktop host-daemon capabilities advertised in the stdout handshake.
@@ -167,6 +171,7 @@ func ServerCapabilities(virtualSupported bool) []string {
 		CapQuestions,
 		CapRoutines,
 		CapStageFiles,
+		CapStageTabs,
 		CapUpdateCheck,
 	}
 	if virtualSupported {

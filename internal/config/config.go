@@ -102,10 +102,22 @@ type BotConfig struct {
 	PermissionMode  string            `json:"permissionMode,omitempty"` // "auto" (default) | "edit" | "ask" | "plan"
 	TimeoutSec      int               `json:"timeoutSec,omitempty"`     // default: 300
 	PrivateSessions bool              `json:"privateSessions,omitempty"`
-	DesktopTarget   string            `json:"desktopTarget,omitempty"`
-	BrowserMode     string            `json:"browserMode,omitempty"` // "" | "auto" | "isolated" | "attach"
-	Env             map[string]string `json:"env,omitempty"`
-	Schedules       []ScheduleConfig  `json:"schedules,omitempty"`
+	DesktopTarget         string            `json:"desktopTarget,omitempty"`
+	BrowserMode           string            `json:"browserMode,omitempty"` // "" | "auto" | "isolated" | "attach"
+	CoordinatorCanApprove *bool             `json:"coordinatorCanApprove,omitempty"`
+	Env                   map[string]string `json:"env,omitempty"`
+	Schedules             []ScheduleConfig  `json:"schedules,omitempty"`
+}
+
+// CanCoordinatorApprove reports whether the bot may approve/reject its own worker tasks' permission prompts.
+func (b BotConfig) CanCoordinatorApprove(hubCfg *HubConfig) bool {
+	if b.CoordinatorCanApprove != nil {
+		return *b.CoordinatorCanApprove
+	}
+	if hubCfg != nil && hubCfg.CoordinatorCanApprove != nil {
+		return *hubCfg.CoordinatorCanApprove
+	}
+	return false
 }
 
 // EffectivePermissionMode returns the normalized permission mode ("auto", "edit", "ask", or "plan").
@@ -123,6 +135,35 @@ func (b BotConfig) ShouldAutoApprove() bool {
 	return b.EffectivePermissionMode() == PermissionModeAuto
 }
 
+// DeviceTokenConfig defines a scoped per-device bearer credential for remote nodes.
+type DeviceTokenConfig struct {
+	ID        string   `json:"id"`
+	Name      string   `json:"name,omitempty"`
+	Token     string   `json:"token,omitempty"`
+	TokenHash string   `json:"tokenHash,omitempty"`
+	Scopes    []string `json:"scopes,omitempty"`
+	Revoked   bool     `json:"revoked,omitempty"`
+}
+
+// NodeWorkspaceConfig defines an authorized workspace directory exposed by a node.
+type NodeWorkspaceConfig struct {
+	ID            string `json:"id"`
+	Name          string `json:"name,omitempty"`
+	Path          string `json:"path"`
+	IsGit         bool   `json:"isGit,omitempty"`
+	DefaultBranch string `json:"defaultBranch,omitempty"`
+}
+
+// NodeConfig configures local node agent capabilities when acting as a remote executor.
+type NodeConfig struct {
+	Enabled           bool                  `json:"enabled,omitempty"`
+	ID                string                `json:"id,omitempty"`
+	Name              string                `json:"name,omitempty"`
+	Permissions       []string              `json:"permissions,omitempty"`
+	Workspaces        []NodeWorkspaceConfig `json:"workspaces,omitempty"`
+	MaxPermissionMode string                `json:"maxPermissionMode,omitempty"`
+}
+
 type HTTPConfig struct {
 	Enabled       *bool  `json:"enabled,omitempty"` // default: true
 	Host          string `json:"host,omitempty"`    // default: "127.0.0.1"
@@ -130,6 +171,8 @@ type HTTPConfig struct {
 	WebhookSecret string `json:"webhookSecret,omitempty"`
 	// APIToken guards the Web UI and /api/*. Required when Host is not loopback.
 	APIToken string `json:"apiToken,omitempty"`
+	// DeviceTokens stores optional scoped per-device credentials alongside APIToken.
+	DeviceTokens []DeviceTokenConfig `json:"deviceTokens,omitempty"`
 	// Tailcat exposes the same server through a Tailcat tunnel (no Tailscale account needed).
 	Tailcat *TailcatConfig `json:"tailcat,omitempty"`
 	// Tailscale exposes the same server inside the user's Tailscale tailnet via tsnet.
@@ -486,6 +529,7 @@ type HubConfig struct {
 	// DefaultHarness selects the default backend harness when creating a bot.
 	DefaultHarness        string `json:"defaultHarness,omitempty"`
 	DefaultPermissionMode string `json:"defaultPermissionMode,omitempty"`
+	CoordinatorCanApprove *bool  `json:"coordinatorCanApprove,omitempty"`
 	// DefaultModel applies to opencode and pi bots (they share provider/model
 	// IDs); DefaultModels overrides it per harness.
 	DefaultModel        string            `json:"defaultModel,omitempty"`
@@ -493,15 +537,13 @@ type HubConfig struct {
 	OnboardingCompleted bool              `json:"onboardingCompleted,omitempty"`
 	DesktopHarness      string            `json:"desktopHarness,omitempty"`
 	DesktopModel        string            `json:"desktopModel,omitempty"`
-	Desktop             DesktopConfig     `json:"desktop,omitempty"`
-	// MagpieWebURL is where `magpie web` is reachable from other devices;
-	// clients away from the host open it instead of the local app.
-	MagpieWebURL      string        `json:"magpieWebUrl,omitempty"`
+	Desktop           DesktopConfig `json:"desktop,omitempty"`
 	OpenCodeServerURL string        `json:"opencodeServerUrl,omitempty"`
 	SharedDir         string        `json:"sharedDir,omitempty"`
 	StateFile         string        `json:"stateFile,omitempty"`
 	MessagesDir       string        `json:"messagesDir,omitempty"`
 	HTTP              HTTPConfig    `json:"http,omitempty"`
+	Node              *NodeConfig   `json:"node,omitempty"`
 	Sync              *SyncConfig   `json:"sync,omitempty"`
 	Push              PushConfig    `json:"push,omitempty"`
 	Memory            *MemoryConfig `json:"memory,omitempty"`
@@ -549,15 +591,8 @@ func (c *HubConfig) DefaultModelFor(harness string) string {
 	if c.DefaultModel == "" {
 		return ""
 	}
-	// A magpie model works in every harness magpie wires up (claude takes
-	// the bare gateway ID); a bare ID/alias works across all harnesses;
-	// provider/model only fits opencode and pi.
-	if strings.HasPrefix(c.DefaultModel, "magpie/") {
-		if harness == "claude" {
-			return strings.TrimPrefix(c.DefaultModel, "magpie/")
-		}
-		return c.DefaultModel
-	}
+	// A bare ID/alias works across all harnesses; provider/model only fits
+	// opencode and pi.
 	if !strings.Contains(c.DefaultModel, "/") {
 		return c.DefaultModel
 	}

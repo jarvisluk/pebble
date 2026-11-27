@@ -58,6 +58,7 @@ data class BotStatus(
     val queued: Int? = null,
     val session: SessionRecord? = null,
     val instructions: String? = null,
+    val latestStage: StageRef? = null,
 ) {
     val displayName: String get() = if (name.isNullOrEmpty()) id else name
     val isBusy: Boolean get() = busy == true
@@ -90,6 +91,7 @@ data class ChatMessage(
     val to: String? = null,
     val text: String? = null,
     val media: List<MessageMedia>? = null,
+    val stage: StageRef? = null,
     val createdAt: String? = null,
     val tools: List<String>? = null,
     val durationMs: Double? = null,
@@ -253,14 +255,6 @@ data class MemoryDreamRunResp(
 )
 
 @Serializable
-data class HarnessMagpie(
-    val installed: Boolean? = null,
-    val connected: Boolean? = null,
-    val model: String? = null,
-    val nativeModel: String? = null,
-)
-
-@Serializable
 data class PermissionCapabilities(
     val modes: List<String>? = null,
     val interactiveApproval: Boolean? = null,
@@ -287,39 +281,12 @@ data class HarnessInfo(
     val category: String? = null,
     val summary: String? = null,
     val install: HarnessInstallInfo? = null,
-    val magpie: HarnessMagpie? = null,
     val permissions: PermissionCapabilities? = null,
 ) {
     val title: String get() = if (label.isNullOrEmpty()) id else label
     val supportedModes: List<String>
         get() = permissions?.modes?.filter { it.isNotEmpty() }?.ifEmpty { listOf("auto") } ?: listOf("auto")
 }
-
-@Serializable
-data class MagpieProvider(
-    val id: String,
-    val name: String? = null,
-    val endpoint: String? = null,
-    val status: String? = null,
-    val modelsInfo: String? = null,
-    val usedBy: String? = null,
-    val enabled: Boolean? = null,
-)
-
-@Serializable
-data class MagpiePreset(
-    val id: String,
-    val name: String? = null,
-)
-
-@Serializable
-data class MagpieInfo(
-    val installed: Boolean? = null,
-    val healthy: Boolean? = null,
-    val providers: List<MagpieProvider>? = null,
-    val presets: List<MagpiePreset>? = null,
-    val webUrl: String? = null,
-)
 
 @Serializable
 data class SetupTaskStatus(
@@ -335,7 +302,6 @@ data class SetupTaskStatus(
 
 @Serializable
 data class SettingsData(
-    val magpie: MagpieInfo? = null,
     val desktopHarness: String? = null,
     val desktopModel: String? = null,
     val defaultHarness: String? = null,
@@ -401,6 +367,27 @@ data class HostTailscaleStatus(
 )
 
 @Serializable
+data class NodeHarnessInfo(
+    val kind: String,
+    val label: String? = null,
+    val installed: Boolean? = null,
+    val authStatus: String? = null,
+    val authDetail: String? = null,
+    val permissionCapabilities: PermissionCapabilities? = null,
+) {
+    val title: String get() = if (label.isNullOrEmpty()) kind else label
+}
+
+@Serializable
+data class NodeWorkspace(
+    val id: String,
+    val name: String,
+    val path: String,
+    val isGit: Boolean? = null,
+    val defaultBranch: String? = null,
+)
+
+@Serializable
 data class NodeInfo(
     val id: String,
     val name: String? = null,
@@ -413,7 +400,13 @@ data class NodeInfo(
     val capabilities: List<String>? = null,
     val version: String? = null,
     val connected: Boolean? = null,
+    val reconnecting: Boolean? = null,
+    val transport: String? = null,
     val lastSeenAt: String? = null,
+    val harnesses: List<NodeHarnessInfo>? = null,
+    val workspaces: List<NodeWorkspace>? = null,
+    val maxPermissionMode: String? = null,
+    val activeTaskIds: List<String>? = null,
 ) {
     val isOutdated: Boolean get() = (protocolVersion ?: 1) < CLIENT_PROTOCOL
 }
@@ -432,6 +425,8 @@ data class TakeoverRequest(
     val target: String? = null,
     val botId: String? = null,
     val botName: String? = null,
+    val taskId: String? = null,
+    val deviceId: String? = null,
     val reason: String? = null,
     val app: String? = null,
     val createdAt: String? = null,
@@ -562,6 +557,8 @@ data class PendingQuestion(
     val id: String,
     val botId: String,
     val botName: String? = null,
+    val taskId: String? = null,
+    val deviceId: String? = null,
     val title: String? = null,
     val fields: List<QuestionField> = emptyList(),
     val createdAt: String? = null,
@@ -650,6 +647,8 @@ data class PendingApproval(
     val id: String,
     val botId: String,
     val botName: String? = null,
+    val taskId: String? = null,
+    val deviceId: String? = null,
     val toolName: String,
     val kind: String? = null,
     val title: String? = null,
@@ -657,6 +656,74 @@ data class PendingApproval(
     val rawInput: JsonObject? = null,
     val options: List<PermissionOption>? = null,
     val mode: String? = null,
+    val createdAt: String? = null,
+)
+
+@Serializable
+data class BotTask(
+    val id: String,
+    val botId: String,
+    val kind: String,
+    val title: String? = null,
+    val prompt: String = "",
+    val status: String = "queued",
+    val deviceId: String? = null,
+    val harness: String? = null,
+    val model: String? = null,
+    val permissionMode: String? = null,
+    val workdir: String? = null,
+    val workspaceId: String? = null,
+    val isolation: String? = null,
+    val branch: String? = null,
+    val worktreePath: String? = null,
+    val checkpointRef: String? = null,
+    val delivery: String? = null,
+    val dependsOn: List<String>? = null,
+    val parentTaskId: String? = null,
+    val routineId: String? = null,
+    val routineName: String? = null,
+    val trigger: String? = null,
+    val slotKey: String? = null,
+    val runtimeSessionId: String? = null,
+    val output: String? = null,
+    val error: String? = null,
+    val tools: List<String>? = null,
+    val durationMs: Double? = null,
+    val costUsd: Double? = null,
+    val inputTokens: Int? = null,
+    val outputTokens: Int? = null,
+    val createdAt: String? = null,
+    val startedAt: String? = null,
+    val finishedAt: String? = null,
+    val injectedAt: String? = null,
+) {
+    val displayTitle: String
+        get() {
+            val t = title.orEmpty().trim()
+            if (t.isNotEmpty()) return t
+            val rn = routineName.orEmpty().trim()
+            if (rn.isNotEmpty()) return rn
+            val line = prompt.lineSequence().firstOrNull().orEmpty().trim()
+            return if (line.length > 64) line.take(64) + "…" else line
+        }
+
+    val isTerminal: Boolean
+        get() = status == "completed" || status == "failed" || status == "cancelled"
+
+    val isWaiting: Boolean
+        get() = status == "waiting_approval" || status == "waiting_question" || status == "waiting_takeover"
+
+    val isActive: Boolean
+        get() = !isTerminal
+}
+
+@Serializable
+data class BotTaskEvent(
+    val seq: Long,
+    val taskId: String,
+    val botId: String,
+    val eventType: String,
+    val payload: JsonElement? = null,
     val createdAt: String? = null,
 )
 
@@ -669,6 +736,35 @@ data class PendingApproval(
 @Serializable data class ApprovalsResp(val ok: Boolean? = null, val items: List<PendingApproval>? = null)
 @Serializable data class RoutinesResp(val routines: List<RoutineItem>? = null)
 @Serializable data class RunsResp(val runs: List<RoutineRun>? = null)
+@Serializable data class TasksResp(val tasks: List<BotTask>? = null)
+@Serializable data class TaskEventsResp(val events: List<BotTaskEvent>? = null)
+
+@Serializable
+data class TaskDiffFile(
+    val path: String,
+    val status: String? = null,
+    val additions: Int? = null,
+    val deletions: Int? = null,
+)
+
+@Serializable
+data class TaskDiffResult(
+    val taskId: String,
+    val branch: String? = null,
+    val worktreePath: String? = null,
+    val checkpointRef: String? = null,
+    val files: List<TaskDiffFile> = emptyList(),
+    val patch: String = "",
+)
+
+@Serializable
+data class TaskRollbackResult(
+    val taskId: String,
+    val rolledBack: Boolean = false,
+    val removedWorktree: Boolean? = null,
+    val branch: String? = null,
+    val worktreePath: String? = null,
+)
 @Serializable data class ModelsResp(val models: List<String>? = null)
 @Serializable data class TextResp(val text: String? = null)
 @Serializable data class InterruptResp(val interrupted: Boolean? = null)
@@ -691,13 +787,77 @@ data class TunnelStartResp(
 )
 
 enum class StageKind(val raw: String) {
+    NEW("new"),
+    FILES("files"),
+    FILE("file"),
     DESKTOP("desktop"),
-    FILES("files");
+    TASK("task"),
+    BROWSER("browser"),
+    ARTIFACT("artifact"),
+    MCP_APP("mcp_app");
 
     companion object {
-        fun fromRaw(raw: String?): StageKind =
-            entries.firstOrNull { it.raw.equals(raw?.trim(), ignoreCase = true) } ?: FILES
+        fun fromRaw(raw: String?): StageKind {
+            val clean = raw?.trim()?.lowercase().orEmpty()
+            return when (clean) {
+                "mcp-app", "mcp_app" -> MCP_APP
+                else -> entries.firstOrNull { it.raw == clean } ?: FILES
+            }
+        }
     }
+}
+
+@Serializable
+data class StageRef(
+    val id: String? = null,
+    val kind: String = "files",
+    val title: String? = null,
+    val subtitle: String? = null,
+    val path: String? = null,
+    val url: String? = null,
+    val resourceUri: String? = null,
+    val target: String? = null,
+    val taskId: String? = null,
+    val closable: Boolean? = null,
+    val createdAt: String? = null,
+) {
+    val resolvedKind: StageKind get() = StageKind.fromRaw(kind)
+
+    val resolvedId: String
+        get() {
+            val explicit = id?.trim().orEmpty()
+            if (explicit.isNotEmpty()) return explicit
+            return when (resolvedKind) {
+                StageKind.FILES -> "files"
+                StageKind.FILE -> "file:${path.orEmpty()}"
+                StageKind.DESKTOP -> {
+                    val dest = target?.trim().orEmpty().ifEmpty { "local" }
+                    if (dest == "local") "desktop" else "desktop:$dest"
+                }
+                StageKind.TASK -> "task:${taskId.orEmpty().ifEmpty { "default" }}"
+                StageKind.NEW -> "new"
+                StageKind.BROWSER -> "browser:${url.orEmpty().ifEmpty { "default" }}"
+                StageKind.ARTIFACT -> "artifact:${path.orEmpty().ifEmpty { title.orEmpty().ifEmpty { "default" } }}"
+                StageKind.MCP_APP -> "mcp_app:${resourceUri.orEmpty().ifEmpty { title.orEmpty().ifEmpty { "default" } }}"
+            }
+        }
+}
+
+data class StageTab(
+    val id: String,
+    val kind: StageKind,
+    val rawKind: String,
+    val title: String,
+    val subtitle: String? = null,
+    val botId: String? = null,
+    val path: String? = null,
+    val url: String? = null,
+    val resourceUri: String? = null,
+    val target: String? = null,
+    val taskId: String? = null,
+    val closable: Boolean = true,
+) {
+    val isDesktop: Boolean get() = kind == StageKind.DESKTOP
 }
 
 @Serializable
@@ -747,11 +907,16 @@ data class StageOpenEvent(
     val id: String? = null,
     val kind: String = "files",
     val title: String? = null,
+    val subtitle: String? = null,
     val botId: String? = null,
     val path: String? = null,
     val url: String? = null,
     val resourceUri: String? = null,
+    val target: String? = null,
+    val taskId: String? = null,
     val closable: Boolean? = null,
+    val autoOpen: Boolean? = null,
+    val createdAt: String? = null,
 )
 
 data class PendingChatInsert(

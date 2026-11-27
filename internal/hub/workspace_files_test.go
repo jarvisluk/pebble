@@ -5,8 +5,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"bot-hub/internal/config"
+	"bot-hub/internal/state"
 )
 
 func newWorkspaceTestHub(t *testing.T) (*Hub, string, string) {
@@ -175,5 +177,112 @@ func TestReadWorkspaceFileAndOpenStage(t *testing.T) {
 	evt := <-ch
 	if evt.Type != "stage_open" || evt.BotID != "helper" {
 		t.Fatalf("unexpected broadcast event: %+v", evt)
+	}
+
+	// OpenBotStage supports kind=file, kind=desktop, kind=browser, autoOpen, and silent flags.
+	fileSt, err := h.OpenBotStage("helper", StageOpenPayload{
+		Kind:     "file",
+		Path:     "memory/notes.md",
+		AutoOpen: true,
+	})
+	if err != nil {
+		t.Fatalf("OpenBotStage file: %v", err)
+	}
+	if fileSt.ID != "file:memory/notes.md" || fileSt.Title != "notes.md" || fileSt.Subtitle != "memory/notes.md" || !fileSt.AutoOpen {
+		t.Fatalf("unexpected file stage payload: %+v", fileSt)
+	}
+
+	deskSt, err := h.OpenBotStage("helper", StageOpenPayload{
+		Kind:   "desktop",
+		Silent: true,
+	})
+	if err != nil {
+		t.Fatalf("OpenBotStage desktop: %v", err)
+	}
+	if deskSt.ID != "desktop" || deskSt.Target != "local" {
+		t.Fatalf("unexpected desktop stage payload: %+v", deskSt)
+	}
+
+	browserSt, err := h.OpenBotStage("helper", StageOpenPayload{
+		Kind:  "browser",
+		Title: "Docs",
+		URL:   "https://example.com",
+	})
+	if err != nil {
+		t.Fatalf("OpenBotStage browser: %v", err)
+	}
+	if browserSt.Subtitle != "https://example.com" {
+		t.Fatalf("unexpected browser stage payload: %+v", browserSt)
+	}
+
+	latest := h.getBotLatestStage("helper")
+	if latest == nil || latest.Kind != "browser" || latest.URL != "https://example.com" {
+		t.Fatalf("unexpected latest stage cached on hub: %+v", latest)
+	}
+
+	statuses, err := h.Status("helper")
+	if err != nil || len(statuses) != 1 || statuses[0].LatestStage == nil || statuses[0].LatestStage.Kind != "browser" {
+		t.Fatalf("expected BotStatus.LatestStage to be populated, got %+v (err=%v)", statuses, err)
+	}
+}
+
+func TestOpenBotStageTask(t *testing.T) {
+	store, err := state.NewStore(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	h, _, _ := newWorkspaceTestHub(t)
+	h.store = store
+	h.lanes["other"] = &botLane{bot: config.BotConfig{ID: "other", Name: "Other"}}
+
+	if _, err := store.CreateBotTask(state.BotTask{
+		ID:        "tsk_alpha",
+		BotID:     "helper",
+		Kind:      state.TaskKindWorker,
+		Title:     "Inspect codebase",
+		Prompt:    "Analyze stage tabs",
+		Status:    state.TaskStatusRunning,
+		DeviceID:  "mac-mini",
+		Harness:   "claude",
+		Delivery:  state.TaskDeliveryReceipt,
+		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := h.OpenBotStage("other", StageOpenPayload{
+		Kind:   "task",
+		TaskID: "tsk_alpha",
+	}); err == nil {
+		t.Fatalf("expected error opening another bot's task on stage")
+	}
+
+	out, err := h.OpenBotStage("helper", StageOpenPayload{
+		Kind:   "task",
+		TaskID: "tsk_alpha",
+	})
+	if err != nil {
+		t.Fatalf("OpenBotStage task: %v", err)
+	}
+	if out.ID != "task:tsk_alpha" || out.TaskID != "tsk_alpha" || out.Title != "Inspect codebase" {
+		t.Fatalf("unexpected task stage output: %+v", out)
+	}
+	if !strings.Contains(out.Subtitle, "mac-mini") || !strings.Contains(out.Subtitle, "running") {
+		t.Fatalf("expected task metadata in subtitle, got %q", out.Subtitle)
+	}
+
+	statuses, err := h.Status("helper")
+	if err != nil || len(statuses) != 1 || statuses[0].LatestStage == nil {
+		t.Fatalf("expected latestStage in BotStatus, got %+v err=%v", statuses, err)
+	}
+	if statuses[0].LatestStage.Kind != "task" || statuses[0].LatestStage.TaskID != "tsk_alpha" {
+		t.Fatalf("unexpected LatestStage: %+v", statuses[0].LatestStage)
+	}
+
+	msgs, err := store.ListMessages("helper", 10)
+	if err != nil || len(msgs) != 1 || msgs[0].Stage == nil || msgs[0].Stage.TaskID != "tsk_alpha" {
+		t.Fatalf("expected stage jump card message with taskId, got %+v err=%v", msgs, err)
 	}
 }

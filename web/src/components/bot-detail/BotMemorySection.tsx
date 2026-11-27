@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import type { MemoryResponse, MemoryStatusFilter, ResolvedLang, SettingsData } from '../../types';
+import type { MemoryResponse, MemoryStatusFilter, ResolvedLang } from '../../types';
 import { translate } from '../../lib/i18n';
 import {
   listMemories,
@@ -14,10 +14,8 @@ import { MemoryItemRow } from '../memory/MemoryItemRow';
 interface BotMemorySectionProps {
   open: boolean;
   botId: string;
-  settings?: SettingsData | null;
   lang: ResolvedLang;
   onToast: (msg: string) => void;
-  onSettingsUpdated?: (s: SettingsData) => void;
 }
 
 const BOT_STATUS_TABS: readonly [MemoryStatusFilter, string][] = [

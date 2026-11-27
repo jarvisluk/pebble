@@ -5,11 +5,75 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
+	"time"
 )
+
+var (
+	secretPatternRe = regexp.MustCompile(`(?i)\b(sk-[a-zA-Z0-9._-]{10,}|tvly-[a-zA-Z0-9._-]{10,}|AIza[0-9A-Za-z_-]{20,})\b`)
+	bearerSecretRe  = regexp.MustCompile(`(?i)(Bearer\s+)[a-zA-Z0-9._-]{10,}`)
+
+	runMagpieOutput = func(ctx context.Context, args ...string) ([]byte, error) {
+		cmd := exec.CommandContext(ctx, magpieBin(), args...)
+		cmd.Env = augmentedEnv(nil)
+		return cmd.Output()
+	}
+	runMagpieCombined = func(ctx context.Context, args ...string) ([]byte, error) {
+		cmd := exec.CommandContext(ctx, magpieBin(), args...)
+		cmd.Env = augmentedEnv(nil)
+		return cmd.CombinedOutput()
+	}
+)
+
+func redactSecrets(s string) string {
+	s = secretPatternRe.ReplaceAllStringFunc(s, func(m string) string {
+		if len(m) <= 8 {
+			return "***"
+		}
+		return m[:4] + "…" + m[len(m)-4:]
+	})
+	s = bearerSecretRe.ReplaceAllString(s, "${1}***")
+	return s
+}
+
+func magpieBin() string {
+	if p := strings.TrimSpace(os.Getenv("MAGPIE_BIN")); p != "" {
+		return p
+	}
+	if p, ok := findBinary("magpie"); ok {
+		return p
+	}
+	if runtime.GOOS == "darwin" {
+		const appBin = "/Applications/magpie.app/Contents/MacOS/magpie"
+		if info, err := os.Stat(appBin); err == nil && !info.IsDir() {
+			return appBin
+		}
+	}
+	if runtime.GOOS == "windows" {
+		if local := os.Getenv("LOCALAPPDATA"); local != "" {
+			winBin := filepath.Join(local, "magpie", "magpie.exe")
+			if info, err := os.Stat(winBin); err == nil && !info.IsDir() {
+				return winBin
+			}
+		}
+	}
+	return "magpie"
+}
+
+func magpieInstalled() bool {
+	bin := magpieBin()
+	if filepath.IsAbs(bin) {
+		info, err := os.Stat(bin)
+		return err == nil && !info.IsDir()
+	}
+	_, err := exec.LookPath(bin)
+	return err == nil
+}
 
 // MagpieMemoryItem represents one memory record returned by `magpie tool memory_search`.
 type MagpieMemoryItem struct {
@@ -258,27 +322,20 @@ func magpieDataDirs(ctx context.Context) (string, string) {
 	if !magpieInstalled() {
 		return defFiles, defCache
 	}
-	pair := dataDirsCache.get(func() ([2]string, bool) {
-		out, err := runMagpieOutput(ctx, "data")
-		if err != nil {
-			return [2]string{defFiles, defCache}, false
-		}
-		f, c := parseMagpieDataDirs(string(out))
-		if f == "" {
-			f = defFiles
-		}
-		if c == "" {
-			c = defCache
-		}
-		return [2]string{f, c}, true
-	})
-	if pair[0] == "" {
-		pair[0] = defFiles
+	cctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	out, err := runMagpieOutput(cctx, "data")
+	if err != nil {
+		return defFiles, defCache
 	}
-	if pair[1] == "" {
-		pair[1] = defCache
+	f, c := parseMagpieDataDirs(string(out))
+	if f == "" {
+		f = defFiles
 	}
-	return pair[0], pair[1]
+	if c == "" {
+		c = defCache
+	}
+	return f, c
 }
 
 func detectMagpieMemorySemanticStatus(filesDir, cacheDir string) *MagpieMemorySemanticStatus {

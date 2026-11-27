@@ -132,6 +132,7 @@ internal fun androidx.compose.foundation.layout.BoxScope.ChatComposer(
     onInterrupt: () -> Unit,
     onSubmit: () -> Unit,
     onError: (String) -> Unit,
+    topDock: (@Composable () -> Unit)? = null,
 ) {
     val p = LocalPalette.current
     val scope = rememberCoroutineScope()
@@ -161,6 +162,7 @@ internal fun androidx.compose.foundation.layout.BoxScope.ChatComposer(
                 ),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+        topDock?.invoke()
         if (showSlashAC || showMentionAC) {
             Surface(
                 color = p.card,

@@ -54,9 +54,6 @@ func TestDefaultModelFor(t *testing.T) {
 		want         string
 	}{
 		{"empty", "", nil, "opencode", ""},
-		{"magpie on opencode", "magpie/mac-mini/auto/sonnet", nil, "opencode", "magpie/mac-mini/auto/sonnet"},
-		{"magpie on claude strips prefix", "magpie/mac-mini/auto/sonnet", nil, "claude", "mac-mini/auto/sonnet"},
-		{"magpie on dsh", "magpie/mac-mini/auto/sonnet", nil, "dsh", "magpie/mac-mini/auto/sonnet"},
 		{"provider/model on opencode", "anthropic/claude-sonnet-4-5", nil, "opencode", "anthropic/claude-sonnet-4-5"},
 		{"provider/model on pi", "anthropic/claude-sonnet-4-5", nil, "pi", "anthropic/claude-sonnet-4-5"},
 		{"provider/model ignored on claude", "anthropic/claude-sonnet-4-5", nil, "claude", ""},
@@ -71,6 +68,26 @@ func TestDefaultModelFor(t *testing.T) {
 		if got := cfg.DefaultModelFor(tc.harness); got != tc.want {
 			t.Errorf("%s: DefaultModelFor(%q) = %q, want %q", tc.name, tc.harness, got, tc.want)
 		}
+	}
+}
+
+func TestLegacyMagpieFieldsIgnoredOnLoad(t *testing.T) {
+	root := t.TempDir()
+	cfgDir := filepath.Join(root, "config")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	raw := `{"modelAccess":"magpie","magpieWebUrl":"https://magpie.example.com","bots":[{"id":"a"}]}`
+	cfgPath := filepath.Join(cfgDir, "bots.json")
+	if err := os.WriteFile(cfgPath, []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _, err := Load(root, cfgPath)
+	if err != nil {
+		t.Fatalf("expected legacy magpie fields to load cleanly, got error: %v", err)
+	}
+	if len(cfg.Bots) != 1 || cfg.Bots[0].ID != "a" {
+		t.Fatalf("unexpected bots: %+v", cfg.Bots)
 	}
 }
 
@@ -214,7 +231,7 @@ func TestEnsureStarterConfig(t *testing.T) {
 }
 
 func TestScheduleConfigNormalizationAndValidation(t *testing.T) {
-	t.Setenv("TEST_ROUTINE_MODEL", "magpie/mac-mini/auto/flash")
+	t.Setenv("TEST_ROUTINE_MODEL", "openai/gpt-4o-mini")
 
 	root := t.TempDir()
 	cfg := &HubConfig{ProjectRoot: root}
@@ -246,7 +263,7 @@ func TestScheduleConfigNormalizationAndValidation(t *testing.T) {
 	if bot.Schedules[0].ID != "morning-brief" {
 		t.Fatalf("expected slugified ID morning-brief, got %q", bot.Schedules[0].ID)
 	}
-	if bot.Schedules[0].Model != "magpie/mac-mini/auto/flash" {
+	if bot.Schedules[0].Model != "openai/gpt-4o-mini" {
 		t.Fatalf("expected expanded Model, got %q", bot.Schedules[0].Model)
 	}
 	if bot.Schedules[0].MainDelivery != RoutineDeliveryReceipt {
@@ -296,7 +313,7 @@ func TestDesktopWorkerConfigAndHasDesktopModel(t *testing.T) {
 	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("TEST_DESK_MODEL", "magpie/mac-mini/auto/flash")
+	t.Setenv("TEST_DESK_MODEL", "anthropic/claude-haiku-4-5")
 	cfgPath := filepath.Join(cfgDir, "bots.json")
 	if err := os.WriteFile(cfgPath, []byte(`{"desktopHarness":"opencode","desktopModel":"${TEST_DESK_MODEL}","bots":[{"id":"a"}]}`), 0o600); err != nil {
 		t.Fatal(err)
@@ -305,7 +322,7 @@ func TestDesktopWorkerConfigAndHasDesktopModel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.DesktopHarness != "opencode" || cfg.DesktopModel != "magpie/mac-mini/auto/flash" {
+	if cfg.DesktopHarness != "opencode" || cfg.DesktopModel != "anthropic/claude-haiku-4-5" {
 		t.Fatalf("unexpected desktop worker config: harness=%q model=%q", cfg.DesktopHarness, cfg.DesktopModel)
 	}
 	if !HasDesktopModel(cfgPath) {
@@ -572,7 +589,7 @@ func TestWorkspaceSkillProvisioningAndValidateModelID(t *testing.T) {
 		t.Fatalf("invalid pebble-setup SKILL.md frontmatter or stale reference")
 	}
 
-	for _, valid := range []string{"", "sonnet", "magpie/mac-mini/auto/sonnet", "anthropic/claude-sonnet-4-5"} {
+	for _, valid := range []string{"", "sonnet", "openai/gpt-4o-mini", "anthropic/claude-sonnet-4-5"} {
 		if err := ValidateModelID(valid); err != nil {
 			t.Fatalf("ValidateModelID(%q) unexpected error: %v", valid, err)
 		}
@@ -688,4 +705,58 @@ func TestLegacyMigrationLookupEnvAndResolveBinary(t *testing.T) {
 		t.Fatalf("unexpected migrated instructions: %v", ocDoc.Instructions)
 	}
 }
+
+func TestDeviceTokensAndNodeConfigLoad(t *testing.T) {
+	root := t.TempDir()
+	cfgDir := filepath.Join(root, "config")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("DEV_TOK_ENV", "expanded-dev-tok")
+	raw := `{
+		"http": {
+			"apiToken": "admin-tok",
+			"deviceTokens": [
+				{"id": "dev-1", "name": "Studio", "token": "${DEV_TOK_ENV}", "scopes": ["node:agent"]}
+			]
+		},
+		"node": {
+			"enabled": true,
+			"id": "studio",
+			"maxPermissionMode": "EDIT",
+			"workspaces": [
+				{"id": "repo", "name": "Repo", "path": "./repos/app", "isGit": true, "defaultBranch": "main"}
+			]
+		},
+		"bots": [{"id": "a"}]
+	}`
+	if err := os.WriteFile(filepath.Join(cfgDir, "bots.json"), []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, _, err := Load(root, "")
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if len(cfg.HTTP.DeviceTokens) != 1 || cfg.HTTP.DeviceTokens[0].Token != "expanded-dev-tok" {
+		t.Fatalf("unexpected deviceTokens: %+v", cfg.HTTP.DeviceTokens)
+	}
+	if cfg.Node == nil || cfg.Node.MaxPermissionMode != PermissionModeEdit {
+		t.Fatalf("unexpected node config: %+v", cfg.Node)
+	}
+	wantPath := filepath.Join(root, "repos", "app")
+	if len(cfg.Node.Workspaces) != 1 || cfg.Node.Workspaces[0].Path != wantPath {
+		t.Fatalf("unexpected node workspaces: %+v (want path %q)", cfg.Node.Workspaces, wantPath)
+	}
+
+	// Invalid maxPermissionMode must fail Load.
+	badRaw := `{"node": {"maxPermissionMode": "superuser"}, "bots": [{"id": "a"}]}`
+	if err := os.WriteFile(filepath.Join(cfgDir, "bots.json"), []byte(badRaw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Load(root, ""); err == nil {
+		t.Fatal("expected invalid node.maxPermissionMode to fail Load")
+	}
+}
+
 

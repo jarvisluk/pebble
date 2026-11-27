@@ -24,7 +24,6 @@ interface MemoryTabProps {
   lang: ResolvedLang;
   onToast: (msg: string) => void;
   onSettingsUpdated: (s: SettingsData) => void;
-  onAfterMagpieInstall?: (fresh: SettingsData) => void;
   onDirtyChange: (dirty: boolean) => void;
   saveRef: React.MutableRefObject<(() => Promise<boolean>) | null>;
   resetRef: React.MutableRefObject<(() => void) | null>;
@@ -212,7 +211,6 @@ export const MemoryTab: React.FC<MemoryTabProps> = ({
   const counts = memData?.counts ?? memStatusData?.counts;
   const candidateCount = counts?.candidate ?? 0;
   const semanticInfo = memData?.semantic ?? memStatusData?.semantic;
-
   return (
     <div id="sTabMemory" className="tab-pane tab-anim">
       <section className="set-card">
@@ -292,7 +290,6 @@ export const MemoryTab: React.FC<MemoryTabProps> = ({
             </button>
           </div>
         </div>
-
         {memAddOpen && (
           <MemoryAddForm
             lang={lang}

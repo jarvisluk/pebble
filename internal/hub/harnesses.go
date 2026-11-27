@@ -30,7 +30,6 @@ type HarnessInfo struct {
 	Summary        string                         `json:"summary,omitempty"`
 	Permissions    harness.PermissionCapabilities `json:"permissions"`
 	Install        harness.HarnessInstallInfo     `json:"install"`
-	Magpie         harness.MagpieStatus           `json:"magpie"`
 }
 
 func (h *Hub) reloadHarness(kind string) {
@@ -89,8 +88,8 @@ func (h *Hub) HarnessKinds() []string {
 	return kinds
 }
 
-// Harnesses lists the registered harnesses with the model their bots
-// inherit and how magpie sees them.
+// Harnesses lists the registered harnesses with their configured default models
+// and live installation/authentication status.
 func (h *Hub) Harnesses(ctx context.Context) []HarnessInfo {
 	h.lanesMu.RLock()
 	var out []HarnessInfo
@@ -117,19 +116,14 @@ func (h *Hub) Harnesses(ctx context.Context) []HarnessInfo {
 		})
 	}
 	h.lanesMu.RUnlock()
-	magpieOK := harness.MagpieInstalled()
 	var wg sync.WaitGroup
 	for i := range out {
 		if !out[i].Installed {
-			out[i].Magpie = harness.MagpieStatus{Installed: magpieOK}
 			continue
 		}
 		wg.Add(1)
 		go func(hi *HarnessInfo) {
 			defer wg.Done()
-			if magpieOK {
-				hi.Magpie = harness.GetMagpieStatus(ctx, hi.ID)
-			}
 			hi.AuthStatus, hi.AuthDetail = harness.DetectHarnessAuthCached(ctx, hi.ID)
 		}(&out[i])
 	}
@@ -137,60 +131,13 @@ func (h *Hub) Harnesses(ctx context.Context) []HarnessInfo {
 	return out
 }
 
-// Models lists the models a harness offers: magpie's catalog (when installed)
-// merged with the harness's own models.
+// Models lists the available models reported by the harness's own CLI/runtime.
 func (h *Hub) Models(ctx context.Context, kind string) ([]string, error) {
-	return h.ModelsWithSource(ctx, kind, "")
-}
-
-// ModelsWithSource returns the available models for kind.
-// When source == "magpie", it returns Magpie gateway models for wiring that harness.
-// Otherwise it returns Magpie models only when kind is connected to Magpie, and
-// native CLI models when kind is running in native mode.
-func (h *Hub) ModelsWithSource(ctx context.Context, kind, source string) ([]string, error) {
 	r, err := h.registry.Get(kind)
 	if err != nil {
 		return nil, err
 	}
-	if strings.EqualFold(strings.TrimSpace(source), "magpie") {
-		if !harness.MagpieInstalled() {
-			return []string{}, nil
-		}
-		return harness.MagpieModels(ctx, kind), nil
-	}
-	var nativeModel string
-	if harness.MagpieInstalled() {
-		st := harness.GetMagpieStatus(ctx, kind)
-		if st.Connected {
-			if models := harness.MagpieModels(ctx, kind); len(models) > 0 {
-				return models, nil
-			}
-		}
-		nativeModel = strings.TrimSpace(st.NativeModel)
-	}
-	models, err := r.Models(ctx)
-	if err != nil {
-		if nativeModel != "" {
-			return []string{nativeModel}, nil
-		}
-		return nil, err
-	}
-	if nativeModel != "" {
-		found := false
-		for _, m := range models {
-			if m == nativeModel {
-				found = true
-				break
-			}
-		}
-		if !found {
-			out := make([]string, 0, len(models)+1)
-			out = append(out, nativeModel)
-			out = append(out, models...)
-			models = out
-		}
-	}
-	return models, nil
+	return r.Models(ctx)
 }
 
 // WarmModelsCache pre-populates model lists for installed harnesses in parallel
@@ -209,52 +156,6 @@ func (h *Hub) WarmModelsCache(ctx context.Context) {
 		}(kind)
 	}
 	wg.Wait()
-}
-
-// MagpieConnect asks magpie to point a harness's CLI at its gateway, using
-// the given model or the harness's default, and reloads the harness when idle.
-func (h *Hub) MagpieConnect(ctx context.Context, kind, model string) error {
-	if _, err := h.registry.Get(kind); err != nil {
-		return err
-	}
-	h.lanesMu.RLock()
-	if strings.TrimSpace(model) == "" {
-		model = h.cfg.DefaultModelFor(kind)
-	}
-	h.lanesMu.RUnlock()
-	if err := harness.MagpieConnect(ctx, kind, model); err != nil {
-		return err
-	}
-	h.reloadHarness(kind)
-	return nil
-}
-
-// MagpieDisconnect asks magpie to restore a harness's CLI to its native config
-// (`magpie <agent> default`), and reloads the harness when idle.
-func (h *Hub) MagpieDisconnect(ctx context.Context, kind string) error {
-	if _, err := h.registry.Get(kind); err != nil {
-		return err
-	}
-	if err := harness.MagpieDisconnect(ctx, kind); err != nil {
-		return err
-	}
-	h.reloadHarness(kind)
-	return nil
-}
-
-// MagpieProviderAction invokes `magpie provider ...` and schedules harness reloads
-// when provider definitions change.
-func (h *Hub) MagpieProviderAction(ctx context.Context, req harness.MagpieProviderReq) (string, error) {
-	out, err := harness.MagpieProviderAction(ctx, req)
-	if err != nil {
-		return "", err
-	}
-	if req.Action != "test" {
-		for _, r := range h.registry.All() {
-			h.reloadHarness(r.Kind())
-		}
-	}
-	return out, nil
 }
 
 // ValidateHarnessKey reports whether kind is a registered harness ID.
@@ -304,7 +205,7 @@ func (h *Hub) ValidateModelForHarness(ctx context.Context, kind, model string) e
 	if _, err := h.registry.Get(kind); err != nil {
 		return err
 	}
-	models, err := h.ModelsWithSource(ctx, kind, "")
+	models, err := h.Models(ctx, kind)
 	if err != nil {
 		return err
 	}
@@ -323,9 +224,6 @@ func (h *Hub) ValidateModelForHarness(ctx context.Context, kind, model string) e
 			sample += fmt.Sprintf(" ... (total %d)", len(models))
 		}
 		return fmt.Errorf("model %q is not in %s's available model list [%s]; run `pebble settings models --harness %s` or pass --force for a custom model ID", model, kind, sample, kind)
-	}
-	if (kind == "claude" || kind == "codex") && strings.HasPrefix(model, "magpie/") {
-		return fmt.Errorf("harness %s expects bare model IDs without the 'magpie/' prefix (got %q)", kind, model)
 	}
 	return nil
 }

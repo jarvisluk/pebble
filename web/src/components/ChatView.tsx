@@ -2,14 +2,17 @@ import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 're
 import type {
   ActiveDesktopTarget,
   BotStatus,
+  BotTask,
   ChatMessage,
   HarnessInfo,
   MessageMedia,
+  NodeInfo,
   PendingApproval,
   PendingAttachment,
   PendingQuestion,
   PermissionMode,
   ResolvedLang,
+  StageRef,
   TakeoverRequest,
 } from '../types';
 import { uploadBotAttachment } from '../lib/api';
@@ -20,6 +23,7 @@ import type { ViewDir, ViewState } from '../lib/useViewTransition';
 import { ChatComposer } from './chat/ChatComposer';
 import { ChatHeader } from './chat/ChatHeader';
 import { ChatMessageList, type TimelineEntry } from './chat/ChatMessageList';
+import { TaskStrip } from './chat/TaskStrip';
 import { isImageMedia, formatFileSize, MessageAttachments } from './chat/MessageAttachments';
 import { useChatAutocomplete } from './chat/useChatAutocomplete';
 
@@ -33,6 +37,9 @@ interface ChatViewProps {
   bots: BotStatus[];
   activeBot: BotStatus | undefined;
   messages: ChatMessage[];
+  tasks?: BotTask[];
+  taskToolMap?: Record<string, string>;
+  nodes?: NodeInfo[];
   seenIds: Set<string>;
   toolName?: string;
   takeovers: TakeoverRequest[];
@@ -41,13 +48,15 @@ interface ChatViewProps {
   questions: PendingQuestion[];
   harnesses?: HarnessInfo[];
   deskOpen: boolean;
+  hasUnreadLatestStage?: boolean;
   inDesktopSidebar?: boolean;
   lang: ResolvedLang;
   inputRef: React.RefObject<HTMLTextAreaElement | null>;
   pendingInsert?: { seq: number; text: string } | null;
   onOpenMenu: () => void;
   onToggleDesktop: () => void;
-  onOpenFiles?: () => void;
+  onOpenStage?: () => void;
+  onOpenStageRef?: (ref: StageRef) => void;
   onOpenDesktopTarget: (target: string) => void;
   onSwitchBackLocal?: () => void;
   onResolveTakeover: (to: TakeoverRequest) => void;
@@ -60,6 +69,7 @@ interface ChatViewProps {
   onReplyQuestion: (id: string, answers: Record<string, unknown>, cancelled: boolean) => Promise<void>;
   onChangePermissionMode?: (botId: string, mode: PermissionMode) => Promise<void>;
   onOpenDetail: () => void;
+  onInspectTask?: (taskId: string) => void;
   onOpenCollab?: (peerId: string) => void;
   onOpenCreate: () => void;
   onSelectBot?: (id: string) => void;
@@ -76,6 +86,9 @@ export const ChatView: React.FC<ChatViewProps> = ({
   bots,
   activeBot,
   messages,
+  tasks = [],
+  taskToolMap = {},
+  nodes = [],
   seenIds,
   toolName,
   takeovers,
@@ -84,13 +97,15 @@ export const ChatView: React.FC<ChatViewProps> = ({
   questions,
   harnesses,
   deskOpen,
+  hasUnreadLatestStage = false,
   inDesktopSidebar = false,
   lang,
   inputRef,
   pendingInsert,
   onOpenMenu,
   onToggleDesktop,
-  onOpenFiles,
+  onOpenStage,
+  onOpenStageRef,
   onOpenDesktopTarget,
   onSwitchBackLocal,
   onResolveTakeover,
@@ -98,6 +113,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
   onReplyQuestion,
   onChangePermissionMode,
   onOpenDetail,
+  onInspectTask,
   onOpenCollab,
   onOpenCreate,
   onSelectBot,
@@ -390,10 +406,11 @@ export const ChatView: React.FC<ChatViewProps> = ({
         takeovers={takeovers}
         activeDeskTarget={activeDeskTarget}
         deskOpen={deskOpen}
+        hasUnreadLatestStage={hasUnreadLatestStage}
         lang={lang}
         onOpenMenu={onOpenMenu}
         onToggleDesktop={onToggleDesktop}
-        onOpenFiles={onOpenFiles}
+        onOpenStage={onOpenStage}
         onOpenDesktopTarget={onOpenDesktopTarget}
         onSwitchBackLocal={onSwitchBackLocal}
         onResolveTakeover={onResolveTakeover}
@@ -417,12 +434,24 @@ export const ChatView: React.FC<ChatViewProps> = ({
             lang={lang}
             onOpenCreate={onOpenCreate}
             onOpenCollab={onOpenCollab}
+            onOpenStageRef={onOpenStageRef}
             onPreviewImage={setPreviewImg}
             onReplyApproval={onReplyApproval}
             onReplyQuestion={onReplyQuestion}
           />
 
           <ChatComposer
+            topDock={
+              !inDesktopSidebar && activeBot && onInspectTask ? (
+                <TaskStrip
+                  tasks={tasks}
+                  taskToolMap={taskToolMap}
+                  nodes={nodes}
+                  lang={lang}
+                  onInspectTask={onInspectTask}
+                />
+              ) : null
+            }
             composerWrapRef={composerWrapRef}
             fileInputRef={fileInputRef}
             inputRef={inputRef}

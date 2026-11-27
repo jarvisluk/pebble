@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import type { ConfirmOptions, ResolvedLang, RoutineItem, RoutineRun } from '../../types';
+import type { ConfirmOptions, ResolvedLang, RoutineItem } from '../../types';
 import { api } from '../../lib/api';
 import { translate } from '../../lib/i18n';
 import { formatStamp } from '../../lib/theme';
@@ -42,8 +42,6 @@ export const BotRoutinesSection: React.FC<BotRoutinesSectionProps> = ({
   const [rtPrompt, setRtPrompt] = useState('');
   const [rtEnabled, setRtEnabled] = useState(true);
   const [rtSaving, setRtSaving] = useState(false);
-  const [runsOpenId, setRunsOpenId] = useState('');
-  const [runsMap, setRunsMap] = useState<Record<string, RoutineRun[]>>({});
 
   const loadRoutines = async (targetBotId: string) => {
     if (!routines.length) setRtLoading(true);
@@ -62,7 +60,6 @@ export const BotRoutinesSection: React.FC<BotRoutinesSectionProps> = ({
     if (!open || !botId) return;
     setRtFormOpen(false);
     setRtErr('');
-    setRunsOpenId('');
     void loadRoutines(botId);
   }, [open, botId]);
 
@@ -415,8 +412,6 @@ export const BotRoutinesSection: React.FC<BotRoutinesSectionProps> = ({
           ]
             .filter(Boolean)
             .join(' · ');
-          const runsOpen = runsOpenId === rt.id;
-          const runs = runsMap[rt.id] || [];
 
           return (
             <div key={rt.id} className="mem-row">
@@ -472,25 +467,6 @@ export const BotRoutinesSection: React.FC<BotRoutinesSectionProps> = ({
                   >
                     {rt.running ? t('rtRunningBtn') : t('rtRunBtn')}
                   </button>
-                  <button
-                    type="button"
-                    className="mp"
-                    onClick={async () => {
-                      if (runsOpen) {
-                        setRunsOpenId('');
-                        return;
-                      }
-                      setRunsOpenId(rt.id);
-                      try {
-                        const d = await api<{ runs?: RoutineRun[] }>(
-                          `/api/bots/${encodeURIComponent(botId)}/routine-runs?routineId=${encodeURIComponent(rt.id)}&limit=8`
-                        );
-                        setRunsMap((prev) => ({ ...prev, [rt.id]: d.runs || [] }));
-                      } catch {}
-                    }}
-                  >
-                    {t('rtRunsBtn')}
-                  </button>
                   <button type="button" className="mp" onClick={() => openRoutineForm(rt)}>
                     {t('rtEditBtn')}
                   </button>
@@ -532,41 +508,6 @@ export const BotRoutinesSection: React.FC<BotRoutinesSectionProps> = ({
               </div>
               <div className="mem-time">{meta}</div>
               <div className="mem-txt">{rt.prompt}</div>
-              {runsOpen && (
-                <div className="rt-runs">
-                  {runs.length === 0 ? (
-                    <div className="set-card-desc">{t('rtRunsEmpty')}</div>
-                  ) : (
-                    runs.map((r, idx) => {
-                      const stText =
-                        r.status === 'ok'
-                          ? t('rtStatusOk')
-                          : r.status === 'silent'
-                            ? t('rtStatusSilent')
-                            : t('rtStatusError');
-                      const costTxt = r.costUsd ? ` · $${Number(r.costUsd).toFixed(4)}` : '';
-                      return (
-                        <div key={r.id || idx} className="rt-run">
-                          <div className="rt-run-hd">
-                            <span>
-                              {stText} · {r.trigger} · {(r.durationMs / 1000).toFixed(1)}s{costTxt}
-                            </span>
-                            <span>{formatStamp(r.finishedAt, lang)}</span>
-                          </div>
-                          {r.error ? (
-                            <div className="rt-run-err">{r.error}</div>
-                          ) : r.output ? (
-                            <div>
-                              {r.output.slice(0, 180)}
-                              {r.output.length > 180 ? '…' : ''}
-                            </div>
-                          ) : null}
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
-              )}
             </div>
           );
         })

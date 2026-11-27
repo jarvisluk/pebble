@@ -2,34 +2,54 @@ import React from 'react';
 import type {
   ActiveDesktopTarget,
   BotStatus,
+  BotTask,
   ChatMessage,
+  ConfirmOptions,
   HarnessInfo,
+  NodeInfo,
   PendingApproval,
   PendingQuestion,
   PermissionMode,
   ResolvedLang,
   ScreenState,
-  StageKind,
+  StageRef,
   StageTab,
   TakeoverRequest,
 } from '../types';
 import { translate } from '../lib/i18n';
+import {
+  type BotStageState,
+  createDesktopTab,
+  createFileTab,
+  createFilesTab,
+  createNewTab,
+  createTaskTab,
+  ensureNonEmptyStageState,
+} from '../lib/stageTabs';
 import { botColor, contrastText } from '../lib/theme';
 import { ChatView } from './ChatView';
 import { DesktopStage } from './DesktopStage';
 import { WorkspaceFilesPane } from './WorkspaceFilesPane';
+import { StageExtensionPane } from './stage/StageExtensionPane';
+import { StageFilePreviewPane } from './stage/StageFilePreviewPane';
+import { StageNewTabPane } from './stage/StageNewTabPane';
+import { StageTabBar } from './stage/StageTabBar';
+import { StageTaskPane } from './stage/StageTaskPane';
 
 interface StageShellProps {
   deskOpen: boolean;
   deskChatOpen: boolean;
-  stageKind: StageKind;
-  stageTabs: StageTab[];
-  activeStageTabId: string;
+  botStageState?: BotStageState;
   canUseFiles: boolean;
   bots: BotStatus[];
   activeBot?: BotStatus;
   activeBotId: string | null;
   msgsMap: Record<string, ChatMessage[]>;
+  tasksMap: Record<string, BotTask[]>;
+  taskToolMap: Record<string, string>;
+  taskChunksMap: Record<string, string>;
+  taskEventSeqMap: Record<string, number>;
+  nodes: NodeInfo[];
   seenIds: Set<string>;
   toolMap: Record<string, string>;
   takeovers: TakeoverRequest[];
@@ -43,21 +63,22 @@ interface StageShellProps {
   activeDeskTarget: ActiveDesktopTarget;
   screenSeq: number;
   liveScreen: ScreenState | null;
-  filesOpenPath: string;
-  filesOpenSeq: number;
   supportsWS: boolean;
   supportsHEVC: boolean;
   onUnsupportedCap: (cap: string) => void;
   setDeskOpen: React.Dispatch<React.SetStateAction<boolean>>;
   setDeskChatOpen: React.Dispatch<React.SetStateAction<boolean>>;
   setDeskTarget: React.Dispatch<React.SetStateAction<string>>;
-  setStageKind: React.Dispatch<React.SetStateAction<StageKind>>;
-  setActiveStageTabId: React.Dispatch<React.SetStateAction<string>>;
-  setStageTabs: React.Dispatch<React.SetStateAction<StageTab[]>>;
+  onSelectStageTab: (tabId: string) => void;
+  onCloseStageTab: (tabId: string) => void;
+  onOpenStageTab: (tab: StageTab, replaceNew?: boolean) => void;
+  onOpenStageRef: (ref: StageRef) => void;
   setCollabPeerId: React.Dispatch<React.SetStateAction<string | null>>;
   setCreateOpen: React.Dispatch<React.SetStateAction<boolean>>;
   setStageInsert: React.Dispatch<React.SetStateAction<{ seq: number; text: string } | null>>;
   setTakeovers: React.Dispatch<React.SetStateAction<TakeoverRequest[]>>;
+  onConfirm: React.Dispatch<React.SetStateAction<ConfirmOptions | null>>;
+  onTaskUpdated: (task: BotTask) => void;
   closeAllOverlays: () => void;
   selectBot: (id: string) => Promise<void>;
   selectDesktopTarget: (next: string) => Promise<void>;
@@ -73,6 +94,7 @@ interface StageShellProps {
   handleResolveTakeover: (to: TakeoverRequest) => Promise<void>;
   handleSendMessage: (text: string, mediaIds?: string[]) => Promise<void>;
   handleInterrupt: () => Promise<void>;
+  onInspectTask: (taskId: string) => void;
   onOpenPermissions: () => void;
   showToast: (msg: string) => void;
 }
@@ -80,14 +102,17 @@ interface StageShellProps {
 export const StageShell: React.FC<StageShellProps> = ({
   deskOpen,
   deskChatOpen,
-  stageKind,
-  stageTabs,
-  activeStageTabId,
+  botStageState,
   canUseFiles,
   bots,
   activeBot,
   activeBotId,
   msgsMap,
+  tasksMap,
+  taskToolMap,
+  taskChunksMap,
+  taskEventSeqMap,
+  nodes,
   seenIds,
   toolMap,
   takeovers,
@@ -101,21 +126,22 @@ export const StageShell: React.FC<StageShellProps> = ({
   activeDeskTarget,
   screenSeq,
   liveScreen,
-  filesOpenPath,
-  filesOpenSeq,
   supportsWS,
   supportsHEVC,
   onUnsupportedCap,
   setDeskOpen,
   setDeskChatOpen,
   setDeskTarget,
-  setStageKind,
-  setActiveStageTabId,
-  setStageTabs,
+  onSelectStageTab,
+  onCloseStageTab,
+  onOpenStageTab,
+  onOpenStageRef,
   setCollabPeerId,
   setCreateOpen,
   setStageInsert,
   setTakeovers,
+  onConfirm,
+  onTaskUpdated,
   closeAllOverlays,
   selectBot,
   selectDesktopTarget,
@@ -126,212 +152,229 @@ export const StageShell: React.FC<StageShellProps> = ({
   handleResolveTakeover,
   handleSendMessage,
   handleInterrupt,
+  onInspectTask,
   onOpenPermissions,
   showToast,
 }) => {
   const t = (k: string, vars?: Record<string, string | number>) => translate(lang, k, vars);
 
-  return (
-  <div
-    id="deskShell"
-    className={`desk-fs-shell stage-shell${deskChatOpen ? ' chat-open' : ''}`}
-    data-surface={stageKind === 'desktop' ? 'dark' : 'adaptive'}
-    hidden={!deskOpen}
-  >
-    {deskChatOpen && (
-      <div className="desk-chat-shade" onClick={() => setDeskChatOpen(false)} />
-    )}
-    <aside id="deskChatSide" className="desk-chat-side" hidden={!deskChatOpen}>
-      {deskChatOpen && (
-        <ChatView
-          hidden={false}
-          viewState="active"
-          viewDir="forward"
-          viewAnim={false}
-          bots={bots}
-          activeBot={activeBot}
-          messages={activeBotId ? msgsMap[activeBotId] || [] : []}
-          seenIds={seenIds}
-          toolName={activeBotId ? toolMap[activeBotId] : undefined}
-          takeovers={takeovers}
-          approvals={activeBotId ? approvals.filter((a) => a.botId === activeBotId) : []}
-          questions={activeBotId ? questions.filter((q) => q.botId === activeBotId) : []}
-          harnesses={harnesses}
-          deskOpen={deskOpen}
-          inDesktopSidebar
-          lang={lang}
-          inputRef={deskInputRef}
-          pendingInsert={stageInsert}
-          onReplyApproval={handleReplyApproval}
-          onReplyQuestion={handleReplyQuestion}
-          onChangePermissionMode={handleChangePermissionMode}
-          onOpenMenu={() => {}}
-          onToggleDesktop={() => {}}
-          onOpenDesktopTarget={(target) => {
-            setDeskTarget(target || 'local');
-            setStageKind('desktop');
-            setActiveStageTabId('desktop');
-          }}
-          onResolveTakeover={(to) => void handleResolveTakeover(to)}
-          onOpenDetail={() => {}}
-          onOpenCollab={(peerId) => {
-            setCollabPeerId(peerId);
-          }}
-          onOpenCreate={() => {
-            setDeskOpen(false);
-            closeAllOverlays();
-            setCreateOpen(true);
-          }}
-          onSelectBot={(id) => void selectBot(id)}
-          onCloseDesktopChat={() => setDeskChatOpen(false)}
-          onSendMessage={handleSendMessage}
-          onInterrupt={handleInterrupt}
-        />
-      )}
-    </aside>
-    <div className="desk-fs-main">
-      <header className="stage-topbar">
-        <div className="stage-topbar-left">
-          <button
-            type="button"
-            className={`stage-pill-btn${deskChatOpen ? ' on' : ''}`}
-            title={t('deskChatSidebarTitle')}
-            onClick={() => setDeskChatOpen((v) => !v)}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-            </svg>
-            <span>{activeBot?.name || t('stageChatToggle')}</span>
-          </button>
-          <nav className="stage-tabs" aria-label={t('stageTabsAria')}>
-            {canUseFiles && (
-              <button
-                type="button"
-                className={`stage-tab${activeStageTabId === 'files' ? ' active' : ''}`}
-                onClick={() => {
-                  setStageKind('files');
-                  setActiveStageTabId('files');
-                }}
-              >
-                {t('stageFilesTab')}
-              </button>
-            )}
-            <button
-              type="button"
-              className={`stage-tab${activeStageTabId === 'desktop' ? ' active' : ''}`}
-              onClick={() => {
-                setStageKind('desktop');
-                setActiveStageTabId('desktop');
-              }}
-            >
-              {t('stageDesktopTab')}
-            </button>
-            {stageTabs.map((tab) => (
-              <div key={tab.id} className={`stage-tab-wrap${activeStageTabId === tab.id ? ' active' : ''}`}>
-                <button
-                  type="button"
-                  className={`stage-tab${activeStageTabId === tab.id ? ' active' : ''}`}
-                  onClick={() => {
-                    setStageKind(tab.kind);
-                    setActiveStageTabId(tab.id);
-                  }}
-                >
-                  {tab.title}
-                </button>
-                {tab.closable !== false && (
-                  <button
-                    type="button"
-                    className="stage-tab-x"
-                    aria-label={t('close')}
-                    onClick={() => {
-                      setStageTabs((prev) => prev.filter((x) => x.id !== tab.id));
-                      if (activeStageTabId === tab.id) {
-                        const nextTab = canUseFiles ? 'files' : 'desktop';
-                        setStageKind(nextTab);
-                        setActiveStageTabId(nextTab);
-                      }
-                    }}
-                  >
-                    ×
-                  </button>
-                )}
-              </div>
-            ))}
-          </nav>
-        </div>
-        <button
-          type="button"
-          className="stage-pill-btn stage-close-btn"
-          title={t('stageClose')}
-          aria-label={t('stageClose')}
-          onClick={() => setDeskOpen(false)}
-        >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-            <path d="M6 6l12 12M18 6 6 18" />
-          </svg>
-        </button>
-      </header>
+  const stageState = ensureNonEmptyStageState(botStageState, t);
+  const activeTab =
+    stageState.tabs.find((x) => x.id === stageState.activeTabId) || stageState.tabs[0];
+  const hasDesktopTab = stageState.tabs.some((x) => x.kind === 'desktop');
+  const activeDesktopTarget =
+    (activeTab?.kind === 'desktop' && activeTab.target) || deskTarget || 'local';
+  const activeBotTasks = activeBotId ? tasksMap[activeBotId] || [] : [];
+  const activeTaskId =
+    activeTab?.kind === 'task'
+      ? activeTab.taskId ||
+        (activeTab.id.startsWith('task:') ? activeTab.id.slice('task:'.length) : activeTab.id)
+      : '';
+  const activeTask = activeTaskId
+    ? Object.values(tasksMap)
+        .flat()
+        .find((item) => item.id === activeTaskId) || null
+    : null;
 
-      {deskOpen && (
-        <>
-          <div className="stage-pane-slot" hidden={activeStageTabId !== 'desktop'}>
-            <DesktopStage
-              open={deskOpen && activeStageTabId === 'desktop'}
-              target={deskTarget}
-              activeDeskTarget={activeDeskTarget}
-              screenUpdateSeq={screenSeq}
-              liveScreen={liveScreen}
-              takeovers={takeovers}
-              chatOpen={deskChatOpen}
-              embeddedInStage
-              activeBotName={activeBot?.name}
-              lang={lang}
-              supportsWS={supportsWS}
-              supportsHEVC={supportsHEVC}
-              onUnsupportedCap={onUnsupportedCap}
-              onChangeTarget={(next) => void selectDesktopTarget(next)}
-              onActiveTargetSync={(next) => applyActiveDesktopTarget(next)}
-              onTakeoversChange={setTakeovers}
-              onResolveTakeover={handleResolveTakeover}
-              onToggleChat={() => setDeskChatOpen((v) => !v)}
-              onOpenPermissions={onOpenPermissions}
-              onClose={() => setDeskOpen(false)}
-            />
-          </div>
-          {canUseFiles && (
-            <div
-              className="stage-pane-slot"
-              hidden={activeStageTabId !== 'files'}
-              style={
-                activeBot
-                  ? ({
-                      '--bot-accent': botColor(activeBot.id, bots),
-                      '--bot-accent-text': contrastText(botColor(activeBot.id, bots)),
-                    } as React.CSSProperties)
-                  : undefined
-              }
-            >
-              <WorkspaceFilesPane
-                botId={activeBotId || ''}
-                initialPath={filesOpenPath}
-                openSeq={filesOpenSeq}
-                lang={lang}
-                onQuotePath={(relPath) => {
-                  setDeskChatOpen(true);
-                  setStageInsert({ seq: Date.now(), text: `@${relPath} ` });
-                }}
-                onToast={showToast}
-              />
-            </div>
-          )}
-          {activeStageTabId !== 'desktop' && activeStageTabId !== 'files' && (
-            <div className="ws-preview-empty">
-              {t('stagePlaceholderDesc', { kind: stageKind })}
-            </div>
-          )}
-        </>
+  const botAccentStyle: React.CSSProperties | undefined = activeBot
+    ? ({
+        '--bot-accent': botColor(activeBot.id, bots),
+        '--bot-accent-text': contrastText(botColor(activeBot.id, bots)),
+      } as React.CSSProperties)
+    : undefined;
+
+  return (
+    <div
+      id="deskShell"
+      className={`desk-fs-shell stage-shell${deskChatOpen ? ' chat-open' : ''}`}
+      data-surface="adaptive"
+      hidden={!deskOpen}
+    >
+      {deskChatOpen && (
+        <div className="desk-chat-shade" onClick={() => setDeskChatOpen(false)} />
       )}
+      <aside id="deskChatSide" className="desk-chat-side" hidden={!deskChatOpen}>
+        {deskChatOpen && (
+          <ChatView
+            hidden={false}
+            viewState="active"
+            viewDir="forward"
+            viewAnim={false}
+            bots={bots}
+            activeBot={activeBot}
+            messages={activeBotId ? msgsMap[activeBotId] || [] : []}
+            tasks={activeBotId ? tasksMap[activeBotId] || [] : []}
+            taskToolMap={taskToolMap}
+            nodes={nodes}
+            seenIds={seenIds}
+            toolName={activeBotId ? toolMap[activeBotId] : undefined}
+            takeovers={takeovers}
+            approvals={activeBotId ? approvals.filter((a) => a.botId === activeBotId) : []}
+            questions={activeBotId ? questions.filter((q) => q.botId === activeBotId) : []}
+            harnesses={harnesses}
+            deskOpen={deskOpen}
+            inDesktopSidebar
+            lang={lang}
+            inputRef={deskInputRef}
+            pendingInsert={stageInsert}
+            onReplyApproval={handleReplyApproval}
+            onReplyQuestion={handleReplyQuestion}
+            onChangePermissionMode={handleChangePermissionMode}
+            onOpenMenu={() => {}}
+            onToggleDesktop={() => {}}
+            onOpenDesktopTarget={(target) => {
+              const resolved = target || 'local';
+              setDeskTarget(resolved);
+              onOpenStageTab(createDesktopTab(t, resolved), false);
+            }}
+            onOpenStageRef={onOpenStageRef}
+            onResolveTakeover={(to) => void handleResolveTakeover(to)}
+            onOpenDetail={() => {}}
+            onInspectTask={onInspectTask}
+            onOpenCollab={(peerId) => {
+              setCollabPeerId(peerId);
+            }}
+            onOpenCreate={() => {
+              setDeskOpen(false);
+              closeAllOverlays();
+              setCreateOpen(true);
+            }}
+            onSelectBot={(id) => void selectBot(id)}
+            onCloseDesktopChat={() => setDeskChatOpen(false)}
+            onSendMessage={handleSendMessage}
+            onInterrupt={handleInterrupt}
+          />
+        )}
+      </aside>
+
+      <div className="desk-fs-main" style={botAccentStyle}>
+        <StageTabBar
+          tabs={stageState.tabs}
+          activeTabId={activeTab.id}
+          chatOpen={deskChatOpen}
+          botName={activeBot?.name}
+          lang={lang}
+          onBack={() => setDeskOpen(false)}
+          onToggleChat={() => setDeskChatOpen((v) => !v)}
+          onSelectTab={onSelectStageTab}
+          onCloseTab={onCloseStageTab}
+          onNewTab={() => onOpenStageTab(createNewTab(t), false)}
+        />
+
+        {deskOpen && (
+          <div className="stage-body">
+            {hasDesktopTab && (
+              <div className="stage-pane-slot stage-desktop-slot" hidden={activeTab.kind !== 'desktop'}>
+                <DesktopStage
+                  open={deskOpen && activeTab.kind === 'desktop'}
+                  target={activeDesktopTarget}
+                  activeDeskTarget={activeDeskTarget}
+                  screenUpdateSeq={screenSeq}
+                  liveScreen={liveScreen}
+                  takeovers={takeovers}
+                  chatOpen={deskChatOpen}
+                  embeddedInStage
+                  activeBotName={activeBot?.name}
+                  lang={lang}
+                  supportsWS={supportsWS}
+                  supportsHEVC={supportsHEVC}
+                  onUnsupportedCap={onUnsupportedCap}
+                  onChangeTarget={(next) => void selectDesktopTarget(next)}
+                  onActiveTargetSync={(next) => applyActiveDesktopTarget(next)}
+                  onTakeoversChange={setTakeovers}
+                  onResolveTakeover={handleResolveTakeover}
+                  onToggleChat={() => setDeskChatOpen((v) => !v)}
+                  onOpenPermissions={onOpenPermissions}
+                  onClose={() => setDeskOpen(false)}
+                />
+              </div>
+            )}
+
+            {activeTab.kind === 'new' && (
+              <div className="stage-pane-slot">
+                <StageNewTabPane
+                  canUseFiles={canUseFiles}
+                  tasks={activeBotTasks}
+                  nodes={nodes}
+                  lang={lang}
+                  onOpenFiles={() => onOpenStageTab(createFilesTab(t), true)}
+                  onOpenDesktop={() => {
+                    const target = activeBot?.desktopTarget || activeDeskTarget.target || 'local';
+                    onOpenStageTab(createDesktopTab(t, target), true);
+                  }}
+                  onOpenTask={(task) => onOpenStageTab(createTaskTab(task, t), true)}
+                />
+              </div>
+            )}
+
+            {activeTab.kind === 'files' && canUseFiles && (
+              <div className="stage-pane-slot">
+                <WorkspaceFilesPane
+                  botId={activeBotId || ''}
+                  initialDir={activeTab.path || ''}
+                  selectedFilePath=""
+                  lang={lang}
+                  onOpenFileTab={(relPath) => onOpenStageTab(createFileTab(relPath), false)}
+                />
+              </div>
+            )}
+
+            {activeTab.kind === 'file' && canUseFiles && (
+              <div className="stage-pane-slot">
+                <StageFilePreviewPane
+                  botId={activeBotId || ''}
+                  filePath={activeTab.path || ''}
+                  lang={lang}
+                  onQuotePath={(relPath) => {
+                    setDeskChatOpen(true);
+                    setStageInsert({ seq: Date.now(), text: `@${relPath} ` });
+                  }}
+                  onToast={showToast}
+                />
+              </div>
+            )}
+
+            {activeTab.kind === 'task' && activeTaskId && (
+              <div className="stage-pane-slot">
+                <StageTaskPane
+                  taskId={activeTaskId}
+                  task={activeTask}
+                  bots={bots}
+                  nodes={nodes}
+                  liveTool={taskToolMap[activeTaskId]}
+                  liveChunk={taskChunksMap[activeTaskId] || ''}
+                  taskRefreshSeq={taskEventSeqMap[activeTaskId] || 0}
+                  approvals={approvals}
+                  questions={questions}
+                  takeovers={takeovers}
+                  lang={lang}
+                  onToast={showToast}
+                  onConfirm={onConfirm}
+                  onTaskUpdated={onTaskUpdated}
+                  onReplyApproval={handleReplyApproval}
+                  onReplyQuestion={handleReplyQuestion}
+                  onResolveTakeover={handleResolveTakeover}
+                  onOpenDesktopTarget={(target) => {
+                    const resolved = target || 'local';
+                    void selectDesktopTarget(resolved);
+                    onOpenStageTab(createDesktopTab(t, resolved), false);
+                  }}
+                />
+              </div>
+            )}
+
+            {activeTab.kind !== 'new' &&
+              activeTab.kind !== 'files' &&
+              activeTab.kind !== 'file' &&
+              activeTab.kind !== 'desktop' &&
+              activeTab.kind !== 'task' && (
+                <div className="stage-pane-slot">
+                  <StageExtensionPane tab={activeTab} lang={lang} />
+                </div>
+              )}
+          </div>
+        )}
+      </div>
     </div>
-  </div>
   );
 };

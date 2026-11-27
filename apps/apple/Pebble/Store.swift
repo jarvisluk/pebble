@@ -71,6 +71,10 @@ final class HubStore {
     var updateChecking = false
     var dismissedUpdateVersion = ""
     var routines: [String: [RoutineItem]] = [:]
+    var tasks: [String: [BotTask]] = [:]
+    var taskEvents: [String: [BotTaskEvent]] = [:]
+    var taskTools: [String: String] = [:]
+    var taskStreamText: [String: String] = [:]
     var pendingStageOpen: StageOpenEvent?
     var pendingChatInsert: PendingChatInsert?
 

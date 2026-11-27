@@ -28,6 +28,7 @@ object PebbleIcons {
     @DrawableRes val Devices: Int = R.drawable.ms_devices
     @DrawableRes val ExpandLess: Int = R.drawable.ms_expand_less
     @DrawableRes val ExpandMore: Int = R.drawable.ms_expand_more
+    @DrawableRes val Extension: Int = R.drawable.ms_extension
     @DrawableRes val FlashlightOff: Int = R.drawable.ms_flashlight_off
     @DrawableRes val FlashlightOn: Int = R.drawable.ms_flashlight_on
     @DrawableRes val Folder: Int = R.drawable.ms_folder
@@ -53,6 +54,7 @@ object PebbleIcons {
     @DrawableRes val PhotoLibrary: Int = R.drawable.ms_photo_library
     @DrawableRes val PlayArrow: Int = R.drawable.ms_play_arrow
     @DrawableRes val Psychology: Int = R.drawable.ms_psychology
+    @DrawableRes val Public: Int = R.drawable.ms_public
     @DrawableRes val PushPin: Int = R.drawable.ms_push_pin
     @DrawableRes val QrCodeScanner: Int = R.drawable.ms_qr_code_scanner
     @DrawableRes val Refresh: Int = R.drawable.ms_refresh
@@ -64,6 +66,7 @@ object PebbleIcons {
     @DrawableRes val SwapVert: Int = R.drawable.ms_swap_vert
     @DrawableRes val SyncProblem: Int = R.drawable.ms_sync_problem
     @DrawableRes val Tune: Int = R.drawable.ms_tune
+    @DrawableRes val ViewSidebar: Int = R.drawable.ms_view_sidebar
     @DrawableRes val Visibility: Int = R.drawable.ms_visibility
     @DrawableRes val VisibilityOff: Int = R.drawable.ms_visibility_off
     @DrawableRes val VpnKey: Int = R.drawable.ms_vpn_key

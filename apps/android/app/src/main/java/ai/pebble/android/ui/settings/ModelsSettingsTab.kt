@@ -8,8 +8,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -79,7 +77,6 @@ import kotlinx.coroutines.launch
 
 private data class BotModelDraft(val harness: String, val model: String)
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ModelsSettingsTab(
     store: PebbleStore,
@@ -106,8 +103,6 @@ fun ModelsSettingsTab(
     var defaultTouched by remember { mutableStateOf(false) }
     val perHarness = remember { mutableStateMapOf<String, String>() }
     var perTouched by remember { mutableStateOf(false) }
-    var mpWebUrl by remember { mutableStateOf("") }
-    var mpWebUrlTouched by remember { mutableStateOf(false) }
     val drafts = remember { mutableStateMapOf<String, BotModelDraft>() }
     var touchedBots by remember { mutableStateOf(setOf<String>()) }
     var loadingModelsFor by remember { mutableStateOf(setOf<String>()) }
@@ -148,7 +143,6 @@ fun ModelsSettingsTab(
             perHarness.clear()
             perHarness.putAll(cleanMap(s.defaultModels))
         }
-        if (!mpWebUrlTouched) mpWebUrl = s.magpie?.webUrl.orEmpty().trim()
         syncDrafts()
     }
 
@@ -161,12 +155,10 @@ fun ModelsSettingsTab(
 
     val settingsChanged = run {
         val s = store.settings ?: return@run false
-        val webDirty = mpWebUrlTouched && mpWebUrl.trim() != s.magpie?.webUrl.orEmpty().trim()
         (defaultHarnessTouched && defaultHarness != baseDefaultHarness) ||
             (defaultPermModeTouched && defaultPermMode != baseDefaultPermMode) ||
             (defaultTouched && defaultModel.trim() != s.defaultModel.orEmpty().trim()) ||
-            (perTouched && cleanMap(perHarness) != cleanMap(s.defaultModels)) ||
-            webDirty
+            (perTouched && cleanMap(perHarness) != cleanMap(s.defaultModels))
     }
     val dirty = settingsChanged || botUpdates.isNotEmpty()
 
@@ -200,14 +192,12 @@ fun ModelsSettingsTab(
                 defaultPermissionMode = defaultPermMode,
                 defaultModel = defaultModel.trim(),
                 defaultModels = cleanMap(perHarness),
-                magpieWebUrl = if (mpWebUrlTouched) mpWebUrl.trim() else null,
                 botUpdates = botUpdates,
             )
             defaultHarnessTouched = false
             defaultPermModeTouched = false
             defaultTouched = false
             perTouched = false
-            mpWebUrlTouched = false
             touchedBots = emptySet()
             drafts.clear()
             sync()
@@ -331,7 +321,6 @@ fun ModelsSettingsTab(
             defaultPermModeTouched = false
             defaultTouched = false
             perTouched = false
-            mpWebUrlTouched = false
             touchedBots = emptySet()
             drafts.clear()
             sync()
@@ -345,9 +334,6 @@ fun ModelsSettingsTab(
         }
     }
 
-    val mp = store.settings?.magpie
-    val mpInstalled = mp?.installed == true
-    val mpHealthy = mp?.healthy == true
     val installedHarnesses = harnesses.filter { it.installed == true }
     val uninstalledHarnesses = harnesses.filter { it.installed != true }
 
@@ -428,7 +414,7 @@ fun ModelsSettingsTab(
 
             GlobalModelInputWithMenu(
                 value = defaultModel,
-                placeholder = "magpie/claude-sonnet-4",
+                placeholder = store.t("globalDefaultPh"),
                 harnesses = orderedGlobal,
                 defaultHarness = defaultHarness,
                 harnessLabel = { harnessDisplayLabel(it, store) },
@@ -613,66 +599,50 @@ fun ModelsSettingsTab(
             if (installedHarnesses.isEmpty()) {
                 Text(store.t("engineNoInstalled"), color = p.mute, fontSize = PebbleFont.secondary)
             } else {
-                val connectedHarnesses = installedHarnesses.filter { it.magpie?.connected == true }
-                val nativeHarnesses = installedHarnesses.filter { it.magpie?.connected != true }
-                val groups = buildList {
-                    if (connectedHarnesses.isNotEmpty()) {
-                        add(Triple("${store.t("harnessGroupConnected")} (${connectedHarnesses.size})", true, connectedHarnesses))
-                    }
-                    if (nativeHarnesses.isNotEmpty()) {
-                        add(Triple("${store.t("harnessGroupNative")} (${nativeHarnesses.size})", false, nativeHarnesses))
-                    }
-                }
-                groups.forEachIndexed { gIdx, (groupTitle, isConnectedGroup, list) ->
-                    if (gIdx > 0) CardDivider()
-                    Text(
-                        text = groupTitle,
-                        color = if (isConnectedGroup) p.sageInk else p.mute,
-                        fontSize = PebbleFont.caption,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    list.forEachIndexed { idx, h ->
-                        if (idx > 0) CardDivider()
-                        val mpConnected = h.magpie?.connected == true
-                        val loginTask = loginTasks[h.id]
-                        val loggingIn = loginTask?.state == "running"
-                        val needsLogin = h.requiresLogin == true && h.authStatus != "ready"
-                        val authReady = h.authStatus == "ready"
+                Text(
+                    text = "${store.t("enginesInstalled")} (${installedHarnesses.size})",
+                    color = p.mute,
+                    fontSize = PebbleFont.caption,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                installedHarnesses.forEachIndexed { idx, h ->
+                    if (idx > 0) CardDivider()
+                    val loginTask = loginTasks[h.id]
+                    val loggingIn = loginTask?.state == "running"
+                    val needsLogin = h.requiresLogin == true && h.authStatus != "ready"
+                    val authReady = h.authStatus == "ready"
 
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(7.dp)
-                                        .clip(CircleShape)
-                                        .background(if (mpConnected) p.sageInk else if (needsLogin) p.danger else p.mute.copy(alpha = 0.45f)),
-                                )
-                                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        Text(h.title, color = p.text, fontSize = PebbleFont.body, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                        if (needsLogin) {
-                                            TagPill(store.t("engineNeedsLogin"), p.pink, p.pinkInk)
-                                        }
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(7.dp)
+                                    .clip(CircleShape)
+                                    .background(if (authReady) p.sageInk else if (needsLogin) p.danger else p.mute.copy(alpha = 0.45f)),
+                            )
+                            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Text(h.title, color = p.text, fontSize = PebbleFont.body, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    if (needsLogin) {
+                                        TagPill(store.t("engineNeedsLogin"), p.pink, p.pinkInk)
                                     }
-                                    val subText = when {
-                                        mpConnected -> h.magpie?.model?.takeIf { it.isNotEmpty() } ?: store.t("mpConnected")
-                                        !h.magpie?.nativeModel.isNullOrEmpty() -> h.magpie?.nativeModel.orEmpty()
-                                        !h.summary.isNullOrEmpty() -> h.summary.orEmpty()
-                                        else -> if (authReady) store.t("engineReady") else h.id
-                                    }
-                                    Text(
-                                        text = subText,
-                                        color = if (mpConnected) p.sageInk else p.text2,
-                                        fontSize = PebbleFont.caption,
-                                        fontFamily = if (mpConnected || !h.magpie?.nativeModel.isNullOrEmpty()) MonoFont else FontFamily.Default,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
                                 }
+                                val subText = when {
+                                    !h.summary.isNullOrEmpty() -> h.summary.orEmpty()
+                                    else -> if (authReady) store.t("engineReady") else h.id
+                                }
+                                Text(
+                                    text = subText,
+                                    color = p.text2,
+                                    fontSize = PebbleFont.caption,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
                                 if (needsLogin) {
                                     Button(
                                         onClick = { startHarnessLogin(h.id) },
@@ -730,7 +700,6 @@ fun ModelsSettingsTab(
                                 Text(loginTask.error, color = p.danger, fontSize = PebbleFont.caption)
                             }
                         }
-                    }
                 }
             }
 
@@ -854,136 +823,4 @@ fun ModelsSettingsTab(
         }
     }
     SectionFooter(store.t("enginesIntro"))
-
-    // Card 1: Magpie Gateway
-    SectionHeader(
-        title = store.t("magpieGatewayTitle"),
-        trailing = {
-            TagPill(
-                text = when {
-                    !mpInstalled -> store.t("notInstalled")
-                    mpHealthy -> store.t("gatewayOk")
-                    else -> store.t("gatewayDown")
-                },
-                bg = if (!mpInstalled) p.s1 else if (mpHealthy) p.sage else p.pink,
-                fg = if (!mpInstalled) p.text2 else if (mpHealthy) p.sageInk else p.danger,
-            )
-        },
-    )
-    SectionCard {
-        Column(
-            modifier = Modifier.padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            if (!mpInstalled) {
-                Text(store.t("hostNoMagpieGlobal"), color = p.text2, fontSize = PebbleFont.body)
-                OutlinedButton(
-                    onClick = {
-                        runOp("magpie:install", "opFailed") {
-                            store.installMagpie()
-                            preloadAllModels(force = true)
-                            store.t("mpInstallDone")
-                        }
-                    },
-                    enabled = busy.isEmpty(),
-                ) {
-                    if (busy == "magpie:install") {
-                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = p.accent)
-                        Spacer(Modifier.width(8.dp))
-                        Text(store.t("mpInstalling"), color = p.text, fontSize = PebbleFont.secondary)
-                    } else {
-                        Text(store.t("mpInstallOnHost"), color = p.text, fontSize = PebbleFont.secondary)
-                    }
-                }
-            } else {
-                Text(store.t("mpWebUrl"), color = p.text2, fontSize = PebbleFont.secondary)
-                OutlinedTextField(
-                    value = mpWebUrl,
-                    onValueChange = { next ->
-                        if (next != mpWebUrl) {
-                            mpWebUrl = next
-                            mpWebUrlTouched = true
-                            onSaved("")
-                        }
-                    },
-                    placeholder = { Text("https://magpie.example.com", fontFamily = MonoFont, fontSize = PebbleFont.secondary) },
-                    singleLine = true,
-                    textStyle = TextStyle(fontFamily = MonoFont, fontSize = PebbleFont.secondary),
-                    shape = PebbleDimens.rowShape,
-                    colors = pebbleFieldColors(),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Text(store.t("mpWebUrlHint"), color = p.mute, fontSize = PebbleFont.caption)
-
-                val providers = mp?.providers.orEmpty()
-                val presets = mp?.presets.orEmpty()
-                val configuredIds = providers.map { it.id }.toSet()
-                val extraPresets = presets.filter { it.id !in configuredIds }
-                if (providers.isNotEmpty()) {
-                    CardDivider()
-                    Text(
-                        text = store.t("providersTitle", mapOf("n" to providers.size)),
-                        color = p.text2,
-                        fontSize = PebbleFont.secondary,
-                        fontWeight = FontWeight.Medium,
-                    )
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        providers.forEach { prov ->
-                            TagPill(
-                                text = prov.name?.takeIf { it.isNotEmpty() } ?: prov.id,
-                                bg = if (prov.enabled == false) p.s1 else p.sage,
-                                fg = if (prov.enabled == false) p.mute else p.sageInk,
-                            )
-                        }
-                    }
-                } else if (extraPresets.isNotEmpty()) {
-                    CardDivider()
-                    Text(
-                        text = store.t("mpPresetsTitle"),
-                        color = p.text2,
-                        fontSize = PebbleFont.secondary,
-                        fontWeight = FontWeight.Medium,
-                    )
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        extraPresets.forEach { pre ->
-                            TagPill(
-                                text = pre.name?.takeIf { it.isNotEmpty() } ?: pre.id,
-                                bg = p.s1,
-                                fg = p.text2,
-                            )
-                        }
-                    }
-                }
-
-                CardDivider()
-                val addr = store.activeServer?.address.orEmpty()
-                val local = listOf("localhost", "127.0.0.1", "[::1]").any { addr.contains(it) }
-                val webUrl = mp?.webUrl.orEmpty()
-                Text(
-                    text = if (webUrl.isNotEmpty() && !local) store.t("mpOpenWeb") else store.t("mpOpenApp"),
-                    color = p.accent,
-                    fontSize = PebbleFont.body,
-                    fontWeight = FontWeight.Medium,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(PebbleDimens.rowShape)
-                        .clickable {
-                            if (webUrl.isNotEmpty() && !local) {
-                                runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(webUrl))) }
-                            } else {
-                                runOp("magpie:open", "opFailed") { store.openMagpie(); null }
-                            }
-                        }
-                        .padding(vertical = 6.dp),
-                )
-            }
-        }
-    }
-    if (mpInstalled) SectionFooter(store.t("mpManageInApp"))
 }

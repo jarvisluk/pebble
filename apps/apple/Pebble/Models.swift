@@ -39,6 +39,7 @@ struct BotStatus: Codable, Identifiable, Hashable {
     var queued: Int?
     var session: SessionRecord?
     var instructions: String?
+    var latestStage: StageRef?
 
     var displayName: String { (name ?? "").isEmpty ? id : name! }
     var isBusy: Bool { busy ?? false }
@@ -68,6 +69,7 @@ struct ChatMessage: Codable, Identifiable, Hashable {
     var to: String?
     var text: String?
     var media: [MessageMedia]?
+    var stage: StageRef?
     var createdAt: String?
     var tools: [String]?
     var durationMs: Double?
@@ -235,13 +237,6 @@ struct MemoryImportResp: Codable {
     var error: String?
 }
 
-struct HarnessMagpie: Codable, Hashable {
-    var installed: Bool?
-    var connected: Bool?
-    var model: String?
-    var nativeModel: String?
-}
-
 struct PermissionCapabilities: Codable, Hashable {
     var modes: [String]?
     var interactiveApproval: Bool?
@@ -266,7 +261,6 @@ struct HarnessInfo: Codable, Identifiable, Hashable {
     var category: String?
     var summary: String?
     var install: HarnessInstallInfo?
-    var magpie: HarnessMagpie?
     var permissions: PermissionCapabilities?
 
     var title: String { (label ?? "").isEmpty ? id : label! }
@@ -274,29 +268,6 @@ struct HarnessInfo: Codable, Identifiable, Hashable {
         let list = (permissions?.modes ?? []).filter { !$0.isEmpty }
         return list.isEmpty ? ["auto"] : list
     }
-}
-
-struct MagpieProvider: Codable, Identifiable, Hashable {
-    var id: String
-    var name: String?
-    var endpoint: String?
-    var status: String?
-    var modelsInfo: String?
-    var usedBy: String?
-    var enabled: Bool?
-}
-
-struct MagpiePreset: Codable, Identifiable, Hashable {
-    var id: String
-    var name: String?
-}
-
-struct MagpieInfo: Codable {
-    var installed: Bool?
-    var healthy: Bool?
-    var providers: [MagpieProvider]?
-    var presets: [MagpiePreset]?
-    var webUrl: String?
 }
 
 struct SetupTaskStatus: Codable {
@@ -317,7 +288,6 @@ struct OnboardingInfo: Codable {
 }
 
 struct SettingsData: Codable {
-    var magpie: MagpieInfo?
     var onboarding: OnboardingInfo?
     var desktopHarness: String?
     var desktopModel: String?
@@ -379,6 +349,26 @@ struct HostTailscaleStatus: Codable {
     var authKeyEnvRef: String?
 }
 
+struct NodeHarnessInfo: Codable, Hashable, Identifiable {
+    var kind: String
+    var label: String?
+    var installed: Bool?
+    var authStatus: String?
+    var authDetail: String?
+    var permissionCapabilities: PermissionCapabilities?
+
+    var id: String { kind }
+    var title: String { (label ?? "").isEmpty ? kind : label! }
+}
+
+struct NodeWorkspace: Codable, Hashable, Identifiable {
+    var id: String
+    var name: String
+    var path: String
+    var isGit: Bool?
+    var defaultBranch: String?
+}
+
 struct NodeInfo: Codable, Identifiable, Hashable {
     var id: String
     var name: String?
@@ -391,7 +381,13 @@ struct NodeInfo: Codable, Identifiable, Hashable {
     var capabilities: [String]?
     var version: String?
     var connected: Bool?
+    var reconnecting: Bool?
+    var transport: String?
     var lastSeenAt: String?
+    var harnesses: [NodeHarnessInfo]?
+    var workspaces: [NodeWorkspace]?
+    var maxPermissionMode: String?
+    var activeTaskIds: [String]?
 
     var isOutdated: Bool { (protocolVersion ?? 1) < ClientProtocol.current }
 }
@@ -408,6 +404,8 @@ struct TakeoverRequest: Codable, Identifiable, Hashable {
     var target: String?
     var botId: String?
     var botName: String?
+    var taskId: String?
+    var deviceId: String?
     var reason: String?
     var app: String?
     var createdAt: String?
@@ -586,6 +584,8 @@ struct PendingQuestion: Codable, Identifiable, Hashable {
     var id: String
     var botId: String
     var botName: String?
+    var taskId: String?
+    var deviceId: String?
     var title: String?
     var fields: [QuestionField]
     var createdAt: String?
@@ -604,6 +604,8 @@ struct PendingApproval: Codable, Identifiable, Hashable {
     var id: String
     var botId: String
     var botName: String?
+    var taskId: String?
+    var deviceId: String?
     var toolName: String
     var kind: String?
     var title: String?
@@ -625,6 +627,104 @@ struct PendingApproval: Codable, Identifiable, Hashable {
 struct ApprovalsResp: Decodable { var ok: Bool?; var items: [PendingApproval]? }
 struct RoutinesResp: Decodable { var routines: [RoutineItem]? }
 struct RunsResp: Decodable { var runs: [RoutineRun]? }
+
+struct BotTask: Codable, Identifiable, Hashable {
+    var id: String
+    var botId: String
+    var kind: String
+    var title: String?
+    var prompt: String
+    var status: String
+    var deviceId: String?
+    var harness: String?
+    var model: String?
+    var permissionMode: String?
+    var workdir: String?
+    var workspaceId: String?
+    var isolation: String?
+    var branch: String?
+    var worktreePath: String?
+    var checkpointRef: String?
+    var delivery: String?
+    var dependsOn: [String]?
+    var parentTaskId: String?
+    var routineId: String?
+    var routineName: String?
+    var trigger: String?
+    var slotKey: String?
+    var runtimeSessionId: String?
+    var output: String?
+    var error: String?
+    var tools: [String]?
+    var durationMs: Double?
+    var costUsd: Double?
+    var inputTokens: Int?
+    var outputTokens: Int?
+    var createdAt: String?
+    var startedAt: String?
+    var finishedAt: String?
+    var injectedAt: String?
+
+    var displayTitle: String {
+        let t = (title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !t.isEmpty { return t }
+        let rn = (routineName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !rn.isEmpty { return rn }
+        let line = prompt.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? prompt
+        return line.count > 64 ? String(line.prefix(64)) + "…" : line
+    }
+
+    var isTerminal: Bool {
+        status == "completed" || status == "failed" || status == "cancelled"
+    }
+
+    var isWaiting: Bool {
+        status == "waiting_approval" || status == "waiting_question" || status == "waiting_takeover"
+    }
+
+    var isActive: Bool {
+        !isTerminal
+    }
+}
+
+struct BotTaskEvent: Codable, Identifiable, Hashable {
+    var seq: Int64
+    var taskId: String
+    var botId: String
+    var eventType: String
+    var payload: JSONValue?
+    var createdAt: String?
+
+    var id: Int64 { seq }
+}
+
+struct TasksResp: Decodable { var tasks: [BotTask]? }
+struct TaskEventsResp: Decodable { var events: [BotTaskEvent]? }
+
+struct TaskDiffFile: Codable, Hashable, Identifiable {
+    var path: String
+    var status: String?
+    var additions: Int?
+    var deletions: Int?
+    var id: String { path }
+}
+
+struct TaskDiffResult: Codable, Hashable {
+    var taskId: String
+    var branch: String?
+    var worktreePath: String?
+    var checkpointRef: String?
+    var files: [TaskDiffFile]
+    var patch: String
+}
+
+struct TaskRollbackResult: Codable, Hashable {
+    var taskId: String
+    var rolledBack: Bool
+    var removedWorktree: Bool?
+    var branch: String?
+    var worktreePath: String?
+}
 struct ModelsResp: Decodable { var models: [String]? }
 struct TextResp: Decodable { var text: String? }
 struct InterruptResp: Decodable { var interrupted: Bool? }
@@ -749,21 +849,60 @@ struct WorkspaceFileTicketResp: Decodable {
 }
 
 enum StageKind: String, Codable, Hashable {
+    case new
     case files
+    case file
     case desktop
+    case task
     case browser
     case artifact
     case mcpApp = "mcp-app"
+
+    init(rawOrUnknown raw: String?) {
+        let clean = (raw ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        self = StageKind(rawValue: clean) ?? .artifact
+    }
+}
+
+struct StageRef: Codable, Hashable, Identifiable {
+    var id: String?
+    var kind: String
+    var title: String?
+    var subtitle: String?
+    var path: String?
+    var url: String?
+    var resourceUri: String?
+    var target: String?
+    var taskId: String?
+    var closable: Bool?
+    var createdAt: String?
+
+    var resolvedId: String {
+        if let id, !id.isEmpty { return id }
+        if let path, !path.isEmpty { return "\(kind):\(path)" }
+        if let target, !target.isEmpty { return "\(kind):\(target)" }
+        if let taskId, !taskId.isEmpty { return "\(kind):\(taskId)" }
+        return kind
+    }
+
+    var resolvedKind: StageKind {
+        if kind == "files", let path, !path.isEmpty { return .file }
+        return StageKind(rawOrUnknown: kind)
+    }
 }
 
 struct StageTab: Identifiable, Hashable {
     var id: String
     var kind: StageKind
+    var rawKind: String
     var title: String
+    var subtitle: String?
     var botId: String?
     var path: String?
     var url: String?
     var resourceUri: String?
+    var target: String?
+    var taskId: String?
     var closable: Bool = true
 }
 
@@ -771,11 +910,16 @@ struct StageOpenEvent: Decodable, Equatable {
     var id: String?
     var kind: String
     var title: String?
+    var subtitle: String?
     var botId: String?
     var path: String?
     var url: String?
     var resourceUri: String?
+    var target: String?
+    var taskId: String?
     var closable: Bool?
+    var autoOpen: Bool?
+    var createdAt: String?
 }
 
 struct PendingChatInsert: Equatable {

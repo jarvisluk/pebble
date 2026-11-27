@@ -2,11 +2,12 @@ import React from 'react';
 import type {
   BotDetail,
   BotStatus,
+  BotTask,
   ChatMessage,
   ConfirmOptions,
+  NodeInfo,
   ResolvedLang,
   SettingsData,
-  StageKind,
 } from '../types';
 import { translate } from '../lib/i18n';
 import { BotDetailPanel } from './BotDetailPanel';
@@ -18,6 +19,8 @@ interface AppOverlaysProps {
   panelOpen: boolean;
   panelDetail: BotDetail | null;
   bots: BotStatus[];
+  nodes: NodeInfo[];
+  tasksMap: Record<string, BotTask[]>;
   settings: SettingsData | null;
   modelsMap: Record<string, string[]>;
   routineRefreshSeq: number;
@@ -35,6 +38,7 @@ interface AppOverlaysProps {
   toastMsg: string;
   closeAllOverlays: () => void;
   setPanelOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  setTasksMap: React.Dispatch<React.SetStateAction<Record<string, BotTask[]>>>;
   showToast: (msg: string) => void;
   setConfirmOpts: React.Dispatch<React.SetStateAction<ConfirmOptions | null>>;
   setBots: React.Dispatch<React.SetStateAction<BotStatus[]>>;
@@ -44,11 +48,8 @@ interface AppOverlaysProps {
   openPanel: (botId?: string) => Promise<void>;
   setSettings: React.Dispatch<React.SetStateAction<SettingsData | null>>;
   selectBot: (id: string) => Promise<void>;
-  setStageKind: React.Dispatch<React.SetStateAction<StageKind>>;
-  setActiveStageTabId: React.Dispatch<React.SetStateAction<string>>;
-  setFilesOpenPath: React.Dispatch<React.SetStateAction<string>>;
-  setFilesOpenSeq: React.Dispatch<React.SetStateAction<number>>;
-  setDeskOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  onOpenBotFiles: (botId: string) => void;
+  onInspectTask: (botId: string, taskId: string) => void;
   setCollabPeerId: React.Dispatch<React.SetStateAction<string | null>>;
   setCreateOpen: React.Dispatch<React.SetStateAction<boolean>>;
   onLoginSuccess: () => Promise<void>;
@@ -59,6 +60,8 @@ export const AppOverlays: React.FC<AppOverlaysProps> = ({
   panelOpen,
   panelDetail,
   bots,
+  nodes,
+  tasksMap,
   settings,
   modelsMap,
   routineRefreshSeq,
@@ -76,6 +79,7 @@ export const AppOverlays: React.FC<AppOverlaysProps> = ({
   toastMsg,
   closeAllOverlays,
   setPanelOpen,
+  setTasksMap,
   showToast,
   setConfirmOpts,
   setBots,
@@ -85,11 +89,8 @@ export const AppOverlays: React.FC<AppOverlaysProps> = ({
   openPanel,
   setSettings,
   selectBot,
-  setStageKind,
-  setActiveStageTabId,
-  setFilesOpenPath,
-  setFilesOpenSeq,
-  setDeskOpen,
+  onOpenBotFiles,
+  onInspectTask,
   setCollabPeerId,
   setCreateOpen,
   onLoginSuccess,
@@ -104,6 +105,8 @@ export const AppOverlays: React.FC<AppOverlaysProps> = ({
       open={panelOpen}
       detail={panelDetail}
       bots={bots}
+      tasks={panelDetail ? tasksMap[panelDetail.id] || [] : []}
+      nodes={nodes}
       settings={settings}
       models={modelsMap}
       routineRefreshSeq={routineRefreshSeq}
@@ -120,16 +123,18 @@ export const AppOverlays: React.FC<AppOverlaysProps> = ({
       onReloadBots={loadBots}
       onLoadModels={loadModels}
       onRefreshDetail={(id) => openPanel(id)}
+      onTasksLoaded={(botId, list) => {
+        setTasksMap((prev) => ({ ...prev, [botId]: list }));
+      }}
+      onInspectTask={(taskId) => {
+        if (panelDetail?.id) onInspectTask(panelDetail.id, taskId);
+      }}
       onSettingsUpdated={setSettings}
       onOpenFiles={(botId) => {
         if (!canUseFiles) return;
         setPanelOpen(false);
         if (botId !== activeBotId) void selectBot(botId);
-        setStageKind('files');
-        setActiveStageTabId('files');
-        setFilesOpenPath('');
-        setFilesOpenSeq((n) => n + 1);
-        setDeskOpen(true);
+        onOpenBotFiles(botId);
       }}
     />
 

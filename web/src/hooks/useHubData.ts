@@ -4,14 +4,16 @@ import type {
   ActiveDesktopTarget,
   BotDetail,
   BotStatus,
+  BotTask,
   ChatMessage,
+  NodeInfo,
   PendingApproval,
   PendingQuestion,
   ServerInfo,
   SettingsData,
   TakeoverRequest,
 } from '../types';
-import { api } from '../lib/api';
+import { api, fetchBotTasks, fetchNodes } from '../lib/api';
 
 export interface UseHubDataOpts {
   t: (k: string, vars?: Record<string, string | number>) => string;
@@ -25,6 +27,8 @@ export interface UseHubDataOpts {
   modelsRef: React.MutableRefObject<Record<string, string[]>>;
   modelsInFlightRef: React.MutableRefObject<Record<string, Promise<string[]> | undefined>>;
   setBots: React.Dispatch<React.SetStateAction<BotStatus[]>>;
+  setTasksMap: React.Dispatch<React.SetStateAction<Record<string, BotTask[]>>>;
+  setNodes: React.Dispatch<React.SetStateAction<NodeInfo[]>>;
   setActiveBotId: React.Dispatch<React.SetStateAction<string | null>>;
   setMsgsMap: React.Dispatch<React.SetStateAction<Record<string, ChatMessage[]>>>;
   setLastMap: React.Dispatch<React.SetStateAction<Record<string, ChatMessage>>>;
@@ -54,6 +58,8 @@ export function useHubData(opts: UseHubDataOpts) {
     modelsRef,
     modelsInFlightRef,
     setBots,
+    setTasksMap,
+    setNodes,
     setActiveBotId,
     setMsgsMap,
     setLastMap,
@@ -91,6 +97,21 @@ export function useHubData(opts: UseHubDataOpts) {
     [showToast]
   );
 
+  const loadBotTasks = useCallback(async (id: string) => {
+    if (!id) return;
+    try {
+      const list = await fetchBotTasks(id, { limit: 50 });
+      setTasksMap((prev) => ({ ...prev, [id]: list }));
+    } catch {}
+  }, []);
+
+  const refreshNodes = useCallback(async () => {
+    try {
+      const list = await fetchNodes();
+      setNodes(list);
+    } catch {}
+  }, []);
+
   const loadBots = useCallback(async () => {
     const data = await api<{ bots?: BotStatus[]; server?: ServerInfo }>('/api/bots');
     setServerInfo(data.server ?? null);
@@ -106,7 +127,7 @@ export function useHubData(opts: UseHubDataOpts) {
       setActiveBotId(nextActive);
     }
     if (nextActive) {
-      await loadMessages(nextActive, true);
+      await Promise.all([loadMessages(nextActive, true), loadBotTasks(nextActive)]);
     }
     await Promise.all(
       list
@@ -274,6 +295,11 @@ export function useHubData(opts: UseHubDataOpts) {
         delete copy[id];
         return copy;
       });
+      setTasksMap((prev) => {
+        const copy = { ...prev };
+        delete copy[id];
+        return copy;
+      });
     },
     [loadMessages]
   );
@@ -281,10 +307,12 @@ export function useHubData(opts: UseHubDataOpts) {
 
   return {
     loadMessages,
+    loadBotTasks,
     loadBots,
     loadSettings,
     loadModels,
     resetModels,
+    refreshNodes,
     refreshTakeovers,
     applyActiveDesktopTarget,
     refreshActiveDesktopTarget,

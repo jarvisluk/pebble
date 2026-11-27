@@ -21,6 +21,8 @@ export interface PendingApproval {
   id: string;
   botId: string;
   botName?: string;
+  taskId?: string;
+  deviceId?: string;
   toolName: string;
   kind: 'shell' | 'write' | 'read' | 'mcp' | 'network' | 'other' | string;
   title?: string;
@@ -52,6 +54,7 @@ export interface BotStatus {
   desktopTarget?: string;
   browserMode?: 'auto' | 'isolated' | 'attach' | string;
   permissionMode?: PermissionMode;
+  latestStage?: StageRef;
 }
 
 export interface BotDetail extends BotStatus {
@@ -73,30 +76,16 @@ export interface MessageMedia {
 export interface ChatMessage {
   id: string;
   botId: string;
-  role: 'user' | 'assistant' | 'bot_out' | 'bot_in' | 'system' | string;
+  role: 'user' | 'assistant' | 'bot_out' | 'bot_in' | 'stage' | 'system' | string;
   from?: string;
   to?: string;
   text: string;
   media?: MessageMedia[];
+  stage?: StageRef;
   createdAt: string;
   tools?: string[];
   durationMs?: number;
   costUsd?: number;
-}
-
-export interface MagpieProvider {
-  id: string;
-  name: string;
-  enabled: boolean;
-  endpoint?: string;
-  status?: string;
-  modelsInfo?: string;
-  usedBy?: string;
-}
-
-export interface MagpiePreset {
-  id: string;
-  name: string;
 }
 
 export interface HarnessInfo {
@@ -116,11 +105,6 @@ export interface HarnessInfo {
     command?: string;
     url?: string;
   };
-  magpie?: {
-    connected?: boolean;
-    model?: string;
-    nativeModel?: string;
-  };
 }
 
 export interface SetupTaskStatus {
@@ -136,18 +120,6 @@ export interface SetupTaskStatus {
 }
 
 export interface SettingsData {
-  magpie?: {
-    installed: boolean;
-    healthy?: boolean;
-    providers?: MagpieProvider[];
-    presets?: MagpiePreset[];
-    webUrl?: string;
-    install?: {
-      script?: string;
-      brew?: string;
-      docs?: string;
-    };
-  };
   onboarding?: {
     completed?: boolean;
     needsSetup?: boolean;
@@ -203,17 +175,42 @@ export interface UpdateStatus {
   config: UpdateConfig;
 }
 
+export interface NodeHarnessInfo {
+  kind: string;
+  label?: string;
+  installed: boolean;
+  authStatus?: 'ready' | 'needs_login' | 'unknown' | string;
+  authDetail?: string;
+  permissionCapabilities?: PermissionCapabilities;
+}
+
+export interface NodeWorkspace {
+  id: string;
+  name: string;
+  path: string;
+  isGit?: boolean;
+  defaultBranch?: string;
+}
+
 export interface NodeInfo {
   id: string;
   name?: string;
   os?: string;
   arch?: string;
   hostname?: string;
+  homeDir?: string;
   permissions?: string[];
   protocolVersion?: number;
   capabilities?: string[];
   version?: string;
   connected: boolean;
+  reconnecting?: boolean;
+  transport?: 'ws' | 'poll' | string;
+  lastSeenAt?: string;
+  harnesses?: NodeHarnessInfo[];
+  workspaces?: NodeWorkspace[];
+  maxPermissionMode?: PermissionMode | string;
+  activeTaskIds?: string[];
 }
 
 export interface SlashCommandItem {
@@ -470,6 +467,8 @@ export interface TakeoverRequest {
   target: string;
   botId: string;
   botName?: string;
+  taskId?: string;
+  deviceId?: string;
   reason: string;
   app?: string;
   createdAt?: string;
@@ -598,9 +597,118 @@ export interface PendingQuestion {
   id: string;
   botId: string;
   botName?: string;
+  taskId?: string;
+  deviceId?: string;
   title?: string;
   fields: QuestionField[];
   createdAt: string;
+}
+
+export type BotTaskKind = 'worker' | 'routine' | 'desktop';
+export type BotTaskStatus =
+  | 'queued'
+  | 'running'
+  | 'waiting_approval'
+  | 'waiting_question'
+  | 'waiting_takeover'
+  | 'completed'
+  | 'failed'
+  | 'cancelled';
+export type BotTaskDelivery = 'wake' | 'receipt' | 'silent';
+
+export interface BotTask {
+  id: string;
+  botId: string;
+  kind: BotTaskKind | string;
+  title?: string;
+  prompt: string;
+  status: BotTaskStatus | string;
+  deviceId: string;
+  harness?: string;
+  model?: string;
+  permissionMode?: PermissionMode | string;
+  workdir?: string;
+  workspaceId?: string;
+  isolation?: 'current' | 'worktree' | 'temp_dir' | string;
+  branch?: string;
+  worktreePath?: string;
+  checkpointRef?: string;
+  delivery: BotTaskDelivery | string;
+  dependsOn?: string[];
+  parentTaskId?: string;
+  routineId?: string;
+  routineName?: string;
+  trigger?: string;
+  slotKey?: string;
+  runtimeSessionId?: string;
+  output?: string;
+  error?: string;
+  tools?: string[];
+  durationMs?: number;
+  costUsd?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  createdAt: string;
+  startedAt?: string;
+  finishedAt?: string;
+  injectedAt?: string;
+}
+
+export type BotTaskEventType =
+  | 'status'
+  | 'chunk'
+  | 'tool_use'
+  | 'message'
+  | 'approval'
+  | 'question'
+  | 'takeover'
+  | 'error';
+
+export interface BotTaskEvent {
+  seq: number;
+  taskId: string;
+  botId: string;
+  eventType: BotTaskEventType | string;
+  payload?: Record<string, unknown> | string;
+  createdAt: string;
+}
+
+export interface SpawnTaskRequest {
+  kind?: BotTaskKind | string;
+  title?: string;
+  prompt: string;
+  deviceId?: string;
+  harness?: string;
+  model?: string;
+  permissionMode?: PermissionMode | string;
+  workdir?: string;
+  delivery?: BotTaskDelivery | string;
+  dependsOn?: string[];
+  parentTaskId?: string;
+}
+
+export interface TaskDiffFile {
+  path: string;
+  status?: string;
+  additions?: number;
+  deletions?: number;
+}
+
+export interface TaskDiffResult {
+  taskId: string;
+  branch?: string;
+  worktreePath?: string;
+  checkpointRef?: string;
+  files: TaskDiffFile[];
+  patch: string;
+}
+
+export interface TaskRollbackResult {
+  taskId: string;
+  rolledBack: boolean;
+  removedWorktree?: boolean;
+  branch?: string;
+  worktreePath?: string;
 }
 
 export interface WorkspaceFileEntry {
@@ -634,16 +742,34 @@ export interface WorkspaceFileContent {
   truncated?: boolean;
 }
 
-export type StageKind = 'files' | 'desktop' | 'browser' | 'artifact' | 'mcp-app';
+export type StageKind = 'new' | 'files' | 'file' | 'desktop' | 'task' | 'browser' | 'artifact' | 'mcp-app' | string;
+
+export interface StageRef {
+  id?: string;
+  kind: StageKind;
+  title?: string;
+  subtitle?: string;
+  path?: string;
+  url?: string;
+  resourceUri?: string;
+  target?: string;
+  taskId?: string;
+  closable?: boolean;
+  payload?: Record<string, unknown>;
+  createdAt?: string;
+}
 
 export interface StageTab {
   id: string;
   kind: StageKind;
   title: string;
+  subtitle?: string;
   botId?: string;
   path?: string;
   url?: string;
   resourceUri?: string;
+  target?: string;
+  taskId?: string;
   closable?: boolean;
 }
 
@@ -651,9 +777,14 @@ export interface StageOpenEvent {
   id?: string;
   kind: StageKind;
   title?: string;
+  subtitle?: string;
   botId?: string;
   path?: string;
   url?: string;
   resourceUri?: string;
+  target?: string;
+  taskId?: string;
   closable?: boolean;
+  autoOpen?: boolean;
+  createdAt?: string;
 }

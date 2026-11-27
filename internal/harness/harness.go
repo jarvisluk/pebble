@@ -484,7 +484,11 @@ type Registry struct {
 
 func NewDefaultRegistry(cfg *config.HubConfig) *Registry {
 	r := &Registry{items: make(map[string]Harness)}
-	r.Register(NewOpenCodeHarness(cfg.OpenCodeServerURL))
+	var ocURL string
+	if cfg != nil {
+		ocURL = cfg.OpenCodeServerURL
+	}
+	r.Register(NewOpenCodeHarnessWithDB(ocURL, resolveOpenCodeDBPath(cfg)))
 	r.Register(NewCodeBuddyHarness())
 	r.Register(NewQoderHarness())
 	r.Register(NewCodexHarness())

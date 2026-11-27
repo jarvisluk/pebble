@@ -18,6 +18,8 @@ type PendingQuestion struct {
 	ID        string                  `json:"id"`
 	BotID     string                  `json:"botId"`
 	BotName   string                  `json:"botName,omitempty"`
+	TaskID    string                  `json:"taskId,omitempty"`
+	DeviceID  string                  `json:"deviceId,omitempty"`
 	Title     string                  `json:"title,omitempty"`
 	Fields    []harness.QuestionField `json:"fields"`
 	CreatedAt string                  `json:"createdAt"`
@@ -33,6 +35,8 @@ type PendingApproval struct {
 	ID        string                     `json:"id"`
 	BotID     string                     `json:"botId"`
 	BotName   string                     `json:"botName,omitempty"`
+	TaskID    string                     `json:"taskId,omitempty"`
+	DeviceID  string                     `json:"deviceId,omitempty"`
 	ToolName  string                     `json:"toolName"`
 	Kind      string                     `json:"kind"`
 	Title     string                     `json:"title,omitempty"`
@@ -115,6 +119,13 @@ func (h *Hub) broadcastQuestions(items []PendingQuestion) {
 
 // AskQuestion publishes a pending question card to connected clients and blocks until answered or cancelled.
 func (h *Hub) AskQuestion(ctx context.Context, bot config.BotConfig, req harness.QuestionRequest) (harness.QuestionResponse, error) {
+	return h.AskQuestionForTask(ctx, bot, "", "", req)
+}
+
+// AskQuestionForTask publishes a pending question card (optionally bound to a BotTask) and blocks until answered or cancelled.
+func (h *Hub) AskQuestionForTask(ctx context.Context, bot config.BotConfig, taskID, deviceID string, req harness.QuestionRequest) (harness.QuestionResponse, error) {
+	taskID = strings.TrimSpace(taskID)
+	deviceID = strings.TrimSpace(deviceID)
 	id := newQuestionID()
 	fields := make([]harness.QuestionField, len(req.Fields))
 	copy(fields, req.Fields)
@@ -123,6 +134,8 @@ func (h *Hub) AskQuestion(ctx context.Context, bot config.BotConfig, req harness
 			ID:        id,
 			BotID:     bot.ID,
 			BotName:   bot.Name,
+			TaskID:    taskID,
+			DeviceID:  deviceID,
 			Title:     req.Title,
 			Fields:    fields,
 			CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
@@ -134,6 +147,13 @@ func (h *Hub) AskQuestion(ctx context.Context, bot config.BotConfig, req harness
 	h.questions[id] = entry
 	items := h.listQuestionsLocked("")
 	h.questionsMu.Unlock()
+	if taskID != "" {
+		h.setTaskWaitingState(taskID, bot.ID, state.TaskStatusWaitingQuestion, state.TaskEventQuestion, map[string]any{
+			"questionId": id,
+			"title":      req.Title,
+			"deviceId":   deviceID,
+		})
+	}
 	h.broadcastQuestions(items)
 
 	defer func() {
@@ -147,6 +167,9 @@ func (h *Hub) AskQuestion(ctx context.Context, bot config.BotConfig, req harness
 		} else {
 			h.questionsMu.Unlock()
 		}
+		if taskID != "" {
+			h.restoreTaskRunningState(taskID, bot.ID, state.TaskStatusWaitingQuestion)
+		}
 	}()
 
 	select {
@@ -155,6 +178,34 @@ func (h *Hub) AskQuestion(ctx context.Context, bot config.BotConfig, req harness
 	case <-ctx.Done():
 		return harness.QuestionResponse{Cancelled: true}, ctx.Err()
 	}
+}
+
+// CancelQuestionsByTask cancels and removes any pending questions bound to taskID.
+func (h *Hub) CancelQuestionsByTask(taskID string) int {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return 0
+	}
+	h.questionsMu.Lock()
+	var cancelled []*pendingQuestionEntry
+	for id, entry := range h.questions {
+		if entry.item.TaskID == taskID {
+			delete(h.questions, id)
+			cancelled = append(cancelled, entry)
+		}
+	}
+	items := h.listQuestionsLocked("")
+	h.questionsMu.Unlock()
+	for _, entry := range cancelled {
+		select {
+		case entry.ch <- harness.QuestionResponse{Cancelled: true}:
+		default:
+		}
+	}
+	if len(cancelled) > 0 {
+		h.broadcastQuestions(items)
+	}
+	return len(cancelled)
 }
 
 // AnswerQuestion delivers a user's response (or cancellation) to a pending question card.
@@ -262,6 +313,35 @@ func (h *Hub) clearSessionAllow(botID string) {
 	h.allowlistMu.Unlock()
 }
 
+// CancelApprovalsByTask cancels and removes all pending approvals bound to taskID.
+func (h *Hub) CancelApprovalsByTask(taskID string) int {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return 0
+	}
+	h.approvalsMu.Lock()
+	var cancelled []*pendingApprovalEntry
+	for id, entry := range h.approvals {
+		if entry.item.TaskID == taskID {
+			delete(h.approvals, id)
+			cancelled = append(cancelled, entry)
+		}
+	}
+	items := h.listApprovalsLocked("")
+	h.approvalsMu.Unlock()
+
+	for _, entry := range cancelled {
+		select {
+		case entry.ch <- harness.PermissionResponse{Decision: "cancelled", Reason: "cancelled"}:
+		default:
+		}
+	}
+	if len(cancelled) > 0 {
+		h.broadcastApprovals(items)
+	}
+	return len(cancelled)
+}
+
 // CancelApprovalsByBot cancels and removes all pending approvals for botID.
 func (h *Hub) CancelApprovalsByBot(botID string) int {
 	h.approvalsMu.Lock()
@@ -287,7 +367,7 @@ func (h *Hub) CancelApprovalsByBot(botID string) int {
 	return len(cancelled)
 }
 
-func (h *Hub) auditApproval(botID string, req harness.PermissionRequest, resp harness.PermissionResponse) {
+func (h *Hub) auditApproval(botID, taskID string, req harness.PermissionRequest, resp harness.PermissionResponse) {
 	if h.store == nil && h.messages == nil {
 		return
 	}
@@ -322,6 +402,18 @@ func (h *Hub) auditApproval(botID string, req harness.PermissionRequest, resp ha
 		return
 	}
 
+	if taskID != "" {
+		if h.store != nil {
+			_, _ = h.store.AppendBotTaskEvent(taskID, botID, state.TaskEventApproval, map[string]any{
+				"toolName": tool,
+				"decision": resp.Decision,
+				"reason":   resp.Reason,
+				"text":     text,
+			})
+		}
+		return
+	}
+
 	var sessID string
 	var turn int
 	h.lanesMu.RLock()
@@ -351,6 +443,13 @@ func (h *Hub) auditApproval(botID string, req harness.PermissionRequest, resp ha
 
 // RequestApproval publishes a pending tool approval card to connected clients and blocks until resolved or cancelled.
 func (h *Hub) RequestApproval(ctx context.Context, bot config.BotConfig, mode string, req harness.PermissionRequest) (harness.PermissionResponse, error) {
+	return h.RequestApprovalForTask(ctx, bot, "", "", mode, req)
+}
+
+// RequestApprovalForTask publishes a pending tool approval card (optionally bound to a BotTask) and blocks until resolved or cancelled.
+func (h *Hub) RequestApprovalForTask(ctx context.Context, bot config.BotConfig, taskID, deviceID, mode string, req harness.PermissionRequest) (harness.PermissionResponse, error) {
+	taskID = strings.TrimSpace(taskID)
+	deviceID = strings.TrimSpace(deviceID)
 	allowKey := approvalAllowKey(req)
 	if h.isSessionAllowed(bot.ID, allowKey) {
 		var allowAlwaysID, fallbackID string
@@ -386,6 +485,8 @@ func (h *Hub) RequestApproval(ctx context.Context, bot config.BotConfig, mode st
 			ID:        id,
 			BotID:     bot.ID,
 			BotName:   bot.Name,
+			TaskID:    taskID,
+			DeviceID:  deviceID,
 			ToolName:  req.ToolName,
 			Kind:      kind,
 			Title:     req.Title,
@@ -402,6 +503,16 @@ func (h *Hub) RequestApproval(ctx context.Context, bot config.BotConfig, mode st
 	h.approvals[id] = entry
 	items := h.listApprovalsLocked("")
 	h.approvalsMu.Unlock()
+	if taskID != "" {
+		h.setTaskWaitingState(taskID, bot.ID, state.TaskStatusWaitingApproval, state.TaskEventApproval, map[string]any{
+			"approvalId": id,
+			"toolName":   req.ToolName,
+			"kind":       kind,
+			"title":      req.Title,
+			"summary":    req.Summary,
+			"deviceId":   deviceID,
+		})
+	}
 	h.broadcastApprovals(items)
 
 	defer func() {
@@ -415,6 +526,9 @@ func (h *Hub) RequestApproval(ctx context.Context, bot config.BotConfig, mode st
 		} else {
 			h.approvalsMu.Unlock()
 		}
+		if taskID != "" {
+			h.restoreTaskRunningState(taskID, bot.ID, state.TaskStatusWaitingApproval)
+		}
 	}()
 
 	timer := time.NewTimer(approvalWaitTimeout)
@@ -426,16 +540,75 @@ func (h *Hub) RequestApproval(ctx context.Context, bot config.BotConfig, mode st
 			h.addSessionAllow(bot.ID, allowKey)
 		}
 		if resp.Decision != "cancelled" {
-			h.auditApproval(bot.ID, req, resp)
+			h.auditApproval(bot.ID, taskID, req, resp)
 		}
 		return resp, nil
 	case <-timer.C:
 		resp := harness.PermissionResponse{Decision: "reject", Reason: "approval timed out"}
-		h.auditApproval(bot.ID, req, resp)
+		h.auditApproval(bot.ID, taskID, req, resp)
 		return resp, nil
 	case <-ctx.Done():
 		return harness.PermissionResponse{Decision: "cancelled"}, ctx.Err()
 	}
+}
+
+func (h *Hub) canCoordinatorApprove(botID string) bool {
+	h.lanesMu.RLock()
+	defer h.lanesMu.RUnlock()
+	if lane, ok := h.lanes[botID]; ok {
+		return lane.bot.CanCoordinatorApprove(h.cfg)
+	}
+	if h.cfg != nil && h.cfg.CoordinatorCanApprove != nil {
+		return *h.cfg.CoordinatorCanApprove
+	}
+	return false
+}
+
+// ReplyApprovalAsCoordinator resolves a pending task approval on behalf of a parent Bot
+// when CoordinatorCanApprove is enabled for that Bot. Human and coordinator replies race
+// on approvalsMu so the first answer wins.
+func (h *Hub) ReplyApprovalAsCoordinator(callerBotID, id, decision, optionID, reason string) ([]PendingApproval, error) {
+	callerBotID = strings.TrimSpace(callerBotID)
+	decision = strings.ToLower(strings.TrimSpace(decision))
+	switch decision {
+	case "allow_once", "allow_always", "reject":
+	default:
+		return nil, fmt.Errorf("invalid decision %q (expected allow_once, allow_always, or reject)", decision)
+	}
+	if callerBotID == "" {
+		return nil, fmt.Errorf("%w: callerBotId is required for coordinator approval", ErrForbidden)
+	}
+
+	h.approvalsMu.Lock()
+	entry, ok := h.approvals[id]
+	var item PendingApproval
+	if ok {
+		item = entry.item
+	}
+	h.approvalsMu.Unlock()
+	if !ok {
+		return nil, ErrApprovalNotFound
+	}
+	if item.TaskID == "" {
+		return nil, fmt.Errorf("%w: coordinator cannot approve non-task prompts", ErrForbidden)
+	}
+
+	authorizedOwner := item.BotID == callerBotID
+	if !authorizedOwner && h.store != nil {
+		if t, found, _ := h.store.GetBotTask(item.TaskID); found && t.ParentTaskID != "" {
+			if pt, pfound, _ := h.store.GetBotTask(t.ParentTaskID); pfound && pt.BotID == callerBotID {
+				authorizedOwner = true
+			}
+		}
+	}
+	if !authorizedOwner {
+		return nil, fmt.Errorf("%w: bot %q is not the coordinator for task %q", ErrForbidden, callerBotID, item.TaskID)
+	}
+	if !h.canCoordinatorApprove(item.BotID) && !h.canCoordinatorApprove(callerBotID) {
+		return nil, fmt.Errorf("%w: coordinator approval is disabled for bot %q", ErrForbidden, item.BotID)
+	}
+
+	return h.ReplyApproval(id, decision, optionID, reason)
 }
 
 // ReplyApproval delivers a user's decision to a pending tool approval card.
