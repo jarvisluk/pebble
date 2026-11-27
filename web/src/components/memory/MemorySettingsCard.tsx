@@ -54,7 +54,7 @@ export const MemorySettingsCard: React.FC<MemorySettingsCardProps> = ({
   const baseEmbedEnabled = Boolean(baseCfg.embedding?.enabled);
   const baseEmbedBaseUrl = (baseCfg.embedding?.baseUrl || '').trim();
   const baseEmbedModel = (baseCfg.embedding?.model || '').trim();
-  const hasSavedEmbedKey = Boolean(baseCfg.embedding?.apiKey);
+  const hasSavedEmbedKey = Boolean(baseCfg.embedding?.hasApiKey || baseCfg.embedding?.apiKey);
   const baseSnapshotMaxChars =
     typeof baseCfg.snapshotMaxChars === 'number' && baseCfg.snapshotMaxChars > 0
       ? String(baseCfg.snapshotMaxChars)

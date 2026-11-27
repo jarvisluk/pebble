@@ -357,6 +357,7 @@ export interface MemoryEmbeddingConfig {
   enabled?: boolean;
   baseUrl?: string;
   apiKey?: string;
+  hasApiKey?: boolean;
   model?: string;
 }
 
