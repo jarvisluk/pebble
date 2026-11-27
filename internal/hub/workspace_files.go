@@ -12,9 +12,12 @@ import (
 	"path"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"bot-hub/internal/state"
 )
 
 var (
@@ -67,13 +70,18 @@ type WorkspaceFileContent struct {
 // StageOpenPayload describes a stage panel/tab open request pushed to clients.
 type StageOpenPayload struct {
 	ID          string         `json:"id,omitempty"`
-	Kind        string         `json:"kind"` // files | desktop | browser | artifact | mcp-app
+	Kind        string         `json:"kind"` // file | files | desktop | browser | artifact | mcp-app
 	Title       string         `json:"title,omitempty"`
+	Subtitle    string         `json:"subtitle,omitempty"`
 	BotID       string         `json:"botId,omitempty"`
 	Path        string         `json:"path,omitempty"`
 	URL         string         `json:"url,omitempty"`
 	ResourceURI string         `json:"resourceUri,omitempty"`
+	Target      string         `json:"target,omitempty"`
 	Closable    *bool          `json:"closable,omitempty"`
+	AutoOpen    bool           `json:"autoOpen,omitempty"`
+	Silent      bool           `json:"silent,omitempty"`
+	CreatedAt   string         `json:"createdAt,omitempty"`
 	Payload     map[string]any `json:"payload,omitempty"`
 }
 
@@ -430,31 +438,80 @@ func (h *Hub) ReadWorkspaceFile(botID, relPath string, maxBytes int) (*Workspace
 	return res, nil
 }
 
-// OpenBotStage validates and broadcasts a stage_open event to connected clients.
+func (h *Hub) getBotLatestStage(botID string) *state.StageRef {
+	if botID == "" {
+		return nil
+	}
+	h.stageMu.RLock()
+	cached := h.latestStages[botID]
+	h.stageMu.RUnlock()
+	if cached != nil {
+		cp := *cached
+		return &cp
+	}
+	if h.store != nil {
+		if ref, ok := h.store.GetBotLatestStage(botID); ok && ref != nil {
+			h.stageMu.Lock()
+			h.latestStages[botID] = ref
+			h.stageMu.Unlock()
+			cp := *ref
+			return &cp
+		}
+	}
+	return nil
+}
+
+func (h *Hub) setBotLatestStage(botID string, ref state.StageRef) {
+	if botID == "" {
+		return
+	}
+	cp := ref
+	h.stageMu.Lock()
+	if h.latestStages == nil {
+		h.latestStages = make(map[string]*state.StageRef)
+	}
+	h.latestStages[botID] = &cp
+	h.stageMu.Unlock()
+	if h.store != nil {
+		_ = h.store.UpsertBotLatestStage(botID, ref)
+	}
+}
+
+// OpenBotStage validates and broadcasts a stage_open event to connected clients,
+// persists the bot's latest submitted stage tab, and posts a jump card in chat.
 func (h *Hub) OpenBotStage(botID string, req StageOpenPayload) (*StageOpenPayload, error) {
 	if _, ok := h.GetBot(botID); !ok {
 		return nil, ErrBotNotFound
 	}
 	kind := strings.TrimSpace(req.Kind)
 	switch kind {
-	case "files", "desktop", "browser", "artifact", "mcp-app":
+	case "file", "files", "desktop", "browser", "artifact", "mcp-app":
 	default:
 		return nil, fmt.Errorf("%w: %s", ErrInvalidStageKind, kind)
 	}
 
+	now := time.Now().UTC().Format(time.RFC3339Nano)
 	out := StageOpenPayload{
 		ID:          strings.TrimSpace(req.ID),
 		Kind:        kind,
 		Title:       strings.TrimSpace(req.Title),
+		Subtitle:    strings.TrimSpace(req.Subtitle),
 		BotID:       botID,
 		Path:        strings.TrimSpace(req.Path),
 		URL:         strings.TrimSpace(req.URL),
 		ResourceURI: strings.TrimSpace(req.ResourceURI),
+		Target:      strings.TrimSpace(req.Target),
 		Closable:    req.Closable,
+		AutoOpen:    req.AutoOpen,
+		Silent:      req.Silent,
+		CreatedAt:   now,
 		Payload:     req.Payload,
 	}
 
-	if kind == "files" && out.Path != "" {
+	if kind == "file" || (kind == "files" && out.Path != "") {
+		if out.Path == "" {
+			return nil, ErrWorkspaceNotFound
+		}
 		_, cleanRel, _, err := h.ResolveWorkspacePath(botID, out.Path)
 		if err != nil {
 			return nil, err
@@ -463,21 +520,91 @@ func (h *Hub) OpenBotStage(botID string, req StageOpenPayload) (*StageOpenPayloa
 		if out.Title == "" {
 			out.Title = path.Base(cleanRel)
 		}
+		if out.Subtitle == "" {
+			out.Subtitle = cleanRel
+		}
+	} else if kind == "desktop" {
+		if out.Target == "" {
+			out.Target = "local"
+		}
+		if out.Subtitle == "" && out.Target != "local" {
+			out.Subtitle = out.Target
+		}
+	} else if kind == "browser" || kind == "artifact" || kind == "mcp-app" {
+		if out.Subtitle == "" {
+			if out.URL != "" {
+				out.Subtitle = out.URL
+			} else if out.ResourceURI != "" {
+				out.Subtitle = out.ResourceURI
+			}
+		}
 	}
 
 	if out.ID == "" {
-		switch kind {
-		case "files", "desktop":
-			out.ID = kind
+		switch {
+		case kind == "file" || (kind == "files" && out.Path != ""):
+			out.ID = "file:" + out.Path
+		case kind == "files":
+			out.ID = "files"
+		case kind == "desktop":
+			if out.Target != "" && out.Target != "local" {
+				out.ID = "desktop:" + out.Target
+			} else {
+				out.ID = "desktop"
+			}
 		default:
-			out.ID = kind + ":" + botID + ":" + fmt.Sprintf("%d", time.Now().UnixMilli())
+			out.ID = kind + ":" + botID + ":" + strconv.FormatInt(time.Now().UnixMilli(), 10)
 		}
 	}
+
+	ref := state.StageRef{
+		ID:          out.ID,
+		Kind:        out.Kind,
+		Title:       out.Title,
+		Subtitle:    out.Subtitle,
+		Path:        out.Path,
+		URL:         out.URL,
+		ResourceURI: out.ResourceURI,
+		Target:      out.Target,
+		Closable:    out.Closable,
+		Payload:     out.Payload,
+		CreatedAt:   out.CreatedAt,
+	}
+	h.setBotLatestStage(botID, ref)
 
 	h.broadcast(Event{
 		Type:    "stage_open",
 		BotID:   botID,
 		Payload: out,
 	})
+
+	if !req.Silent {
+		fallbackText := out.Title
+		if fallbackText == "" {
+			fallbackText = out.Path
+		}
+		if fallbackText == "" {
+			fallbackText = out.URL
+		}
+		if fallbackText == "" {
+			fallbackText = out.Kind
+		}
+		h.appendMessage(state.ChatMessage{
+			BotID:     botID,
+			Role:      "stage",
+			From:      "stage",
+			Text:      fallbackText,
+			Stage:     &ref,
+			CreatedAt: out.CreatedAt,
+		})
+	}
+
+	if st, err := h.statusOne(botID); err == nil {
+		h.broadcast(Event{
+			Type:    "bot_status",
+			BotID:   botID,
+			Payload: st,
+		})
+	}
 	return &out, nil
 }

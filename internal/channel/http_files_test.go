@@ -124,9 +124,24 @@ func TestWorkspaceFilesAndStageRoutes(t *testing.T) {
 		t.Fatalf("GET raw mismatched path status = %d, want 401", badRaw.Code)
 	}
 
-	// Open stage endpoint
+	// Open stage endpoint (kind=files backward compatibility + kind=file jump card & latestStage)
 	stageRec := doReq(http.MethodPost, "/api/bots/assistant/stage", `{"kind":"files","path":"notes.md"}`, "Bearer secret-token")
 	if stageRec.Code != http.StatusOK || !strings.Contains(stageRec.Body.String(), `"kind":"files"`) {
 		t.Fatalf("POST stage status = %d, body = %s", stageRec.Code, stageRec.Body.String())
+	}
+
+	fileStageRec := doReq(http.MethodPost, "/api/bots/assistant/stage", `{"kind":"file","path":"notes.md","autoOpen":true}`, "Bearer secret-token")
+	if fileStageRec.Code != http.StatusOK || !strings.Contains(fileStageRec.Body.String(), `"kind":"file"`) || !strings.Contains(fileStageRec.Body.String(), `"autoOpen":true`) {
+		t.Fatalf("POST stage file status = %d, body = %s", fileStageRec.Code, fileStageRec.Body.String())
+	}
+
+	botsRec := doReq(http.MethodGet, "/api/bots", "", "Bearer secret-token")
+	if botsRec.Code != http.StatusOK || !strings.Contains(botsRec.Body.String(), `"latestStage"`) {
+		t.Fatalf("expected latestStage in /api/bots response, got %d: %s", botsRec.Code, botsRec.Body.String())
+	}
+
+	msgsRec := doReq(http.MethodGet, "/api/bots/assistant/messages", "", "Bearer secret-token")
+	if msgsRec.Code != http.StatusOK || !strings.Contains(msgsRec.Body.String(), `"role":"stage"`) {
+		t.Fatalf("expected persisted stage jump card in messages, got %d: %s", msgsRec.Code, msgsRec.Body.String())
 	}
 }

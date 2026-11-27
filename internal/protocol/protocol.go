@@ -56,6 +56,7 @@ const (
 	CapDesktopWSHEVC       = "desktop.ws_hevc"
 	CapDesktopFramePolling = "desktop.frame_polling"
 	CapStageFiles          = "stage.files"
+	CapStageTabs           = "stage.tabs"
 	CapQuestions           = "questions"
 	CapRoutines            = "routines"
 	CapUpdateCheck         = "update.check"
@@ -167,6 +168,7 @@ func ServerCapabilities(virtualSupported bool) []string {
 		CapQuestions,
 		CapRoutines,
 		CapStageFiles,
+		CapStageTabs,
 		CapUpdateCheck,
 	}
 	if virtualSupported {

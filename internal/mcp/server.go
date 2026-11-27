@@ -372,26 +372,38 @@ func toolDefinitions() []map[string]any {
 		},
 		{
 			"name":        "open_stage",
-			"description": "Open a content panel in the user's Bot Hub Stage UI (next to the live chat sidebar). Use kind='files' with a workspace-relative path to open a file preview, or kind='desktop' to bring up Remote Desktop.",
+			"description": "Submit a side-tab item to the user's Single-Bot Stage UI and post a clickable jump card in chat. By default autoOpen is false (the user clicks the jump card or topbar Stage button to jump to fullscreen; set autoOpen=true only when explicitly asked to jump immediately). Use kind='file' (or 'files' with path) to submit a file preview tab, kind='files' without path for the workspace browser, or kind='desktop' for Remote Desktop.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"kind": map[string]any{
 						"type":        "string",
-						"enum":        []string{"files", "desktop", "browser", "artifact", "mcp-app"},
-						"description": "Stage panel kind to open.",
+						"enum":        []string{"file", "files", "desktop", "browser", "artifact", "mcp-app"},
+						"description": "Stage tab kind to submit.",
 					},
 					"path": map[string]any{
 						"type":        "string",
-						"description": "Workspace-relative file or directory path (for kind='files').",
+						"description": "Workspace-relative file path (for kind='file' or 'files').",
 					},
 					"title": map[string]any{
 						"type":        "string",
 						"description": "Optional custom tab title.",
 					},
+					"subtitle": map[string]any{
+						"type":        "string",
+						"description": "Optional short subtitle shown on the chat jump card.",
+					},
 					"url": map[string]any{
 						"type":        "string",
 						"description": "Optional URL (for browser/artifact).",
+					},
+					"target": map[string]any{
+						"type":        "string",
+						"description": "Optional desktop target ID (for kind='desktop', defaults to 'local').",
+					},
+					"autoOpen": map[string]any{
+						"type":        "boolean",
+						"description": "If true, immediately switch the client into fullscreen Stage if not already open. Defaults to false (posts jump card and updates latest tab indicator).",
 					},
 				},
 				"required": []string{"kind"},
@@ -677,19 +689,25 @@ func (s *Server) callTool(ctx context.Context, name string, rawArgs json.RawMess
 			return "caller bot ID is unknown", true
 		}
 		var args struct {
-			Kind  string `json:"kind"`
-			Path  string `json:"path"`
-			Title string `json:"title"`
-			URL   string `json:"url"`
+			Kind     string `json:"kind"`
+			Path     string `json:"path"`
+			Title    string `json:"title"`
+			Subtitle string `json:"subtitle"`
+			URL      string `json:"url"`
+			Target   string `json:"target"`
+			AutoOpen bool   `json:"autoOpen"`
 		}
 		if err := json.Unmarshal(rawArgs, &args); err != nil || strings.TrimSpace(args.Kind) == "" {
 			return "kind is required", true
 		}
 		body, err := s.client.DoJSON(ctx, http.MethodPost, "/api/bots/"+url.PathEscape(selfBotID)+"/stage", map[string]any{
-			"kind":  strings.TrimSpace(args.Kind),
-			"path":  strings.TrimSpace(args.Path),
-			"title": strings.TrimSpace(args.Title),
-			"url":   strings.TrimSpace(args.URL),
+			"kind":     strings.TrimSpace(args.Kind),
+			"path":     strings.TrimSpace(args.Path),
+			"title":    strings.TrimSpace(args.Title),
+			"subtitle": strings.TrimSpace(args.Subtitle),
+			"url":      strings.TrimSpace(args.URL),
+			"target":   strings.TrimSpace(args.Target),
+			"autoOpen": args.AutoOpen,
 		})
 		if err != nil {
 			return err.Error(), true
