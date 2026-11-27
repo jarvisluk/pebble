@@ -198,7 +198,7 @@ func AppendAttachmentContext(prompt string, atts []Attachment) string {
 		return prompt
 	}
 	if trimmed == "" {
-		trimmed = "请查看附件。"
+		trimmed = "Please check the attached file(s)."
 	}
 	var paths []string
 	for _, a := range atts {
@@ -484,7 +484,11 @@ type Registry struct {
 
 func NewDefaultRegistry(cfg *config.HubConfig) *Registry {
 	r := &Registry{items: make(map[string]Harness)}
-	r.Register(NewOpenCodeHarness(cfg.OpenCodeServerURL))
+	var ocURL string
+	if cfg != nil {
+		ocURL = cfg.OpenCodeServerURL
+	}
+	r.Register(NewOpenCodeHarnessWithDB(ocURL, resolveOpenCodeDBPath(cfg)))
 	r.Register(NewCodeBuddyHarness())
 	r.Register(NewQoderHarness())
 	r.Register(NewCodexHarness())

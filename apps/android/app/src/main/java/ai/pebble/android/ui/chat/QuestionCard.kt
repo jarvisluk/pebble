@@ -145,6 +145,9 @@ fun QuestionCardView(
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.weight(1f),
                 )
+                taskDeviceLabel(question.deviceId, store.nodes)?.let { devLabel ->
+                    TagPill(text = devLabel, bg = p.lilac, fg = p.lilacInk)
+                }
                 TagPill(
                     text = store.t("questionWaitingBadge"),
                     bg = p.s1,

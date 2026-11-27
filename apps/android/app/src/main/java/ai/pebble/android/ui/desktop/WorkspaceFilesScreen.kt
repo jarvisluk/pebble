@@ -65,6 +65,7 @@ import ai.pebble.android.data.errText
 import ai.pebble.android.ui.chat.MarkdownText
 import ai.pebble.android.ui.theme.BotAccent
 import ai.pebble.android.ui.theme.PebbleFont
+import ai.pebble.android.ui.theme.LoadingContent
 import ai.pebble.android.ui.theme.LocalPalette
 import ai.pebble.android.ui.theme.MonoFont
 import ai.pebble.android.ui.theme.PebbleDimens
@@ -79,15 +80,13 @@ import ai.pebble.android.ui.theme.PebbleIcons
 fun WorkspaceFilesView(
     store: PebbleStore,
     botId: String,
-    initialPath: String?,
     showHidden: Boolean,
     refreshTrigger: Int,
-    onQuotePath: (String) -> Unit,
+    onOpenFile: (String) -> Unit,
     modifier: Modifier = Modifier,
     inWideStage: Boolean = false,
 ) {
     val p = LocalPalette.current
-    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val botIdx = store.bots.indexOfFirst { it.id == botId }.coerceAtLeast(0)
     val botObj = store.bots.getOrNull(botIdx)
@@ -98,16 +97,6 @@ fun WorkspaceFilesView(
     var listLoading by remember(botId) { mutableStateOf(false) }
     var listErr by remember(botId) { mutableStateOf("") }
     var listSeq by remember(botId) { mutableIntStateOf(0) }
-
-    var selectedPath by remember(botId) { mutableStateOf<String?>(null) }
-    var preview by remember(botId) { mutableStateOf<WorkspaceFileContent?>(null) }
-    var imageUrl by remember(botId) { mutableStateOf<String?>(null) }
-    var previewLoading by remember(botId) { mutableStateOf(false) }
-    var previewErr by remember(botId) { mutableStateOf("") }
-    var previewSeq by remember(botId) { mutableIntStateOf(0) }
-
-    var downloading by remember { mutableStateOf(false) }
-    var toastMsg by remember { mutableStateOf("") }
 
     suspend fun loadDir(path: String) {
         if (botId.isEmpty()) return
@@ -127,68 +116,10 @@ fun WorkspaceFilesView(
         if (seq == listSeq) listLoading = false
     }
 
-    suspend fun openFile(path: String) {
-        if (botId.isEmpty()) return
-        previewSeq += 1
-        val seq = previewSeq
-        selectedPath = path
-        previewLoading = true
-        previewErr = ""
-        imageUrl = null
-        toastMsg = ""
-        try {
-            val doc = store.readWorkspaceFile(botId, path)
-            if (seq != previewSeq) return
-            preview = doc
-            if (doc.kind == "image") {
-                val url = store.workspaceFileImageURL(botId, path)
-                if (seq != previewSeq) return
-                imageUrl = url
-            }
-        } catch (e: Throwable) {
-            if (seq != previewSeq) return
-            preview = null
-            previewErr = errText(e, store.t("opFailed"))
-        }
-        if (seq == previewSeq) previewLoading = false
-    }
-
-    fun downloadAndShare(path: String, fileName: String, mimeType: String?) {
-        if (downloading) return
-        downloading = true
-        toastMsg = ""
-        scope.launch {
-            try {
-                val file = store.downloadWorkspaceFileToTemp(botId, path, fileName)
-                val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
-                val intent = Intent(Intent.ACTION_VIEW).apply {
-                    setDataAndType(uri, mimeType?.takeIf { it.isNotBlank() } ?: "*/*")
-                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                }
-                val chooser = Intent.createChooser(intent, fileName)
-                runCatching { context.startActivity(chooser) }
-                    .onFailure { toastMsg = store.t("downloadFailed") }
-            } catch (e: Throwable) {
-                toastMsg = errText(e, store.t("downloadFailed"))
-            } finally {
-                downloading = false
-            }
-        }
-    }
-
-    LaunchedEffect(botId, initialPath) {
-        selectedPath = null
-        preview = null
-        imageUrl = null
-        val initP = initialPath?.trim().orEmpty()
-        if (initP.isNotEmpty()) {
-            val idx = initP.lastIndexOf('/')
-            val parent = if (idx > 0) initP.substring(0, idx) else ""
-            loadDir(parent)
-            openFile(initP)
-        } else {
-            loadDir("")
-        }
+    LaunchedEffect(botId) {
+        dirPath = ""
+        listResult = null
+        loadDir("")
     }
 
     LaunchedEffect(showHidden, refreshTrigger) {
@@ -197,183 +128,24 @@ fun WorkspaceFilesView(
         }
     }
 
-    BoxWithConstraints(
+    Box(
         modifier = modifier
             .fillMaxSize()
-            .background(p.page),
+            .background(if (inWideStage) p.card else p.page),
     ) {
-        val isSplit = maxWidth >= 720.dp
-        if (isSplit) {
-            Row(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(12.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Surface(
-                    color = p.card,
-                    shape = RoundedCornerShape(20.dp),
-                    modifier = Modifier
-                        .width(296.dp)
-                        .fillMaxHeight(),
-                ) {
-                    WorkspaceListPanel(
-                        store = store,
-                        botPal = botPal,
-                        dirPath = dirPath,
-                        listResult = listResult,
-                        listLoading = listLoading,
-                        listErr = listErr,
-                        selectedPath = selectedPath,
-                        isSplit = true,
-                        onLoadDir = { scope.launch { loadDir(it) } },
-                        onOpenFile = { scope.launch { openFile(it) } },
-                    )
-                }
-                Surface(
-                    color = p.card,
-                    shape = RoundedCornerShape(20.dp),
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight(),
-                ) {
-                    val path = selectedPath
-                    if (path != null) {
-                        WorkspacePreviewPanel(
-                            store = store,
-                            path = path,
-                            preview = preview,
-                            imageUrl = imageUrl,
-                            loading = previewLoading,
-                            error = previewErr,
-                            downloading = downloading,
-                            toastMsg = toastMsg,
-                            isSplit = true,
-                            onBack = {
-                                selectedPath = null
-                                preview = null
-                                imageUrl = null
-                            },
-                            onRetry = { scope.launch { openFile(path) } },
-                            onQuotePath = { onQuotePath(path) },
-                            onShare = {
-                                downloadAndShare(
-                                    path = path,
-                                    fileName = preview?.name?.ifEmpty { null } ?: path.substringAfterLast('/'),
-                                    mimeType = preview?.mimeType,
-                                )
-                            },
-                        )
-                    } else {
-                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(8.dp),
-                                modifier = Modifier.padding(24.dp),
-                            ) {
-                                Icon(painterResource(PebbleIcons.Description), contentDescription = null, tint = p.mute, modifier = Modifier.size(40.dp))
-                                Text(store.t("workspaceFiles"), color = p.text, fontSize = PebbleFont.title, fontWeight = FontWeight.Bold)
-                                Text(store.t("selectFileHint"), color = p.text2, fontSize = PebbleFont.secondary, textAlign = TextAlign.Center)
-                            }
-                        }
-                    }
-                }
-            }
-        } else if (inWideStage) {
-            Surface(
-                color = p.card,
-                shape = RoundedCornerShape(20.dp),
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(12.dp),
-            ) {
-                val path = selectedPath
-                if (path != null) {
-                    WorkspacePreviewPanel(
-                        store = store,
-                        path = path,
-                        preview = preview,
-                        imageUrl = imageUrl,
-                        loading = previewLoading,
-                        error = previewErr,
-                        downloading = downloading,
-                        toastMsg = toastMsg,
-                        isSplit = false,
-                        inCard = true,
-                        onBack = {
-                            selectedPath = null
-                            preview = null
-                            imageUrl = null
-                        },
-                        onRetry = { scope.launch { openFile(path) } },
-                        onQuotePath = { onQuotePath(path) },
-                        onShare = {
-                            downloadAndShare(
-                                path = path,
-                                fileName = preview?.name?.ifEmpty { null } ?: path.substringAfterLast('/'),
-                                mimeType = preview?.mimeType,
-                            )
-                        },
-                    )
-                } else {
-                    WorkspaceListPanel(
-                        store = store,
-                        botPal = botPal,
-                        dirPath = dirPath,
-                        listResult = listResult,
-                        listLoading = listLoading,
-                        listErr = listErr,
-                        selectedPath = null,
-                        isSplit = false,
-                        inCard = true,
-                        onLoadDir = { scope.launch { loadDir(it) } },
-                        onOpenFile = { scope.launch { openFile(it) } },
-                    )
-                }
-            }
-        } else {
-            val path = selectedPath
-            if (path != null) {
-                WorkspacePreviewPanel(
-                    store = store,
-                    path = path,
-                    preview = preview,
-                    imageUrl = imageUrl,
-                    loading = previewLoading,
-                    error = previewErr,
-                    downloading = downloading,
-                    toastMsg = toastMsg,
-                    isSplit = false,
-                    onBack = {
-                        selectedPath = null
-                        preview = null
-                        imageUrl = null
-                    },
-                    onRetry = { scope.launch { openFile(path) } },
-                    onQuotePath = { onQuotePath(path) },
-                    onShare = {
-                        downloadAndShare(
-                            path = path,
-                            fileName = preview?.name?.ifEmpty { null } ?: path.substringAfterLast('/'),
-                            mimeType = preview?.mimeType,
-                        )
-                    },
-                )
-            } else {
-                WorkspaceListPanel(
-                    store = store,
-                    botPal = botPal,
-                    dirPath = dirPath,
-                    listResult = listResult,
-                    listLoading = listLoading,
-                    listErr = listErr,
-                    selectedPath = null,
-                    isSplit = false,
-                    onLoadDir = { scope.launch { loadDir(it) } },
-                    onOpenFile = { scope.launch { openFile(it) } },
-                )
-            }
-        }
+        WorkspaceListPanel(
+            store = store,
+            botPal = botPal,
+            dirPath = dirPath,
+            listResult = listResult,
+            listLoading = listLoading,
+            listErr = listErr,
+            selectedPath = null,
+            isSplit = false,
+            inCard = inWideStage,
+            onLoadDir = { scope.launch { loadDir(it) } },
+            onOpenFile = onOpenFile,
+        )
     }
 }
 
@@ -638,7 +410,7 @@ private fun WorkspaceEntryRow(
 }
 
 @Composable
-private fun WorkspacePreviewPanel(
+internal fun WorkspacePreviewPanel(
     store: PebbleStore,
     path: String,
     preview: WorkspaceFileContent?,
@@ -700,10 +472,8 @@ private fun WorkspacePreviewPanel(
                     Text(store.t("insertToChat"), color = p.text, fontSize = PebbleFont.secondary, maxLines = 1)
                 }
             }
-            if (downloading) {
-                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = p.accent)
-            } else {
-                IconButton(onClick = onShare, modifier = Modifier.size(34.dp)) {
+            IconButton(onClick = onShare, enabled = !downloading, modifier = Modifier.size(34.dp)) {
+                LoadingContent(loading = downloading, color = p.accent) {
                     Icon(painterResource(PebbleIcons.IosShare), contentDescription = store.t("openQuickLook"), tint = p.accent, modifier = Modifier.size(18.dp))
                 }
             }

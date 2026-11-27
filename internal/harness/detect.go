@@ -51,7 +51,7 @@ var harnessInstallMeta = map[string]HarnessInstallInfo{
 		CanAutoInstall: true,
 		RequiresLogin:  false,
 		Category:       "recommended",
-		Summary:        "免登录 · 内置免费模型",
+		Summary:        "No login · Built-in free models",
 	},
 	"codebuddy": {
 		Binary:         "codebuddy",
@@ -60,7 +60,7 @@ var harnessInstallMeta = map[string]HarnessInstallInfo{
 		CanAutoInstall: true,
 		RequiresLogin:  true,
 		Category:       "recommended",
-		Summary:        "微信扫码 · 国内直连",
+		Summary:        "WeChat QR · Direct in China",
 	},
 	"qoder": {
 		Binary:         "qoderclicn",
@@ -70,7 +70,7 @@ var harnessInstallMeta = map[string]HarnessInstallInfo{
 		CanAutoInstall: true,
 		RequiresLogin:  true,
 		Category:       "recommended",
-		Summary:        "国内直连 · 免 Node 依赖",
+		Summary:        "Direct in China · No Node required",
 	},
 	"codex": {
 		Binary:         "codex",
@@ -79,7 +79,7 @@ var harnessInstallMeta = map[string]HarnessInstallInfo{
 		CanAutoInstall: true,
 		RequiresLogin:  true,
 		Category:       "recommended",
-		Summary:        "ChatGPT 订阅",
+		Summary:        "ChatGPT subscription",
 	},
 	"claude": {
 		Binary:         "claude",
@@ -88,7 +88,7 @@ var harnessInstallMeta = map[string]HarnessInstallInfo{
 		CanAutoInstall: true,
 		RequiresLogin:  true,
 		Category:       "recommended",
-		Summary:        "Claude 订阅",
+		Summary:        "Claude subscription",
 	},
 	"grok": {
 		Binary:         "grok",
@@ -97,16 +97,16 @@ var harnessInstallMeta = map[string]HarnessInstallInfo{
 		CanAutoInstall: true,
 		RequiresLogin:  true,
 		Category:       "recommended",
-		Summary:        "SuperGrok / X 订阅",
+		Summary:        "SuperGrok / X subscription",
 	},
 	"trae": {
 		Binary:         "traecli",
-		Command:        "查看 Trae CLI 安装说明",
+		Command:        "",
 		URL:            "https://www.trae.cn",
 		CanAutoInstall: false,
 		RequiresLogin:  false,
 		Category:       "advanced",
-		Summary:        "字节 Trae ACP",
+		Summary:        "ByteDance Trae ACP",
 	},
 	"pi": {
 		Binary:         "pi",
@@ -115,11 +115,11 @@ var harnessInstallMeta = map[string]HarnessInstallInfo{
 		CanAutoInstall: true,
 		RequiresLogin:  false,
 		Category:       "advanced",
-		Summary:        "极客轻量 Agent",
+		Summary:        "Lightweight CLI agent",
 	},
 	"dsh": {
 		Binary:         "dsh",
-		Command:        "查看 DeepSeek Harness 安装说明",
+		Command:        "",
 		URL:            "https://github.com/deepseek-ai/deepseek-harness",
 		CanAutoInstall: false,
 		RequiresLogin:  false,
@@ -128,7 +128,7 @@ var harnessInstallMeta = map[string]HarnessInstallInfo{
 	},
 	"agy": {
 		Binary:         "agy",
-		Command:        "查看 Antigravity CLI 安装说明",
+		Command:        "",
 		CanAutoInstall: false,
 		RequiresLogin:  false,
 		Category:       "advanced",
@@ -293,69 +293,63 @@ func DetectHarnessAuth(ctx context.Context, kind string) (status string, detail 
 			return "ready", "API Key"
 		}
 		if home != "" && nonEmptyFile(filepath.Join(home, ".claude", ".credentials.json")) {
-			return "ready", "已登录"
-		}
-		if GetMagpieStatus(ctx, "claude").Connected {
-			return "ready", "Magpie"
+			return "ready", "Signed in"
 		}
 		if code, out, err := runAuthCheckFunc(ctx, binPath, "auth", "status"); err == nil && code == 0 {
 			low := strings.ToLower(out)
 			if !strings.Contains(low, "not logged in") && !strings.Contains(low, `"loggedin":false`) && !strings.Contains(low, `"loggedIn": false`) {
-				return "ready", "已登录"
+				return "ready", "Signed in"
 			}
 		}
-		return "needs_login", "需登录 Claude 账号"
+		return "needs_login", "Sign in to Claude account"
 
 	case "codex":
 		if strings.TrimSpace(os.Getenv("OPENAI_API_KEY")) != "" {
 			return "ready", "API Key"
 		}
 		if home != "" && nonEmptyFile(filepath.Join(home, ".codex", "auth.json")) {
-			return "ready", "已登录"
-		}
-		if GetMagpieStatus(ctx, "codex").Connected {
-			return "ready", "Magpie"
+			return "ready", "Signed in"
 		}
 		if code, out, err := runAuthCheckFunc(ctx, binPath, "login", "status"); err == nil && code == 0 {
 			low := strings.ToLower(out)
 			if !strings.Contains(low, "not logged in") {
-				return "ready", "已登录"
+				return "ready", "Signed in"
 			}
 		}
-		return "needs_login", "需登录 ChatGPT 账号"
+		return "needs_login", "Sign in to ChatGPT account"
 
 	case "codebuddy":
 		if strings.TrimSpace(os.Getenv("CODEBUDDY_API_KEY")) != "" {
 			return "ready", "API Key"
 		}
 		if home != "" && dirHasAuthFile(filepath.Join(home, ".codebuddy")) {
-			return "ready", "已登录"
+			return "ready", "Signed in"
 		}
-		return "needs_login", "需微信或账号登录"
+		return "needs_login", "Sign in with WeChat or account"
 
 	case "qoder":
 		if strings.TrimSpace(os.Getenv("QODER_API_KEY")) != "" {
 			return "ready", "API Key"
 		}
 		if home != "" && dirHasAuthFile(filepath.Join(home, ".qoder")) {
-			return "ready", "已登录"
+			return "ready", "Signed in"
 		}
 		if code, out, err := runAuthCheckFunc(ctx, binPath, "auth", "status"); err == nil && code == 0 {
 			low := strings.ToLower(out)
 			if !strings.Contains(low, "not logged in") && !strings.Contains(low, "unauthenticated") {
-				return "ready", "已登录"
+				return "ready", "Signed in"
 			}
 		}
-		return "needs_login", "需登录 Qoder 账号"
+		return "needs_login", "Sign in to Qoder account"
 
 	case "grok":
 		if strings.TrimSpace(os.Getenv("XAI_API_KEY")) != "" {
 			return "ready", "API Key"
 		}
 		if home != "" && nonEmptyFile(filepath.Join(home, ".grok", "auth.json")) {
-			return "ready", "已登录"
+			return "ready", "Signed in"
 		}
-		return "needs_login", "需登录 xAI / X 账号"
+		return "needs_login", "Sign in to xAI / X account"
 
 	default:
 		return "ready", ""

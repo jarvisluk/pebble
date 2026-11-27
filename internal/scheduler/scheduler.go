@@ -61,11 +61,12 @@ func (j *scheduledJob) getNext() time.Time {
 type Scheduler struct {
 	hub *hub.Hub
 
-	mu     sync.Mutex
-	ctx    context.Context
-	jobs   map[string]*scheduledJob
-	active map[string]bool
-	wg     sync.WaitGroup
+	mu       sync.Mutex
+	ctx      context.Context
+	jobs     map[string]*scheduledJob
+	dreamJob *dreamScheduledJob
+	active   map[string]bool
+	wg       sync.WaitGroup
 
 	probeMu          sync.Mutex
 	primaryProbe     func(context.Context) bool
@@ -153,6 +154,8 @@ func (s *Scheduler) Sync() {
 		}
 	}
 
+	memCfg := s.hub.MemoryConfig()
+
 	s.mu.Lock()
 	if s.ctx == nil || s.ctx.Err() != nil {
 		s.mu.Unlock()
@@ -186,10 +189,12 @@ func (s *Scheduler) Sync() {
 		started++
 		log.Printf("[scheduler] armed %s (%s)", key, describeSchedule(want.spec))
 	}
+	s.syncDreamJobLocked(memCfg.Enabled && memCfg.Dream.Enabled, memCfg.Dream.DailyAt)
 	total := len(s.jobs)
+	dreamArmed := s.dreamJob != nil
 	s.mu.Unlock()
 
-	if total == 0 && started == 0 {
+	if total == 0 && started == 0 && !dreamArmed {
 		log.Printf("[scheduler] no active schedules configured")
 	}
 }
@@ -403,40 +408,49 @@ func (s *Scheduler) executeWithSlot(ctx context.Context, botID string, sched con
 		prompt += "\n\n[Webhook Payload]\n" + strings.TrimSpace(webhookPayload)
 	}
 
-	started := time.Now()
-	res, err := s.hub.RunIsolated(ctx, botID, prompt, hub.IsolatedOptions{
-		Source:         "routine:" + sched.Name,
-		Model:          sched.Model,
-		PermissionMode: sched.PermissionMode,
-	})
-	finished := time.Now()
-
 	delivery := sched.EffectiveMainDelivery()
+	taskDelivery := state.TaskDeliveryReceipt
+	switch delivery {
+	case config.RoutineDeliveryNotify:
+		taskDelivery = state.TaskDeliveryWake
+	case config.RoutineDeliveryNone:
+		taskDelivery = state.TaskDeliverySilent
+	}
 	modelUsed := strings.TrimSpace(sched.Model)
 	if modelUsed == "" {
 		modelUsed = bot.Model
 	}
-	run := state.RoutineRun{
-		BotID:       botID,
-		RoutineID:   rid,
-		RoutineName: sched.Name,
-		Trigger:     trigger,
-		Delivery:    delivery,
-		Model:       modelUsed,
-		DurationMs:  finished.Sub(started).Milliseconds(),
-		StartedAt:   started.UTC().Format(time.RFC3339Nano),
-		FinishedAt:  finished.UTC().Format(time.RFC3339Nano),
-		SlotKey:     slotKey,
-	}
 
+	started := time.Now()
+	task, err := s.hub.SpawnTask(ctx, hub.TaskSpawnRequest{
+		BotID:           botID,
+		Kind:            state.TaskKindRoutine,
+		Title:           sched.Name,
+		Prompt:          prompt,
+		Model:           sched.Model,
+		PermissionMode:  sched.PermissionMode,
+		Delivery:        taskDelivery,
+		RoutineID:       rid,
+		RoutineName:     sched.Name,
+		Trigger:         trigger,
+		SlotKey:         slotKey,
+		ManagedDelivery: true,
+	})
 	if err != nil {
-		run.Status = "error"
-		run.Error = err.Error()
-		if res != nil {
-			run.Output = strings.TrimSpace(res.Text)
-			run.CostUSD = res.Usage.CostUSD
-			run.InputTokens = res.Usage.InputTokens
-			run.OutputTokens = res.Usage.OutputTokens
+		finished := time.Now()
+		run := state.RoutineRun{
+			BotID:       botID,
+			RoutineID:   rid,
+			RoutineName: sched.Name,
+			Trigger:     trigger,
+			Status:      "error",
+			Delivery:    delivery,
+			Model:       modelUsed,
+			Error:       err.Error(),
+			DurationMs:  finished.Sub(started).Milliseconds(),
+			StartedAt:   started.UTC().Format(time.RFC3339Nano),
+			FinishedAt:  finished.UTC().Format(time.RFC3339Nano),
+			SlotKey:     slotKey,
 		}
 		saved, recErr := s.hub.RecordRoutineRun(run)
 		if recErr == nil {
@@ -446,14 +460,81 @@ func (s *Scheduler) executeWithSlot(ctx context.Context, botID string, sched con
 		return &run, err
 	}
 
-	run.CostUSD = res.Usage.CostUSD
-	run.InputTokens = res.Usage.InputTokens
-	run.OutputTokens = res.Usage.OutputTokens
-	if res.DurationMs > 0 {
-		run.DurationMs = res.DurationMs
+	finishedTask, waitErr := s.hub.WaitTask(ctx, task.ID)
+	if waitErr != nil {
+		_, _ = s.hub.CancelTask(task.ID)
+		finished := time.Now()
+		run := state.RoutineRun{
+			ID:          task.ID,
+			BotID:       botID,
+			RoutineID:   rid,
+			RoutineName: sched.Name,
+			Trigger:     trigger,
+			Status:      "error",
+			Delivery:    delivery,
+			Model:       modelUsed,
+			Error:       waitErr.Error(),
+			DurationMs:  finished.Sub(started).Milliseconds(),
+			StartedAt:   started.UTC().Format(time.RFC3339Nano),
+			FinishedAt:  finished.UTC().Format(time.RFC3339Nano),
+			SlotKey:     slotKey,
+		}
+		saved, recErr := s.hub.RecordRoutineRun(run)
+		if recErr == nil {
+			run = saved
+		}
+		s.hub.BroadcastRoutineRun(run)
+		return &run, waitErr
 	}
 
-	if isSilentOutput(res.Text) {
+	finished := time.Now()
+	runStartedAt := finishedTask.StartedAt
+	if runStartedAt == "" {
+		runStartedAt = started.UTC().Format(time.RFC3339Nano)
+	}
+	runFinishedAt := finishedTask.FinishedAt
+	if runFinishedAt == "" {
+		runFinishedAt = finished.UTC().Format(time.RFC3339Nano)
+	}
+	durMs := finishedTask.DurationMs
+	if durMs <= 0 {
+		durMs = finished.Sub(started).Milliseconds()
+	}
+
+	run := state.RoutineRun{
+		ID:           finishedTask.ID,
+		BotID:        botID,
+		RoutineID:    rid,
+		RoutineName:  sched.Name,
+		Trigger:      trigger,
+		Delivery:     delivery,
+		Model:        modelUsed,
+		DurationMs:   durMs,
+		CostUSD:      finishedTask.CostUSD,
+		InputTokens:  finishedTask.InputTokens,
+		OutputTokens: finishedTask.OutputTokens,
+		StartedAt:    runStartedAt,
+		FinishedAt:   runFinishedAt,
+		SlotKey:      slotKey,
+	}
+
+	if finishedTask.Status != state.TaskStatusCompleted {
+		errText := finishedTask.Error
+		if errText == "" {
+			errText = "routine " + finishedTask.Status
+		}
+		run.Status = "error"
+		run.Error = errText
+		run.Output = strings.TrimSpace(finishedTask.Output)
+		saved, recErr := s.hub.RecordRoutineRun(run)
+		if recErr == nil {
+			run = saved
+		}
+		s.hub.BroadcastRoutineRun(run)
+		return &run, errors.New(errText)
+	}
+
+	if isSilentOutput(finishedTask.Output) {
 		run.Status = "silent"
 		saved, recErr := s.hub.RecordRoutineRun(run)
 		if recErr == nil {
@@ -465,10 +546,10 @@ func (s *Scheduler) executeWithSlot(ctx context.Context, botID string, sched con
 	}
 
 	run.Status = "ok"
-	run.Output = strings.TrimSpace(res.Text)
+	run.Output = strings.TrimSpace(finishedTask.Output)
 
 	if delivery == config.RoutineDeliveryNotify {
-		msg := fmt.Sprintf("[Routine 通知: %s]\n%s", sched.Name, run.Output)
+		msg := fmt.Sprintf("[Routine notification: %s]\n%s", sched.Name, run.Output)
 		if _, sendErr := s.hub.Send(ctx, botID, msg, hub.SendOptions{Source: "routine:" + sched.Name}); sendErr != nil {
 			log.Printf("[scheduler] main notify failed %s/%s: %v", botID, rid, sendErr)
 		} else {
@@ -604,7 +685,7 @@ func isSilentOutput(text string) bool {
 	if trimmed == "" {
 		return true
 	}
-	clean := strings.Trim(trimmed, " \t\r\n`\"'.。")
+	clean := strings.Trim(trimmed, " \t\r\n`\"'.。") // i18n:allow-cjk
 	return strings.EqualFold(clean, "NO_REPLY")
 }
 

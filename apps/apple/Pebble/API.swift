@@ -77,6 +77,33 @@ func normalizeAddress(_ raw: String) -> NormalizedAddress {
     return NormalizedAddress(cleanAddress: withProto, token: token, isTailcat: false, isTailscale: false)
 }
 
+private let pairingTokenAllowedChars = CharacterSet(
+    charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
+)
+
+func stripLinkFragment(_ raw: String) -> String {
+    let trimmed = raw
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+        .replacingOccurrences(of: "[\\r\\n]+", with: "", options: .regularExpression)
+    if let hash = trimmed.firstIndex(of: "#") {
+        return String(trimmed[..<hash]).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    return trimmed
+}
+
+func maskedPairingLink(_ baseLink: String) -> String {
+    let base = stripLinkFragment(baseLink)
+    return base.isEmpty ? "" : "\(base)#token=••••••••"
+}
+
+func buildPairingLink(_ baseLink: String, token: String) -> String? {
+    let base = stripLinkFragment(baseLink)
+    let tok = token.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !base.isEmpty, !tok.isEmpty else { return nil }
+    let encoded = tok.addingPercentEncoding(withAllowedCharacters: pairingTokenAllowedChars) ?? tok
+    return "\(base)#token=\(encoded)"
+}
+
 /// 独立于系统共享 Cookie 存储的 HTTP 会话，避免本机多端口或模式切换时残留的 `bot_hub_token` Cookie 污染请求。
 let hubAPISession: URLSession = {
     let cfg = URLSessionConfiguration.default
@@ -207,7 +234,7 @@ struct APIClient {
     }
 }
 
-/// `/api/events` SSE：ready 事件表示在线，断开后按 1s 起、×1.8、上限 12s 重连，401 停止。
+/// `/api/events` SSE：ready 事件表示在线，断开后按 1s 起、×1.8、上限 12s 重连，401 停止；支持 `?since=<seq>` 断点续传。
 final class EventStream {
     private var task: Task<Void, Never>?
 
@@ -218,13 +245,18 @@ final class EventStream {
         stop()
         task = Task.detached {
             var delay = 1.0
+            var lastSeq: UInt64 = 0
             while !Task.isCancelled {
                 do {
-                    guard let url = URL(string: base + "/api/events") else { return }
+                    let eventPath = lastSeq > 0 ? "/api/events?since=\(lastSeq)" : "/api/events"
+                    guard let url = URL(string: base + eventPath) else { return }
                     var req = URLRequest(url: url)
                     req.timeoutInterval = 70
                     APIClient.attachClientHeaders(&req)
                     req.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+                    if lastSeq > 0 {
+                        req.setValue("\(lastSeq)", forHTTPHeaderField: "Last-Event-ID")
+                    }
                     if !token.isEmpty { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
                     let (bytes, resp) = try await hubAPISession.bytes(for: req)
                     let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
@@ -236,6 +268,7 @@ final class EventStream {
                     if code != 200 { throw HubError(message: "HTTP \(code)") }
                     var buf: [UInt8] = []
                     var event = "message"
+                    var eventId: UInt64 = 0
                     var dataLines: [String] = []
                     for try await byte in bytes {
                         if byte != 10 { buf.append(byte); continue }
@@ -248,13 +281,24 @@ final class EventStream {
                                 await onStatus(true)
                             } else if !dataLines.isEmpty,
                                       let obj = try? JSONSerialization.jsonObject(with: Data(dataLines.joined(separator: "\n").utf8)) as? [String: Any] {
+                                if eventId > 0 {
+                                    lastSeq = eventId
+                                } else if let seqNum = obj["seq"] as? NSNumber, seqNum.uint64Value > 0 {
+                                    lastSeq = seqNum.uint64Value
+                                }
                                 let payload = (obj["payload"] as? [String: Any]) ?? obj
                                 await onEvent(event, payload)
                             }
                             event = "message"
+                            eventId = 0
                             dataLines = []
                         } else if line.hasPrefix(":") {
                             continue
+                        } else if line.hasPrefix("id:") {
+                            let rawId = line.dropFirst(3).trimmingCharacters(in: .whitespaces)
+                            if let parsed = UInt64(rawId), parsed > 0 {
+                                eventId = parsed
+                            }
                         } else if line.hasPrefix("event:") {
                             event = line.dropFirst(6).trimmingCharacters(in: .whitespaces)
                         } else if line.hasPrefix("data:") {

@@ -24,6 +24,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
@@ -34,6 +35,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -48,6 +50,20 @@ data class ConfirmItem(
     val destructive: Boolean = true,
     val onConfirm: () -> Unit,
 )
+
+/**
+ * 按钮加载态：保留原按钮与内容占位，仅隐藏内容并原位叠加转圈。
+ * 禁止把按钮整体替换为裸 CircularProgressIndicator，否则顶栏 / 行内按钮宽度跳动、相邻元素位移。
+ */
+@Composable
+fun LoadingContent(loading: Boolean, color: Color, content: @Composable () -> Unit) {
+    Box(contentAlignment = Alignment.Center) {
+        Box(Modifier.alpha(if (loading) 0f else 1f)) { content() }
+        if (loading) {
+            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = color)
+        }
+    }
+}
 
 fun copyToClipboard(context: Context, text: String) {
     val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return

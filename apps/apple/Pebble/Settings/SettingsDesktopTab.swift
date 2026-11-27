@@ -214,15 +214,13 @@ struct SettingsDesktopTab: View {
             }
             HStack {
                 Spacer()
-                if deskSaving {
-                    ProgressView().controlSize(.small)
-                } else {
-                    Button(hub.t("save")) {
-                        Task { _ = await saveWorker() }
-                    }
-                    .buttonStyle(HubPrimaryButtonStyle())
-                    .disabled(!deskDirty)
+                Button {
+                    Task { _ = await saveWorker() }
+                } label: {
+                    HubLoadingLabel(loading: deskSaving) { Text(hub.t("save")) }
                 }
+                .buttonStyle(HubPrimaryButtonStyle())
+                .disabled(!deskDirty || deskSaving)
             }
         } header: {
             Text(hub.t("deskWorkerTitle"))

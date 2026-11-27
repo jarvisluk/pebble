@@ -1,21 +1,31 @@
-.PHONY: web build desktop app app-fast app-wails serve chat status test ios-tunnel android-tunnel android-native android-native-debug
+.PHONY: web build desktop app app-fast app-wails serve chat status test check-i18n ios-tunnel android-tunnel android-native android-native-debug version version-check version-sync release-prepare release-cli release-macos release-android release-ios release-checksums
 
-GO_LDFLAGS ?= -s -w
+VERSION ?= $(shell python3 scripts/version.py show --field version)
+GIT_COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+BUILD_DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+VERSION_LDFLAGS = -X bot-hub/internal/protocol.AppVersion=$(VERSION) -X bot-hub/internal/protocol.BuildCommit=$(GIT_COMMIT) -X bot-hub/internal/protocol.BuildDate=$(BUILD_DATE)
+GO_LDFLAGS ?= -s -w $(VERSION_LDFLAGS)
+GO_TAGS ?= $(shell grep -v '^\#' scripts/go-build-tags.txt | grep -v '^$$' | paste -sd, -)
+GO_TAG_FLAGS = $(if $(strip $(GO_TAGS)),-tags="$(GO_TAGS)")
 APP_CONFIG ?= Release
 UNIVERSAL ?= 0
 DSYM ?= 0
+WHOLE_MODULE ?= 0
+XCODE_CAS_PATH ?=
+PEBBLE_ABIS ?=
+CODESIGN_RUNTIME ?= 0
 
 web:
 	cd web && npm run build
 
 build:
 	mkdir -p bin
-	go build -ldflags="$(GO_LDFLAGS)" -o bin/pebble ./cmd/pebble
+	go build -trimpath $(GO_TAG_FLAGS) -ldflags="$(GO_LDFLAGS)" -o bin/pebble ./cmd/pebble
 	ln -sf pebble bin/bot-hub
 
 # Desktop app (Wails, cgo): used for Windows/Linux or legacy macOS packaging.
 desktop:
-	go build -trimpath -ldflags="-s -w" -o bin/bot-hub-desktop ./cmd/bot-hub-desktop
+	go build -trimpath $(GO_TAG_FLAGS) -ldflags="$(GO_LDFLAGS)" -o bin/bot-hub-desktop ./cmd/bot-hub-desktop
 
 APP = bin/Pebble.app
 RES_BIN = $(APP)/Contents/Resources/bin
@@ -25,7 +35,7 @@ CODESIGN_IDENTITY ?=
 app:
 	@set -e; \
 	arch=$$(uname -m); \
-	dest_args=""; arch_args=""; dsym_args=""; \
+	dest_args=""; arch_args=""; dsym_args=""; swift_args=""; cas_path="$(XCODE_CAS_PATH)"; \
 	if [ "$(UNIVERSAL)" != "1" ]; then \
 		dest_args="-destination platform=macOS,arch=$$arch"; \
 		arch_args="ONLY_ACTIVE_ARCH=YES"; \
@@ -33,12 +43,24 @@ app:
 	if [ "$(DSYM)" != "1" ]; then \
 		dsym_args="DEBUG_INFORMATION_FORMAT=dwarf"; \
 	fi; \
+	if [ "$(APP_CONFIG)" = "Release" ] && [ "$(WHOLE_MODULE)" != "1" ]; then \
+		swift_args="SWIFT_COMPILATION_MODE=incremental SWIFT_OPTIMIZATION_LEVEL=-O"; \
+	fi; \
+	if [ -z "$$cas_path" ]; then \
+		dd=$$(defaults read com.apple.dt.Xcode IDECustomDerivedDataLocation 2>/dev/null || true); \
+		case "$$dd" in \
+			/*) cas_path="$$dd/CompilationCache.noindex" ;; \
+			*) cas_path="$$HOME/Library/Caches/Pebble/CompilationCache.noindex" ;; \
+		esac; \
+	fi; \
 	mkdir -p bin; \
-	(go build -ldflags="$(GO_LDFLAGS)" -o bin/pebble ./cmd/pebble && ln -sf pebble bin/bot-hub) & \
+	(go build -trimpath $(GO_TAG_FLAGS) -ldflags="$(GO_LDFLAGS)" -o bin/pebble ./cmd/pebble && ln -sf pebble bin/bot-hub) & \
 	go_pid=$$!; \
 	xcodebuild -project apps/apple/Pebble.xcodeproj -scheme PebbleMac -configuration "$(APP_CONFIG)" -derivedDataPath build/apple-mac \
-		$$dest_args $$arch_args $$dsym_args \
+		$$dest_args $$arch_args $$dsym_args $$swift_args \
+		ENABLE_PREVIEWS=NO \
 		COMPILATION_CACHE_ENABLE_CACHING=YES \
+		COMPILATION_CACHE_CAS_PATH="$$cas_path" \
 		CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO build & \
 	xcode_pid=$$!; \
 	wait "$$go_pid"; \
@@ -90,13 +112,22 @@ app:
 		IDENTITY=$$(security find-identity -v -p codesigning 2>/dev/null | awk '/Developer ID Application:/ {print $$2; exit}'); \
 	fi; \
 	if [ -z "$$IDENTITY" ]; then \
+		IDENTITY=$$(security find-identity -v -p codesigning 2>/dev/null | awk '/Pebble Local Signing/ {print $$2; exit}'); \
+	fi; \
+	if [ -z "$$IDENTITY" ]; then \
 		IDENTITY="-"; \
+		echo "WARNING: No code signing identity found; falling back to ad-hoc signing (-). Every rebuild will reset macOS TCC permissions (Screen Recording / Documents / etc.). Install an Apple Development certificate or create a trusted 'Pebble Local Signing' certificate in Keychain." >&2; \
 	fi; \
 	echo "Signing $(APP) with identity: $$IDENTITY"; \
+	RUNTIME_FLAGS=""; \
+	if [ "$$IDENTITY" != "-" ] && { [ "$(CODESIGN_RUNTIME)" = "1" ] || printf '%s' "$$IDENTITY" | grep -q "^Developer ID Application:" || \
+		security find-identity -v -p codesigning 2>/dev/null | grep -F -- "$$IDENTITY" | grep -q "Developer ID Application:"; }; then \
+		RUNTIME_FLAGS="--options runtime --timestamp"; \
+	fi; \
 	for f in "$(RES_BIN)"/*; do \
-		[ -f "$$f" ] && [ ! -L "$$f" ] && codesign --force --sign "$$IDENTITY" "$$f"; \
+		[ -f "$$f" ] && [ ! -L "$$f" ] && codesign --force $$RUNTIME_FLAGS --sign "$$IDENTITY" "$$f"; \
 	done; \
-	codesign --force --sign "$$IDENTITY" --entitlements apps/apple/Pebble/PebbleMac.entitlements "$(APP)"
+	codesign --force $$RUNTIME_FLAGS --sign "$$IDENTITY" --entitlements apps/apple/Pebble/PebbleMac.entitlements "$(APP)"
 	codesign --verify --deep --strict "$(APP)"
 
 app-fast:
@@ -149,7 +180,11 @@ app-wails: desktop
 		IDENTITY=$$(security find-identity -v -p codesigning 2>/dev/null | awk '/Developer ID Application:/ {print $$2; exit}'); \
 	fi; \
 	if [ -z "$$IDENTITY" ]; then \
+		IDENTITY=$$(security find-identity -v -p codesigning 2>/dev/null | awk '/Pebble Local Signing/ {print $$2; exit}'); \
+	fi; \
+	if [ -z "$$IDENTITY" ]; then \
 		IDENTITY="-"; \
+		echo "WARNING: No code signing identity found; falling back to ad-hoc signing (-). Every rebuild will reset macOS TCC permissions (Screen Recording / Documents / etc.). Install an Apple Development certificate or create a trusted 'Pebble Local Signing' certificate in Keychain." >&2; \
 	fi; \
 	echo "Signing $(APP) with identity: $$IDENTITY"; \
 	for f in "$(RES_BIN)"/*; do \
@@ -167,16 +202,50 @@ status:
 	go run ./cmd/pebble status
 
 test:
-	go test ./...
+	go test $(GO_TAG_FLAGS) ./...
+
+check-i18n:
+	go test -v ./internal/i18ncheck
 
 ios-tunnel:
 	./scripts/build-tunnel-ios.sh
 
 android-tunnel:
-	./scripts/build-tunnel-android.sh
+	ANDROID_ABIS="$(PEBBLE_ABIS)" ./scripts/build-tunnel-android.sh
 
 android-native: android-tunnel
-	cd apps/android && ./gradlew :app:assembleRelease
+	cd apps/android && ./gradlew :app:assembleRelease $(if $(strip $(PEBBLE_ABIS)),-Ppebble.abis=$(PEBBLE_ABIS))
 
 android-native-debug: android-tunnel
-	cd apps/android && ./gradlew :app:assembleDebug
+	cd apps/android && ./gradlew :app:assembleDebug $(if $(strip $(PEBBLE_ABIS)),-Ppebble.abis=$(PEBBLE_ABIS))
+
+version:
+	python3 scripts/version.py show
+
+version-check:
+	python3 scripts/version.py check
+
+version-sync:
+	python3 scripts/version.py sync
+
+release-prepare:
+	@if [ -z "$(BUMP)" ]; then \
+		echo "Usage: make release-prepare BUMP=<patch|minor|major|alpha|beta|rc|build|X.Y.Z[-pre]>" >&2; \
+		exit 1; \
+	fi
+	./scripts/release/prepare.sh "$(BUMP)" $(RELEASE_ARGS)
+
+release-cli:
+	./scripts/release/build-cli.sh
+
+release-macos:
+	./scripts/release/package-macos.sh
+
+release-android:
+	./scripts/release/package-android.sh
+
+release-ios:
+	./scripts/release/archive-ios.sh
+
+release-checksums:
+	./scripts/release/checksums.sh

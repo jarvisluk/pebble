@@ -234,6 +234,7 @@ final class MacAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationC
     func applicationDidFinishLaunching(_ notification: Notification) {
         UNUserNotificationCenter.current().delegate = self
         Task { @MainActor in
+            PlatformAppearance.shared.apply(themePref: normalizeThemePref(UserDefaults.standard.string(forKey: "bothub.theme")))
             DesktopHostManager.shared.startDaemonIfNeeded()
         }
     }

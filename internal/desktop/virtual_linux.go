@@ -216,7 +216,7 @@ wait $XVFB_PID`,
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("启动虚拟桌面失败: %w", err)
+		return fmt.Errorf("failed to start virtual desktop: %w", err)
 	}
 
 	pgid := cmd.Process.Pid
@@ -238,7 +238,7 @@ wait $XVFB_PID`,
 		_ = syscall.Kill(-pgid, syscall.SIGKILL)
 		_ = cmd.Wait()
 		releaseDisplay(disp)
-		return errors.New("Xvfb 启动超时，虚拟显示未能就绪")
+		return errors.New("Xvfb timed out; virtual display did not become ready")
 	}
 
 	b.mu.Lock()
@@ -358,14 +358,14 @@ func (b *linuxVirtualBackend) HasWindows(ctx context.Context) (bool, error) {
 func (b *linuxVirtualBackend) Install(ctx context.Context) (*SetupResult, error) {
 	missing := detectMissingVirtualDeps()
 	if len(missing) == 0 {
-		return &SetupResult{OK: true, AlreadyReady: true, Output: "虚拟桌面依赖已就绪"}, nil
+		return &SetupResult{OK: true, AlreadyReady: true, Output: "virtual desktop dependencies are ready"}, nil
 	}
 	pkgMgr, manualCmd := detectLinuxPackageInstall(missing)
 	if pkgMgr == "" {
 		return &SetupResult{
 			OK:          false,
 			MissingDeps: missing,
-			Error:       "未检测到受支持的包管理器（apt-get/dnf/pacman/apk），请手动安装: " + strings.Join(missing, ", "),
+			Error:       "no supported package manager detected (apt-get/dnf/pacman/apk); install manually: " + strings.Join(missing, ", "),
 		}, nil
 	}
 
@@ -400,7 +400,7 @@ func (b *linuxVirtualBackend) Install(ctx context.Context) (*SetupResult, error)
 			errMsg = err.Error()
 		}
 		if os.Geteuid() != 0 {
-			errMsg = fmt.Sprintf("自动安装需要 root 或免密 sudo 权限（%s）。请在终端手动执行：%s", errMsg, manualCmd)
+			errMsg = fmt.Sprintf("automatic installation requires root or passwordless sudo (%s); run manually in terminal: %s", errMsg, manualCmd)
 		}
 		return &SetupResult{
 			OK:             false,
@@ -443,7 +443,7 @@ func parseAgentDesktopWindows(raw []byte) ([]WindowInfo, error) {
 		}
 		return env.Windows, nil
 	}
-	return nil, errors.New("无法解析 agent-desktop 窗口列表")
+	return nil, errors.New("failed to parse agent-desktop window list")
 }
 
 var (

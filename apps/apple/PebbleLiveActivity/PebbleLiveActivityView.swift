@@ -47,7 +47,7 @@ struct PebbleLiveActivityWidget: Widget {
                             if context.attributes.kind == "desktop" || context.state.phase == "takeover" {
                                 if let url = deepLinkURL(for: context) {
                                     Link(destination: url) {
-                                        Label(isEn ? "Take Over" : "立即接管", systemImage: "hand.tap.fill")
+                                        Label(isEn ? "Take Over" : "立即接管", systemImage: "hand.tap.fill") // i18n:allow-cjk
                                             .font(.caption.weight(.semibold))
                                             .frame(maxWidth: .infinity)
                                     }
@@ -58,7 +58,7 @@ struct PebbleLiveActivityWidget: Widget {
                                 if context.state.phase == "running" || context.state.phase == "approval",
                                    let botId = context.attributes.botId, !botId.isEmpty {
                                     Button(intent: InterruptBotIntent(botId: botId)) {
-                                        Label(isEn ? "Stop" : "中断", systemImage: "stop.fill")
+                                        Label(isEn ? "Stop" : "中断", systemImage: "stop.fill") // i18n:allow-cjk
                                             .font(.caption.weight(.semibold))
                                     }
                                     .buttonStyle(.bordered)
@@ -66,7 +66,7 @@ struct PebbleLiveActivityWidget: Widget {
                                 }
                                 if let url = deepLinkURL(for: context) {
                                     Link(destination: url) {
-                                        Label(isEn ? "Open Chat" : "查看会话", systemImage: "arrow.up.right")
+                                        Label(isEn ? "Open Chat" : "查看会话", systemImage: "arrow.up.right") // i18n:allow-cjk
                                             .font(.caption.weight(.semibold))
                                             .frame(maxWidth: .infinity)
                                     }
@@ -99,12 +99,12 @@ struct PebbleLiveActivityWidget: Widget {
     }
 
     private func stepText(_ n: Int) -> String {
-        isEn ? (n == 1 ? "1 step" : "\(n) steps") : "\(n) 步"
+        isEn ? (n == 1 ? "1 step" : "\(n) steps") : "\(n) 步" // i18n:allow-cjk
     }
 
     private func desktopTitle(_ target: String?) -> String {
         let resolved = (target ?? "").isEmpty ? "local" : target!
-        let base = isEn ? "Remote Desktop" : "远程桌面"
+        let base = isEn ? "Remote Desktop" : "远程桌面" // i18n:allow-cjk
         return resolved == "local" ? base : "\(base) · \(resolved)"
     }
 
@@ -116,6 +116,11 @@ struct PebbleLiveActivityWidget: Widget {
     }
 
     private func subtitleText(for context: ActivityViewContext<PebbleActivityAttributes>) -> String {
+        let taskSuffix: String = {
+            let n = context.state.activeTaskCount ?? 0
+            guard n > 0 else { return "" }
+            return isEn ? (n == 1 ? " · 1 task" : " · \(n) tasks") : " · \(n) 个子任务" // i18n:allow-cjk
+        }()
         if context.state.phase == "takeover", let reason = context.state.takeoverReason, !reason.isEmpty {
             return reason
         }
@@ -123,9 +128,9 @@ struct PebbleLiveActivityWidget: Widget {
             return summary
         }
         if context.state.stepCount > 0 {
-            return "\(context.state.statusText) · \(stepText(context.state.stepCount))"
+            return "\(context.state.statusText) · \(stepText(context.state.stepCount))\(taskSuffix)"
         }
-        return context.state.statusText
+        return context.state.statusText + taskSuffix
     }
 
     private func iconName(for context: ActivityViewContext<PebbleActivityAttributes>) -> String {
@@ -178,7 +183,7 @@ private struct LockScreenView: View {
     private var titleText: String {
         if context.attributes.kind == "desktop" {
             let resolved = (context.attributes.target ?? "").isEmpty ? "local" : context.attributes.target!
-            let base = isEn ? "Remote Desktop" : "远程桌面"
+            let base = isEn ? "Remote Desktop" : "远程桌面" // i18n:allow-cjk
             return resolved == "local" ? base : "\(base) · \(resolved)"
         }
         return context.attributes.botName ?? context.attributes.botId ?? "Pebble"

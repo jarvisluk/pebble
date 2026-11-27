@@ -185,6 +185,13 @@ struct BotListView: View {
                 )
                 .padding(.bottom, 4)
         }
+        if hub.showUpdateBanner {
+            updateBanner
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(p.s1, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .padding(.bottom, 4)
+        }
         if let to = hub.takeovers.first {
             takeoverCard(to)
                 .padding(12)
@@ -242,6 +249,13 @@ struct BotListView: View {
             Section {
                 compatBanner
                     .listRowBackground(hub.isClientUpgradeRequired ? p.pink : p.s1)
+            }
+            .selectionDisabled()
+        }
+        if hub.showUpdateBanner {
+            Section {
+                updateBanner
+                    .listRowBackground(p.s1)
             }
             .selectionDisabled()
         }
@@ -330,6 +344,36 @@ struct BotListView: View {
         .padding(.vertical, 2)
     }
 
+    private var updateBanner: some View {
+        let latest = hub.updateStatus?.latest
+        let ver = (latest?.tag.isEmpty == false ? latest?.tag : nil) ?? "v\(latest?.version ?? "")"
+        return HStack(alignment: .center, spacing: 8) {
+            Text(hub.t("updateBannerText", ["version": ver]))
+                .font(.system(size: AppFont.secondary))
+                .foregroundStyle(p.text2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if let rawURL = latest?.url, let u = URL(string: rawURL) {
+                Button {
+                    openExternalURL(u)
+                } label: {
+                    Text(hub.t("updateBannerView"))
+                        .font(.system(size: AppFont.caption, weight: .semibold))
+                        .foregroundStyle(p.page)
+                }
+                .tint(p.accent)
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+            }
+            Button(hub.t("dismiss")) {
+                hub.dismissUpdateBanner()
+            }
+            .font(.system(size: AppFont.caption, weight: .medium))
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+        }
+        .padding(.vertical, 2)
+    }
+
     private func takeoverCard(_ to: TakeoverRequest) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Label(hub.t("takeoverBanner", ["bot": to.botName ?? to.botId ?? "Bot", "reason": to.reason ?? ""]), systemImage: "hand.raised.fill")
@@ -372,6 +416,10 @@ struct BotRow: View {
                 return (hub.t("processing"), p.busy)
             }
             if let m = lastMsg {
+                if m.role == "stage", let st = m.stage {
+                    let lbl = (st.title ?? st.path ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                    return (lbl.isEmpty ? st.kind : lbl, p.text2)
+                }
                 let pre = m.role == "user" ? hub.t("youPrefix") : ""
                 var rawBody = m.body
                 if rawBody.isEmpty, let first = m.media?.first {

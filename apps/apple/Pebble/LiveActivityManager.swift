@@ -16,6 +16,7 @@ final class LiveActivityManager {
     @ObservationIgnored private var botActivities: [String: Activity<PebbleActivityAttributes>] = [:]
     @ObservationIgnored private var botStartedAt: [String: Double] = [:]
     @ObservationIgnored private var botSteps: [String: Int] = [:]
+    @ObservationIgnored private var botTaskCounts: [String: Int] = [:]
     @ObservationIgnored private var activeApprovalBots: Set<String> = []
     @ObservationIgnored private var desktopActivities: [String: Activity<PebbleActivityAttributes>] = [:]
     @ObservationIgnored private var tokenTasks: [String: Task<Void, Never>] = [:]
@@ -49,11 +50,12 @@ final class LiveActivityManager {
             )
             let state = PebbleActivityAttributes.ContentState(
                 phase: "running",
-                statusText: L.lang == "en" ? "Thinking…" : "正在思考",
+                statusText: L.lang == "en" ? "Thinking…" : "正在思考", // i18n:allow-cjk
                 stepCount: 0,
                 startedAt: now,
                 summary: nil,
-                takeoverReason: nil
+                takeoverReason: nil,
+                activeTaskCount: botTaskCounts[bot.id]
             )
             if let act = try? Activity.request(
                 attributes: attrs,
@@ -68,10 +70,10 @@ final class LiveActivityManager {
             let steps = botSteps.removeValue(forKey: bot.id) ?? 0
             let finalState = PebbleActivityAttributes.ContentState(
                 phase: "completed",
-                statusText: L.lang == "en" ? "Completed" : "已完成",
+                statusText: L.lang == "en" ? "Completed" : "已完成", // i18n:allow-cjk
                 stepCount: steps,
                 startedAt: started,
-                summary: L.lang == "en" ? "Task finished" : "任务已完成",
+                summary: L.lang == "en" ? "Task finished" : "任务已完成", // i18n:allow-cjk
                 takeoverReason: nil
             )
             Task {
@@ -90,15 +92,38 @@ final class LiveActivityManager {
         botSteps[botId] = steps
         let started = botStartedAt[botId] ?? Date().timeIntervalSince1970
         let status = tool.isEmpty
-            ? (L.lang == "en" ? "Running tool" : "正在运行工具")
-            : (L.lang == "en" ? "Running \(tool)" : "正在运行 \(tool)")
+            ? (L.lang == "en" ? "Running tool" : "正在运行工具") // i18n:allow-cjk
+            : (L.lang == "en" ? "Running \(tool)" : "正在运行 \(tool)") // i18n:allow-cjk
         let state = PebbleActivityAttributes.ContentState(
             phase: "running",
             statusText: status,
             stepCount: steps,
             startedAt: started,
             summary: nil,
-            takeoverReason: nil
+            takeoverReason: nil,
+            activeTaskCount: botTaskCounts[botId]
+        )
+        Task {
+            await act.update(.init(state: state, staleDate: nil))
+        }
+    }
+
+    func handleTasks(botId: String, tasks: [BotTask]) {
+        let count = tasks.filter(\.isActive).count
+        botTaskCounts[botId] = count
+        guard activitiesEnabled, let act = botActivities[botId] else { return }
+        let started = botStartedAt[botId] ?? Date().timeIntervalSince1970
+        let steps = botSteps[botId] ?? 0
+        let state = PebbleActivityAttributes.ContentState(
+            phase: activeApprovalBots.contains(botId) ? "approval" : "running",
+            statusText: activeApprovalBots.contains(botId)
+                ? (L.lang == "en" ? "Approval required" : "等待批准") // i18n:allow-cjk
+                : (L.lang == "en" ? "Thinking…" : "正在思考"), // i18n:allow-cjk
+            stepCount: steps,
+            startedAt: started,
+            summary: nil,
+            takeoverReason: nil,
+            activeTaskCount: count > 0 ? count : nil
         )
         Task {
             await act.update(.init(state: state, staleDate: nil))
@@ -112,11 +137,11 @@ final class LiveActivityManager {
             let target = (item.target ?? "").isEmpty ? "local" : item.target!
             activeTargets.insert(target)
             let reason = (item.reason ?? "").isEmpty
-                ? (L.lang == "en" ? "Manual action required" : "需要人工接管完成操作")
+                ? (L.lang == "en" ? "Manual action required" : "需要人工接管完成操作") // i18n:allow-cjk
                 : item.reason!
             let state = PebbleActivityAttributes.ContentState(
                 phase: "takeover",
-                statusText: L.lang == "en" ? "Waiting for takeover" : "等待人工接管",
+                statusText: L.lang == "en" ? "Waiting for takeover" : "等待人工接管", // i18n:allow-cjk
                 stepCount: 0,
                 startedAt: Date().timeIntervalSince1970,
                 summary: nil,
@@ -147,10 +172,10 @@ final class LiveActivityManager {
             tokenTasks.removeValue(forKey: "desktop:\(target)")?.cancel()
             let doneState = PebbleActivityAttributes.ContentState(
                 phase: "completed",
-                statusText: L.lang == "en" ? "Takeover resolved" : "接管已完成",
+                statusText: L.lang == "en" ? "Takeover resolved" : "接管已完成", // i18n:allow-cjk
                 stepCount: 0,
                 startedAt: Date().timeIntervalSince1970,
-                summary: L.lang == "en" ? "Automation resumed" : "远程桌面已恢复自动执行",
+                summary: L.lang == "en" ? "Automation resumed" : "远程桌面已恢复自动执行", // i18n:allow-cjk
                 takeoverReason: nil
             )
             Task {
@@ -182,11 +207,12 @@ final class LiveActivityManager {
             }()
             let state = PebbleActivityAttributes.ContentState(
                 phase: "approval",
-                statusText: L.lang == "en" ? "Approval required" : "等待批准",
+                statusText: L.lang == "en" ? "Approval required" : "等待批准", // i18n:allow-cjk
                 stepCount: steps,
                 startedAt: started,
                 summary: body,
-                takeoverReason: nil
+                takeoverReason: nil,
+                activeTaskCount: botTaskCounts[botId]
             )
             Task { await act.update(.init(state: state, staleDate: nil)) }
         }
@@ -198,11 +224,12 @@ final class LiveActivityManager {
             let steps = botSteps[botId] ?? 0
             let state = PebbleActivityAttributes.ContentState(
                 phase: "running",
-                statusText: L.lang == "en" ? "Thinking…" : "正在思考",
+                statusText: L.lang == "en" ? "Thinking…" : "正在思考", // i18n:allow-cjk
                 stepCount: steps,
                 startedAt: started,
                 summary: nil,
-                takeoverReason: nil
+                takeoverReason: nil,
+                activeTaskCount: botTaskCounts[botId]
             )
             Task { await act.update(.init(state: state, staleDate: nil)) }
         }
@@ -230,6 +257,7 @@ final class LiveActivityManager {
     func startObservingTokens() {}
     func handleBotStatus(_ bot: BotStatus) {}
     func handleToolUse(botId: String, tool: String) {}
+    func handleTasks(botId: String, tasks: [BotTask]) {}
     func handleTakeovers(_ items: [TakeoverRequest]) {}
     func handleApprovals(_ items: [PendingApproval], bots: [BotStatus] = []) {}
 }

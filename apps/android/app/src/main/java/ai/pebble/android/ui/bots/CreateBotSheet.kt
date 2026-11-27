@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -50,6 +49,7 @@ import ai.pebble.android.ui.settings.harnessLabelForSelection
 import ai.pebble.android.ui.settings.installedHarnessList
 import ai.pebble.android.ui.theme.BotAppearancePicker
 import ai.pebble.android.ui.theme.BotAvatar
+import ai.pebble.android.ui.theme.LoadingContent
 import ai.pebble.android.ui.theme.LocalPalette
 import ai.pebble.android.ui.theme.MonoFont
 import ai.pebble.android.ui.theme.PebbleDimens
@@ -195,10 +195,8 @@ fun CreateBotSheet(
                     Text(store.t("newBot"), fontSize = PebbleFont.title, fontWeight = FontWeight.Bold)
                 },
                 actions = {
-                    if (submitting) {
-                        CircularProgressIndicator(modifier = Modifier.padding(end = 16.dp).size(20.dp), strokeWidth = 2.dp, color = p.accent)
-                    } else {
-                        TextButton(onClick = { create() }) {
+                    TextButton(onClick = { create() }, enabled = !submitting) {
+                        LoadingContent(loading = submitting, color = p.accent) {
                             Text(store.t("create"), color = p.accent, fontSize = PebbleFont.body, fontWeight = FontWeight.SemiBold)
                         }
                     }

@@ -54,8 +54,12 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import ai.pebble.android.data.ConnState
+import ai.pebble.android.data.HubException
 import ai.pebble.android.data.PebbleStore
+import ai.pebble.android.data.buildPairingLink
 import ai.pebble.android.data.errText
+import ai.pebble.android.data.maskedPairingLink
+import ai.pebble.android.data.stripLinkFragment
 import ai.pebble.android.ui.theme.CardDivider
 import ai.pebble.android.ui.theme.ConfirmItem
 import ai.pebble.android.ui.theme.LocalPalette
@@ -130,7 +134,35 @@ fun NetworkSettingsTab(
         }
     }
 
-    LaunchedEffect(store.isConnected) {
+    fun toggleTokenReveal() {
+        if (tcTokenShow) {
+            tcTokenShow = false
+        } else if (tcTokenVal.isNotEmpty()) {
+            tcTokenShow = true
+        } else {
+            runOp("tc:reveal", "opFailed") {
+                val tok = store.revealTailcatToken()
+                tcTokenVal = tok
+                tcTokenShow = tok.isNotEmpty()
+                null
+            }
+        }
+    }
+
+    fun copyFullPairingLink(baseLink: String, busyKey: String) {
+        runOp(busyKey, "opFailed") {
+            val tok = tcTokenVal.ifEmpty { store.revealTailcatToken() }
+            if (tok.isNotEmpty()) tcTokenVal = tok
+            val full = buildPairingLink(baseLink, tok)
+                ?: throw HubException("copyPairLinkNoToken", isKey = true)
+            copyToClipboard(context, full)
+            store.t("pairLinkCopied")
+        }
+    }
+
+    LaunchedEffect(store.activeServerId, store.authToken, store.isConnected) {
+        tcTokenVal = ""
+        tcTokenShow = false
         loadAll()
     }
 
@@ -303,7 +335,7 @@ fun NetworkSettingsTab(
         else -> store.t("tailcatUnknown") to p.text2
     }
     val tcFooter = when (tcState) {
-        "ready" -> store.t("remoteHelpReady")
+        "ready" -> store.t(if (envRef.isNotEmpty()) "remoteHelpEnvReady" else "remoteHelpReady")
         "connecting" -> store.t("remoteHelpConnecting")
         "error" -> store.tailcat?.error?.takeIf { it.isNotEmpty() } ?: store.t("tailcatErr")
         else -> store.t("remoteHelpOff")
@@ -365,21 +397,19 @@ fun NetworkSettingsTab(
             if (tcState == "ready") {
                 QrImageCard(bytes = tcQRBytes)
                 store.tailcat?.link?.takeIf { it.isNotEmpty() }?.let { link ->
-                    SelectionContainer {
-                        Text(link, color = p.text2, fontSize = PebbleFont.caption, fontFamily = MonoFont)
-                    }
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                        Button(
-                            onClick = {
-                                copyToClipboard(context, link)
-                                onSaved(store.t("pairLinkCopied"))
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = p.accent, contentColor = p.onAccent),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                        ) {
-                            Text(store.t("copyPairLink"), fontSize = PebbleFont.secondary)
-                        }
-                    }
+                    CardDivider()
+                    PairingLinkBlock(
+                        store = store,
+                        baseLink = link,
+                        hasToken = hasTok,
+                        envRef = envRef,
+                        tokenVal = tcTokenVal,
+                        tokenShow = tcTokenShow,
+                        busy = busy,
+                        busyKey = "tc:copyLink",
+                        onToggleReveal = { toggleTokenReveal() },
+                        onCopyLink = { copyFullPairingLink(link, "tc:copyLink") },
+                    )
                 }
             }
 
@@ -413,19 +443,7 @@ fun NetworkSettingsTab(
                         )
                         if (envRef.isEmpty()) {
                             OutlinedButton(
-                                onClick = {
-                                    if (tcTokenShow) {
-                                        tcTokenShow = false
-                                    } else if (tcTokenVal.isNotEmpty()) {
-                                        tcTokenShow = true
-                                    } else {
-                                        runOp("tc:reveal", "opFailed") {
-                                            tcTokenVal = store.revealTailcatToken()
-                                            tcTokenShow = true
-                                            null
-                                        }
-                                    }
-                                },
+                                onClick = { toggleTokenReveal() },
                                 enabled = busy != "tc:reveal",
                                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
                             ) {
@@ -458,11 +476,16 @@ fun NetworkSettingsTab(
                                         ) {
                                             runOp("tc:reset", "opFailed") {
                                                 val res = store.setTailcat(mapOf("resetToken" to true))
-                                                res.apiToken?.takeIf { it.isNotEmpty() }?.let { issued ->
+                                                val issued = res.apiToken.orEmpty()
+                                                if (issued.isNotEmpty()) {
                                                     tcTokenVal = issued
                                                     tcTokenShow = true
+                                                } else {
+                                                    tcTokenVal = ""
+                                                    tcTokenShow = false
                                                 }
                                                 tcQRVersion += 1
+                                                tsQRVersion += 1
                                                 store.t("tokenResetToast")
                                             }
                                         },
@@ -487,6 +510,7 @@ fun NetworkSettingsTab(
                                 fontFamily = MonoFont,
                             )
                         }
+                        Text(store.t("accessTokenStandaloneHint"), color = p.text2, fontSize = PebbleFont.caption)
                     }
                 }
             }
@@ -595,49 +619,56 @@ fun NetworkSettingsTab(
                 val dns = store.hostTailscale?.dnsName.orEmpty()
                 val ip = store.hostTailscale?.ip.orEmpty()
                 val hostDesc = dns.ifEmpty { ip }
-                if (hostDesc.isNotEmpty()) {
-                    val suffix = if (dns.isNotEmpty() && ip.isNotEmpty()) " ($ip)" else ""
-                    SelectionContainer {
-                        Text(hostDesc + suffix, color = p.text2, fontSize = PebbleFont.caption, fontFamily = MonoFont)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    if (hostDesc.isNotEmpty()) {
+                        val suffix = if (dns.isNotEmpty() && ip.isNotEmpty()) " ($ip)" else ""
+                        SelectionContainer(modifier = Modifier.weight(1f)) {
+                            Text(hostDesc + suffix, color = p.text2, fontSize = PebbleFont.caption, fontFamily = MonoFont)
+                        }
+                    } else {
+                        Spacer(Modifier.weight(1f))
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            onConfirm(
+                                ConfirmItem(
+                                    title = store.t("tsLogoutTitle"),
+                                    message = store.t("tsLogoutDesc"),
+                                ) {
+                                    runOp("ts:logout", "opFailed") {
+                                        store.setHostTailscale(mapOf("logout" to true))
+                                        tsQRBytes = null
+                                        null
+                                    }
+                                },
+                            )
+                        },
+                        enabled = busy != "ts:logout",
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                    ) {
+                        Text(store.t("tsLogout"), color = p.danger, fontSize = PebbleFont.secondary)
                     }
                 }
                 store.hostTailscale?.link?.takeIf { it.isNotEmpty() }?.let { link ->
-                    SelectionContainer {
-                        Text(link, color = p.text2, fontSize = PebbleFont.caption, fontFamily = MonoFont)
-                    }
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                        OutlinedButton(
-                            onClick = {
-                                onConfirm(
-                                    ConfirmItem(
-                                        title = store.t("tsLogoutTitle"),
-                                        message = store.t("tsLogoutDesc"),
-                                    ) {
-                                        runOp("ts:logout", "opFailed") {
-                                            store.setHostTailscale(mapOf("logout" to true))
-                                            tsQRBytes = null
-                                            null
-                                        }
-                                    },
-                                )
-                            },
-                            enabled = busy != "ts:logout",
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                        ) {
-                            Text(store.t("tsLogout"), color = p.danger, fontSize = PebbleFont.secondary)
-                        }
-                        Spacer(Modifier.width(8.dp))
-                        Button(
-                            onClick = {
-                                copyToClipboard(context, link)
-                                onSaved(store.t("tsAddressCopied"))
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = p.accent, contentColor = p.onAccent),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                        ) {
-                            Text(store.t("tsCopyLink"), fontSize = PebbleFont.secondary)
-                        }
-                    }
+                    val tsHasTok = store.hostTailscale?.hasToken ?: (store.tailcat?.hasToken == true)
+                    val tsEnvRef = store.hostTailscale?.tokenEnvRef ?: store.tailcat?.tokenEnvRef.orEmpty()
+                    CardDivider()
+                    PairingLinkBlock(
+                        store = store,
+                        baseLink = link,
+                        hasToken = tsHasTok,
+                        envRef = tsEnvRef,
+                        tokenVal = tcTokenVal,
+                        tokenShow = tcTokenShow,
+                        busy = busy,
+                        busyKey = "ts:copyLink",
+                        onToggleReveal = { toggleTokenReveal() },
+                        onCopyLink = { copyFullPairingLink(link, "ts:copyLink") },
+                    )
                 }
             }
 
@@ -720,12 +751,16 @@ fun NetworkSettingsTab(
                     "files" to store.t("permFiles"),
                     "exec" to store.t("permExec"),
                     "desktop" to store.t("permDesktop"),
+                    "agent" to store.t("permAgent"),
                 )
                 store.nodes.forEachIndexed { idx, node ->
                     if (idx > 0) CardDivider()
                     val on = node.connected == true
                     val outdated = store.serverInfo != null && node.isOutdated
                     val perms = node.permissions.orEmpty()
+                    val harnesses = node.harnesses.orEmpty()
+                    val workspaces = node.workspaces.orEmpty()
+                    val activeCount = node.activeTaskIds?.size ?: 0
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -733,6 +768,9 @@ fun NetworkSettingsTab(
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
                         ) {
                             Text(node.name ?: node.id, color = p.text, fontSize = PebbleFont.cardTitle, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                            if (activeCount > 0) {
+                                TagPill(store.t("nodeActiveTasks", mapOf("n" to activeCount)), p.sage, p.sageInk)
+                            }
                             if (outdated) {
                                 TagPill(store.t("nodeOutdatedTag"), p.pink, p.pinkInk)
                             }
@@ -744,6 +782,11 @@ fun NetworkSettingsTab(
                         }
                         val host = node.hostname?.takeIf { it.isNotEmpty() }?.let { " · $it" }.orEmpty()
                         Text("${node.os.orEmpty()}/${node.arch.orEmpty()}$host", color = p.text2, fontSize = PebbleFont.secondary, fontFamily = MonoFont)
+                        node.maxPermissionMode?.takeIf { it.isNotEmpty() }?.let { maxMode ->
+                            val modeKey = "permMode_$maxMode"
+                            val modeLabel = store.t(modeKey).let { if (it == modeKey) maxMode else it }
+                            Text(store.t("nodeMaxPermMode", mapOf("mode" to modeLabel)), color = p.mute, fontSize = PebbleFont.caption)
+                        }
                         if (outdated) {
                             Text(store.t("nodeOutdatedHint"), color = p.mute, fontSize = PebbleFont.caption)
                         }
@@ -759,7 +802,12 @@ fun NetworkSettingsTab(
                                     verticalArrangement = Arrangement.spacedBy(6.dp),
                                 ) {
                                     perms.forEach { perm ->
-                                        TagPill(permLabels[perm] ?: perm, p.s1, p.text2)
+                                        val isAgent = perm == "agent"
+                                        TagPill(
+                                            text = permLabels[perm] ?: perm,
+                                            bg = if (isAgent) p.lilac else p.s1,
+                                            fg = if (isAgent) p.lilacInk else p.text2,
+                                        )
                                     }
                                 }
                                 if (on && "desktop" in perms) {
@@ -768,6 +816,63 @@ fun NetworkSettingsTab(
                                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
                                     ) {
                                         Text(store.t("openDesktop"), fontSize = PebbleFont.secondary, color = p.text)
+                                    }
+                                }
+                            }
+                        }
+                        if (harnesses.isNotEmpty()) {
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(store.t("nodeHarnesses"), color = p.mute, fontSize = PebbleFont.caption, fontWeight = FontWeight.Medium)
+                                FlowRow(
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                                ) {
+                                    harnesses.forEach { h ->
+                                        val installed = h.installed == true
+                                        val ready = installed && h.authStatus == "ready"
+                                        val needsLogin = installed && h.authStatus == "needs_login"
+                                        val suffix = when {
+                                            !installed -> store.t("nodeNotInstalled")
+                                            ready -> store.t("nodeAuthReady")
+                                            needsLogin -> store.t("nodeAuthNeedsLogin")
+                                            else -> ""
+                                        }
+                                        val label = if (suffix.isEmpty()) h.title else "${h.title} · $suffix"
+                                        TagPill(
+                                            text = label,
+                                            bg = if (ready) p.sage else if (needsLogin) p.pink else p.s1,
+                                            fg = if (ready) p.sageInk else if (needsLogin) p.pinkInk else p.text2,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        if (workspaces.isNotEmpty()) {
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(store.t("nodeWorkspaces"), color = p.mute, fontSize = PebbleFont.caption, fontWeight = FontWeight.Medium)
+                                workspaces.forEach { ws ->
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    ) {
+                                        Text(
+                                            text = ws.name.ifEmpty { ws.id },
+                                            color = p.text,
+                                            fontSize = PebbleFont.caption,
+                                            fontWeight = FontWeight.SemiBold,
+                                        )
+                                        Text(
+                                            text = ws.path,
+                                            color = p.text2,
+                                            fontFamily = MonoFont,
+                                            fontSize = PebbleFont.caption,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f, fill = false),
+                                        )
+                                        if (ws.isGit == true) {
+                                            TagPill(ws.defaultBranch?.takeIf { it.isNotEmpty() } ?: "git", p.s1, p.text2)
+                                        }
                                     }
                                 }
                             }
@@ -805,6 +910,92 @@ private fun QrImageCard(bytes: ByteArray?) {
                     CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp, color = p.accent)
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun PairingLinkBlock(
+    store: PebbleStore,
+    baseLink: String,
+    hasToken: Boolean,
+    envRef: String,
+    tokenVal: String,
+    tokenShow: Boolean,
+    busy: String,
+    busyKey: String,
+    onToggleReveal: () -> Unit,
+    onCopyLink: () -> Unit,
+) {
+    val p = LocalPalette.current
+    val canIncludeToken = hasToken && envRef.isEmpty()
+    val revealed = if (canIncludeToken && tokenShow) buildPairingLink(baseLink, tokenVal) else null
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = store.t(if (canIncludeToken) "pairingLinkTitle" else "tunnelAddressTitle"),
+                color = p.text,
+                fontSize = PebbleFont.body,
+                fontWeight = FontWeight.SemiBold,
+            )
+            TagPill(
+                text = store.t(if (canIncludeToken) "pairingLinkWithToken" else "pairingLinkNoToken"),
+                bg = if (canIncludeToken) p.sage else p.s2,
+                fg = if (canIncludeToken) p.sageInk else p.text2,
+            )
+        }
+
+        if (canIncludeToken) {
+            if (revealed != null) {
+                SelectionContainer {
+                    Text(revealed, color = p.text2, fontSize = PebbleFont.caption, fontFamily = MonoFont)
+                }
+            } else {
+                Text(maskedPairingLink(baseLink), color = p.text2, fontSize = PebbleFont.caption, fontFamily = MonoFont)
+            }
+        } else {
+            SelectionContainer {
+                Text(stripLinkFragment(baseLink), color = p.text2, fontSize = PebbleFont.caption, fontFamily = MonoFont)
+            }
+        }
+
+        if (canIncludeToken) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                OutlinedButton(
+                    onClick = onToggleReveal,
+                    enabled = busy != "tc:reveal",
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                ) {
+                    Text(store.t(if (tokenShow) "hide" else "show"), fontSize = PebbleFont.secondary, color = p.text)
+                }
+                Button(
+                    onClick = onCopyLink,
+                    enabled = busy != busyKey,
+                    colors = ButtonDefaults.buttonColors(containerColor = p.accent, contentColor = p.onAccent),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                ) {
+                    Text(store.t("copyPairLink"), fontSize = PebbleFont.secondary)
+                }
+            }
+        } else {
+            Text(
+                text = if (envRef.isNotEmpty()) {
+                    store.t("pairingLinkEnvNote", mapOf("ref" to envRef))
+                } else {
+                    store.t("pairingLinkNoTokenNote")
+                },
+                color = p.text2,
+                fontSize = PebbleFont.caption,
+            )
         }
     }
 }

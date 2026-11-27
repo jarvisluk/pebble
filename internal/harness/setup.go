@@ -69,7 +69,7 @@ func installCommandForTarget(target string) ([]string, error) {
 	case "codebuddy":
 		npmPath, ok := findBinary("npm")
 		if !ok {
-			return nil, errors.New("未检测到 npm，请先安装 Node.js 后重试")
+			return nil, errors.New("npm not found; install Node.js and retry")
 		}
 		return []string{npmPath, "install", "-g", "@tencent-ai/codebuddy-code"}, nil
 	case "codex":
@@ -88,8 +88,6 @@ func installCommandForTarget(target string) ([]string, error) {
 			return nil, errors.New("npm not found; please install Node.js first")
 		}
 		return []string{npmPath, "install", "-g", "@mariozechner/pi-coding-agent"}, nil
-	case "magpie":
-		return []string{"bash", "-lc", "curl -fsSL https://usemagpie.ai/install.sh | sh"}, nil
 	default:
 		return nil, fmt.Errorf("auto-install is not supported for %q", target)
 	}
@@ -98,7 +96,7 @@ func installCommandForTarget(target string) ([]string, error) {
 func loginCommandForTarget(kind string) ([]string, error) {
 	installed, binPath := DetectHarness(kind)
 	if !installed {
-		return nil, fmt.Errorf("%s 尚未安装", kind)
+		return nil, fmt.Errorf("%s is not installed", kind)
 	}
 	switch kind {
 	case "claude":
@@ -112,7 +110,7 @@ func loginCommandForTarget(kind string) ([]string, error) {
 	case "grok":
 		return []string{binPath, "login"}, nil
 	default:
-		return nil, fmt.Errorf("%s 无需或不支持自动登录", kind)
+		return nil, fmt.Errorf("%s does not require or support automatic login", kind)
 	}
 }
 
@@ -210,9 +208,6 @@ func StartInstall(target string) (SetupTask, error) {
 		if ctx.Err() == context.DeadlineExceeded && cmd.Process != nil {
 			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 		}
-		if target == "magpie" {
-			InvalidateMagpieCache()
-		}
 		InvalidateAuthCache()
 
 		setupMu.Lock()
@@ -233,17 +228,10 @@ func StartInstall(target string) (SetupTask, error) {
 			cur.task.Error = waitErr.Error()
 			return
 		}
-		if target == "magpie" && !MagpieInstalled() {
+		if okInstalled, _ := DetectHarness(target); !okInstalled {
 			cur.task.State = "error"
-			cur.task.Error = "installer finished but magpie binary was not found in PATH"
+			cur.task.Error = fmt.Sprintf("installer finished but %s binary was not found in PATH", target)
 			return
-		}
-		if target != "magpie" {
-			if okInstalled, _ := DetectHarness(target); !okInstalled {
-				cur.task.State = "error"
-				cur.task.Error = fmt.Sprintf("installer finished but %s binary was not found in PATH", target)
-				return
-			}
 		}
 		cur.task.State = "done"
 	}()

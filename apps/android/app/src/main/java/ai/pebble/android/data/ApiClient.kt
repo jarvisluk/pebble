@@ -1,5 +1,6 @@
 package ai.pebble.android.data
 
+import ai.pebble.android.BuildConfig
 import ai.pebble.android.i18n.L
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -108,6 +109,24 @@ fun normalizeAddress(raw: String): NormalizedAddress {
     return NormalizedAddress(cleanAddress = withProto, token = token, isTailcat = false, isTailscale = false)
 }
 
+fun stripLinkFragment(raw: String): String {
+    val trimmed = raw.trim().replace(Regex("[\\r\\n]+"), "")
+    val hashIdx = trimmed.indexOf('#')
+    return (if (hashIdx >= 0) trimmed.substring(0, hashIdx) else trimmed).trim()
+}
+
+fun maskedPairingLink(baseLink: String): String {
+    val base = stripLinkFragment(baseLink)
+    return if (base.isEmpty()) "" else "$base#token=••••••••"
+}
+
+fun buildPairingLink(baseLink: String, token: String): String? {
+    val base = stripLinkFragment(baseLink)
+    val tok = token.trim()
+    if (base.isEmpty() || tok.isEmpty()) return null
+    return "$base#token=${encodeURIComponent(tok)}"
+}
+
 object SharedHttp {
     val apiClient: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
@@ -137,6 +156,7 @@ class ApiClient(
             builder
                 .header("X-Pebble-Protocol", CLIENT_PROTOCOL.toString())
                 .header("X-Pebble-Client", "android")
+                .header("X-Pebble-Version", BuildConfig.VERSION_NAME)
     }
 
     suspend fun rawBytes(path: String, method: String = "GET", body: Map<String, Any?>? = null): ByteArray =
@@ -293,13 +313,18 @@ class EventStream {
         if (base.isBlank()) return
         job = scope.launch(Dispatchers.IO) {
             var delayMs = 1000L
+            var lastSeq = 0L
             while (isActive) {
                 try {
+                    val eventPath = if (lastSeq > 0L) "/api/events?since=$lastSeq" else "/api/events"
                     val reqBuilder = ApiClient.attachClientHeaders(
                         Request.Builder()
-                            .url("$base/api/events")
+                            .url("$base$eventPath")
                             .header("Accept", "text/event-stream"),
                     )
+                    if (lastSeq > 0L) {
+                        reqBuilder.header("Last-Event-ID", lastSeq.toString())
+                    }
                     if (token.isNotEmpty()) {
                         reqBuilder.header("Authorization", "Bearer $token")
                     }
@@ -325,6 +350,9 @@ class EventStream {
                                 delayMs = 1000L
                                 withContext(Dispatchers.Main) { onStatus(true) }
                             },
+                            onSeq = { seq ->
+                                if (seq > 0L) lastSeq = seq
+                            },
                             onEvent = { ev, obj ->
                                 withContext(Dispatchers.Main) { onEvent(ev, obj) }
                             },
@@ -349,9 +377,11 @@ class EventStream {
         source: BufferedSource,
         isStillActive: () -> Boolean,
         onReady: suspend () -> Unit,
+        onSeq: (Long) -> Unit,
         onEvent: suspend (String, JsonObject) -> Unit,
     ) {
         var event = "message"
+        var eventId = 0L
         val dataLines = mutableListOf<String>()
         while (isStillActive()) {
             val rawLine = source.readUtf8Line() ?: break
@@ -364,14 +394,21 @@ class EventStream {
                         val rawJson = dataLines.joinToString("\n")
                         val obj = runCatching { HubJson.parseToJsonElement(rawJson).jsonObject }.getOrNull()
                         if (obj != null) {
+                            val seq = if (eventId > 0L) eventId else obj["seq"]?.asDisplayString()?.toLongOrNull() ?: 0L
+                            if (seq > 0L) onSeq(seq)
                             val payload = (obj["payload"] as? JsonObject) ?: obj
                             onEvent(event, payload)
                         }
                     }
                     event = "message"
+                    eventId = 0L
                     dataLines.clear()
                 }
                 line.startsWith(":") -> Unit
+                line.startsWith("id:") -> {
+                    val parsed = line.substring(3).trim().toLongOrNull() ?: 0L
+                    if (parsed > 0L) eventId = parsed
+                }
                 line.startsWith("event:") -> {
                     event = line.substring(6).trim()
                 }

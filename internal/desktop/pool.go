@@ -102,7 +102,7 @@ func (p *EnginePool) ForSlot(slot string) (*Engine, error) {
 		return p.defaultEng, nil
 	}
 	if !p.VirtualSupported() {
-		return nil, errors.New("当前主机不支持独立虚拟屏幕（仅 Linux 支持多虚拟屏）")
+		return nil, errors.New("this host does not support dedicated virtual screens (Linux only)")
 	}
 
 	p.mu.Lock()

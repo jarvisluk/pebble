@@ -1,8 +1,20 @@
+import java.io.StringReader
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
 }
+
+val versionPropsText = providers.fileContents(
+    rootProject.layout.projectDirectory.file("version.properties")
+).asText.orNull ?: error("Missing apps/android/version.properties; run scripts/version.py sync")
+val versionProps = Properties().apply { load(StringReader(versionPropsText)) }
+val appVersionName = versionProps.getProperty("VERSION_NAME")?.trim()?.takeIf { it.isNotEmpty() }
+    ?: error("Missing VERSION_NAME in apps/android/version.properties")
+val appVersionCode = versionProps.getProperty("VERSION_CODE")?.trim()?.toIntOrNull()
+    ?: error("Invalid VERSION_CODE in apps/android/version.properties")
 
 android {
     namespace = "ai.pebble.android"
@@ -16,8 +28,8 @@ android {
         applicationId = "ai.pebble.android"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = appVersionCode
+        versionName = appVersionName
 
         val abiProp = providers.gradleProperty("pebble.abis").orNull
         ndk {
@@ -25,6 +37,22 @@ android {
                 listOf("arm64-v8a", "x86_64")
             } else {
                 abiProp.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+            }
+        }
+    }
+
+    val releaseKeystorePath = providers.environmentVariable("PEBBLE_KEYSTORE_PATH").orNull?.trim()
+    val releaseKeystorePassword = providers.environmentVariable("PEBBLE_KEYSTORE_PASSWORD").orNull
+    val releaseKeyAlias = providers.environmentVariable("PEBBLE_KEY_ALIAS").orNull
+    val releaseKeyPassword = providers.environmentVariable("PEBBLE_KEY_PASSWORD").orNull
+
+    signingConfigs {
+        if (!releaseKeystorePath.isNullOrBlank()) {
+            create("release") {
+                storeFile = file(releaseKeystorePath)
+                storePassword = releaseKeystorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
             }
         }
     }
@@ -41,9 +69,10 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            val ksPath = providers.environmentVariable("PEBBLE_KEYSTORE_PATH").orNull
-            if (ksPath.isNullOrBlank()) {
-                signingConfig = signingConfigs.getByName("debug")
+            signingConfig = if (!releaseKeystorePath.isNullOrBlank()) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
             }
         }
     }
@@ -83,7 +112,6 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
-    implementation(libs.google.material)
 
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)

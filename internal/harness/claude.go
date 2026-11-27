@@ -116,27 +116,27 @@ func (h *ClaudeHarness) Models(context.Context) ([]string, error) {
 
 func (h *ClaudeHarness) ListCommands(_ context.Context, bot config.BotConfig) ([]SlashCommand, error) {
 	builtins := []SlashCommand{
-		{Name: "compact", Description: "压缩当前会话上下文", Source: "harness"},
-		{Name: "clear", Description: "清空会话历史", Source: "harness"},
-		{Name: "cost", Description: "查看本次会话费用统计", Source: "harness"},
-		{Name: "context", Description: "查看当前上下文占用", Source: "harness"},
-		{Name: "memory", Description: "查看或编辑记忆文件", Source: "harness"},
-		{Name: "review", Description: "代码评审", Source: "harness"},
-		{Name: "init", Description: "初始化项目 CLAUDE.md", Source: "harness"},
-		{Name: "plan", Description: "进入计划模式", Source: "harness"},
-		{Name: "mcp", Description: "查看 MCP 服务状态", Source: "harness"},
-		{Name: "doctor", Description: "检查运行环境健康状态", Source: "harness"},
-		{Name: "help", Description: "查看可用命令帮助", Source: "harness"},
-		{Name: "model", Description: "查看或切换模型", Source: "harness"},
-		{Name: "fast", Description: "切换快速输出模式", Source: "harness"},
-		{Name: "export", Description: "导出当前会话", Source: "harness"},
-		{Name: "permissions", Description: "查看权限配置", Source: "harness"},
-		{Name: "agents", Description: "查看或管理 Subagent", Source: "harness"},
-		{Name: "skills", Description: "查看已安装 Skill", Source: "harness"},
-		{Name: "hooks", Description: "查看钩子配置", Source: "harness"},
-		{Name: "usage", Description: "查看订阅额度与用量", Source: "harness"},
-		{Name: "rewind", Description: "回退会话到历史节点", Source: "harness"},
-		{Name: "rename", Description: "重命名当前会话", Source: "harness"},
+		{Name: "compact", Description: "Compact current session context", Source: "harness"},
+		{Name: "clear", Description: "Clear session history", Source: "harness"},
+		{Name: "cost", Description: "Show session cost breakdown", Source: "harness"},
+		{Name: "context", Description: "Inspect current context usage", Source: "harness"},
+		{Name: "memory", Description: "View or edit memory files", Source: "harness"},
+		{Name: "review", Description: "Review code changes", Source: "harness"},
+		{Name: "init", Description: "Initialize project CLAUDE.md", Source: "harness"},
+		{Name: "plan", Description: "Enter plan mode", Source: "harness"},
+		{Name: "mcp", Description: "Show MCP server status", Source: "harness"},
+		{Name: "doctor", Description: "Check runtime environment health", Source: "harness"},
+		{Name: "help", Description: "Show available commands", Source: "harness"},
+		{Name: "model", Description: "View or switch model", Source: "harness"},
+		{Name: "fast", Description: "Toggle fast output mode", Source: "harness"},
+		{Name: "export", Description: "Export current session", Source: "harness"},
+		{Name: "permissions", Description: "View permission settings", Source: "harness"},
+		{Name: "agents", Description: "View or manage subagents", Source: "harness"},
+		{Name: "skills", Description: "List installed skills", Source: "harness"},
+		{Name: "hooks", Description: "View hook configuration", Source: "harness"},
+		{Name: "usage", Description: "View subscription quota and usage", Source: "harness"},
+		{Name: "rewind", Description: "Rewind session to an earlier point", Source: "harness"},
+		{Name: "rename", Description: "Rename current session", Source: "harness"},
 	}
 
 	h.mu.Lock()
@@ -159,9 +159,9 @@ func (h *ClaudeHarness) ListCommands(_ context.Context, bot config.BotConfig) ([
 
 func (h *ClaudeHarness) ListAgents(_ context.Context, bot config.BotConfig) ([]AgentInfo, error) {
 	builtins := []AgentInfo{
-		{Name: "Explore", Description: "快速只读检索代码库"},
-		{Name: "Plan", Description: "只读调研与方案设计"},
-		{Name: "general-purpose", Description: "通用多步调研与执行代理"},
+		{Name: "Explore", Description: "Fast read-only codebase exploration"},
+		{Name: "Plan", Description: "Read-only research and architecture planning"},
+		{Name: "general-purpose", Description: "General multi-step research and execution agent"},
 	}
 	var local []AgentInfo
 	if bot.Workspace != "" {
@@ -239,9 +239,8 @@ func (h *ClaudeHarness) startProc(opts RunOptions, ephemeral bool) (*claudeProc,
 
 	cmd := exec.Command(h.binary, args...)
 	cmd.Dir = bot.Workspace
-	// Drop a parent Claude Code session's variables (bot-hub may run inside
-	// one): they override the gateway settings magpie writes to
-	// ~/.claude/settings.json. A bot's own env still applies.
+	// Drop a parent Claude Code session's variables (pebble may run inside
+	// one) so they do not override the bot's own env or Claude CLI config.
 	cmd.Env = nil
 	for _, kv := range cmd.Environ() {
 		if !strings.HasPrefix(kv, "ANTHROPIC_") && !strings.HasPrefix(kv, "CLAUDECODE=") &&

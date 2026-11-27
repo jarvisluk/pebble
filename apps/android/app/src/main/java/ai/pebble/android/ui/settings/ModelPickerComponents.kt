@@ -54,11 +54,7 @@ fun harnessLabelForSelection(id: String, store: PebbleStore): String {
     return if (h?.installed == true) title else "$title (${store.t("notInstalled")})"
 }
 
-fun harnessDisplayLabel(h: HarnessInfo, store: PebbleStore): String = when {
-    h.magpie?.connected == true -> "${h.title} · Magpie"
-    store.settings?.magpie?.installed == true -> "${h.title} · ${store.t("mpNative")}"
-    else -> h.title
-}
+fun harnessDisplayLabel(h: HarnessInfo, store: PebbleStore): String = h.title
 
 fun orderedGlobalHarnesses(
     harnesses: List<HarnessInfo>,
@@ -71,10 +67,20 @@ fun orderedGlobalHarnesses(
         if (seen.add(h.id)) add(h)
     }
     harnesses.firstOrNull { it.id == defaultHarness && (!anyInstalled || it.installed == true) }?.let(::addUnique)
-    harnesses.filter { (!anyInstalled || it.installed == true) && it.magpie?.connected != true }.forEach(::addUnique)
-    harnesses.filter { (!anyInstalled || it.installed == true) && it.magpie?.connected == true }.forEach(::addUnique)
+    harnesses.filter { !anyInstalled || it.installed == true }.forEach(::addUnique)
     harnesses.filter { !anyInstalled || (it.installed == true && !models[it.id].isNullOrEmpty()) }.forEach(::addUnique)
 }
+
+val MEMORY_KINDS = listOf(
+    "fact",
+    "preference",
+    "rule",
+    "decision",
+    "reference",
+    "profile",
+    "procedure",
+    "episode",
+)
 
 fun localizedMemoryKind(raw: String?, store: PebbleStore): String {
     val k = raw.orEmpty().trim()
@@ -82,6 +88,7 @@ fun localizedMemoryKind(raw: String?, store: PebbleStore): String {
         "fact" -> store.t("kindFact")
         "preference" -> store.t("kindPreference")
         "rule" -> store.t("kindRule")
+        "decision" -> store.t("kindDecision")
         "reference" -> store.t("kindReference")
         "profile" -> store.t("kindProfile")
         "procedure" -> store.t("kindProcedure")
