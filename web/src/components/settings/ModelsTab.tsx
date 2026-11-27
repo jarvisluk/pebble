@@ -9,10 +9,12 @@ import type {
   SetupTaskStatus,
 } from '../../types';
 import { api } from '../../lib/api';
+import { harnessSelectionLabel, installedHarnesses as getInstalledHarnesses } from '../../lib/harnesses';
 import { translate } from '../../lib/i18n';
 import { BotAvatar } from '../BotAvatar';
 import { HarnessIcon } from '../HarnessIcon';
 import { MagpieInstallBanner } from '../MagpieInstallBanner';
+import { ModelCombo } from '../ModelCombo';
 
 interface ModelsTabProps {
   active: boolean;
@@ -57,17 +59,15 @@ export const ModelsTab: React.FC<ModelsTabProps> = ({
 }) => {
   const t = (k: string, vars?: Record<string, string | number>) => translate(lang, k, vars);
 
-  const [defaultHarness, setDefaultHarness] = useState('opencode');
+  const [defaultHarness, setDefaultHarness] = useState('');
   const [defaultPermMode, setDefaultPermMode] = useState<PermissionMode>('auto');
   const [defaultModel, setDefaultModel] = useState('');
-  const [defaultModelsDraft, setDefaultModelsDraft] = useState<Record<string, string>>({});
   const [mpWebUrlDraft, setMpWebUrlDraft] = useState('');
   const [botDrafts, setBotDrafts] = useState<Record<string, { harness: string; model: string }>>({});
   const [touchedFields, setTouchedFields] = useState({
     defaultHarness: false,
     defaultPermMode: false,
     defaultModel: false,
-    defaultModels: false,
     magpieWebUrl: false,
   });
   const [touchedBots, setTouchedBots] = useState<Set<string>>(() => new Set());
@@ -75,7 +75,6 @@ export const ModelsTab: React.FC<ModelsTabProps> = ({
 
   // Engine install/login
   const [moreEnginesOpen, setMoreEnginesOpen] = useState(false);
-  const [perOverridesOpen, setPerOverridesOpen] = useState(false);
   const [expandedInstall, setExpandedInstall] = useState<Set<string>>(() => new Set());
   const [installTasks, setInstallTasks] = useState<Record<string, SetupTaskStatus>>({});
   const [loginTasks, setLoginTasks] = useState<Record<string, SetupTaskStatus>>({});
@@ -99,30 +98,27 @@ export const ModelsTab: React.FC<ModelsTabProps> = ({
   const preloadAllModels = useCallback(
     (list: SettingsData['harnesses'] | undefined, force = false) => {
       for (const h of list || []) {
-        if (h.installed !== false) void onLoadModels(h.id, force);
+        if (h.installed === true) void onLoadModels(h.id, force);
       }
     },
     [onLoadModels]
   );
 
   const baseline = useMemo(() => {
-    const cleanPer = Object.fromEntries(
-      Object.entries(settings?.defaultModels || {})
-        .map(([k, v]) => [k, v.trim()])
-        .filter(([, v]) => Boolean(v))
-    );
+    const installed = getInstalledHarnesses(settings);
+    const dh = settings?.defaultHarness || installed[0]?.id || '';
+    const dm = (settings?.defaultModels?.[dh] || settings?.defaultModel || '').trim();
     const botMap: Record<string, { harness: string; model: string }> = {};
     for (const b of bots) {
       botMap[b.id] = {
-        harness: b.harness || 'opencode',
+        harness: b.harness || dh || '',
         model: (b.modelInherited ? '' : b.model || '').trim(),
       };
     }
     return {
-      defaultHarness: settings?.defaultHarness || settings?.harnesses?.[0]?.id || 'opencode',
+      defaultHarness: dh,
       defaultPermMode: (settings?.defaultPermissionMode || 'auto') as PermissionMode,
-      defaultModel: (settings?.defaultModel || '').trim(),
-      defaultModels: cleanPer,
+      defaultModel: dm,
       magpieWebUrl: (settings?.magpie?.webUrl || '').trim(),
       bots: botMap,
     };
@@ -134,13 +130,6 @@ export const ModelsTab: React.FC<ModelsTabProps> = ({
     if (touchedFields.defaultPermMode && defaultPermMode !== baseline.defaultPermMode) return true;
     if (touchedFields.defaultModel && defaultModel.trim() !== baseline.defaultModel) return true;
     if (touchedFields.magpieWebUrl && mpWebUrlDraft.trim() !== baseline.magpieWebUrl) return true;
-    if (touchedFields.defaultModels) {
-      const ka = Object.keys(defaultModelsDraft).filter((k) => defaultModelsDraft[k]?.trim());
-      const kb = Object.keys(baseline.defaultModels);
-      if (ka.length !== kb.length || !ka.every((k) => defaultModelsDraft[k].trim() === baseline.defaultModels[k])) {
-        return true;
-      }
-    }
     for (const b of bots) {
       if (!touchedBots.has(b.id)) continue;
       const cur = botDrafts[b.id];
@@ -157,7 +146,6 @@ export const ModelsTab: React.FC<ModelsTabProps> = ({
     defaultPermMode,
     defaultModel,
     mpWebUrlDraft,
-    defaultModelsDraft,
     botDrafts,
     baseline,
     bots,
@@ -179,14 +167,12 @@ export const ModelsTab: React.FC<ModelsTabProps> = ({
       defaultHarness: false,
       defaultPermMode: false,
       defaultModel: false,
-      defaultModels: false,
       magpieWebUrl: false,
     });
     setTouchedBots(new Set());
     setDefaultHarness(baseline.defaultHarness);
     setDefaultPermMode(baseline.defaultPermMode);
     setDefaultModel(baseline.defaultModel);
-    setDefaultModelsDraft({ ...baseline.defaultModels });
     setMpWebUrlDraft(baseline.magpieWebUrl);
     setBotDrafts({ ...baseline.bots });
     setErr('');
@@ -197,7 +183,6 @@ export const ModelsTab: React.FC<ModelsTabProps> = ({
     if (!touchedFields.defaultHarness) setDefaultHarness(baseline.defaultHarness);
     if (!touchedFields.defaultPermMode) setDefaultPermMode(baseline.defaultPermMode);
     if (!touchedFields.defaultModel) setDefaultModel(baseline.defaultModel);
-    if (!touchedFields.defaultModels) setDefaultModelsDraft({ ...baseline.defaultModels });
     if (!touchedFields.magpieWebUrl) setMpWebUrlDraft(baseline.magpieWebUrl);
   }, [settings, baseline, touchedFields]);
 
@@ -215,7 +200,7 @@ export const ModelsTab: React.FC<ModelsTabProps> = ({
           continue;
         }
         const target = {
-          harness: b.harness || 'opencode',
+          harness: b.harness || baseline.defaultHarness || '',
           model: (b.modelInherited ? '' : b.model || '').trim(),
         };
         const cur = prev[b.id];
@@ -224,7 +209,7 @@ export const ModelsTab: React.FC<ModelsTabProps> = ({
       }
       return changed ? next : prev;
     });
-  }, [bots, touchedBots]);
+  }, [bots, touchedBots, baseline.defaultHarness]);
 
   useEffect(() => {
     if (!active) return;
@@ -235,32 +220,29 @@ export const ModelsTab: React.FC<ModelsTabProps> = ({
     onSavingChange(true);
     setErr('');
     try {
-      const perHarness = Object.fromEntries(
-        Object.entries(defaultModelsDraft)
-          .map(([k, v]) => [k, v.trim()])
-          .filter(([, v]) => Boolean(v))
-      );
       const general = defaultModel.trim();
       const webUrl = mpWebUrlDraft.trim();
-      const equalPer =
-        Object.keys(perHarness).length === Object.keys(baseline.defaultModels).length &&
-        Object.keys(perHarness).every((k) => perHarness[k] === baseline.defaultModels[k]);
       if (
         defaultHarness !== baseline.defaultHarness ||
         defaultPermMode !== baseline.defaultPermMode ||
         general !== baseline.defaultModel ||
-        !equalPer ||
         webUrl !== baseline.magpieWebUrl
       ) {
+        const body: Record<string, unknown> = {
+          defaultPermissionMode: defaultPermMode,
+          defaultModel: general,
+          magpieWebUrl: webUrl,
+        };
+        if (defaultHarness) {
+          body.defaultHarness = defaultHarness;
+        }
+        const hasLegacyOverride = Boolean(settings?.defaultModels?.[defaultHarness]?.trim());
+        if (hasLegacyOverride && (general !== baseline.defaultModel || defaultHarness !== baseline.defaultHarness)) {
+          body.defaultModelsPatch = { [defaultHarness]: '' };
+        }
         const next = await api<SettingsData>('/api/settings', {
           method: 'PUT',
-          body: {
-            defaultHarness,
-            defaultPermissionMode: defaultPermMode,
-            defaultModel: general,
-            defaultModels: perHarness,
-            magpieWebUrl: webUrl,
-          },
+          body,
         });
         onSettingsUpdated(next);
       }
@@ -278,7 +260,6 @@ export const ModelsTab: React.FC<ModelsTabProps> = ({
         defaultHarness: false,
         defaultPermMode: false,
         defaultModel: false,
-        defaultModels: false,
         magpieWebUrl: false,
       });
       setTouchedBots(new Set());
@@ -293,12 +274,12 @@ export const ModelsTab: React.FC<ModelsTabProps> = ({
     }
   }, [
     onSavingChange,
-    defaultModelsDraft,
     defaultModel,
     mpWebUrlDraft,
     baseline,
     defaultHarness,
     defaultPermMode,
+    settings?.defaultModels,
     onSettingsUpdated,
     bots,
     botDrafts,
@@ -449,10 +430,10 @@ export const ModelsTab: React.FC<ModelsTabProps> = ({
 
   const mp = settings?.magpie;
   const harnesses = settings?.harnesses || [];
-  const installedHarnesses = harnesses.filter((h) => h.installed !== false);
+  const installedHarnesses = harnesses.filter((h) => h.installed === true);
   const connectedHarnesses = installedHarnesses.filter((h) => Boolean(h.magpie?.connected));
   const nativeHarnesses = installedHarnesses.filter((h) => !h.magpie?.connected);
-  const uninstalledHarnesses = harnesses.filter((h) => h.installed === false);
+  const uninstalledHarnesses = harnesses.filter((h) => h.installed !== true);
 
   const renderInstalledEngine = (h: HarnessInfo) => {
     const connected = Boolean(h.magpie?.connected);
@@ -602,106 +583,86 @@ export const ModelsTab: React.FC<ModelsTabProps> = ({
             <select
               id="sDefaultHarness"
               value={defaultHarness}
+              disabled={installedHarnesses.length === 0}
               onChange={(e) => {
                 const nextVal = e.target.value;
                 if (nextVal === defaultHarness) return;
-                setTouchedFields((prev) => ({ ...prev, defaultHarness: true }));
+                setTouchedFields((prev) => ({
+                  ...prev,
+                  defaultHarness: true,
+                  defaultModel: defaultModel.trim() ? true : prev.defaultModel,
+                }));
                 setDefaultHarness(nextVal);
+                if (defaultModel.trim()) setDefaultModel('');
                 void onLoadModels(nextVal);
               }}
             >
-              {(harnesses.length > 0 ? harnesses : [{ id: 'opencode', label: 'opencode' }]).map((h) => (
-                <option key={h.id} value={h.id}>
-                  {h.label}
+              {installedHarnesses.length === 0 ? (
+                <option value={defaultHarness}>
+                  {defaultHarness ? harnessSelectionLabel(defaultHarness, settings, t('notInstalled')) : t('notInstalled')}
                 </option>
-              ))}
+              ) : (
+                <>
+                  {defaultHarness && !installedHarnesses.some((h) => h.id === defaultHarness) && (
+                    <option value={defaultHarness} disabled>
+                      {harnessSelectionLabel(defaultHarness, settings, t('notInstalled'))}
+                    </option>
+                  )}
+                  {installedHarnesses.map((h) => (
+                    <option key={h.id} value={h.id}>
+                      {h.label}
+                    </option>
+                  ))}
+                </>
+              )}
             </select>
+            {installedHarnesses.length === 0 && (
+              <div className="set-card-desc mt-4">{t('engineNoInstalled')}</div>
+            )}
           </div>
           <div className="fld">
             <label>
-              {t('permDefaultMode')} <em>{t('permDefaultModeDesc')}</em>
+              {t('defaultModel')} <em>{t('globalDefaultPh')}</em>
             </label>
-            <select
-              id="sDefaultPermMode"
-              value={defaultPermMode}
-              onChange={(e) => {
-                const nextVal = e.target.value as PermissionMode;
-                if (nextVal === defaultPermMode) return;
-                setTouchedFields((prev) => ({ ...prev, defaultPermMode: true }));
-                setDefaultPermMode(nextVal);
+            <ModelCombo
+              id="sDefaultModel"
+              value={defaultModel}
+              onChange={(nextVal) => {
+                if (nextVal === defaultModel) return;
+                setTouchedFields((prev) => ({ ...prev, defaultModel: true }));
+                setDefaultModel(nextVal);
               }}
-            >
-              {(['auto', 'edit', 'ask', 'plan'] as PermissionMode[]).map((m) => (
-                <option key={m} value={m}>
-                  {t(`permMode_${m}`)}
-                </option>
-              ))}
-            </select>
+              options={models[defaultHarness] || []}
+              placeholder={t('globalDefaultPh')}
+              loadingText={t('ubLoadingModels')}
+              emptyText={t('ubNoModelsFound')}
+              onFocus={() => {
+                if (defaultHarness) void onLoadModels(defaultHarness);
+              }}
+            />
           </div>
         </div>
         <div className="fld">
-          <label dangerouslySetInnerHTML={{ __html: t('globalDefaultModel') }} />
-          <input
-            id="sDefaultModel"
-            className="mono"
-            spellCheck={false}
-            list="models-global"
-            placeholder={t('globalDefaultPh')}
-            value={defaultModel}
-            onFocus={() => {
-              void onLoadModels(defaultHarness);
-              preloadAllModels(settings?.harnesses);
-            }}
+          <label>
+            {t('permDefaultMode')} <em>{t('permDefaultModeDesc')}</em>
+          </label>
+          <select
+            id="sDefaultPermMode"
+            value={defaultPermMode}
             onChange={(e) => {
-              const nextVal = e.target.value;
-              if (nextVal === defaultModel) return;
-              setTouchedFields((prev) => ({ ...prev, defaultModel: true }));
-              setDefaultModel(nextVal);
+              const nextVal = e.target.value as PermissionMode;
+              if (nextVal === defaultPermMode) return;
+              setTouchedFields((prev) => ({ ...prev, defaultPermMode: true }));
+              setDefaultPermMode(nextVal);
             }}
-          />
+          >
+            {(['auto', 'edit', 'ask', 'plan'] as PermissionMode[]).map((m) => (
+              <option key={m} value={m}>
+                {t(`permMode_${m}`)}
+              </option>
+            ))}
+          </select>
         </div>
-
-        {installedHarnesses.length > 0 && (() => {
-          const overrideCount = installedHarnesses.filter((h) => (defaultModelsDraft[h.id] || '').trim()).length;
-          return (
-            <div>
-              <button
-                type="button"
-                className="link-btn engine-more-btn"
-                onClick={() => setPerOverridesOpen((v) => !v)}
-              >
-                {perOverridesOpen
-                  ? t('collapse')
-                  : overrideCount > 0
-                    ? t('perHarnessOverridesCount', { n: overrideCount })
-                    : t('perHarnessOverrides')}
-              </button>
-              {perOverridesOpen && (
-                <div className="per-harness-list">
-                  {installedHarnesses.map((h) => (
-                    <div key={h.id} className="per-harness-row">
-                      <label>{h.label}</label>
-                      <input
-                        className="mono"
-                        list={`models-${h.id}`}
-                        placeholder={t('engineModelPh')}
-                        spellCheck={false}
-                        value={defaultModelsDraft[h.id] || ''}
-                        onFocus={() => void onLoadModels(h.id)}
-                        onChange={(e) => {
-                          const nextVal = e.target.value;
-                          if (nextVal === (defaultModelsDraft[h.id] || '')) return;
-                          setTouchedFields((prev) => ({ ...prev, defaultModels: true }));
-                          setDefaultModelsDraft((prev) => ({ ...prev, [h.id]: nextVal }));
-                        }}
-                      />
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          );
-        })()}
 
         <div className="set-subsec-hd">
           <h3>{t('botModels')}</h3>
@@ -713,10 +674,10 @@ export const ModelsTab: React.FC<ModelsTabProps> = ({
           ) : (
             bots.map((b) => {
               const draft = botDrafts[b.id] || {
-                harness: b.harness || 'opencode',
+                harness: b.harness || baseline.defaultHarness || '',
                 model: (b.modelInherited ? '' : b.model || '').trim(),
               };
-              const dm = defaultModelsDraft[draft.harness]?.trim() || '';
+              const dm = settings?.defaultModels?.[draft.harness]?.trim() || '';
               const def = dm || resolveDefaultModel(defaultModel.trim(), draft.harness);
               return (
                 <div key={b.id} className="brow">
@@ -726,6 +687,7 @@ export const ModelsTab: React.FC<ModelsTabProps> = ({
                   </div>
                   <select
                     value={draft.harness}
+                    disabled={installedHarnesses.length === 0}
                     onChange={(e) => {
                       const h = e.target.value;
                       if (h === draft.harness) return;
@@ -734,11 +696,24 @@ export const ModelsTab: React.FC<ModelsTabProps> = ({
                       void onLoadModels(h);
                     }}
                   >
-                    {harnesses.map((h) => (
-                      <option key={h.id} value={h.id}>
-                        {h.label}
+                    {installedHarnesses.length === 0 ? (
+                      <option value={draft.harness}>
+                        {draft.harness ? harnessSelectionLabel(draft.harness, settings, t('notInstalled')) : t('notInstalled')}
                       </option>
-                    ))}
+                    ) : (
+                      <>
+                        {draft.harness && !installedHarnesses.some((h) => h.id === draft.harness) && (
+                          <option value={draft.harness} disabled>
+                            {harnessSelectionLabel(draft.harness, settings, t('notInstalled'))}
+                          </option>
+                        )}
+                        {installedHarnesses.map((h) => (
+                          <option key={h.id} value={h.id}>
+                            {h.label}
+                          </option>
+                        ))}
+                      </>
+                    )}
                   </select>
                   <input
                     list={`models-${draft.harness}`}

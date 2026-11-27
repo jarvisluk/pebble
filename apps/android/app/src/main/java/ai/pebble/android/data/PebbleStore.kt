@@ -1072,16 +1072,20 @@ class PebbleStore(context: Context) {
         defaultHarness: String,
         defaultPermissionMode: String? = null,
         defaultModel: String,
-        defaultModels: Map<String, String>,
+        defaultModelsPatch: Map<String, String>? = null,
         magpieWebUrl: String?,
         botUpdates: List<Triple<String, String, String>>,
     ) {
         if (changed) {
             val body = mutableMapOf<String, Any?>(
-                "defaultHarness" to defaultHarness,
                 "defaultModel" to defaultModel,
-                "defaultModels" to defaultModels,
             )
+            if (defaultHarness.isNotEmpty()) {
+                body["defaultHarness"] = defaultHarness
+            }
+            if (!defaultModelsPatch.isNullOrEmpty()) {
+                body["defaultModelsPatch"] = defaultModelsPatch
+            }
             if (!defaultPermissionMode.isNullOrEmpty()) {
                 body["defaultPermissionMode"] = defaultPermissionMode
             }

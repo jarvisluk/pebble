@@ -1389,9 +1389,11 @@ func TestSettingsPatchDryRunValidationAndBotRoutes(t *testing.T) {
 	t.Cleanup(harness.InvalidateMagpieCache)
 
 	binDir := t.TempDir()
-	fakeOC := filepath.Join(binDir, "opencode")
-	if err := os.WriteFile(fakeOC, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatal(err)
+	for _, binName := range []string{"opencode", "claude"} {
+		fakeBin := filepath.Join(binDir, binName)
+		if err := os.WriteFile(fakeBin, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
 	}
 	t.Setenv("PATH", binDir)
 	harness.InvalidateAuthCache()
@@ -1540,5 +1542,81 @@ func TestSettingsPatchDryRunValidationAndBotRoutes(t *testing.T) {
 	}
 	if rec := doReq(http.MethodPost, "/api/bots?validate=1", `{"id":"c3","name":"C3","harness":"opencode","model":"m1"}`); rec.Code != http.StatusCreated {
 		t.Fatalf("expected 201 for valid create?validate=1, got %d %s", rec.Code, rec.Body.String())
+	}
+
+	// 7. PUT /api/settings without ?validate=1 still rejects switching defaultHarness to an uninstalled harness,
+	// while allowing switching to an installed harness.
+	if rec := doReq(http.MethodPut, "/api/settings", `{"defaultHarness":"trae"}`); rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for uninstalled defaultHarness trae without validate=1, got %d %s", rec.Code, rec.Body.String())
+	}
+	if got := h.DefaultHarness(); got != "opencode" {
+		t.Fatalf("expected defaultHarness preserved as opencode, got %q", got)
+	}
+	if rec := doReq(http.MethodPut, "/api/settings", `{"defaultHarness":"claude"}`); rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for installed defaultHarness claude without validate=1, got %d %s", rec.Code, rec.Body.String())
+	}
+	if got := h.DefaultHarness(); got != "claude" {
+		t.Fatalf("expected defaultHarness updated to claude, got %q", got)
+	}
+}
+
+func TestSettingsDefaultHarnessFallbackToInstalled(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("MAGPIE_BIN", filepath.Join(tmp, "missing-magpie"))
+	harness.InvalidateMagpieCache()
+	t.Cleanup(harness.InvalidateMagpieCache)
+	harness.InvalidateAuthCache()
+	t.Cleanup(harness.InvalidateAuthCache)
+	t.Cleanup(hub.SetHarnessDetectorForTest(func(kind string) (bool, string) {
+		if kind == "claude" {
+			return true, "/usr/local/bin/claude"
+		}
+		return false, ""
+	}))
+
+	store, err := state.NewStore(filepath.Join(tmp, "sessions.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	msgStore, err := state.NewMessageStore(filepath.Join(tmp, "messages"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	reg := harness.NewRegistry()
+	reg.Register(catalogNoopHarness{kind: "opencode", models: []string{"m1"}})
+	reg.Register(catalogNoopHarness{kind: "claude", models: []string{"sonnet"}})
+
+	cfg := &config.HubConfig{
+		ProjectRoot: tmp,
+		SharedDir:   filepath.Join(tmp, "workspaces", "_shared"),
+		StateFile:   filepath.Join(tmp, "sessions.json"),
+		MessagesDir: filepath.Join(tmp, "messages"),
+		Bots: []config.BotConfig{
+			{ID: "a", Name: "A", Workspace: filepath.Join(tmp, "workspaces", "a"), Harness: "claude"},
+		},
+	}
+	h := hub.New(cfg, store, msgStore, reg)
+	defer h.Close()
+
+	s := NewHTTPServer(h, config.HTTPConfig{Host: "127.0.0.1", Port: 3789})
+	defer s.Shutdown(t.Context())
+
+	req := httptest.NewRequest(http.MethodGet, "/api/settings", nil)
+	req.Host = "127.0.0.1:3789"
+	rec := httptest.NewRecorder()
+	s.srv.Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /api/settings failed: %d %s", rec.Code, rec.Body.String())
+	}
+	var got struct {
+		DefaultHarness string `json:"defaultHarness"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.DefaultHarness != "claude" {
+		t.Fatalf("expected defaultHarness fallback to installed claude, got %q", got.DefaultHarness)
 	}
 }

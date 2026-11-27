@@ -44,6 +44,16 @@ fun settingsHarnessList(store: PebbleStore): List<HarnessInfo> {
     }
 }
 
+fun installedHarnessList(store: PebbleStore): List<HarnessInfo> =
+    store.settings?.harnesses.orEmpty().filter { it.installed == true }
+
+fun harnessLabelForSelection(id: String, store: PebbleStore): String {
+    if (id.isEmpty()) return store.t("notInstalled")
+    val h = store.settings?.harnesses?.firstOrNull { it.id == id }
+    val title = h?.title ?: id
+    return if (h?.installed == true) title else "$title (${store.t("notInstalled")})"
+}
+
 fun harnessDisplayLabel(h: HarnessInfo, store: PebbleStore): String = when {
     h.magpie?.connected == true -> "${h.title} · Magpie"
     store.settings?.magpie?.installed == true -> "${h.title} · ${store.t("mpNative")}"
@@ -60,10 +70,10 @@ fun orderedGlobalHarnesses(
     fun addUnique(h: HarnessInfo) {
         if (seen.add(h.id)) add(h)
     }
-    harnesses.firstOrNull { it.id == defaultHarness }?.let(::addUnique)
+    harnesses.firstOrNull { it.id == defaultHarness && (!anyInstalled || it.installed == true) }?.let(::addUnique)
     harnesses.filter { (!anyInstalled || it.installed == true) && it.magpie?.connected != true }.forEach(::addUnique)
     harnesses.filter { (!anyInstalled || it.installed == true) && it.magpie?.connected == true }.forEach(::addUnique)
-    harnesses.filter { !anyInstalled || !models[it.id].isNullOrEmpty() }.forEach(::addUnique)
+    harnesses.filter { !anyInstalled || (it.installed == true && !models[it.id].isNullOrEmpty()) }.forEach(::addUnique)
 }
 
 fun localizedMemoryKind(raw: String?, store: PebbleStore): String {
@@ -90,6 +100,7 @@ fun ModelInputWithMenu(
     onRefreshCandidates: () -> Unit = onLoadCandidates,
     onValueChange: (String) -> Unit,
     store: PebbleStore,
+    label: String? = null,
 ) {
     val p = LocalPalette.current
     var menuOpen by remember { mutableStateOf(false) }
@@ -103,7 +114,17 @@ fun ModelInputWithMenu(
         OutlinedTextField(
             value = value,
             onValueChange = onValueChange,
+            label = label?.let { l -> { Text(l, fontSize = PebbleFont.secondary) } },
             placeholder = { Text(placeholder, fontFamily = MonoFont, fontSize = PebbleFont.secondary) },
+            trailingIcon = if (value.isNotEmpty()) {
+                {
+                    IconButton(onClick = { onValueChange("") }) {
+                        Icon(painterResource(PebbleIcons.Close), contentDescription = store.t("clear"), tint = p.mute, modifier = Modifier.size(16.dp))
+                    }
+                }
+            } else {
+                null
+            },
             singleLine = true,
             textStyle = TextStyle(fontFamily = MonoFont, fontSize = PebbleFont.secondary),
             shape = PebbleDimens.rowShape,
@@ -115,7 +136,7 @@ fun ModelInputWithMenu(
                 menuOpen = true
                 if (candidates.isEmpty() && !loading) onLoadCandidates()
             }) {
-                Icon(painterResource(PebbleIcons.List), contentDescription = store.t("optionalModels"), tint = p.accent)
+                Icon(painterResource(PebbleIcons.ArrowDropDown), contentDescription = store.t("optionalModels"), tint = p.accent)
             }
             DropdownMenu(
                 expanded = menuOpen,
@@ -205,6 +226,15 @@ fun GlobalModelInputWithMenu(
             value = value,
             onValueChange = onValueChange,
             placeholder = { Text(placeholder, fontFamily = MonoFont, fontSize = PebbleFont.secondary) },
+            trailingIcon = if (value.isNotEmpty()) {
+                {
+                    IconButton(onClick = { onValueChange("") }) {
+                        Icon(painterResource(PebbleIcons.Close), contentDescription = store.t("clear"), tint = p.mute, modifier = Modifier.size(16.dp))
+                    }
+                }
+            } else {
+                null
+            },
             singleLine = true,
             textStyle = TextStyle(fontFamily = MonoFont, fontSize = PebbleFont.secondary),
             shape = PebbleDimens.rowShape,
@@ -220,7 +250,7 @@ fun GlobalModelInputWithMenu(
                     onLoadHarness(singleId)
                 }
             }) {
-                Icon(painterResource(PebbleIcons.List), contentDescription = store.t("optionalModels"), tint = p.accent)
+                Icon(painterResource(PebbleIcons.ArrowDropDown), contentDescription = store.t("optionalModels"), tint = p.accent)
             }
             DropdownMenu(
                 expanded = menuOpen,

@@ -15,21 +15,18 @@ struct SettingsModelsTab: View {
         var model: String
     }
 
-    @State private var defaultHarness = "opencode"
+    @State private var defaultHarness = ""
     @State private var defaultHarnessTouched = false
     @State private var defaultPermMode = "auto"
     @State private var defaultPermModeTouched = false
     @State private var defaultModel = ""
     @State private var defaultTouched = false
-    @State private var perHarness: [String: String] = [:]
-    @State private var perTouched = false
     @State private var mpWebUrl = ""
     @State private var mpWebUrlTouched = false
     @State private var drafts: [String: BotDraft] = [:]
     @State private var touchedBots: Set<String> = []
 
     @State private var moreEnginesOpen = false
-    @State private var perOverridesOpen = false
     @State private var expandedInstall: Set<String> = []
     @State private var installTasks: [String: SetupTaskStatus] = [:]
     @State private var loginTasks: [String: SetupTaskStatus] = [:]
@@ -38,23 +35,23 @@ struct SettingsModelsTab: View {
     @State private var busy = ""
 
     private var harnesses: [HarnessInfo] { settingsHarnessList(from: hub) }
-    private var primaryHarness: String { harnesses.first?.id ?? "opencode" }
+    private var installedHarnesses: [HarnessInfo] { installedHarnessList(from: hub) }
+    private var uninstalledHarnesses: [HarnessInfo] { harnesses.filter { $0.installed != true } }
 
     private var baseDefaultHarness: String {
         if let dh = hub.settings?.defaultHarness, !dh.isEmpty { return dh }
-        return primaryHarness
+        return installedHarnesses.first?.id ?? ""
+    }
+
+    private var baseDefaultModel: String {
+        let override = (hub.settings?.defaultModels?[baseDefaultHarness] ?? "").trimmingCharacters(in: .whitespaces)
+        if !override.isEmpty { return override }
+        return (hub.settings?.defaultModel ?? "").trimmingCharacters(in: .whitespaces)
     }
 
     private var baseDefaultPermMode: String {
         let m = (hub.settings?.defaultPermissionMode ?? "").trimmingCharacters(in: .whitespaces)
         return m.isEmpty ? "auto" : m
-    }
-
-    private func clean(_ m: [String: String]?) -> [String: String] {
-        (m ?? [:]).compactMapValues {
-            let t = $0.trimmingCharacters(in: .whitespaces)
-            return t.isEmpty ? nil : t
-        }
     }
 
     private func origModel(_ b: BotStatus) -> String {
@@ -78,20 +75,11 @@ struct SettingsModelsTab: View {
         let webDirty = mpWebUrlTouched && mpWebUrl.trimmingCharacters(in: .whitespaces) != (s.magpie?.webUrl ?? "").trimmingCharacters(in: .whitespaces)
         return (defaultHarnessTouched && defaultHarness != baseDefaultHarness)
             || (defaultPermModeTouched && defaultPermMode != baseDefaultPermMode)
-            || (defaultTouched && defaultModel.trimmingCharacters(in: .whitespaces) != (s.defaultModel ?? "").trimmingCharacters(in: .whitespaces))
-            || (perTouched && clean(perHarness) != clean(s.defaultModels))
+            || (defaultTouched && defaultModel.trimmingCharacters(in: .whitespaces) != baseDefaultModel)
             || webDirty
     }
 
     private var dirty: Bool { settingsChanged || !botUpdates.isEmpty }
-
-    private var installedHarnesses: [HarnessInfo] {
-        harnesses.filter { $0.installed == true }
-    }
-
-    private var uninstalledHarnesses: [HarnessInfo] {
-        harnesses.filter { $0.installed != true }
-    }
 
     var body: some View {
         defaultsAndBotsSection
@@ -103,7 +91,7 @@ struct SettingsModelsTab: View {
                 try? await hub.refreshBots()
                 sync()
             }
-            .task(id: "\(hub.isConnected)|\(hub.modelsGeneration)|\(harnesses.map(\.id).joined(separator: ","))") {
+            .task(id: "\(hub.isConnected)|\(hub.modelsGeneration)|\(installedHarnesses.map(\.id).joined(separator: ","))") {
                 guard hub.isConnected else { return }
                 await preloadAllModels(force: false)
             }
@@ -502,43 +490,38 @@ struct SettingsModelsTab: View {
 
     private var defaultsAndBotsSection: some View {
         Section(hub.t("globalAndBotModels")) {
-            HubMenuPicker(
-                title: hub.t("defaultHarness"),
-                selection: Binding(
-                    get: { defaultHarness },
-                    set: { next in
-                        guard next != defaultHarness else { return }
-                        defaultHarness = next
-                        defaultHarnessTouched = true
-                        saved = ""
-                        Task { _ = try? await hub.loadModels(next) }
-                    }
-                ),
-                options: harnesses.map { ($0.id, $0.title) }
-            )
+            VStack(alignment: .leading, spacing: 3) {
+                HubMenuPicker(
+                    title: hub.t("defaultHarness"),
+                    selection: Binding(
+                        get: { defaultHarness },
+                        set: { next in
+                            guard next != defaultHarness else { return }
+                            defaultHarness = next
+                            defaultHarnessTouched = true
+                            if !defaultModel.trimmingCharacters(in: .whitespaces).isEmpty {
+                                defaultModel = ""
+                                defaultTouched = true
+                            }
+                            saved = ""
+                            Task { _ = try? await hub.loadModels(next) }
+                        }
+                    ),
+                    options: installedHarnesses.map { ($0.id, $0.title) },
+                    fallbackLabel: harnessLabelForSelection(defaultHarness, from: hub),
+                    disabled: installedHarnesses.isEmpty
+                )
+                if installedHarnesses.isEmpty {
+                    Text(hub.t("engineNoInstalled"))
+                        .font(.system(size: AppFont.caption))
+                        .foregroundStyle(p.mute)
+                }
+            }
 
-            HubMenuPicker(
-                title: hub.t("permDefaultMode"),
-                selection: Binding(
-                    get: { defaultPermMode },
-                    set: {
-                        guard $0 != defaultPermMode else { return }
-                        defaultPermMode = $0
-                        defaultPermModeTouched = true
-                        saved = ""
-                    }
-                ),
-                options: ["auto", "edit", "ask", "plan"].map { ($0, hub.t("permMode_\($0)")) }
-            )
-            Text(hub.t("permDefaultModeDesc"))
-                .font(.system(size: AppFont.caption))
-                .foregroundStyle(p.mute)
-
-            HubFormField(label: hub.t("globalDefaultModel")) {
-                GlobalModelFieldRow(
-                    title: hub.t("globalDefaultModel"),
-                    defaultHarness: defaultHarness,
-                    harnesses: harnesses,
+            HubFormField(label: hub.t("defaultModel")) {
+                ModelFieldRow(
+                    title: hub.t("defaultModel"),
+                    harness: defaultHarness,
                     text: Binding(
                         get: { defaultModel },
                         set: {
@@ -548,40 +531,28 @@ struct SettingsModelsTab: View {
                             saved = ""
                         }
                     ),
-                    placeholder: "magpie/claude-sonnet-4",
+                    placeholder: hub.t("globalDefaultPh"),
                     onError: { error = $0 }
                 )
             }
 
-            if !installedHarnesses.isEmpty {
-                let overrideCount = installedHarnesses.filter { !(perHarness[$0.id] ?? "").trimmingCharacters(in: .whitespaces).isEmpty }.count
-                DisclosureGroup(
-                    overrideCount > 0 ? hub.t("perHarnessOverridesCount", ["n": overrideCount]) : hub.t("perHarnessOverrides"),
-                    isExpanded: $perOverridesOpen
-                ) {
-                    ForEach(installedHarnesses) { h in
-                        let ph = defaultModel.trimmingCharacters(in: .whitespaces).isEmpty
-                            ? hub.t("engineModelPh")
-                            : resolveDefaultModel(defaultModel.trimmingCharacters(in: .whitespaces), h.id)
-                        HubFormField(label: h.title) {
-                            ModelFieldRow(
-                                title: h.title,
-                                harness: h.id,
-                                text: Binding(
-                                    get: { perHarness[h.id] ?? "" },
-                                    set: {
-                                        guard $0 != (perHarness[h.id] ?? "") else { return }
-                                        perHarness[h.id] = $0
-                                        perTouched = true
-                                        saved = ""
-                                    }
-                                ),
-                                placeholder: ph,
-                                onError: { error = $0 }
-                            )
+            VStack(alignment: .leading, spacing: 3) {
+                HubMenuPicker(
+                    title: hub.t("permDefaultMode"),
+                    selection: Binding(
+                        get: { defaultPermMode },
+                        set: {
+                            guard $0 != defaultPermMode else { return }
+                            defaultPermMode = $0
+                            defaultPermModeTouched = true
+                            saved = ""
                         }
-                    }
-                }
+                    ),
+                    options: ["auto", "edit", "ask", "plan"].map { ($0, hub.t("permMode_\($0)")) }
+                )
+                Text(hub.t("permDefaultModeDesc"))
+                    .font(.system(size: AppFont.caption))
+                    .foregroundStyle(p.mute)
             }
 
             if hub.bots.isEmpty {
@@ -589,7 +560,7 @@ struct SettingsModelsTab: View {
             } else {
                 ForEach(Array(hub.bots.enumerated()), id: \.element.id) { i, b in
                     let d = drafts[b.id] ?? BotDraft(harness: b.harness ?? "", model: origModel(b))
-                    let per = (perHarness[d.harness] ?? "").trimmingCharacters(in: .whitespaces)
+                    let per = (hub.settings?.defaultModels?[d.harness] ?? "").trimmingCharacters(in: .whitespaces)
                     let ph = per.isEmpty ? resolveDefaultModel(defaultModel.trimmingCharacters(in: .whitespaces), d.harness) : per
                     VStack(alignment: .leading, spacing: 8) {
                         HStack(spacing: 10) {
@@ -599,37 +570,39 @@ struct SettingsModelsTab: View {
                                 Text("@\(b.id)").font(.system(size: AppFont.caption, design: .monospaced)).foregroundStyle(.secondary)
                             }
                             Spacer()
-                            Menu {
-                                if !harnesses.contains(where: { $0.id == d.harness }) {
-                                    Button(d.harness.isEmpty ? "-" : d.harness) {}
-                                }
-                                ForEach(harnesses) { h in
-                                    Button {
-                                        guard h.id != d.harness else { return }
-                                        drafts[b.id] = BotDraft(harness: h.id, model: "")
-                                        touchedBots.insert(b.id)
-                                        saved = ""
-                                        Task { _ = try? await hub.loadModels(h.id) }
-                                    } label: {
-                                        if h.id == d.harness {
-                                            Label(h.title, systemImage: "checkmark")
-                                        } else {
-                                            Text(h.title)
+                            let botHarnessLbl = harnessLabelForSelection(d.harness, from: hub)
+                            if installedHarnesses.isEmpty {
+                                Text(botHarnessLbl)
+                                    .foregroundStyle(p.mute)
+                            } else {
+                                Menu {
+                                    ForEach(installedHarnesses) { h in
+                                        Button {
+                                            guard h.id != d.harness else { return }
+                                            drafts[b.id] = BotDraft(harness: h.id, model: "")
+                                            touchedBots.insert(b.id)
+                                            saved = ""
+                                            Task { _ = try? await hub.loadModels(h.id) }
+                                        } label: {
+                                            if h.id == d.harness {
+                                                Label(h.title, systemImage: "checkmark")
+                                            } else {
+                                                Text(h.title)
+                                            }
                                         }
                                     }
+                                } label: {
+                                    (Text(botHarnessLbl).foregroundStyle(p.text2)
+                                        + Text(" ")
+                                        + Text(Image(systemName: "chevron.up.chevron.down"))
+                                            .font(.system(size: AppFont.caption - 1, weight: .medium))
+                                            .foregroundStyle(p.mute))
                                 }
-                            } label: {
-                                let lbl = harnesses.first(where: { $0.id == d.harness })?.title ?? (d.harness.isEmpty ? "-" : d.harness)
-                                (Text(lbl).foregroundStyle(p.text2)
-                                    + Text(" ")
-                                    + Text(Image(systemName: "chevron.up.chevron.down"))
-                                        .font(.system(size: AppFont.caption - 1, weight: .medium))
-                                        .foregroundStyle(p.mute))
+                                .buttonStyle(.plain)
+                                .hubBorderlessMenu()
+                                .menuIndicator(.hidden)
+                                .fixedSize()
                             }
-                            .buttonStyle(.plain)
-                            .hubBorderlessMenu()
-                            .menuIndicator(.hidden)
-                            .fixedSize()
                         }
                         ModelFieldRow(
                             title: hub.t("statModel"),
@@ -665,8 +638,7 @@ struct SettingsModelsTab: View {
         guard let s = hub.settings else { return }
         if !defaultHarnessTouched { defaultHarness = baseDefaultHarness }
         if !defaultPermModeTouched { defaultPermMode = baseDefaultPermMode }
-        if !defaultTouched { defaultModel = (s.defaultModel ?? "").trimmingCharacters(in: .whitespaces) }
-        if !perTouched { perHarness = clean(s.defaultModels) }
+        if !defaultTouched { defaultModel = baseDefaultModel }
         if !mpWebUrlTouched { mpWebUrl = (s.magpie?.webUrl ?? "").trimmingCharacters(in: .whitespaces) }
         syncDrafts()
     }
@@ -688,7 +660,6 @@ struct SettingsModelsTab: View {
             defaultHarnessTouched = false
             defaultPermModeTouched = false
             defaultTouched = false
-            perTouched = false
             mpWebUrlTouched = false
             touchedBots = []
             drafts = [:]
@@ -700,19 +671,22 @@ struct SettingsModelsTab: View {
         error = ""
         saved = ""
         do {
+            let hasLegacyOverride = !(hub.settings?.defaultModels?[defaultHarness] ?? "").trimmingCharacters(in: .whitespaces).isEmpty
+            let patch: [String: String]? = (defaultTouched || defaultHarnessTouched) && hasLegacyOverride
+                ? [defaultHarness: ""]
+                : nil
             try await hub.saveModelsSettings(
                 changed: settingsChanged,
                 defaultHarness: defaultHarness,
                 defaultPermissionMode: defaultPermMode,
                 defaultModel: defaultModel.trimmingCharacters(in: .whitespaces),
-                defaultModels: clean(perHarness),
+                defaultModelsPatch: patch,
                 magpieWebUrl: mpWebUrlTouched ? mpWebUrl.trimmingCharacters(in: .whitespaces) : nil,
                 botUpdates: botUpdates
             )
             defaultHarnessTouched = false
             defaultPermModeTouched = false
             defaultTouched = false
-            perTouched = false
             mpWebUrlTouched = false
             touchedBots = []
             drafts = [:]
@@ -727,7 +701,7 @@ struct SettingsModelsTab: View {
     }
 
     private func preloadAllModels(force: Bool) async {
-        let ids = harnesses.filter { $0.installed != false }.map(\.id)
+        let ids = installedHarnesses.map(\.id)
         await withTaskGroup(of: Void.self) { group in
             for id in ids {
                 group.addTask { @MainActor in

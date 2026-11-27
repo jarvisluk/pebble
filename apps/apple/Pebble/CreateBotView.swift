@@ -11,20 +11,16 @@ struct CreateBotView: View {
     @State private var desc = ""
     @State private var avatar = ""
     @State private var color = ""
-    @State private var harness = "opencode"
+    @State private var harness = ""
     @State private var harnessTouched = false
     @State private var permMode = "auto"
     @State private var permModeTouched = false
     @State private var model = ""
-    @State private var loadingModelsFor: Set<String> = []
     @State private var instructions = ""
     @State private var submitting = false
     @State private var err = ""
 
-    private var harnesses: [HarnessInfo] {
-        if let h = hub.settings?.harnesses, !h.isEmpty { return h }
-        return ["opencode", "codebuddy", "qoder", "codex", "claude", "grok", "trae", "pi", "dsh", "agy"].map { HarnessInfo(id: $0, label: $0) }
-    }
+    private var harnesses: [HarnessInfo] { installedHarnessList(from: hub) }
 
     private func slug(_ s: String) -> String {
         s.lowercased()
@@ -33,7 +29,8 @@ struct CreateBotView: View {
     }
 
     var body: some View {
-        let ph = resolveDefaultModel(hub.settings?.defaultModel ?? "", harness)
+        let per = (hub.settings?.defaultModels?[harness] ?? "").trimmingCharacters(in: .whitespaces)
+        let ph = per.isEmpty ? resolveDefaultModel(hub.settings?.defaultModel ?? "", harness) : per
         let form = Form {
             Section {
                 HubFormField(label: hub.t("botName")) {
@@ -66,14 +63,28 @@ struct CreateBotView: View {
                 )
             }
             Section {
-                HubMenuPicker(
-                    title: hub.t("harnessBackend"),
-                    selection: Binding(
-                        get: { harness },
-                        set: { harness = $0; harnessTouched = true }
-                    ),
-                    options: harnesses.map { ($0.id, $0.title) }
-                )
+                VStack(alignment: .leading, spacing: 3) {
+                    HubMenuPicker(
+                        title: hub.t("harnessBackend"),
+                        selection: Binding(
+                            get: { harness },
+                            set: { next in
+                                guard next != harness else { return }
+                                harness = next
+                                harnessTouched = true
+                                model = ""
+                            }
+                        ),
+                        options: harnesses.map { ($0.id, $0.title) },
+                        fallbackLabel: harnessLabelForSelection(harness, from: hub),
+                        disabled: harnesses.isEmpty
+                    )
+                    if harnesses.isEmpty {
+                        Text(hub.t("engineNoInstalled"))
+                            .font(.system(size: AppFont.caption))
+                            .foregroundStyle(p.mute)
+                    }
+                }
                 let supportedModes = hub.supportedPermissionModes(for: harness)
                 let activePerm = supportedModes.contains(permMode) ? permMode : hub.clampPermissionMode(permMode, harnessId: harness)
                 if supportedModes.count <= 1 {
@@ -101,56 +112,14 @@ struct CreateBotView: View {
                             .foregroundStyle(p.mute)
                     }
                 }
-                let cands = hub.models[harness] ?? []
-                let trimmedModel = model.trimmingCharacters(in: .whitespaces)
-                let isLoadingModels = loadingModelsFor.contains(harness)
                 HubFormField(label: hub.t("modelOptional")) {
-                    HStack(spacing: 8) {
-                        TextField("", text: $model, prompt: Text(ph.isEmpty ? hub.t("inheritDefaultPh") : ph))
-                            .monoInput()
-                        Menu {
-                            if !trimmedModel.isEmpty {
-                                Button(hub.t("clear")) { model = "" }
-                                Divider()
-                            }
-                            if cands.isEmpty {
-                                if isLoadingModels {
-                                    Text(hub.t("loading"))
-                                } else {
-                                    Text(hub.t("noModels"))
-                                    Button {
-                                        loadCands(for: harness, force: true)
-                                    } label: {
-                                        Label(hub.t("refresh"), systemImage: "arrow.clockwise")
-                                    }
-                                }
-                            } else {
-                                ForEach(cands, id: \.self) { m in
-                                    Button {
-                                        model = m
-                                    } label: {
-                                        if m == trimmedModel {
-                                            Label(m, systemImage: "checkmark")
-                                        } else {
-                                            Text(m)
-                                        }
-                                    }
-                                }
-                                Divider()
-                                Button {
-                                    loadCands(for: harness, force: true)
-                                } label: {
-                                    Label(hub.t("refresh"), systemImage: "arrow.clockwise")
-                                }
-                            }
-                        } label: {
-                            Label(hub.t("optionalModels"), systemImage: "list.bullet").labelStyle(.iconOnly)
-                        }
-                        .buttonStyle(.plain)
-                        .hubBorderlessMenu()
-                        .menuIndicator(.hidden)
-                        .fixedSize()
-                    }
+                    ModelFieldRow(
+                        title: hub.t("modelOptional"),
+                        harness: harness,
+                        text: $model,
+                        placeholder: ph.isEmpty ? hub.t("inheritDefaultPh") : ph,
+                        onError: { err = $0 }
+                    )
                 }
             }
             Section(hub.t("agentsCreateLbl")) {
@@ -174,28 +143,20 @@ struct CreateBotView: View {
         .task {
                 if hub.settings == nil { _ = try? await hub.loadSettings() }
                 if !harnessTouched {
-                    harness = hub.settings?.defaultHarness ?? harnesses.first?.id ?? "opencode"
+                    let preferred = hub.settings?.defaultHarness ?? ""
+                    if !preferred.isEmpty && harnesses.contains(where: { $0.id == preferred }) {
+                        harness = preferred
+                    } else {
+                        harness = harnesses.first?.id ?? ""
+                    }
                 }
                 if !permModeTouched {
                     permMode = hub.clampPermissionMode(hub.settings?.defaultPermissionMode, harnessId: harness)
                 }
             }
-            .task(id: "\(harness)|\(hub.isConnected)|\(hub.modelsGeneration)") {
+            .task(id: harness) {
                 permMode = hub.clampPermissionMode(permMode, harnessId: harness)
-                if hub.isConnected && (hub.models[harness] ?? []).isEmpty {
-                    loadCands(for: harness)
-                }
             }
-    }
-
-    private func loadCands(for target: String, force: Bool = false) {
-        guard !target.isEmpty else { return }
-        guard force || !loadingModelsFor.contains(target) else { return }
-        loadingModelsFor.insert(target)
-        Task {
-            _ = try? await hub.loadModels(target, force: force)
-            loadingModelsFor.remove(target)
-        }
     }
 
     private func create() {
@@ -204,6 +165,10 @@ struct CreateBotView: View {
         let id = botId.trimmingCharacters(in: .whitespaces)
         if n.isEmpty { err = hub.t("fillBotName"); return }
         if id.range(of: "^[a-zA-Z0-9][a-zA-Z0-9_-]*$", options: .regularExpression) == nil { err = hub.t("idInvalid"); return }
+        guard !harness.isEmpty && harnesses.contains(where: { $0.id == harness }) else {
+            err = hub.t("engineNoInstalled")
+            return
+        }
         var body: [String: Any] = ["id": id, "name": n, "harness": harness]
         let supportedModes = hub.supportedPermissionModes(for: harness)
         body["permissionMode"] = supportedModes.contains(permMode) ? permMode : hub.clampPermissionMode(permMode, harnessId: harness)

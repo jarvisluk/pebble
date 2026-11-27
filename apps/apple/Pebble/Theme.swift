@@ -741,36 +741,43 @@ struct HubMenuPicker<Selection: Hashable>: View {
     var title: String
     @Binding var selection: Selection
     var options: [(Selection, String)]
+    var fallbackLabel: String? = nil
+    var disabled: Bool = false
 
     private var currentLabel: String {
-        options.first(where: { $0.0 == selection })?.1 ?? ""
+        options.first(where: { $0.0 == selection })?.1 ?? fallbackLabel ?? ""
     }
 
     var body: some View {
         LabeledContent(title) {
-            Menu {
-                ForEach(Array(options.enumerated()), id: \.offset) { _, opt in
-                    Button {
-                        selection = opt.0
-                    } label: {
-                        if selection == opt.0 {
-                            Label(opt.1, systemImage: "checkmark")
-                        } else {
-                            Text(opt.1)
+            if disabled || options.isEmpty {
+                Text(currentLabel)
+                    .foregroundStyle(p.mute)
+            } else {
+                Menu {
+                    ForEach(Array(options.enumerated()), id: \.offset) { _, opt in
+                        Button {
+                            selection = opt.0
+                        } label: {
+                            if selection == opt.0 {
+                                Label(opt.1, systemImage: "checkmark")
+                            } else {
+                                Text(opt.1)
+                            }
                         }
                     }
+                } label: {
+                    (Text(currentLabel).foregroundStyle(p.text2)
+                        + Text(" ")
+                        + Text(Image(systemName: "chevron.up.chevron.down"))
+                            .font(.system(size: AppFont.caption - 1, weight: .medium))
+                            .foregroundStyle(p.mute))
                 }
-            } label: {
-                (Text(currentLabel).foregroundStyle(p.text2)
-                    + Text(" ")
-                    + Text(Image(systemName: "chevron.up.chevron.down"))
-                        .font(.system(size: AppFont.caption - 1, weight: .medium))
-                        .foregroundStyle(p.mute))
+                .buttonStyle(.plain)
+                .hubBorderlessMenu()
+                .menuIndicator(.hidden)
+                .fixedSize()
             }
-            .buttonStyle(.plain)
-            .hubBorderlessMenu()
-            .menuIndicator(.hidden)
-            .fixedSize()
         }
     }
 }

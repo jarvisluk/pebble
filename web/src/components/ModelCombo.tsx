@@ -10,6 +10,7 @@ interface ModelComboProps {
   loadingText: string;
   emptyText: string;
   dropUp?: boolean;
+  onFocus?: () => void;
 }
 
 export const ModelCombo: React.FC<ModelComboProps> = ({
@@ -22,6 +23,7 @@ export const ModelCombo: React.FC<ModelComboProps> = ({
   loadingText,
   emptyText,
   dropUp = false,
+  onFocus,
 }) => {
   const [open, setOpen] = useState(false);
   const [filtering, setFiltering] = useState(false);
@@ -69,6 +71,7 @@ export const ModelCombo: React.FC<ModelComboProps> = ({
           onFocus={() => {
             setOpen(true);
             setFiltering(false);
+            onFocus?.();
           }}
           onClick={() => {
             setOpen(true);
@@ -122,8 +125,10 @@ export const ModelCombo: React.FC<ModelComboProps> = ({
           aria-label="Toggle models"
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => {
-            setOpen((v) => !v);
+            const next = !open;
+            setOpen(next);
             setFiltering(false);
+            if (next) onFocus?.();
           }}
         >
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">

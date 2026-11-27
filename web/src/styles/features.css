@@ -653,14 +653,10 @@
 .harness-dot.bad { background: var(--danger); }
 .harness-sub-ok { color: var(--sage-ink) !important; font-family: var(--mono); }
 .harness-sub-mono { font-family: var(--mono); }
-.per-harness-list { display: flex; flex-direction: column; gap: 8px; padding-top: 6px; }
-.per-harness-row { display: grid; grid-template-columns: 156px minmax(0, 1fr); gap: 10px; align-items: center; }
-.per-harness-row > label { font-size: var(--fs-sm); color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 820px) {
   .two { grid-template-columns: minmax(0, 1fr); }
   .brow { grid-template-columns: 28px minmax(0, 1fr) 132px; }
   .brow input { grid-column: 2 / -1; }
-  .per-harness-row { grid-template-columns: minmax(0, 1fr); gap: 6px; }
 }
 
 .prov-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 0; }

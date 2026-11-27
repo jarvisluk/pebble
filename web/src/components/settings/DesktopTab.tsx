@@ -8,6 +8,7 @@ import type {
   SettingsData,
 } from '../../types';
 import { api } from '../../lib/api';
+import { harnessSelectionLabel, installedHarnesses as getInstalledHarnesses } from '../../lib/harnesses';
 import { translate } from '../../lib/i18n';
 
 interface DesktopTabProps {
@@ -183,6 +184,7 @@ export const DesktopTab: React.FC<DesktopTabProps> = ({
   };
 
   const nonVirtualTargets = permTargets.filter((tr) => !tr.virtual);
+  const installed = getInstalledHarnesses(settings);
 
   return (
     <div id="sTabDesktop" className="tab-pane tab-anim">
@@ -302,7 +304,12 @@ export const DesktopTab: React.FC<DesktopTabProps> = ({
             }}
           >
             <option value="">{t('deskWorkerFollowBot')}</option>
-            {(settings?.harnesses || []).map((h) => (
+            {deskHarness && !installed.some((h) => h.id === deskHarness) && (
+              <option value={deskHarness} disabled>
+                {harnessSelectionLabel(deskHarness, settings, t('notInstalled'))}
+              </option>
+            )}
+            {installed.map((h) => (
               <option key={h.id} value={h.id}>
                 {h.label}
               </option>

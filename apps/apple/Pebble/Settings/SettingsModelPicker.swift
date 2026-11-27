@@ -19,7 +19,7 @@ func orderedGlobalHarnesses(harnesses: [HarnessInfo], defaultHarness: String, mo
         guard seen.insert(h.id).inserted else { return }
         out.append(h)
     }
-    if let def = harnesses.first(where: { $0.id == defaultHarness }) {
+    if let def = harnesses.first(where: { $0.id == defaultHarness }), !anyInstalled || def.installed == true {
         appendIfNeeded(def)
     }
     for h in harnesses where (!anyInstalled || h.installed == true) && h.magpie?.connected != true {
@@ -28,7 +28,7 @@ func orderedGlobalHarnesses(harnesses: [HarnessInfo], defaultHarness: String, mo
     for h in harnesses where (!anyInstalled || h.installed == true) && h.magpie?.connected == true {
         appendIfNeeded(h)
     }
-    for h in harnesses where !anyInstalled || !(models[h.id] ?? []).isEmpty {
+    for h in harnesses where !anyInstalled || (h.installed == true && !(models[h.id] ?? []).isEmpty) {
         appendIfNeeded(h)
     }
     return out
@@ -38,6 +38,19 @@ func orderedGlobalHarnesses(harnesses: [HarnessInfo], defaultHarness: String, mo
 func settingsHarnessList(from hub: HubStore) -> [HarnessInfo] {
     if let h = hub.settings?.harnesses, !h.isEmpty { return h }
     return ["opencode", "codebuddy", "qoder", "codex", "claude", "grok", "trae", "pi", "dsh", "agy"].map { HarnessInfo(id: $0, label: $0) }
+}
+
+@MainActor
+func installedHarnessList(from hub: HubStore) -> [HarnessInfo] {
+    (hub.settings?.harnesses ?? []).filter { $0.installed == true }
+}
+
+@MainActor
+func harnessLabelForSelection(_ id: String, from hub: HubStore) -> String {
+    if id.isEmpty { return hub.t("notInstalled") }
+    let h = hub.settings?.harnesses?.first(where: { $0.id == id })
+    let title = h?.title ?? id
+    return h?.installed == true ? title : "\(title) (\(hub.t("notInstalled")))"
 }
 
 @MainActor
@@ -101,6 +114,7 @@ struct ModelOptionsMenuContent: View {
 
 struct ModelFieldRow: View {
     @Environment(HubStore.self) private var hub
+    @Environment(\.palette) private var p
     var title: String
     var harness: String
     @Binding var text: String
@@ -110,10 +124,21 @@ struct ModelFieldRow: View {
     @State private var loading = false
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 6) {
             TextField(title, text: $text, prompt: Text(placeholder))
                 .monoInput()
                 .labelsHidden()
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if !text.trimmingCharacters(in: .whitespaces).isEmpty {
+                Button {
+                    text = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: AppFont.secondary))
+                        .foregroundStyle(p.mute)
+                }
+                .buttonStyle(.plain)
+            }
             Menu {
                 if !text.trimmingCharacters(in: .whitespaces).isEmpty {
                     Button(hub.t("clear")) { text = "" }
@@ -127,14 +152,24 @@ struct ModelFieldRow: View {
                     onSelect: { text = $0 }
                 )
             } label: {
-                Label(hub.t("optionalModels"), systemImage: "list.bullet")
-                    .labelStyle(.iconOnly)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: AppFont.caption, weight: .medium))
+                    .foregroundStyle(p.text2)
+                    .frame(width: 24, height: 24)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .hubBorderlessMenu()
             .menuIndicator(.hidden)
             .fixedSize()
         }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(p.s1, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(p.s2, lineWidth: 1)
+        )
         .task(id: "\(harness)|\(hub.isConnected)|\(hub.modelsGeneration)") {
             guard hub.isConnected, !harness.isEmpty, (hub.models[harness] ?? []).isEmpty else { return }
             await load(force: false)
@@ -158,6 +193,7 @@ struct ModelFieldRow: View {
 
 struct GlobalModelFieldRow: View {
     @Environment(HubStore.self) private var hub
+    @Environment(\.palette) private var p
     var title: String
     var defaultHarness: String
     var harnesses: [HarnessInfo]
@@ -170,10 +206,21 @@ struct GlobalModelFieldRow: View {
     var body: some View {
         let targets = orderedGlobalHarnesses(harnesses: harnesses, defaultHarness: defaultHarness, models: hub.models)
         let trimmedCurrent = text.trimmingCharacters(in: .whitespaces)
-        HStack(spacing: 8) {
+        HStack(spacing: 6) {
             TextField(title, text: $text, prompt: Text(placeholder))
                 .monoInput()
                 .labelsHidden()
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if !trimmedCurrent.isEmpty {
+                Button {
+                    text = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: AppFont.secondary))
+                        .foregroundStyle(p.mute)
+                }
+                .buttonStyle(.plain)
+            }
             Menu {
                 if !trimmedCurrent.isEmpty {
                     Button(hub.t("clear")) { text = "" }
@@ -209,20 +256,31 @@ struct GlobalModelFieldRow: View {
                     }
                 }
             } label: {
-                Label(hub.t("optionalModels"), systemImage: "list.bullet")
-                    .labelStyle(.iconOnly)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: AppFont.caption, weight: .medium))
+                    .foregroundStyle(p.text2)
+                    .frame(width: 24, height: 24)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .hubBorderlessMenu()
             .menuIndicator(.hidden)
             .fixedSize()
         }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(p.s1, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(p.s2, lineWidth: 1)
+        )
     }
 
     private func refreshAll() async {
         loadingAll = true
         defer { loadingAll = false }
-        for h in harnesses {
+        let installed = harnesses.filter { $0.installed == true }
+        for h in installed {
             do {
                 _ = try await hub.loadModels(h.id, force: true)
             } catch {

@@ -408,13 +408,8 @@ fun BotInfoSheet(
     val canBindDesktop = store.supports("bot.desktop_binding")
     val canIsolateBrowser = store.supports("bot.browser_isolation")
 
-    val harnesses = remember(store.settings?.harnesses, editHarness) {
-        val list = settingsHarnessList(store)
-        if (editHarness.isNotEmpty() && list.none { it.id == editHarness }) {
-            list + ai.pebble.android.data.HarnessInfo(id = editHarness, label = editHarness)
-        } else {
-            list
-        }
+    val harnesses = remember(store.settings?.harnesses) {
+        ai.pebble.android.ui.settings.installedHarnessList(store)
     }
 
     val effectiveModelPlaceholder = remember(editHarness, store.settings, store.langRevision) {
@@ -813,19 +808,21 @@ fun BotInfoSheet(
                     AnimatedVisibility(visible = techOpen) {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Box(modifier = Modifier.fillMaxWidth()) {
-                                val currentHarnessLabel = harnesses.firstOrNull { it.id == editHarness }?.title ?: editHarness.ifEmpty { "-" }
+                                val currentHarnessLabel = ai.pebble.android.ui.settings.harnessLabelForSelection(editHarness, store)
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .clip(PebbleDimens.rowShape)
-                                        .clickable { harnessMenuOpen = true }
+                                        .clickable(enabled = harnesses.isNotEmpty()) { harnessMenuOpen = true }
                                         .padding(vertical = 8.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 ) {
                                     Text(store.t("statHarness"), color = p.text, fontSize = PebbleFont.body, modifier = Modifier.weight(1f))
-                                    Text(currentHarnessLabel, color = p.text2, fontSize = PebbleFont.secondary)
-                                    Icon(painterResource(PebbleIcons.ExpandMore), contentDescription = null, tint = p.mute, modifier = Modifier.size(18.dp))
+                                    Text(currentHarnessLabel, color = if (harnesses.isEmpty()) p.mute else p.text2, fontSize = PebbleFont.secondary)
+                                    if (harnesses.isNotEmpty()) {
+                                        Icon(painterResource(PebbleIcons.ExpandMore), contentDescription = null, tint = p.mute, modifier = Modifier.size(18.dp))
+                                    }
                                 }
                                 DropdownMenu(
                                     expanded = harnessMenuOpen,
@@ -845,6 +842,7 @@ fun BotInfoSheet(
                                                 if (h.id != editHarness) {
                                                     editHarness = h.id
                                                     editModel = ""
+                                                    editPermMode = store.clampPermissionMode(editPermMode, h.id)
                                                     scope.launch { runCatching { store.loadModels(h.id) } }
                                                 }
                                             },
@@ -885,7 +883,7 @@ fun BotInfoSheet(
                                 onValueChange = { editModel = it },
                                 store = store,
                             )
-                            val permModes = store.supportedPermissionModes(active?.harness)
+                            val permModes = store.supportedPermissionModes(editHarness)
                             if (permModes.size <= 1) {
                                 val onlyMode = permModes.firstOrNull() ?: "auto"
                                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {

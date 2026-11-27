@@ -12,6 +12,7 @@ import type {
   SettingsData,
 } from '../types';
 import { api } from '../lib/api';
+import { harnessSelectionLabel, installedHarnesses as getInstalledHarnesses } from '../lib/harnesses';
 import { translate } from '../lib/i18n';
 import { botColor, contrastText, formatStamp } from '../lib/theme';
 import { BotAppearancePicker } from './BotAppearancePicker';
@@ -207,8 +208,7 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
       } as React.CSSProperties)
     : undefined;
 
-  const harnessLabel = (id?: string) =>
-    settings?.harnesses.find((h) => h.id === id)?.label || id || 'opencode';
+  const installed = getInstalledHarnesses(settings);
 
   const resolveBotDefaultModel = (g: string, h: string) => {
     if (!g) return '';
@@ -1070,19 +1070,39 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
                     <select
                       id="peHarness"
                       value={editHarness}
+                      disabled={installed.length === 0}
                       onChange={(e) => {
                         const nextH = e.target.value;
                         if (nextH === editHarness) return;
                         setEditHarness(nextH);
                         setEditModel('');
+                        const nextCaps = settings?.harnesses.find((h) => h.id === nextH)?.permissions?.modes;
+                        const nextSupported: PermissionMode[] =
+                          nextCaps && nextCaps.length > 0 ? nextCaps : ['auto', 'edit', 'ask', 'plan'];
+                        if (!nextSupported.includes(editPermissionMode)) {
+                          setEditPermissionMode(nextSupported[0] || 'auto');
+                        }
                         void onLoadModels(nextH);
                       }}
                     >
-                      {(settings?.harnesses || [{ id: editHarness, label: harnessLabel(editHarness) }]).map((h) => (
-                        <option key={h.id} value={h.id}>
-                          {h.label}
+                      {installed.length === 0 ? (
+                        <option value={editHarness}>
+                          {editHarness ? harnessSelectionLabel(editHarness, settings, t('notInstalled')) : t('notInstalled')}
                         </option>
-                      ))}
+                      ) : (
+                        <>
+                          {editHarness && !installed.some((h) => h.id === editHarness) && (
+                            <option value={editHarness} disabled>
+                              {harnessSelectionLabel(editHarness, settings, t('notInstalled'))}
+                            </option>
+                          )}
+                          {installed.map((h) => (
+                            <option key={h.id} value={h.id}>
+                              {h.label}
+                            </option>
+                          ))}
+                        </>
+                      )}
                     </select>
                   </div>
                   <div className="fld">
@@ -1178,7 +1198,7 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
                         </div>
                       )}
                       {(() => {
-                        const hCaps = settings?.harnesses.find((h) => h.id === detail.harness)?.permissions?.modes;
+                        const hCaps = settings?.harnesses.find((h) => h.id === editHarness)?.permissions?.modes;
                         const supported: PermissionMode[] = hCaps && hCaps.length > 0 ? hCaps : ['auto', 'edit', 'ask', 'plan'];
                         const activeVal = supported.includes(editPermissionMode) ? editPermissionMode : supported[0] || 'auto';
                         return (

@@ -94,18 +94,19 @@ fun ModelsSettingsTab(
     val scope = rememberCoroutineScope()
 
     val harnesses = settingsHarnessList(store)
-    val primaryHarness = harnesses.firstOrNull()?.id ?: "opencode"
+    val installedHarnesses = installedHarnessList(store)
+    val primaryHarness = installedHarnesses.firstOrNull()?.id.orEmpty()
     val baseDefaultHarness = store.settings?.defaultHarness?.takeIf { it.isNotEmpty() } ?: primaryHarness
+    val baseDefaultModel = store.settings?.defaultModels?.get(baseDefaultHarness)?.trim()?.takeIf { it.isNotEmpty() }
+        ?: store.settings?.defaultModel.orEmpty().trim()
     val baseDefaultPermMode = store.settings?.defaultPermissionMode?.takeIf { it.isNotEmpty() } ?: "auto"
 
     var defaultHarness by remember { mutableStateOf(baseDefaultHarness) }
     var defaultHarnessTouched by remember { mutableStateOf(false) }
     var defaultPermMode by remember { mutableStateOf(baseDefaultPermMode) }
     var defaultPermModeTouched by remember { mutableStateOf(false) }
-    var defaultModel by remember { mutableStateOf("") }
+    var defaultModel by remember { mutableStateOf(baseDefaultModel) }
     var defaultTouched by remember { mutableStateOf(false) }
-    val perHarness = remember { mutableStateMapOf<String, String>() }
-    var perTouched by remember { mutableStateOf(false) }
     var mpWebUrl by remember { mutableStateOf("") }
     var mpWebUrlTouched by remember { mutableStateOf(false) }
     val drafts = remember { mutableStateMapOf<String, BotModelDraft>() }
@@ -119,12 +120,6 @@ fun ModelsSettingsTab(
     val pollJobs = remember { mutableMapOf<String, Job>() }
     var copiedKey by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf("") }
-
-    fun cleanMap(m: Map<String, String>?): Map<String, String> =
-        m.orEmpty().mapNotNull { (k, v) ->
-            val t = v.trim()
-            if (t.isEmpty()) null else k to t
-        }.toMap()
 
     fun origModel(b: BotStatus): String =
         (if (b.modelInherited == true) "" else b.model.orEmpty()).trim()
@@ -143,11 +138,7 @@ fun ModelsSettingsTab(
         val s = store.settings ?: return
         if (!defaultHarnessTouched) defaultHarness = baseDefaultHarness
         if (!defaultPermModeTouched) defaultPermMode = baseDefaultPermMode
-        if (!defaultTouched) defaultModel = s.defaultModel.orEmpty().trim()
-        if (!perTouched) {
-            perHarness.clear()
-            perHarness.putAll(cleanMap(s.defaultModels))
-        }
+        if (!defaultTouched) defaultModel = baseDefaultModel
         if (!mpWebUrlTouched) mpWebUrl = s.magpie?.webUrl.orEmpty().trim()
         syncDrafts()
     }
@@ -164,8 +155,7 @@ fun ModelsSettingsTab(
         val webDirty = mpWebUrlTouched && mpWebUrl.trim() != s.magpie?.webUrl.orEmpty().trim()
         (defaultHarnessTouched && defaultHarness != baseDefaultHarness) ||
             (defaultPermModeTouched && defaultPermMode != baseDefaultPermMode) ||
-            (defaultTouched && defaultModel.trim() != s.defaultModel.orEmpty().trim()) ||
-            (perTouched && cleanMap(perHarness) != cleanMap(s.defaultModels)) ||
+            (defaultTouched && defaultModel.trim() != baseDefaultModel) ||
             webDirty
     }
     val dirty = settingsChanged || botUpdates.isNotEmpty()
@@ -187,26 +177,31 @@ fun ModelsSettingsTab(
     }
 
     fun preloadAllModels(force: Boolean = false) {
-        harnesses.filter { it.installed != false }.forEach { h -> loadCands(h.id, force = force) }
+        installedHarnesses.forEach { h -> loadCands(h.id, force = force) }
     }
 
     suspend fun saveAll(): Boolean {
         onError("")
         onSaved("")
         return try {
+            val hasLegacyOverride = !store.settings?.defaultModels?.get(defaultHarness)?.trim().isNullOrEmpty()
+            val patch = if ((defaultTouched || defaultHarnessTouched) && hasLegacyOverride) {
+                mapOf(defaultHarness to "")
+            } else {
+                null
+            }
             store.saveModelsSettings(
                 changed = settingsChanged,
                 defaultHarness = defaultHarness,
                 defaultPermissionMode = defaultPermMode,
                 defaultModel = defaultModel.trim(),
-                defaultModels = cleanMap(perHarness),
+                defaultModelsPatch = patch,
                 magpieWebUrl = if (mpWebUrlTouched) mpWebUrl.trim() else null,
                 botUpdates = botUpdates,
             )
             defaultHarnessTouched = false
             defaultPermModeTouched = false
             defaultTouched = false
-            perTouched = false
             mpWebUrlTouched = false
             touchedBots = emptySet()
             drafts.clear()
@@ -318,7 +313,7 @@ fun ModelsSettingsTab(
         }
     }
 
-    LaunchedEffect(store.modelsGeneration, harnesses.map { it.id }) {
+    LaunchedEffect(store.modelsGeneration, installedHarnesses.map { it.id }) {
         if (store.isConnected) {
             preloadAllModels()
         }
@@ -330,7 +325,6 @@ fun ModelsSettingsTab(
             defaultHarnessTouched = false
             defaultPermModeTouched = false
             defaultTouched = false
-            perTouched = false
             mpWebUrlTouched = false
             touchedBots = emptySet()
             drafts.clear()
@@ -348,11 +342,9 @@ fun ModelsSettingsTab(
     val mp = store.settings?.magpie
     val mpInstalled = mp?.installed == true
     val mpHealthy = mp?.healthy == true
-    val installedHarnesses = harnesses.filter { it.installed == true }
     val uninstalledHarnesses = harnesses.filter { it.installed != true }
 
-    // Card 3: Defaults & Bot Overrides (without duplicate perOpen disclosure!)
-    val orderedGlobal = orderedGlobalHarnesses(harnesses, defaultHarness, store.models)
+    // Card 3: Defaults & Bot Models
     SectionHeader(store.t("globalAndBotModels"))
     SectionCard {
         Column(
@@ -360,35 +352,71 @@ fun ModelsSettingsTab(
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             var defHarnessOpen by remember { mutableStateOf(false) }
-            Box {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(PebbleDimens.rowShape)
-                        .clickable { defHarnessOpen = true }
-                        .padding(vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(store.t("defaultHarness"), color = p.text2, fontSize = PebbleFont.body, modifier = Modifier.weight(1f))
-                    Text(harnesses.firstOrNull { it.id == defaultHarness }?.title ?: defaultHarness, color = p.text, fontSize = PebbleFont.body, fontWeight = FontWeight.Medium)
-                    Icon(painterResource(PebbleIcons.ArrowDropDown), contentDescription = null, tint = p.mute)
-                }
-                DropdownMenu(expanded = defHarnessOpen, onDismissRequest = { defHarnessOpen = false }, containerColor = p.card) {
-                    harnesses.forEach { h ->
-                        DropdownMenuItem(
-                            text = { Text(h.title, color = p.text, fontSize = PebbleFont.body) },
-                            onClick = {
-                                if (h.id != defaultHarness) {
-                                    defaultHarness = h.id
-                                    defaultHarnessTouched = true
-                                    onSaved("")
-                                    if (store.models[h.id].isNullOrEmpty() && store.isConnected) loadCands(h.id)
-                                }
-                                defHarnessOpen = false
-                            },
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Box {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(PebbleDimens.rowShape)
+                            .clickable(enabled = installedHarnesses.isNotEmpty()) { defHarnessOpen = true }
+                            .padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(store.t("defaultHarness"), color = p.text2, fontSize = PebbleFont.body, modifier = Modifier.weight(1f))
+                        Text(
+                            text = harnessLabelForSelection(defaultHarness, store),
+                            color = if (installedHarnesses.isEmpty()) p.mute else p.text,
+                            fontSize = PebbleFont.body,
+                            fontWeight = FontWeight.Medium,
                         )
+                        if (installedHarnesses.isNotEmpty()) {
+                            Icon(painterResource(PebbleIcons.ArrowDropDown), contentDescription = null, tint = p.mute)
+                        }
+                    }
+                    DropdownMenu(expanded = defHarnessOpen, onDismissRequest = { defHarnessOpen = false }, containerColor = p.card) {
+                        installedHarnesses.forEach { h ->
+                            DropdownMenuItem(
+                                text = { Text(h.title, color = p.text, fontSize = PebbleFont.body) },
+                                onClick = {
+                                    if (h.id != defaultHarness) {
+                                        defaultHarness = h.id
+                                        defaultHarnessTouched = true
+                                        if (defaultModel.isNotBlank()) {
+                                            defaultModel = ""
+                                            defaultTouched = true
+                                        }
+                                        onSaved("")
+                                        if (store.models[h.id].isNullOrEmpty() && store.isConnected) loadCands(h.id)
+                                    }
+                                    defHarnessOpen = false
+                                },
+                            )
+                        }
                     }
                 }
+                if (installedHarnesses.isEmpty()) {
+                    Text(store.t("engineNoInstalled"), color = p.mute, fontSize = PebbleFont.caption)
+                }
+            }
+
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(store.t("defaultModel"), color = p.text2, fontSize = PebbleFont.secondary, fontWeight = FontWeight.Medium)
+                ModelInputWithMenu(
+                    value = defaultModel,
+                    placeholder = store.t("globalDefaultPh"),
+                    candidates = store.models[defaultHarness].orEmpty(),
+                    loading = defaultHarness in loadingModelsFor,
+                    onLoadCandidates = { loadCands(defaultHarness) },
+                    onRefreshCandidates = { loadCands(defaultHarness, force = true) },
+                    onValueChange = { next ->
+                        if (next != defaultModel) {
+                            defaultModel = next
+                            defaultTouched = true
+                            onSaved("")
+                        }
+                    },
+                    store = store,
+                )
             }
 
             var defPermOpen by remember { mutableStateOf(false) }
@@ -426,81 +454,6 @@ fun ModelsSettingsTab(
                 Text(store.t("permDefaultModeDesc"), color = p.mute, fontSize = PebbleFont.caption)
             }
 
-            GlobalModelInputWithMenu(
-                value = defaultModel,
-                placeholder = "magpie/claude-sonnet-4",
-                harnesses = orderedGlobal,
-                defaultHarness = defaultHarness,
-                harnessLabel = { harnessDisplayLabel(it, store) },
-                modelsByHarness = store.models,
-                loadingHarnesses = loadingModelsFor,
-                onLoadHarness = { loadCands(it) },
-                onRefreshHarness = { loadCands(it, force = true) },
-                onRefreshAll = { preloadAllModels(force = true) },
-                onValueChange = { next ->
-                    if (next != defaultModel) {
-                        defaultModel = next
-                        defaultTouched = true
-                        onSaved("")
-                    }
-                },
-                store = store,
-            )
-
-            if (installedHarnesses.isNotEmpty()) {
-                var perOverridesOpen by remember { mutableStateOf(false) }
-                val overrideCount = installedHarnesses.count { !perHarness[it.id].isNullOrBlank() }
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(PebbleDimens.rowShape)
-                        .clickable { perOverridesOpen = !perOverridesOpen }
-                        .padding(vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = if (perOverridesOpen) {
-                            store.t("collapse")
-                        } else if (overrideCount > 0) {
-                            store.t("perHarnessOverridesCount", mapOf("n" to overrideCount))
-                        } else {
-                            store.t("perHarnessOverrides")
-                        },
-                        color = p.accent,
-                        fontSize = PebbleFont.secondary,
-                        fontWeight = FontWeight.Medium,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Icon(painterResource(if (perOverridesOpen) PebbleIcons.ExpandLess else PebbleIcons.ExpandMore), contentDescription = null, tint = p.mute)
-                }
-                AnimatedVisibility(visible = perOverridesOpen) {
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        installedHarnesses.forEach { h ->
-                            val enginePh = defaultModel.trim().takeIf { it.isNotEmpty() }?.let { resolveDefaultModel(it, h.id) }.orEmpty()
-                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Text(h.title, color = p.text2, fontSize = PebbleFont.caption, fontWeight = FontWeight.Medium)
-                                ModelInputWithMenu(
-                                    value = perHarness[h.id].orEmpty(),
-                                    placeholder = enginePh.ifEmpty { store.t("engineModelPh") },
-                                    candidates = store.models[h.id].orEmpty(),
-                                    loading = h.id in loadingModelsFor,
-                                    onLoadCandidates = { loadCands(h.id) },
-                                    onRefreshCandidates = { loadCands(h.id, force = true) },
-                                    onValueChange = { next ->
-                                        if (next != perHarness[h.id].orEmpty()) {
-                                            perHarness[h.id] = next
-                                            perTouched = true
-                                            onSaved("")
-                                        }
-                                    },
-                                    store = store,
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
             CardDivider()
             if (store.bots.isEmpty()) {
                 Text(store.t("noBotsInSettings"), color = p.mute, fontSize = PebbleFont.body)
@@ -508,7 +461,7 @@ fun ModelsSettingsTab(
                 store.bots.forEachIndexed { idx, b ->
                     if (idx > 0) CardDivider()
                     val d = drafts[b.id] ?: BotModelDraft(b.harness.orEmpty(), origModel(b))
-                    val per = perHarness[d.harness].orEmpty().trim()
+                    val per = store.settings?.defaultModels?.get(d.harness).orEmpty().trim()
                     val ph = per.ifEmpty { resolveDefaultModel(defaultModel.trim(), d.harness) }
                     var botHarnessMenu by remember { mutableStateOf(false) }
 
@@ -524,12 +477,21 @@ fun ModelsSettingsTab(
                                 Text("@${b.id}", color = p.text2, fontSize = PebbleFont.caption, fontFamily = MonoFont)
                             }
                             Box {
-                                TextButton(onClick = { botHarnessMenu = true }) {
-                                    Text(harnesses.firstOrNull { it.id == d.harness }?.title ?: d.harness.ifEmpty { "-" }, color = p.accent, fontSize = PebbleFont.secondary)
-                                    Icon(painterResource(PebbleIcons.ArrowDropDown), contentDescription = null, tint = p.accent, modifier = Modifier.size(18.dp))
+                                TextButton(
+                                    onClick = { botHarnessMenu = true },
+                                    enabled = installedHarnesses.isNotEmpty(),
+                                ) {
+                                    Text(
+                                        text = harnessLabelForSelection(d.harness, store),
+                                        color = if (installedHarnesses.isEmpty()) p.mute else p.accent,
+                                        fontSize = PebbleFont.secondary,
+                                    )
+                                    if (installedHarnesses.isNotEmpty()) {
+                                        Icon(painterResource(PebbleIcons.ArrowDropDown), contentDescription = null, tint = p.accent, modifier = Modifier.size(18.dp))
+                                    }
                                 }
                                 DropdownMenu(expanded = botHarnessMenu, onDismissRequest = { botHarnessMenu = false }, containerColor = p.card) {
-                                    harnesses.forEach { h ->
+                                    installedHarnesses.forEach { h ->
                                         DropdownMenuItem(
                                             text = { Text(h.title, color = p.text, fontSize = PebbleFont.body) },
                                             onClick = {

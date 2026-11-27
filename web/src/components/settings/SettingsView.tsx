@@ -118,7 +118,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const preloadAllModels = useCallback(
     (list: SettingsData['harnesses'] | undefined, force = false) => {
       for (const h of list || []) {
-        if (h.installed !== false) void onLoadModels(h.id, force);
+        if (h.installed === true) void onLoadModels(h.id, force);
       }
     },
     [onLoadModels]
@@ -157,7 +157,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       seenH.add(h.id);
       ordered.push(h);
     };
-    pushH(list.find((h) => h.id === defHarness));
+    const def = list.find((h) => h.id === defHarness);
+    if (!anyInstalled || def?.installed) pushH(def);
     for (const h of list) {
       if ((!anyInstalled || h.installed) && !h.magpie?.connected) pushH(h);
     }
@@ -165,7 +166,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       if ((!anyInstalled || h.installed) && h.magpie?.connected) pushH(h);
     }
     for (const h of list) {
-      if (!anyInstalled || (models[h.id]?.length ?? 0) > 0) pushH(h);
+      if (!anyInstalled || (h.installed && (models[h.id]?.length ?? 0) > 0)) pushH(h);
     }
     const seen = new Set<string>();
     const out: { value: string; label: string }[] = [];

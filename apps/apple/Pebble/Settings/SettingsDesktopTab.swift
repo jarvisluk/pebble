@@ -156,8 +156,8 @@ struct SettingsDesktopTab: View {
     }
 
     private var desktopWorkerSection: some View {
-        let harnesses = settingsHarnessList(from: hub)
-        let defHarness = hub.settings?.defaultHarness ?? harnesses.first?.id ?? "opencode"
+        let harnesses = installedHarnessList(from: hub)
+        let defHarness = hub.settings?.defaultHarness ?? harnesses.first?.id ?? ""
         return Section {
             LabeledContent(hub.t("localDesktopEngine")) {
                 Text(localEngineText).foregroundStyle(.secondary)
@@ -173,7 +173,8 @@ struct SettingsDesktopTab: View {
                         saved = ""
                     }
                 ),
-                options: [("", hub.t("deskWorkerFollowBot"))] + harnesses.map { ($0.id, $0.title) }
+                options: [("", hub.t("deskWorkerFollowBot"))] + harnesses.map { ($0.id, $0.title) },
+                fallbackLabel: deskHarness.isEmpty ? hub.t("deskWorkerFollowBot") : harnessLabelForSelection(deskHarness, from: hub)
             )
             HubFormField(label: hub.t("deskWorkerModelLabel")) {
                 if deskHarness.isEmpty {

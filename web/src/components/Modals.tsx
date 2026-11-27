@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import type { BotStatus, ConfirmOptions, PermissionMode, ResolvedLang, SettingsData } from '../types';
 import { api } from '../lib/api';
+import { installedHarnesses } from '../lib/harnesses';
 import { translate } from '../lib/i18n';
 import { BotAppearancePicker } from './BotAppearancePicker';
 import { BotAvatar } from './BotAvatar';
@@ -33,7 +34,7 @@ export const CreateBotModal: React.FC<CreateBotModalProps> = ({
   const [desc, setDesc] = useState('');
   const [avatar, setAvatar] = useState('');
   const [color, setColor] = useState('');
-  const [harness, setHarness] = useState('opencode');
+  const [harness, setHarness] = useState('');
   const [model, setModel] = useState('');
   const [permMode, setPermMode] = useState<PermissionMode>('auto');
   const [inst, setInst] = useState('');
@@ -41,9 +42,12 @@ export const CreateBotModal: React.FC<CreateBotModalProps> = ({
   const [err, setErr] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
+  const installed = installedHarnesses(settings);
+
   useEffect(() => {
     if (!open) return;
-    const defaultH = settings?.defaultHarness || settings?.harnesses?.[0]?.id || 'opencode';
+    const preferred = settings?.defaultHarness || '';
+    const defaultH = preferred && installed.some((h) => h.id === preferred) ? preferred : installed[0]?.id || '';
     setName('');
     setId('');
     setIdTouched(false);
@@ -52,17 +56,17 @@ export const CreateBotModal: React.FC<CreateBotModalProps> = ({
     setColor('');
     setHarness(defaultH);
     setModel('');
-    const hModes = settings?.harnesses.find((h) => h.id === defaultH)?.permissions?.modes;
+    const hModes = installed.find((h) => h.id === defaultH)?.permissions?.modes;
     const defPerm = (settings?.defaultPermissionMode || 'auto') as PermissionMode;
     setPermMode(hModes && hModes.length > 0 && !hModes.includes(defPerm) ? hModes[0] : defPerm);
     setInst('');
     setPriv(false);
     setErr('');
-    void onLoadModels(defaultH);
+    if (defaultH) void onLoadModels(defaultH);
   }, [open]);
 
-  const selectedHarness = settings?.harnesses.find((h) => h.id === harness);
-  const defModel = selectedHarness?.defaultModel || '';
+  const selectedHarness = installed.find((h) => h.id === harness);
+  const defModel = settings?.defaultModels?.[harness]?.trim() || selectedHarness?.defaultModel || '';
   const modelList = models[harness] || [];
   const supportedModes: PermissionMode[] =
     selectedHarness?.permissions?.modes && selectedHarness.permissions.modes.length > 0
@@ -74,6 +78,10 @@ export const CreateBotModal: React.FC<CreateBotModalProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!harness || !installed.some((h) => h.id === harness)) {
+      setErr(t('engineNoInstalled'));
+      return;
+    }
     setSubmitting(true);
     setErr('');
     try {
@@ -180,6 +188,7 @@ export const CreateBotModal: React.FC<CreateBotModalProps> = ({
               <select
                 id="fHarness"
                 value={harness}
+                disabled={installed.length === 0}
                 onChange={(e) => {
                   const nextH = e.target.value;
                   setHarness(nextH);
@@ -187,12 +196,19 @@ export const CreateBotModal: React.FC<CreateBotModalProps> = ({
                   void onLoadModels(nextH);
                 }}
               >
-                {(settings?.harnesses || [{ id: 'opencode', label: 'opencode' }]).map((h) => (
-                  <option key={h.id} value={h.id}>
-                    {h.label}
-                  </option>
-                ))}
+                {installed.length === 0 ? (
+                  <option value="">{t('notInstalled')}</option>
+                ) : (
+                  installed.map((h) => (
+                    <option key={h.id} value={h.id}>
+                      {h.label}
+                    </option>
+                  ))
+                )}
               </select>
+              {installed.length === 0 && (
+                <div className="set-card-desc mt-4">{t('engineNoInstalled')}</div>
+              )}
             </div>
             <div className="fld">
               <label dangerouslySetInnerHTML={{ __html: t('modelDefaultOptional') }} />

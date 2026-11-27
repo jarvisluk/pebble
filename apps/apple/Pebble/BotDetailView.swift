@@ -220,11 +220,7 @@ struct BotInfoSheet: View {
     private var canIsolateBrowser: Bool { hub.supports("bot.browser_isolation") }
 
     private var harnessOptions: [(String, String)] {
-        var opts = settingsHarnessList(from: hub).map { ($0.id, $0.title) }
-        if !editHarness.isEmpty && !opts.contains(where: { $0.0 == editHarness }) {
-            opts.insert((editHarness, editHarness), at: 0)
-        }
-        return opts
+        installedHarnessList(from: hub).map { ($0.id, $0.title) }
     }
 
     private var effectiveModelPlaceholder: String {
@@ -322,10 +318,13 @@ struct BotInfoSheet: View {
                                     guard next != editHarness else { return }
                                     editHarness = next
                                     editModel = ""
+                                    editPermMode = hub.clampPermissionMode(editPermMode, harnessId: next)
                                     Task { _ = try? await hub.loadModels(next) }
                                 }
                             ),
-                            options: harnessOptions
+                            options: harnessOptions,
+                            fallbackLabel: harnessLabelForSelection(editHarness, from: hub),
+                            disabled: harnessOptions.isEmpty
                         )
                         HubFormField(label: hub.t("statModel")) {
                             ModelFieldRow(
@@ -362,7 +361,7 @@ struct BotInfoSheet: View {
                         if canIsolateBrowser {
                             HubMenuPicker(title: hub.t("botBrowserMode"), selection: $editBrowserMode, options: browserModeOptions)
                         }
-                        let permModes = hub.supportedPermissionModes(for: active?.harness)
+                        let permModes = hub.supportedPermissionModes(for: editHarness)
                         if permModes.count <= 1 {
                             let onlyMode = permModes.first ?? "auto"
                             VStack(alignment: .leading, spacing: 3) {

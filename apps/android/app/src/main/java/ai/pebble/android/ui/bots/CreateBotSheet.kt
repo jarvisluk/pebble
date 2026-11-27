@@ -20,7 +20,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
@@ -39,27 +38,28 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import ai.pebble.android.data.HarnessInfo
 import ai.pebble.android.data.PebbleStore
 import ai.pebble.android.data.errText
 import ai.pebble.android.data.resolveDefaultModel
+import ai.pebble.android.ui.settings.ModelInputWithMenu
+import ai.pebble.android.ui.settings.harnessLabelForSelection
+import ai.pebble.android.ui.settings.installedHarnessList
 import ai.pebble.android.ui.theme.BotAppearancePicker
-import ai.pebble.android.ui.theme.PebbleFont
 import ai.pebble.android.ui.theme.BotAvatar
 import ai.pebble.android.ui.theme.LocalPalette
 import ai.pebble.android.ui.theme.MonoFont
 import ai.pebble.android.ui.theme.PebbleDimens
+import ai.pebble.android.ui.theme.PebbleFont
+import ai.pebble.android.ui.theme.PebbleIcons
 import ai.pebble.android.ui.theme.SectionCard
 import ai.pebble.android.ui.theme.SectionHeader
 import ai.pebble.android.ui.theme.StatusTextBanner
 import ai.pebble.android.ui.theme.pebbleFieldColors
 import kotlinx.coroutines.launch
-import androidx.compose.ui.res.painterResource
-import ai.pebble.android.ui.theme.PebbleIcons
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -77,7 +77,7 @@ fun CreateBotSheet(
     var desc by remember { mutableStateOf("") }
     var avatar by remember { mutableStateOf("") }
     var color by remember { mutableStateOf("") }
-    var harness by remember { mutableStateOf("opencode") }
+    var harness by remember { mutableStateOf("") }
     var harnessTouched by remember { mutableStateOf(false) }
     var permMode by remember { mutableStateOf("auto") }
     var permModeTouched by remember { mutableStateOf(false) }
@@ -89,13 +89,9 @@ fun CreateBotSheet(
 
     var harnessMenuOpen by remember { mutableStateOf(false) }
     var permMenuOpen by remember { mutableStateOf(false) }
-    var modelMenuOpen by remember { mutableStateOf(false) }
 
     val harnesses = remember(store.settings?.harnesses) {
-        val list = store.settings?.harnesses.orEmpty()
-        list.ifEmpty {
-            listOf("opencode", "codebuddy", "qoder", "codex", "claude", "grok", "trae", "pi", "dsh", "agy").map { HarnessInfo(id = it, label = it) }
-        }
+        installedHarnessList(store)
     }
 
     fun slug(s: String): String =
@@ -116,7 +112,12 @@ fun CreateBotSheet(
     LaunchedEffect(Unit) {
         if (store.settings == null) runCatching { store.loadSettings() }
         if (!harnessTouched) {
-            harness = store.settings?.defaultHarness ?: harnesses.firstOrNull()?.id ?: "opencode"
+            val preferred = store.settings?.defaultHarness.orEmpty()
+            harness = if (preferred.isNotEmpty() && harnesses.any { it.id == preferred }) {
+                preferred
+            } else {
+                harnesses.firstOrNull()?.id.orEmpty()
+            }
         }
         if (!permModeTouched) {
             val fallback = store.settings?.defaultPermissionMode ?: "auto"
@@ -141,6 +142,10 @@ fun CreateBotSheet(
         }
         if (!Regex("^[a-zA-Z0-9][a-zA-Z0-9_-]*$").matches(id)) {
             err = store.t("idInvalid")
+            return
+        }
+        if (harness.isEmpty() || harnesses.none { it.id == harness }) {
+            err = store.t("engineNoInstalled")
             return
         }
         val body = mutableMapOf<String, Any?>("id" to id, "name" to n, "harness" to harness)
@@ -169,7 +174,8 @@ fun CreateBotSheet(
     }
 
     val previewId = botId.ifEmpty { name.ifEmpty { "new" } }
-    val ph = resolveDefaultModel(store.settings?.defaultModel.orEmpty(), harness)
+    val per = store.settings?.defaultModels?.get(harness).orEmpty().trim()
+    val ph = per.ifEmpty { resolveDefaultModel(store.settings?.defaultModel.orEmpty(), harness) }
     val cands = store.models[harness].orEmpty()
 
     Scaffold(
@@ -287,39 +293,54 @@ fun CreateBotSheet(
                         modifier = Modifier.padding(14.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
-                        Box {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(PebbleDimens.rowShape)
-                                    .clickable { harnessMenuOpen = true }
-                                    .padding(horizontal = 4.dp, vertical = 10.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Text(store.t("harnessBackend"), color = p.text2, fontSize = PebbleFont.body, modifier = Modifier.weight(1f))
-                                Text(
-                                    text = harnesses.firstOrNull { it.id == harness }?.title ?: harness,
-                                    color = p.text,
-                                    fontSize = PebbleFont.body,
-                                    fontWeight = FontWeight.Medium,
-                                )
-                                Icon(painterResource(PebbleIcons.ArrowDropDown), contentDescription = null, tint = p.mute)
-                            }
-                            DropdownMenu(
-                                expanded = harnessMenuOpen,
-                                onDismissRequest = { harnessMenuOpen = false },
-                                containerColor = p.card,
-                            ) {
-                                harnesses.forEach { h ->
-                                    DropdownMenuItem(
-                                        text = { Text(h.title, color = p.text) },
-                                        onClick = {
-                                            harness = h.id
-                                            harnessTouched = true
-                                            harnessMenuOpen = false
-                                        },
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Box {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(PebbleDimens.rowShape)
+                                        .clickable(enabled = harnesses.isNotEmpty()) { harnessMenuOpen = true }
+                                        .padding(horizontal = 4.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(store.t("harnessBackend"), color = p.text2, fontSize = PebbleFont.body, modifier = Modifier.weight(1f))
+                                    Text(
+                                        text = harnessLabelForSelection(harness, store),
+                                        color = if (harnesses.isEmpty()) p.mute else p.text,
+                                        fontSize = PebbleFont.body,
+                                        fontWeight = FontWeight.Medium,
                                     )
+                                    if (harnesses.isNotEmpty()) {
+                                        Icon(painterResource(PebbleIcons.ArrowDropDown), contentDescription = null, tint = p.mute)
+                                    }
                                 }
+                                DropdownMenu(
+                                    expanded = harnessMenuOpen,
+                                    onDismissRequest = { harnessMenuOpen = false },
+                                    containerColor = p.card,
+                                ) {
+                                    harnesses.forEach { h ->
+                                        DropdownMenuItem(
+                                            text = { Text(h.title, color = p.text) },
+                                            onClick = {
+                                                if (h.id != harness) {
+                                                    harness = h.id
+                                                    harnessTouched = true
+                                                    model = ""
+                                                }
+                                                harnessMenuOpen = false
+                                            },
+                                        )
+                                    }
+                                }
+                            }
+                            if (harnesses.isEmpty()) {
+                                Text(
+                                    text = store.t("engineNoInstalled"),
+                                    color = p.mute,
+                                    fontSize = PebbleFont.caption,
+                                    modifier = Modifier.padding(horizontal = 4.dp),
+                                )
                             }
                         }
 
@@ -387,94 +408,17 @@ fun CreateBotSheet(
                             }
                         }
 
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        ) {
-                            OutlinedTextField(
-                                value = model,
-                                onValueChange = { model = it },
-                                label = { Text(store.t("modelOptional"), fontSize = PebbleFont.secondary) },
-                                placeholder = { Text(ph.ifEmpty { store.t("inheritDefaultPh") }, fontFamily = MonoFont) },
-                                singleLine = true,
-                                textStyle = TextStyle(fontFamily = MonoFont, fontSize = PebbleFont.body),
-                                shape = PebbleDimens.rowShape,
-                                colors = pebbleFieldColors(),
-                                modifier = Modifier.weight(1f),
-                            )
-                            Box {
-                                val loadingModels = harness in loadingModelsFor
-                                val trimmedModel = model.trim()
-                                IconButton(onClick = {
-                                    modelMenuOpen = true
-                                    if (cands.isEmpty() && !loadingModels) loadCands(harness)
-                                }) {
-                                    Icon(painterResource(PebbleIcons.List), contentDescription = store.t("optionalModels"), tint = p.accent)
-                                }
-                                DropdownMenu(
-                                    expanded = modelMenuOpen,
-                                    onDismissRequest = { modelMenuOpen = false },
-                                    containerColor = p.card,
-                                    modifier = Modifier.heightIn(max = 360.dp),
-                                ) {
-                                    if (trimmedModel.isNotEmpty()) {
-                                        DropdownMenuItem(
-                                            text = { Text(store.t("clear"), color = p.danger) },
-                                            onClick = {
-                                                model = ""
-                                                modelMenuOpen = false
-                                            },
-                                        )
-                                        HorizontalDivider(color = p.s2)
-                                    }
-                                    if (cands.isEmpty()) {
-                                        DropdownMenuItem(
-                                            text = { Text(if (loadingModels) store.t("loading") else store.t("noModels"), color = p.mute, fontSize = PebbleFont.secondary) },
-                                            enabled = false,
-                                            onClick = {},
-                                        )
-                                        if (!loadingModels) {
-                                            DropdownMenuItem(
-                                                text = { Text(store.t("refresh"), color = p.accent, fontSize = PebbleFont.secondary) },
-                                                leadingIcon = { Icon(painterResource(PebbleIcons.Refresh), contentDescription = null, tint = p.accent, modifier = Modifier.size(18.dp)) },
-                                                onClick = { loadCands(harness, force = true) },
-                                            )
-                                        }
-                                    } else {
-                                        cands.forEach { m ->
-                                            val selected = m == trimmedModel
-                                            DropdownMenuItem(
-                                                text = {
-                                                    Text(
-                                                        text = m,
-                                                        fontFamily = MonoFont,
-                                                        fontSize = PebbleFont.secondary,
-                                                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                                                        color = if (selected) p.accent else p.text,
-                                                    )
-                                                },
-                                                trailingIcon = if (selected) {
-                                                    { Icon(painterResource(PebbleIcons.Check), contentDescription = null, tint = p.accent, modifier = Modifier.size(16.dp)) }
-                                                } else {
-                                                    null
-                                                },
-                                                onClick = {
-                                                    model = m
-                                                    modelMenuOpen = false
-                                                },
-                                            )
-                                        }
-                                        HorizontalDivider(color = p.s2)
-                                        DropdownMenuItem(
-                                            text = { Text(store.t("refresh"), color = p.accent, fontSize = PebbleFont.secondary) },
-                                            leadingIcon = { Icon(painterResource(PebbleIcons.Refresh), contentDescription = null, tint = p.accent, modifier = Modifier.size(18.dp)) },
-                                            onClick = { loadCands(harness, force = true) },
-                                        )
-                                    }
-                                }
-                            }
-                        }
+                        ModelInputWithMenu(
+                            value = model,
+                            placeholder = ph.ifEmpty { store.t("inheritDefaultPh") },
+                            candidates = cands,
+                            loading = harness in loadingModelsFor,
+                            onLoadCandidates = { loadCands(harness) },
+                            onRefreshCandidates = { loadCands(harness, force = true) },
+                            onValueChange = { model = it },
+                            store = store,
+                            label = store.t("modelOptional"),
+                        )
                     }
                 }
 

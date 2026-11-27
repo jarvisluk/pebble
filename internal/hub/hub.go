@@ -2365,8 +2365,8 @@ func (h *Hub) ValidateHarnessKey(kind string) error {
 	return err
 }
 
-// ValidateHarnessReady checks that kind is registered, installed, and authenticated.
-func (h *Hub) ValidateHarnessReady(ctx context.Context, kind string) error {
+// ValidateHarnessInstalled checks that kind is registered and installed on the host.
+func (h *Hub) ValidateHarnessInstalled(kind string) error {
 	kind = strings.TrimSpace(kind)
 	if _, err := h.registry.Get(kind); err != nil {
 		return err
@@ -2374,6 +2374,23 @@ func (h *Hub) ValidateHarnessReady(ctx context.Context, kind string) error {
 	installed, _ := detectHarnessFunc(kind)
 	if !installed {
 		return fmt.Errorf("harness %q is not installed", kind)
+	}
+	return nil
+}
+
+// SetHarnessDetectorForTest overrides harness installation detection in tests
+// and returns a restore function.
+func SetHarnessDetectorForTest(fn func(string) (bool, string)) func() {
+	prev := detectHarnessFunc
+	detectHarnessFunc = fn
+	return func() { detectHarnessFunc = prev }
+}
+
+// ValidateHarnessReady checks that kind is registered, installed, and authenticated.
+func (h *Hub) ValidateHarnessReady(ctx context.Context, kind string) error {
+	kind = strings.TrimSpace(kind)
+	if err := h.ValidateHarnessInstalled(kind); err != nil {
+		return err
 	}
 	status, detail := detectHarnessAuthFunc(ctx, kind)
 	if status == "needs_login" {
@@ -2790,8 +2807,20 @@ func (h *Hub) DeleteBot(botID string) error {
 // DefaultHarness returns the hub-wide default harness for new bots.
 func (h *Hub) DefaultHarness() string {
 	h.lanesMu.RLock()
-	defer h.lanesMu.RUnlock()
-	return h.cfg.EffectiveDefaultHarness()
+	explicit := strings.TrimSpace(h.cfg.DefaultHarness)
+	h.lanesMu.RUnlock()
+	if explicit != "" {
+		return explicit
+	}
+	if installed, _ := detectHarnessFunc("opencode"); installed {
+		return "opencode"
+	}
+	for _, r := range h.registry.All() {
+		if installed, _ := detectHarnessFunc(r.Kind()); installed {
+			return r.Kind()
+		}
+	}
+	return "opencode"
 }
 
 // SetDefaultHarness updates and persists the hub-wide default harness.

@@ -1072,16 +1072,20 @@ final class HubStore {
         defaultHarness: String,
         defaultPermissionMode: String? = nil,
         defaultModel: String,
-        defaultModels: [String: String],
+        defaultModelsPatch: [String: String]? = nil,
         magpieWebUrl: String?,
         botUpdates: [(id: String, harness: String, model: String)]
     ) async throws {
         if changed {
             var body: [String: Any] = [
-                "defaultHarness": defaultHarness,
                 "defaultModel": defaultModel,
-                "defaultModels": defaultModels,
             ]
+            if !defaultHarness.isEmpty {
+                body["defaultHarness"] = defaultHarness
+            }
+            if let defaultModelsPatch, !defaultModelsPatch.isEmpty {
+                body["defaultModelsPatch"] = defaultModelsPatch
+            }
             if let defaultPermissionMode, !defaultPermissionMode.isEmpty {
                 body["defaultPermissionMode"] = defaultPermissionMode
             }

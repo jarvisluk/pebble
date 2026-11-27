@@ -1198,6 +1198,12 @@ func (s *HTTPServer) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 				writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
 				return
 			}
+			if trimmed != curDefaultHarness {
+				if err := s.hub.ValidateHarnessInstalled(trimmed); err != nil {
+					writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+					return
+				}
+			}
 			nextDefaultHarness = trimmed
 		} else {
 			nextDefaultHarness = "opencode"

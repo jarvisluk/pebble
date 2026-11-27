@@ -58,7 +58,7 @@ fun DesktopSettingsTab(
 ) {
     val p = LocalPalette.current
     val scope = rememberCoroutineScope()
-    val harnesses = settingsHarnessList(store)
+    val harnesses = installedHarnessList(store)
 
     var permTarget by remember { mutableStateOf("local") }
     var targetMenuOpen by remember { mutableStateOf(false) }
@@ -348,7 +348,7 @@ fun DesktopSettingsTab(
     SectionFooter(store.t("deskPermsDesc"))
 
     // Card 2: Desktop Worker
-    val defHarness = store.settings?.defaultHarness?.takeIf { it.isNotEmpty() } ?: (harnesses.firstOrNull()?.id ?: "opencode")
+    val defHarness = store.settings?.defaultHarness?.takeIf { it.isNotEmpty() } ?: (harnesses.firstOrNull()?.id.orEmpty())
     val orderedGlobal = orderedGlobalHarnesses(harnesses, defHarness, store.models)
 
     SectionHeader(store.t("deskWorkerTitle"))
@@ -375,7 +375,7 @@ fun DesktopSettingsTab(
                 ) {
                     Text(store.t("deskWorkerHarnessLabel"), color = p.text2, fontSize = PebbleFont.secondary, modifier = Modifier.weight(1f))
                     Text(
-                        text = harnesses.firstOrNull { it.id == deskHarness }?.title ?: store.t("deskWorkerFollowBot"),
+                        text = if (deskHarness.isEmpty()) store.t("deskWorkerFollowBot") else harnessLabelForSelection(deskHarness, store),
                         color = p.text,
                         fontSize = PebbleFont.secondary,
                         fontWeight = FontWeight.Medium,
