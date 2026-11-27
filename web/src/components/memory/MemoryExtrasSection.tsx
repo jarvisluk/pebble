@@ -52,22 +52,20 @@ export const MemoryExtrasSection: React.FC<MemoryExtrasSectionProps> = ({
         <div className="note" id="sMemMagpieImport">
           <div className="row-between row-wrap">
             <strong>{t('memMagpieImportTitle')}</strong>
-            <div className="row-inline-sm row-wrap">
-              {(magpie?.legacyCount ?? 0) > 0 && (
-                <span className="mp">
-                  {t('memMagpieLegacyCount', { n: magpie?.legacyCount ?? 0 })}
-                </span>
-              )}
-              {(magpie?.injectedHarnesses || []).length > 0 && (
-                <span className="mp">
-                  {t('memMagpieInjected', {
-                    list: (magpie?.injectedHarnesses || []).join(', '),
-                  })}
-                </span>
-              )}
-            </div>
+            {(magpie?.legacyCount ?? 0) > 0 && (
+              <span className="mp">
+                {t('memMagpieLegacyCount', { n: magpie?.legacyCount ?? 0 })}
+              </span>
+            )}
           </div>
           <div>{t('memMagpieImportDesc')}</div>
+          {(magpie?.injectedHarnesses || []).length > 0 && (
+            <div className="mem-sub-meta mem-wrap-line">
+              {t('memMagpieInjected', {
+                list: (magpie?.injectedHarnesses || []).join(', '),
+              })}
+            </div>
+          )}
           <div className="mem-import-row">
             <select
               id="sMemImportMode"
