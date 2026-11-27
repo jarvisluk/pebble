@@ -121,9 +121,10 @@ struct MemoryIndexEditorBlock: View {
         if !touched, let serverLines = doc?.lines {
             return serverLines
         }
-        let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty { return 0 }
-        return draft.components(separatedBy: .newlines).count
+        if draft.isEmpty { return 0 }
+        let stripped = draft.replacingOccurrences(of: "\\r?\\n$", with: "", options: .regularExpression)
+        if stripped.isEmpty { return 0 }
+        return stripped.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).count
     }
 
     private var isDirty: Bool {

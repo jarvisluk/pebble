@@ -220,6 +220,8 @@ struct MemoryDreamResp: Codable {
 
 struct MemoryReindexResp: Codable {
     var ok: Bool?
+    var docsIndexed: Int?
+    var chunksIndexed: Int?
     var docCount: Int?
     var chunkCount: Int?
     var error: String?

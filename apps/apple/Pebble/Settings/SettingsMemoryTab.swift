@@ -456,9 +456,12 @@ struct SettingsMemoryTab: View {
         indexSaving = true
         defer { indexSaving = false }
         do {
-            let updated = try await hub.saveMemoryIndex(scope: "global", content: indexDraft)
-            indexDoc = updated
-            indexDraft = updated.content ?? indexDraft
+            var savedDoc = try await hub.saveMemoryIndex(scope: "global", content: indexDraft)
+            if savedDoc.content == nil {
+                savedDoc.content = indexDraft
+            }
+            indexDoc = savedDoc
+            indexDraft = savedDoc.content ?? indexDraft
             indexTouched = false
             saved = hub.t("memIndexSaved")
             return true

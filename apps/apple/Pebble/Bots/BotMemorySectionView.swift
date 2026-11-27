@@ -191,9 +191,12 @@ struct BotMemorySectionView: View {
         indexSaving = true
         defer { indexSaving = false }
         do {
-            let updated = try await hub.saveMemoryIndex(scope: "bot", botId: botId, content: indexDraft)
-            indexDoc = updated
-            indexDraft = updated.content ?? indexDraft
+            var savedDoc = try await hub.saveMemoryIndex(scope: "bot", botId: botId, content: indexDraft)
+            if savedDoc.content == nil {
+                savedDoc.content = indexDraft
+            }
+            indexDoc = savedDoc
+            indexDraft = savedDoc.content ?? indexDraft
             indexTouched = false
             notice = hub.t("memIndexSaved")
         } catch {

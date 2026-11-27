@@ -241,13 +241,17 @@ extension SettingsMemoryTab {
         if cfgEmbedApiKeyTouched && !keyTrimmed.isEmpty {
             embedObj["apiKey"] = keyTrimmed
         }
-        let body: [String: Any] = [
-            "enabled": true,
+        let existingCfg = hub.settings?.memory ?? memStatus?.config
+        var body: [String: Any] = [
+            "enabled": existingCfg?.enabled ?? true,
             "coexistence": cfgCoexistence,
             "disableClaudeAutoMemory": cfgDisableClaudeAuto,
             "dream": dreamObj,
             "embedding": embedObj,
         ]
+        if let maxChars = existingCfg?.snapshotMaxChars, maxChars > 0 {
+            body["snapshotMaxChars"] = maxChars
+        }
         do {
             try await hub.saveMemoryConfig(body)
             cfgTouched = false
