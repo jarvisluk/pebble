@@ -61,11 +61,12 @@ func (j *scheduledJob) getNext() time.Time {
 type Scheduler struct {
 	hub *hub.Hub
 
-	mu     sync.Mutex
-	ctx    context.Context
-	jobs   map[string]*scheduledJob
-	active map[string]bool
-	wg     sync.WaitGroup
+	mu       sync.Mutex
+	ctx      context.Context
+	jobs     map[string]*scheduledJob
+	dreamJob *dreamScheduledJob
+	active   map[string]bool
+	wg       sync.WaitGroup
 
 	probeMu          sync.Mutex
 	primaryProbe     func(context.Context) bool
@@ -153,6 +154,8 @@ func (s *Scheduler) Sync() {
 		}
 	}
 
+	memCfg := s.hub.MemoryConfig()
+
 	s.mu.Lock()
 	if s.ctx == nil || s.ctx.Err() != nil {
 		s.mu.Unlock()
@@ -186,10 +189,12 @@ func (s *Scheduler) Sync() {
 		started++
 		log.Printf("[scheduler] armed %s (%s)", key, describeSchedule(want.spec))
 	}
+	s.syncDreamJobLocked(memCfg.Enabled && memCfg.Dream.Enabled, memCfg.Dream.DailyAt)
 	total := len(s.jobs)
+	dreamArmed := s.dreamJob != nil
 	s.mu.Unlock()
 
-	if total == 0 && started == 0 {
+	if total == 0 && started == 0 && !dreamArmed {
 		log.Printf("[scheduler] no active schedules configured")
 	}
 }

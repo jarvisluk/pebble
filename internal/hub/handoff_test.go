@@ -37,7 +37,7 @@ func TestBuildTurnPromptIncludesCrossHostHandoff(t *testing.T) {
 		Name:      "Assistant",
 		Workspace: filepath.Join(h.cfg.ProjectRoot, "workspaces", "assistant"),
 	}
-	got := h.buildTurnPrompt(bot, "Continue with step 2", true, "", nil)
+	got := h.buildTurnPrompt(bot, "Continue with step 2", true, "", nil, "")
 	if !strings.Contains(got, "Cross-host session handoff") ||
 		!strings.Contains(got, "Prepare deployment checklist for Mac mini") ||
 		!strings.Contains(got, "Checklist drafted with 3 verification steps.") ||

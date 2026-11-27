@@ -140,12 +140,25 @@ func TestPlatformInstructionsAndOpenCodeSync(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected _shared/PEBBLE.md: %v", err)
 	}
-	if !strings.Contains(string(pebbleMD), "recall_session") || !strings.Contains(string(pebbleMD), "bot:<your-bot-id>") ||
+	if !strings.Contains(string(pebbleMD), "recall_session") ||
+		!strings.Contains(string(pebbleMD), "recall_memory") || !strings.Contains(string(pebbleMD), "read_memory") ||
+		!strings.Contains(string(pebbleMD), "save_memory") || !strings.Contains(string(pebbleMD), "forget_memory") ||
+		!strings.Contains(string(pebbleMD), "pebble memory") || !strings.Contains(string(pebbleMD), "Magpie Coexistence Boundary") ||
 		!strings.Contains(string(pebbleMD), "agent-desktop") || !strings.Contains(string(pebbleMD), "agent-browser") ||
 		!strings.Contains(string(pebbleMD), "request_takeover") || !strings.Contains(string(pebbleMD), "pebble bot") ||
 		!strings.Contains(string(pebbleMD), "pebble settings") || !strings.Contains(string(pebbleMD), "pebble-setup") ||
 		!strings.Contains(string(pebbleMD), "update") || strings.Contains(string(pebbleMD), "node_desktop") {
 		t.Fatalf("unexpected PEBBLE.md content:\n%s", pebbleMD)
+	}
+	for _, dir := range []string{
+		filepath.Join(cfg.SharedDir, "memory", "items"),
+		filepath.Join(cfg.Bots[0].Workspace, "memory", "items"),
+		filepath.Join(cfg.Bots[0].Workspace, "memory", "daily"),
+		filepath.Join(cfg.Bots[0].Workspace, "memory", "dreams"),
+	} {
+		if st, err := os.Stat(dir); err != nil || !st.IsDir() {
+			t.Fatalf("expected memory dir %s to exist: %v", dir, err)
+		}
 	}
 	skillRaw, err := os.ReadFile(filepath.Join(cfg.Bots[0].Workspace, ".agents", "skills", PebbleSetupSkillName, "SKILL.md"))
 	if err != nil {

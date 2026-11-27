@@ -1,9 +1,7 @@
 package hub
 
 import (
-	"bot-hub/internal/harness"
 	"bot-hub/internal/state"
-	"context"
 	"fmt"
 	"strings"
 )
@@ -99,6 +97,9 @@ func (h *Hub) RotateSession(botID, handoffNote string, deferUntilTurnEnd bool) (
 			Text:      fmt.Sprintf("Session archived (%s). The next turn will start a new session.", prev.ID),
 		})
 		h.emitStatus(lane)
+		if note == "" && prev.TurnCount >= 3 {
+			h.triggerSessionFlushAsync(botID, prev.ID, "session_rotate")
+		}
 	}
 	return &RotateResult{Rotated: existed, SessionID: prev.ID}, nil
 }
@@ -164,38 +165,4 @@ func (h *Hub) RecallSession(callerBotID string, opts state.RecallOptions) (*stat
 		return nil, fmt.Errorf("%w: bot %q sessions are private", ErrForbidden, res.Session.BotID)
 	}
 	return res, nil
-}
-
-// MemorySearch queries Magpie Memory (global or scoped to a specific bot's workspace + tag).
-func (h *Hub) MemorySearch(ctx context.Context, scope, botID, query, kind string, limit int) (harness.MagpieMemoryList, error) {
-	projectDir := ""
-	botID = strings.TrimSpace(botID)
-	if botID != "" {
-		bot, ok := h.GetBot(botID)
-		if !ok {
-			return harness.MagpieMemoryList{}, fmt.Errorf("bot %q not found: %w", botID, ErrBotNotFound)
-		}
-		projectDir = bot.Workspace
-		scope = "project"
-	}
-	return harness.MagpieMemorySearch(ctx, scope, projectDir, botID, query, kind, limit), nil
-}
-
-// MemorySave writes or updates a Magpie Memory entry.
-func (h *Hub) MemorySave(ctx context.Context, req harness.MagpieMemorySaveReq) (string, error) {
-	req.BotID = strings.TrimSpace(req.BotID)
-	if req.BotID != "" {
-		bot, ok := h.GetBot(req.BotID)
-		if !ok {
-			return "", fmt.Errorf("bot %q not found: %w", req.BotID, ErrBotNotFound)
-		}
-		req.Project = bot.Workspace
-		req.Scope = "project"
-	}
-	return harness.MagpieMemorySave(ctx, req)
-}
-
-// MemoryForget forgets/deletes a Magpie Memory entry by ID.
-func (h *Hub) MemoryForget(ctx context.Context, id string) (string, error) {
-	return harness.MagpieMemoryForget(ctx, id)
 }

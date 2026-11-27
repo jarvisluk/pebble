@@ -272,6 +272,59 @@ func NormalizeRoutinePermissionMode(v string) (string, error) {
 	}
 }
 
+// NormalizeMemoryCoexistence validates and normalizes memory coexistence mode ("auto" or "isolated").
+func NormalizeMemoryCoexistence(v string) (string, error) {
+	s := strings.ToLower(strings.TrimSpace(v))
+	switch s {
+	case "", MemoryCoexistenceAuto:
+		return MemoryCoexistenceAuto, nil
+	case MemoryCoexistenceIsolated:
+		return MemoryCoexistenceIsolated, nil
+	default:
+		return "", fmt.Errorf("invalid memory coexistence %q (expected auto or isolated)", v)
+	}
+}
+
+// ValidateMemoryConfig checks MemoryConfig fields, dream schedule, and optional embedding endpoint.
+func ValidateMemoryConfig(m *MemoryConfig) error {
+	if m == nil {
+		return nil
+	}
+	if _, err := NormalizeMemoryCoexistence(m.Coexistence); err != nil {
+		return err
+	}
+	if m.SnapshotMaxChars < 0 {
+		return errors.New("memory snapshotMaxChars must be >= 0")
+	}
+	if m.Dream != nil {
+		if d := strings.TrimSpace(m.Dream.DailyAt); d != "" && !isValidDailyAt(d) {
+			return fmt.Errorf("invalid memory dream dailyAt %q (expected HH:MM)", m.Dream.DailyAt)
+		}
+		if dm := strings.TrimSpace(m.Dream.Model); dm != "" && !ContainsEnvRef(dm) {
+			if err := ValidateModelID(dm); err != nil {
+				return fmt.Errorf("invalid memory dream model: %w", err)
+			}
+		}
+		if m.Dream.MinNewMessages < 0 {
+			return errors.New("memory dream minNewMessages must be >= 0")
+		}
+	}
+	if m.Embedding != nil {
+		if base := strings.TrimSpace(m.Embedding.BaseURL); base != "" && !ContainsEnvRef(base) {
+			u, err := url.ParseRequestURI(base)
+			if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+				return fmt.Errorf("invalid memory embedding baseUrl %q (expected http:// or https:// URL)", m.Embedding.BaseURL)
+			}
+		}
+		if em := strings.TrimSpace(m.Embedding.Model); em != "" && !ContainsEnvRef(em) {
+			if err := ValidateModelID(em); err != nil {
+				return fmt.Errorf("invalid memory embedding model: %w", err)
+			}
+		}
+	}
+	return nil
+}
+
 func NormalizeBot(b *BotConfig, cfg *HubConfig) {
 	if b.Name == "" {
 		b.Name = b.ID

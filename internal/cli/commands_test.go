@@ -415,3 +415,141 @@ func TestCLISettingsAndGuardrails(t *testing.T) {
 		}
 	}
 }
+
+func TestCLIMemoryCommands(t *testing.T) {
+	var (
+		gotSearchQuery string
+		gotGetPath     string
+		gotGetQuery    string
+		gotSaveBody    map[string]any
+		gotDeletePath  string
+		gotDeleteQuery string
+		gotDreamBody   map[string]any
+		gotImportBody  map[string]any
+	)
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer tok-mem" {
+			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/memory":
+			gotSearchQuery = r.URL.RawQuery
+			_, _ = w.Write([]byte(`{"backend":"pebble","installed":true,"available":true,"items":[{"id":"mem_1","title":"Note"}]}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/memory/status":
+			_, _ = w.Write([]byte(`{"backend":"pebble","docCount":3,"chunkCount":5}`))
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/memory/"):
+			gotGetPath = r.URL.Path
+			gotGetQuery = r.URL.RawQuery
+			_, _ = w.Write([]byte(`{"path":"coder/memory/items/note-1.md","content":"hello"}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/memory":
+			gotSaveBody = map[string]any{}
+			_ = json.NewDecoder(r.Body).Decode(&gotSaveBody)
+			_, _ = w.Write([]byte(`{"ok":true,"id":"mem_2","item":{"id":"mem_2"}}`))
+		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/api/memory/"):
+			gotDeletePath = r.URL.Path
+			gotDeleteQuery = r.URL.RawQuery
+			_, _ = w.Write([]byte(`{"ok":true,"id":"mem_1","action":"archived"}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/memory/dream":
+			gotDreamBody = map[string]any{}
+			_ = json.NewDecoder(r.Body).Decode(&gotDreamBody)
+			_, _ = w.Write([]byte(`{"ok":true,"results":[{"botId":"coder","summary":"clean"}]}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/memory/reindex":
+			_, _ = w.Write([]byte(`{"ok":true,"docsIndexed":4,"chunksIndexed":9}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/memory/import/magpie":
+			gotImportBody = map[string]any{}
+			_ = json.NewDecoder(r.Body).Decode(&gotImportBody)
+			_, _ = w.Write([]byte(`{"ok":true,"imported":2,"skipped":1}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer api.Close()
+
+	ws := t.TempDir()
+	ocDoc := map[string]any{
+		"mcp": map[string]any{
+			"servers": map[string]any{
+				"pebble": map[string]any{
+					"type":        "local",
+					"command":     []string{"/usr/local/bin/pebble", "mcp", "--hub-url", api.URL, "--bot-id", "coder"},
+					"environment": map[string]string{"PEBBLE_API_TOKEN": "tok-mem"},
+				},
+			},
+		},
+	}
+	ocBytes, _ := json.Marshal(ocDoc)
+	if err := os.WriteFile(filepath.Join(ws, "opencode.json"), ocBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	run := func(args ...string) (string, string, int) {
+		var out, errBuf bytes.Buffer
+		code := runCommand(context.Background(), args, ws, &out, &errBuf)
+		return out.String(), errBuf.String(), code
+	}
+
+	if out, errOut, code := run("memory", "search", "--query", "deploy", "--tags", "ops,ci", "--include-sessions", "--limit", "5"); code != 0 || !strings.Contains(out, `"mem_1"`) {
+		t.Fatalf("memory search failed: code=%d out=%s err=%s", code, out, errOut)
+	}
+	if !strings.Contains(gotSearchQuery, "callerBotId=coder") || !strings.Contains(gotSearchQuery, "includeSessions=1") {
+		t.Fatalf("unexpected search query: %q", gotSearchQuery)
+	}
+	if out, errOut, code := run("memory", "list", "--scope", "bot"); code != 0 || !strings.Contains(out, `"backend": "pebble"`) {
+		t.Fatalf("memory list failed: code=%d out=%s err=%s", code, out, errOut)
+	}
+	if !strings.Contains(gotSearchQuery, "botId=coder") {
+		t.Fatalf("expected auto-resolved botId=coder in list query, got %q", gotSearchQuery)
+	}
+	if out, errOut, code := run("memory", "get", "--id", "mem_1", "--start-line", "1", "--end-line", "10"); code != 0 || !strings.Contains(out, `"hello"`) {
+		t.Fatalf("memory get failed: code=%d out=%s err=%s", code, out, errOut)
+	}
+	if gotGetPath != "/api/memory/mem_1" || !strings.Contains(gotGetQuery, "startLine=1") {
+		t.Fatalf("unexpected get request: %q %q", gotGetPath, gotGetQuery)
+	}
+	if out, errOut, code := run("memory", "save", "--title", "Rule", "--text", "Keep PRs small", "--kind", "rule", "--tags", "git", "--pin", "--supersedes", "mem_0"); code != 0 || !strings.Contains(out, `"mem_2"`) {
+		t.Fatalf("memory save failed: code=%d out=%s err=%s", code, out, errOut)
+	}
+	if gotSaveBody["botId"] != "coder" || gotSaveBody["scope"] != "bot" || gotSaveBody["supersedes"] != "mem_0" || gotSaveBody["pin"] != true {
+		t.Fatalf("unexpected save body: %#v", gotSaveBody)
+	}
+	if out, errOut, code := run("memory", "forget", "--id", "mem_1", "--dismiss", "--reason", "outdated"); code != 0 || !strings.Contains(out, `"archived"`) {
+		t.Fatalf("memory forget failed: code=%d out=%s err=%s", code, out, errOut)
+	}
+	if gotDeletePath != "/api/memory/mem_1" || !strings.Contains(gotDeleteQuery, "dismiss=1") {
+		t.Fatalf("unexpected forget request: %q %q", gotDeletePath, gotDeleteQuery)
+	}
+	if out, errOut, code := run("memory", "status", "--bot", "coder"); code != 0 || !strings.Contains(out, `"docCount": 3`) {
+		t.Fatalf("memory status failed: code=%d out=%s err=%s", code, out, errOut)
+	}
+	if out, errOut, code := run("memory", "dream", "--bot", "coder"); code != 0 || !strings.Contains(out, `"clean"`) {
+		t.Fatalf("memory dream failed: code=%d out=%s err=%s", code, out, errOut)
+	}
+	if gotDreamBody["botId"] != "coder" || gotDreamBody["force"] != true {
+		t.Fatalf("unexpected dream body: %#v", gotDreamBody)
+	}
+	if out, errOut, code := run("memory", "reindex"); code != 0 || !strings.Contains(out, `"docsIndexed": 4`) {
+		t.Fatalf("memory reindex failed: code=%d out=%s err=%s", code, out, errOut)
+	}
+	if out, errOut, code := run("memory", "import-magpie", "--mode", "all", "--dry-run"); code != 0 || !strings.Contains(out, `"imported": 2`) {
+		t.Fatalf("memory import-magpie failed: code=%d out=%s err=%s", code, out, errOut)
+	}
+	if gotImportBody["mode"] != "all" || gotImportBody["dryRun"] != true {
+		t.Fatalf("unexpected import body: %#v", gotImportBody)
+	}
+
+	// computer_use role blocks mutating memory commands.
+	t.Setenv("PEBBLE_MCP_ROLE", "computer_use")
+	for _, tc := range [][]string{
+		{"memory", "save", "--text", "x"},
+		{"memory", "forget", "--id", "mem_1"},
+		{"memory", "dream"},
+		{"memory", "reindex"},
+		{"memory", "import-magpie"},
+	} {
+		if _, _, code := run(tc...); code == 0 {
+			t.Fatalf("expected computer_use role to block %v", tc)
+		}
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"bot-hub/internal/config"
 	"bot-hub/internal/desktop"
 	"bot-hub/internal/harness"
+	"bot-hub/internal/memory"
 	"bot-hub/internal/node"
 	"bot-hub/internal/push"
 	"bot-hub/internal/state"
@@ -55,11 +56,18 @@ type Hub struct {
 	cfg           *config.HubConfig
 	store         *state.Store
 	messages      *state.MessageStore
+	memory        *memory.Store
 	mediaDir      string
 	registry      *harness.Registry
 	nodes         *node.Registry
 	localDeskPool *desktop.EnginePool
 	desktop       *desktop.Coordinator
+
+	bgCtx       context.Context
+	bgCancel    context.CancelFunc
+	bgWG        sync.WaitGroup
+	dreamMu     sync.Mutex
+	dreamActive map[string]bool
 
 	lanesMu sync.RWMutex
 	lanes   map[string]*botLane
@@ -134,13 +142,24 @@ func New(cfg *config.HubConfig, store *state.Store, messages *state.MessageStore
 	} else if cfg != nil && cfg.MessagesDir != "" {
 		mediaDir = filepath.Join(filepath.Dir(cfg.MessagesDir), "media")
 	}
+	bgCtx, bgCancel := context.WithCancel(context.Background())
+	var memStore *memory.Store
+	if wsDir := resolveWorkspacesDir(cfg); wsDir != "" {
+		if ms, err := memory.NewStore(wsDir, store, buildMemoryEngineConfig(cfg.Memory)); err == nil {
+			memStore = ms
+		}
+	}
 	h := &Hub{
 		cfg:                cfg,
 		store:              store,
 		messages:           messages,
+		memory:             memStore,
 		mediaDir:           mediaDir,
 		registry:           reg,
 		localDeskPool:      desktop.NewEnginePool(deskCfg),
+		bgCtx:              bgCtx,
+		bgCancel:           bgCancel,
+		dreamActive:        make(map[string]bool),
 		lanes:              make(map[string]*botLane, len(cfg.Bots)),
 		order:              make([]string, 0, len(cfg.Bots)),
 		pendingReload:      make(map[string]bool),
@@ -192,7 +211,12 @@ func (h *Hub) Close() {
 		return
 	}
 	h.closed = true
+	bgCancel := h.bgCancel
 	h.closeMu.Unlock()
+
+	if bgCancel != nil {
+		bgCancel()
+	}
 
 	h.lanesMu.RLock()
 	lanes := make([]*botLane, 0, len(h.order))
@@ -204,6 +228,7 @@ func (h *Hub) Close() {
 	for _, lane := range lanes {
 		lane.stop()
 	}
+	h.bgWG.Wait()
 	h.desktopTargetMu.Lock()
 	if h.activeDesktopTimer != nil {
 		h.activeDesktopTimer.Stop()
