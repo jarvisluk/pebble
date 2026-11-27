@@ -97,29 +97,6 @@ extension HubStore {
         removeBotState(botId)
     }
 
-    // MARK: 记忆
-
-    func fetchMemories(scope: String, botId: String? = nil, query: String = "", kind: String = "", limit: Int = 0) async throws -> MemoryList {
-        var q = URLComponents()
-        var items = [URLQueryItem(name: "scope", value: scope)]
-        if let botId { items.append(URLQueryItem(name: "botId", value: botId)) }
-        let qq = query.trimmingCharacters(in: .whitespaces)
-        if !qq.isEmpty { items.append(URLQueryItem(name: "query", value: qq)) }
-        let kk = kind.trimmingCharacters(in: .whitespaces)
-        if !kk.isEmpty { items.append(URLQueryItem(name: "kind", value: kk)) }
-        if limit > 0 { items.append(URLQueryItem(name: "limit", value: "\(limit)")) }
-        q.queryItems = items
-        return try await callAPI("/api/memory?\(q.percentEncodedQuery ?? "")")
-    }
-
-    func saveMemory(_ body: [String: Any]) async throws {
-        _ = try await rawAPI("/api/memory", method: "POST", body: body)
-    }
-
-    func deleteMemory(_ id: String) async throws {
-        _ = try await rawAPI("/api/memory/\(enc(id))", method: "DELETE")
-    }
-
     // MARK: 定时任务
 
     @discardableResult
