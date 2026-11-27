@@ -8,10 +8,13 @@ import ai.pebble.android.data.HubJson
 import ai.pebble.android.data.NodeInfo
 import ai.pebble.android.data.PebbleStore
 import ai.pebble.android.data.ServerInfo
+import ai.pebble.android.data.buildPairingLink
 import ai.pebble.android.data.countToolCalls
 import ai.pebble.android.data.formatDurationMs
+import ai.pebble.android.data.maskedPairingLink
 import ai.pebble.android.data.normalizeAddress
 import ai.pebble.android.data.resolveDefaultModel
+import ai.pebble.android.data.stripLinkFragment
 import ai.pebble.android.ui.chat.MarkdownBlock
 import ai.pebble.android.ui.chat.MarkdownParser
 import ai.pebble.android.ui.chat.TableAlign
@@ -192,5 +195,31 @@ class PebbleCoreTest {
         assertTrue(PebbleStore.isLocalDesktopTarget("local:virtual:bot1"))
         assertFalse(PebbleStore.isLocalDesktopTarget("node-1"))
         assertFalse(PebbleStore.isLocalDesktopTarget("node-1:virtual:bot1"))
+    }
+
+    @Test
+    fun pairingLinkFormattingAndRoundTrip() {
+        val plain = buildPairingLink("tailcat://connect/tc123?port=3789", "tok123")
+        assertEquals("tailcat://connect/tc123?port=3789#token=tok123", plain)
+
+        val special = buildPairingLink("tailcat://connect/tc123?port=3789", "a+b&c=1 #2")
+        assertEquals("tailcat://connect/tc123?port=3789#token=a%2Bb%26c%3D1%20%232", special)
+        val parsed = normalizeAddress(special!!)
+        assertEquals("tailcat://connect/tc123?port=3789", parsed.cleanAddress)
+        assertEquals("a+b&c=1 #2", parsed.token)
+        assertTrue(parsed.isTailcat)
+
+        val stripped = buildPairingLink("tailscale://mac.ts.net:3789#token=old", "newTok")
+        assertEquals("tailscale://mac.ts.net:3789#token=newTok", stripped)
+        assertEquals("tailscale://mac.ts.net:3789", stripLinkFragment("tailscale://mac.ts.net:3789#token=old"))
+
+        assertEquals(null, buildPairingLink("", "tok"))
+        assertEquals(null, buildPairingLink("tailcat://connect/tc123?port=3789", "   "))
+
+        assertEquals(
+            "tailcat://connect/tc123?port=3789#token=••••••••",
+            maskedPairingLink("tailcat://connect/tc123?port=3789#token=old"),
+        )
+        assertEquals("", maskedPairingLink("   "))
     }
 }

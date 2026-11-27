@@ -80,8 +80,9 @@ struct SettingsNetworkTab: View {
 
     private var tcFooterText: String {
         let st = hub.tailcat?.state ?? "disabled"
+        let envRef = hub.tailcat?.tokenEnvRef ?? ""
         switch st {
-        case "ready": return hub.t("remoteHelpReady")
+        case "ready": return hub.t(envRef.isEmpty ? "remoteHelpReady" : "remoteHelpEnvReady")
         case "connecting": return hub.t("remoteHelpConnecting")
         case "error": return (hub.tailcat?.error ?? "").isEmpty ? hub.t("tailcatErr") : hub.tailcat!.error!
         default: return hub.t("remoteHelpOff")
@@ -104,7 +105,11 @@ struct SettingsNetworkTab: View {
         tailcatPairingSection
         hostTailscaleSection
         connectedNodesSection
-            .task(id: hub.authToken) { await loadAll() }
+            .task(id: "\(hub.activeServerId ?? "")|\(hub.authToken)") {
+                tcTokenVal = ""
+                tcTokenShow = false
+                await loadAll()
+            }
             .task(id: "\(hub.tailcat?.state ?? "")|\(hub.tailcat?.link ?? "")|\(tcQRVersion)") {
                 guard hub.tailcat?.state == "ready" else {
                     tcQRData = nil
@@ -218,6 +223,93 @@ struct SettingsNetworkTab: View {
         .padding(.vertical, 4)
     }
 
+    private func toggleTokenReveal() {
+        if tcTokenShow {
+            tcTokenShow = false
+        } else if !tcTokenVal.isEmpty {
+            tcTokenShow = true
+        } else {
+            run("tc:reveal", "opFailed") {
+                let tok = try await hub.revealTailcatToken()
+                tcTokenVal = tok
+                tcTokenShow = !tok.isEmpty
+                return nil
+            }
+        }
+    }
+
+    private func copyFullPairingLink(_ baseLink: String, busyKey: String) {
+        run(busyKey, "opFailed") {
+            let tok = tcTokenVal.isEmpty ? try await hub.revealTailcatToken() : tcTokenVal
+            if !tok.isEmpty { tcTokenVal = tok }
+            guard let full = buildPairingLink(baseLink, token: tok) else {
+                throw HubError(message: hub.t("copyPairLinkNoToken"))
+            }
+            copyToClipboard(full)
+            return hub.t("pairLinkCopied")
+        }
+    }
+
+    @ViewBuilder
+    private func pairingLinkBlock(baseLink: String, hasToken: Bool, envRef: String, busyKey: String) -> some View {
+        let canIncludeToken = hasToken && envRef.isEmpty
+        let revealed = canIncludeToken && tcTokenShow ? buildPairingLink(baseLink, token: tcTokenVal) : nil
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Text(hub.t(canIncludeToken ? "pairingLinkTitle" : "tunnelAddressTitle"))
+                    .font(.system(size: AppFont.body, weight: .semibold))
+                    .foregroundStyle(p.text)
+                Tag(
+                    text: hub.t(canIncludeToken ? "pairingLinkWithToken" : "pairingLinkNoToken"),
+                    bg: canIncludeToken ? p.sage : p.s2,
+                    fg: canIncludeToken ? p.sageInk : p.text2
+                )
+                Spacer()
+            }
+
+            if canIncludeToken {
+                if let full = revealed {
+                    Text(full)
+                        .font(.system(size: AppFont.caption, design: .monospaced))
+                        .foregroundStyle(p.text2)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    Text(maskedPairingLink(baseLink))
+                        .font(.system(size: AppFont.caption, design: .monospaced))
+                        .foregroundStyle(p.text2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                HStack(spacing: 8) {
+                    Spacer()
+                    Button(tcTokenShow ? hub.t("hide") : hub.t("show")) {
+                        toggleTokenReveal()
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(busy == "tc:reveal")
+
+                    Button(hub.t("copyPairLink")) {
+                        copyFullPairingLink(baseLink, busyKey: busyKey)
+                    }
+                    .buttonStyle(HubPrimaryButtonStyle())
+                    .disabled(busy == busyKey)
+                }
+            } else {
+                Text(stripLinkFragment(baseLink))
+                    .font(.system(size: AppFont.caption, design: .monospaced))
+                    .foregroundStyle(p.text2)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                Text(!envRef.isEmpty ? hub.t("pairingLinkEnvNote", ["ref": envRef]) : hub.t("pairingLinkNoTokenNote"))
+                    .font(.system(size: AppFont.caption))
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
     private var tailcatPairingSection: some View {
         let tc = tailcatStatusView
         let state = hub.tailcat?.state ?? "disabled"
@@ -273,21 +365,7 @@ struct SettingsNetworkTab: View {
             if state == "ready" {
                 qrCardView(tcQRData)
                 if let link = hub.tailcat?.link, !link.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(link)
-                            .font(.system(size: AppFont.caption, design: .monospaced))
-                            .foregroundStyle(p.text2)
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        HStack {
-                            Spacer()
-                            Button(hub.t("copyPairLink")) {
-                                copyToClipboard(link)
-                                saved = hub.t("pairLinkCopied")
-                            }
-                            .buttonStyle(HubPrimaryButtonStyle())
-                        }
-                    }
+                    pairingLinkBlock(baseLink: link, hasToken: hasTok, envRef: envRef, busyKey: "tc:copyLink")
                 }
             }
 
@@ -303,17 +381,7 @@ struct SettingsNetworkTab: View {
                         Spacer()
                         if envRef.isEmpty {
                             Button(tcTokenShow ? hub.t("hide") : hub.t("show")) {
-                                if tcTokenShow {
-                                    tcTokenShow = false
-                                } else if !tcTokenVal.isEmpty {
-                                    tcTokenShow = true
-                                } else {
-                                    run("tc:reveal", "opFailed") {
-                                        tcTokenVal = try await hub.revealTailcatToken()
-                                        tcTokenShow = true
-                                        return nil
-                                    }
-                                }
+                                toggleTokenReveal()
                             }
                             .buttonStyle(.bordered)
                             .controlSize(.small)
@@ -341,8 +409,12 @@ struct SettingsNetworkTab: View {
                                         if let issued = res.apiToken, !issued.isEmpty {
                                             tcTokenVal = issued
                                             tcTokenShow = true
+                                        } else {
+                                            tcTokenVal = ""
+                                            tcTokenShow = false
                                         }
                                         tcQRVersion += 1
+                                        tsQRVersion += 1
                                         return hub.t("tokenResetToast")
                                     }
                                 }
@@ -362,6 +434,9 @@ struct SettingsNetworkTab: View {
                             .font(.system(size: AppFont.caption, design: .monospaced))
                             .foregroundStyle(p.text2)
                             .textSelection(.enabled)
+                        Text(hub.t("accessTokenStandaloneHint"))
+                            .font(.system(size: AppFont.caption))
+                            .foregroundStyle(.secondary)
                     }
                 }
             }
@@ -445,42 +520,35 @@ struct SettingsNetworkTab: View {
             if state == "running" {
                 qrCardView(tsQRData)
                 let hostDesc = hub.hostTailscale?.dnsName?.isEmpty == false ? hub.hostTailscale?.dnsName : hub.hostTailscale?.ip
-                if let hostDesc, !hostDesc.isEmpty {
-                    let suffix = (hub.hostTailscale?.dnsName?.isEmpty == false && !(hub.hostTailscale?.ip ?? "").isEmpty) ? " (\(hub.hostTailscale!.ip!))" : ""
-                    Text(hostDesc + suffix)
-                        .font(.system(size: AppFont.caption, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
-                }
-                if let link = hub.hostTailscale?.link, !link.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(link)
+                HStack(spacing: 8) {
+                    if let hostDesc, !hostDesc.isEmpty {
+                        let suffix = (hub.hostTailscale?.dnsName?.isEmpty == false && !(hub.hostTailscale?.ip ?? "").isEmpty) ? " (\(hub.hostTailscale!.ip!))" : ""
+                        Text(hostDesc + suffix)
                             .font(.system(size: AppFont.caption, design: .monospaced))
-                            .foregroundStyle(p.text2)
+                            .foregroundStyle(.secondary)
                             .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        HStack(spacing: 8) {
-                            Spacer()
-                            Button(hub.t("tsLogout"), role: .destructive) {
-                                confirm = ConfirmItem(title: hub.t("tsLogoutTitle"), message: hub.t("tsLogoutDesc")) {
-                                    run("ts:logout", "opFailed") {
-                                        _ = try await hub.setHostTailscale(["logout": true])
-                                        tsQRData = nil
-                                        return nil
-                                    }
-                                }
+                    }
+                    Spacer()
+                    Button(hub.t("tsLogout"), role: .destructive) {
+                        confirm = ConfirmItem(title: hub.t("tsLogoutTitle"), message: hub.t("tsLogoutDesc")) {
+                            run("ts:logout", "opFailed") {
+                                _ = try await hub.setHostTailscale(["logout": true])
+                                tsQRData = nil
+                                return nil
                             }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                            .disabled(busy == "ts:logout")
-
-                            Button(hub.t("tsCopyLink")) {
-                                copyToClipboard(link)
-                                saved = hub.t("tsAddressCopied")
-                            }
-                            .buttonStyle(HubPrimaryButtonStyle())
                         }
                     }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(busy == "ts:logout")
+                }
+                if let link = hub.hostTailscale?.link, !link.isEmpty {
+                    pairingLinkBlock(
+                        baseLink: link,
+                        hasToken: (hub.hostTailscale?.hasToken ?? hub.tailcat?.hasToken) == true,
+                        envRef: hub.hostTailscale?.tokenEnvRef ?? hub.tailcat?.tokenEnvRef ?? "",
+                        busyKey: "ts:copyLink"
+                    )
                 }
             }
 

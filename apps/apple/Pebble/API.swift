@@ -77,6 +77,33 @@ func normalizeAddress(_ raw: String) -> NormalizedAddress {
     return NormalizedAddress(cleanAddress: withProto, token: token, isTailcat: false, isTailscale: false)
 }
 
+private let pairingTokenAllowedChars = CharacterSet(
+    charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
+)
+
+func stripLinkFragment(_ raw: String) -> String {
+    let trimmed = raw
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+        .replacingOccurrences(of: "[\\r\\n]+", with: "", options: .regularExpression)
+    if let hash = trimmed.firstIndex(of: "#") {
+        return String(trimmed[..<hash]).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    return trimmed
+}
+
+func maskedPairingLink(_ baseLink: String) -> String {
+    let base = stripLinkFragment(baseLink)
+    return base.isEmpty ? "" : "\(base)#token=••••••••"
+}
+
+func buildPairingLink(_ baseLink: String, token: String) -> String? {
+    let base = stripLinkFragment(baseLink)
+    let tok = token.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !base.isEmpty, !tok.isEmpty else { return nil }
+    let encoded = tok.addingPercentEncoding(withAllowedCharacters: pairingTokenAllowedChars) ?? tok
+    return "\(base)#token=\(encoded)"
+}
+
 /// 独立于系统共享 Cookie 存储的 HTTP 会话，避免本机多端口或模式切换时残留的 `bot_hub_token` Cookie 污染请求。
 let hubAPISession: URLSession = {
     let cfg = URLSessionConfiguration.default

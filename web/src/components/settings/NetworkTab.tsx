@@ -9,6 +9,7 @@ import type {
 } from '../../types';
 import { api, CLIENT_PROTOCOL } from '../../lib/api';
 import { translate } from '../../lib/i18n';
+import { buildPairingLink, maskedPairingLink, stripLinkFragment } from '../../lib/pairing';
 
 interface NetworkTabProps {
   active: boolean;
@@ -46,6 +47,7 @@ export const NetworkTab: React.FC<NetworkTabProps> = ({
   const [remoteTokenShow, setRemoteTokenShow] = useState(false);
   const [remoteErr, setRemoteErr] = useState('');
   const [remoteBusy, setRemoteBusy] = useState(false);
+  const [pairCopyBusy, setPairCopyBusy] = useState(false);
 
   const remoteTimerRef = useRef<number | null>(null);
   const tsTimerRef = useRef<number | null>(null);
@@ -132,6 +134,8 @@ export const NetworkTab: React.FC<NetworkTabProps> = ({
     setRemoteErr('');
     setTsErr('');
     setRemoteTokenIn('');
+    setRemoteTokenVal('');
+    setRemoteTokenShow(false);
     void loadLocalNode();
     api<{ nodes?: NodeInfo[] }>('/api/nodes')
       .then((d) => setNodes(d.nodes || []))
@@ -147,6 +151,119 @@ export const NetworkTab: React.FC<NetworkTabProps> = ({
   }, [active, clearTimers, loadLocalNode, applyTailcatState, applyTailscaleState]);
 
   const onlineNodeCount = nodes.filter((n) => n.connected).length;
+
+  const resolveRemoteToken = useCallback(async (): Promise<string> => {
+    if (remoteTokenVal) return remoteTokenVal;
+    const d = await api<TailcatStatus>('/api/tailcat?reveal=1');
+    const tok = d.apiToken || '';
+    if (tok) setRemoteTokenVal(tok);
+    return tok;
+  }, [remoteTokenVal]);
+
+  const toggleRemoteTokenShow = useCallback(async () => {
+    if (remoteTokenShow) {
+      setRemoteTokenShow(false);
+      return;
+    }
+    try {
+      const tok = await resolveRemoteToken();
+      if (tok) setRemoteTokenShow(true);
+      else onToast(t('copyPairLinkNoToken'));
+    } catch (e) {
+      if (e instanceof Error && e.message !== 'unauthorized') setRemoteErr(e.message);
+    }
+  }, [remoteTokenShow, resolveRemoteToken, onToast, t]);
+
+  const copyFullPairingLink = useCallback(
+    async (baseLink: string) => {
+      if (pairCopyBusy) return;
+      setPairCopyBusy(true);
+      let full = '';
+      try {
+        const tok = await resolveRemoteToken();
+        full = buildPairingLink(baseLink, tok);
+      } catch {
+        full = '';
+      }
+      if (!full) {
+        setPairCopyBusy(false);
+        onToast(t('copyPairLinkNoToken'));
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(full);
+        onToast(t('pairLinkCopied'));
+      } catch {
+        onToast(t('copyFailed'));
+      } finally {
+        setPairCopyBusy(false);
+      }
+    },
+    [pairCopyBusy, resolveRemoteToken, onToast, t]
+  );
+
+  const renderPairingLinkBox = ({
+    boxId,
+    codeId,
+    copyBtnId,
+    baseLink,
+    hasToken,
+    envRef,
+  }: {
+    boxId: string;
+    codeId: string;
+    copyBtnId?: string;
+    baseLink: string;
+    hasToken: boolean;
+    envRef: string;
+  }) => {
+    const canIncludeToken = hasToken && !envRef;
+    const revealed = canIncludeToken && remoteTokenShow ? buildPairingLink(baseLink, remoteTokenVal) : '';
+    const displayText = canIncludeToken
+      ? revealed || maskedPairingLink(baseLink)
+      : stripLinkFragment(baseLink);
+    const isMasked = canIncludeToken && !revealed;
+
+    return (
+      <div className="pair-sec" id={boxId}>
+        <div className="pair-link-hd">
+          <span className="pair-link-title">
+            {t(canIncludeToken ? 'pairingLinkTitle' : 'tunnelAddressTitle')}
+          </span>
+          <span className={`mp${canIncludeToken ? ' ok' : ''}`}>
+            {t(canIncludeToken ? 'pairingLinkWithToken' : 'pairingLinkNoToken')}
+          </span>
+        </div>
+        <div id={codeId} className={`pair-link-text${isMasked ? ' masked' : ''}`}>
+          {displayText}
+        </div>
+        {canIncludeToken ? (
+          <div className="row-end" id={copyBtnId ? `${copyBtnId}Wrap` : undefined}>
+            <button
+              type="button"
+              className="mp"
+              onClick={() => void toggleRemoteTokenShow()}
+            >
+              {remoteTokenShow ? t('hide') : t('show')}
+            </button>
+            <button
+              type="button"
+              id={copyBtnId}
+              className="mp go"
+              disabled={pairCopyBusy}
+              onClick={() => void copyFullPairingLink(baseLink)}
+            >
+              {t('copyPairLink')}
+            </button>
+          </div>
+        ) : (
+          <div className="set-card-desc">
+            {envRef ? t('pairingLinkEnvNote', { ref: envRef }) : t('pairingLinkNoTokenNote')}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div id="sTabRemote" className="tab-pane tab-anim">
@@ -355,26 +472,15 @@ export const NetworkTab: React.FC<NetworkTabProps> = ({
         {tailcat?.state === 'ready' && (
           <>
             <img id="remoteQR" alt="" src={`/api/tailcat/qr.png?t=${qrBust}`} className="qr-box" />
-            <div className="fld" id="remoteLinkFld">
-              <textarea id="remoteLink" className="mono ta-sm" readOnly value={tailcat.link || ''} />
-            </div>
-            <div className="row-end" id="remoteCopyWrap">
-              <button
-                type="button"
-                id="remoteCopy"
-                className="mp go"
-                onClick={async () => {
-                  try {
-                    await navigator.clipboard.writeText(tailcat.link || '');
-                    onToast(t('pairLinkCopied'));
-                  } catch {
-                    onToast(t('copyFailed'));
-                  }
-                }}
-              >
-                {t('copyPairLink')}
-              </button>
-            </div>
+            {tailcat.link &&
+              renderPairingLinkBox({
+                boxId: 'remoteLinkFld',
+                codeId: 'remoteLink',
+                copyBtnId: 'remoteCopy',
+                baseLink: tailcat.link,
+                hasToken: !!tailcat.hasToken,
+                envRef: tailcat.tokenEnvRef || '',
+              })}
           </>
         )}
         {(tailcat?.state === 'disabled' || tailcat?.state === 'error') && !tailcat.hasToken && (
@@ -392,7 +498,7 @@ export const NetworkTab: React.FC<NetworkTabProps> = ({
         )}
         <p id="remoteHelp" className="set-card-desc">
           {tailcat?.state === 'ready'
-            ? t('remoteHelpReady')
+            ? t(tailcat.tokenEnvRef ? 'remoteHelpEnvReady' : 'remoteHelpReady')
             : !tailcat || tailcat.state === 'disabled'
               ? t('remoteHelpOff')
               : tailcat.state === 'connecting'
@@ -400,9 +506,9 @@ export const NetworkTab: React.FC<NetworkTabProps> = ({
                 : tailcat.error || t('remoteHelpFallback')}
         </p>
         {tailcat?.hasToken && (
-          <div className="note" id="remoteTokBox">
-            <div className="row-between">
-              <span id="remoteTokTitle">
+          <div className="pair-sec" id="remoteTokBox">
+            <div className="row-between row-wrap">
+              <span id="remoteTokTitle" className="pair-link-title">
                 {tailcat.tokenEnvRef ? t('accessTokenEnv') : t('accessTokenReusable')}
               </span>
               {!tailcat.tokenEnvRef && (
@@ -411,19 +517,29 @@ export const NetworkTab: React.FC<NetworkTabProps> = ({
                     type="button"
                     className="mp"
                     id="remoteTokEye"
+                    onClick={() => void toggleRemoteTokenShow()}
+                  >
+                    {remoteTokenShow ? t('hide') : t('show')}
+                  </button>
+                  <button
+                    type="button"
+                    className="mp"
+                    id="remoteTokCopy"
                     onClick={async () => {
-                      if (!remoteTokenShow) {
-                        if (!remoteTokenVal) {
-                          const d = await api<TailcatStatus>('/api/tailcat?reveal=1');
-                          setRemoteTokenVal(d.apiToken || '');
+                      try {
+                        const tok = await resolveRemoteToken();
+                        if (!tok) {
+                          onToast(t('copyPairLinkNoToken'));
+                          return;
                         }
-                        setRemoteTokenShow(true);
-                      } else {
-                        setRemoteTokenShow(false);
+                        await navigator.clipboard.writeText(tok);
+                        onToast(t('tokenCopied'));
+                      } catch {
+                        onToast(t('copyFailed'));
                       }
                     }}
                   >
-                    {remoteTokenShow ? t('hide') : t('show')}
+                    {t('copy')}
                   </button>
                   <button
                     type="button"
@@ -439,8 +555,15 @@ export const NetworkTab: React.FC<NetworkTabProps> = ({
                             method: 'POST',
                             body: { resetToken: true },
                           });
-                          setRemoteTokenShow(true);
+                          if (r.apiToken) {
+                            setRemoteTokenVal(r.apiToken);
+                            setRemoteTokenShow(true);
+                          } else {
+                            setRemoteTokenVal('');
+                            setRemoteTokenShow(false);
+                          }
                           applyTailcatState(r);
+                          setTsQrBust(Date.now());
                           onToast(t('tokenResetToast'));
                         },
                       })
@@ -456,31 +579,15 @@ export const NetworkTab: React.FC<NetworkTabProps> = ({
                 {t('accessTokenEnvHint', { ref: tailcat.tokenEnvRef })}
               </div>
             ) : (
-              <div className="cmd" id="remoteTokCmd">
-                <code id="remoteTokVal">
-                  {remoteTokenShow && remoteTokenVal ? remoteTokenVal : '•'.repeat(24)}
-                </code>
-                <button
-                  type="button"
-                  id="remoteTokCopy"
-                  onClick={async () => {
-                    try {
-                      let tok = remoteTokenVal;
-                      if (!tok) {
-                        const d = await api<TailcatStatus>('/api/tailcat?reveal=1');
-                        tok = d.apiToken || '';
-                        setRemoteTokenVal(tok);
-                      }
-                      await navigator.clipboard.writeText(tok);
-                      onToast(t('tokenCopied'));
-                    } catch {
-                      onToast(t('copyFailed'));
-                    }
-                  }}
+              <>
+                <div
+                  id="remoteTokVal"
+                  className={`pair-link-text${remoteTokenShow && remoteTokenVal ? '' : ' masked'}`}
                 >
-                  {t('copy')}
-                </button>
-              </div>
+                  {remoteTokenShow && remoteTokenVal ? remoteTokenVal : '•'.repeat(24)}
+                </div>
+                <div className="set-card-desc">{t('accessTokenStandaloneHint')}</div>
+              </>
             )}
           </div>
         )}
@@ -576,16 +683,15 @@ export const NetworkTab: React.FC<NetworkTabProps> = ({
         {tailscale?.state === 'running' && (
           <>
             <img id="tsQR" alt="" src={`/api/tailscale/qr.png?t=${tsQrBust}`} className="qr-box" />
-            {(tailscale.dnsName || tailscale.ip) && (
-              <p className="set-card-desc">
-                <code className="mono">{tailscale.dnsName || tailscale.ip}</code>
-                {tailscale.dnsName && tailscale.ip ? ` (${tailscale.ip})` : ''}
-              </p>
-            )}
-            <div className="fld">
-              <textarea id="tsLink" className="mono ta-sm" readOnly value={tailscale.link || ''} />
-            </div>
-            <div className="row-end">
+            <div className="row-between">
+              <span className="set-card-desc">
+                {(tailscale.dnsName || tailscale.ip) && (
+                  <>
+                    <code className="mono">{tailscale.dnsName || tailscale.ip}</code>
+                    {tailscale.dnsName && tailscale.ip ? ` (${tailscale.ip})` : ''}
+                  </>
+                )}
+              </span>
               <button
                 type="button"
                 className="mp bad"
@@ -613,21 +719,15 @@ export const NetworkTab: React.FC<NetworkTabProps> = ({
               >
                 {t('tsLogout')}
               </button>
-              <button
-                type="button"
-                className="mp go"
-                onClick={async () => {
-                  try {
-                    await navigator.clipboard.writeText(tailscale.link || '');
-                    onToast(t('tsAddressCopied'));
-                  } catch {
-                    onToast(t('copyFailed'));
-                  }
-                }}
-              >
-                {t('tsCopyLink')}
-              </button>
             </div>
+            {tailscale.link &&
+              renderPairingLinkBox({
+                boxId: 'tsLinkFld',
+                codeId: 'tsLink',
+                baseLink: tailscale.link,
+                hasToken: tailscale.hasToken ?? !!tailcat?.hasToken,
+                envRef: tailscale.tokenEnvRef ?? tailcat?.tokenEnvRef ?? '',
+              })}
           </>
         )}
 

@@ -108,6 +108,24 @@ fun normalizeAddress(raw: String): NormalizedAddress {
     return NormalizedAddress(cleanAddress = withProto, token = token, isTailcat = false, isTailscale = false)
 }
 
+fun stripLinkFragment(raw: String): String {
+    val trimmed = raw.trim().replace(Regex("[\\r\\n]+"), "")
+    val hashIdx = trimmed.indexOf('#')
+    return (if (hashIdx >= 0) trimmed.substring(0, hashIdx) else trimmed).trim()
+}
+
+fun maskedPairingLink(baseLink: String): String {
+    val base = stripLinkFragment(baseLink)
+    return if (base.isEmpty()) "" else "$base#token=••••••••"
+}
+
+fun buildPairingLink(baseLink: String, token: String): String? {
+    val base = stripLinkFragment(baseLink)
+    val tok = token.trim()
+    if (base.isEmpty() || tok.isEmpty()) return null
+    return "$base#token=${encodeURIComponent(tok)}"
+}
+
 object SharedHttp {
     val apiClient: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
