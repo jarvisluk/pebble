@@ -19,6 +19,13 @@ const (
 	PermissionModeEdit = "edit"
 	PermissionModeAsk  = "ask"
 	PermissionModePlan = "plan"
+
+	MemoryCoexistenceAuto     = "auto"
+	MemoryCoexistenceIsolated = "isolated"
+
+	DefaultMemorySnapshotMaxChars = 12000
+	DefaultMemoryDreamDailyAt     = "03:30"
+	DefaultMemoryDreamMinMessages = 4
 )
 
 type ScheduleConfig struct {
@@ -386,6 +393,93 @@ func (p PushConfig) IsEnabled() bool {
 	return p.Enabled == nil || *p.Enabled
 }
 
+type MemoryDreamConfig struct {
+	Enabled        *bool  `json:"enabled,omitempty"`        // default: true
+	DailyAt        string `json:"dailyAt,omitempty"`        // default: "03:30"
+	Model          string `json:"model,omitempty"`          // optional override model
+	MinNewMessages int    `json:"minNewMessages,omitempty"` // default: 4
+}
+
+type MemoryEmbedConfig struct {
+	Enabled bool   `json:"enabled"`
+	BaseURL string `json:"baseUrl,omitempty"`
+	APIKey  string `json:"apiKey,omitempty"`
+	Model   string `json:"model,omitempty"`
+}
+
+type MemoryConfig struct {
+	Enabled                 *bool              `json:"enabled,omitempty"`                 // default: true
+	Coexistence             string             `json:"coexistence,omitempty"`             // "auto" (default) | "isolated"
+	SnapshotMaxChars        int                `json:"snapshotMaxChars,omitempty"`        // default: 12000
+	DisableClaudeAutoMemory *bool              `json:"disableClaudeAutoMemory,omitempty"` // default: true
+	Dream                   *MemoryDreamConfig `json:"dream,omitempty"`
+	Embedding               *MemoryEmbedConfig `json:"embedding,omitempty"`
+}
+
+func (m *MemoryConfig) IsEnabled() bool {
+	return m == nil || m.Enabled == nil || *m.Enabled
+}
+
+func (m *MemoryConfig) EffectiveCoexistence() string {
+	if m != nil && strings.EqualFold(strings.TrimSpace(m.Coexistence), MemoryCoexistenceIsolated) {
+		return MemoryCoexistenceIsolated
+	}
+	return MemoryCoexistenceAuto
+}
+
+func (m *MemoryConfig) EffectiveSnapshotMaxChars() int {
+	if m == nil || m.SnapshotMaxChars <= 0 {
+		return DefaultMemorySnapshotMaxChars
+	}
+	return m.SnapshotMaxChars
+}
+
+func (m *MemoryConfig) ShouldDisableClaudeAutoMemory() bool {
+	return m == nil || m.DisableClaudeAutoMemory == nil || *m.DisableClaudeAutoMemory
+}
+
+func (m *MemoryConfig) DreamEnabled() bool {
+	if !m.IsEnabled() {
+		return false
+	}
+	return m == nil || m.Dream == nil || m.Dream.Enabled == nil || *m.Dream.Enabled
+}
+
+func (m *MemoryConfig) EffectiveDreamDailyAt() string {
+	if m != nil && m.Dream != nil {
+		if d := strings.TrimSpace(m.Dream.DailyAt); d != "" {
+			return d
+		}
+	}
+	return DefaultMemoryDreamDailyAt
+}
+
+func (m *MemoryConfig) EffectiveDreamModel() string {
+	if m != nil && m.Dream != nil {
+		return strings.TrimSpace(m.Dream.Model)
+	}
+	return ""
+}
+
+func (m *MemoryConfig) EffectiveDreamMinNewMessages() int {
+	if m != nil && m.Dream != nil && m.Dream.MinNewMessages > 0 {
+		return m.Dream.MinNewMessages
+	}
+	return DefaultMemoryDreamMinMessages
+}
+
+func (m *MemoryConfig) EffectiveEmbedding() MemoryEmbedConfig {
+	if m == nil || m.Embedding == nil {
+		return MemoryEmbedConfig{}
+	}
+	return MemoryEmbedConfig{
+		Enabled: m.Embedding.Enabled,
+		BaseURL: strings.TrimSpace(m.Embedding.BaseURL),
+		APIKey:  strings.TrimSpace(m.Embedding.APIKey),
+		Model:   strings.TrimSpace(m.Embedding.Model),
+	}
+}
+
 type HubConfig struct {
 	ProjectRoot string `json:"-"`
 	ConfigPath  string `json:"-"`
@@ -402,15 +496,16 @@ type HubConfig struct {
 	Desktop             DesktopConfig     `json:"desktop,omitempty"`
 	// MagpieWebURL is where `magpie web` is reachable from other devices;
 	// clients away from the host open it instead of the local app.
-	MagpieWebURL      string      `json:"magpieWebUrl,omitempty"`
-	OpenCodeServerURL string      `json:"opencodeServerUrl,omitempty"`
-	SharedDir         string      `json:"sharedDir,omitempty"`
-	StateFile         string      `json:"stateFile,omitempty"`
-	MessagesDir       string      `json:"messagesDir,omitempty"`
-	HTTP              HTTPConfig  `json:"http,omitempty"`
-	Sync              *SyncConfig `json:"sync,omitempty"`
-	Push              PushConfig  `json:"push,omitempty"`
-	Bots              []BotConfig `json:"bots"`
+	MagpieWebURL      string        `json:"magpieWebUrl,omitempty"`
+	OpenCodeServerURL string        `json:"opencodeServerUrl,omitempty"`
+	SharedDir         string        `json:"sharedDir,omitempty"`
+	StateFile         string        `json:"stateFile,omitempty"`
+	MessagesDir       string        `json:"messagesDir,omitempty"`
+	HTTP              HTTPConfig    `json:"http,omitempty"`
+	Sync              *SyncConfig   `json:"sync,omitempty"`
+	Push              PushConfig    `json:"push,omitempty"`
+	Memory            *MemoryConfig `json:"memory,omitempty"`
+	Bots              []BotConfig   `json:"bots"`
 }
 
 // EffectiveBrowserMode returns "isolated", "attach", or "auto".

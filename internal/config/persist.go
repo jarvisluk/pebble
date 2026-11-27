@@ -15,6 +15,11 @@ func ContainsEnvRef(s string) bool {
 	return envRefRe.MatchString(s)
 }
 
+// ExpandEnv expands `${VAR}` references in s using process environment variables.
+func ExpandEnv(s string) string {
+	return expandEnv(s)
+}
+
 func expandEnv(s string) string {
 	return envRefRe.ReplaceAllStringFunc(s, func(m string) string {
 		key := m[2 : len(m)-1]
@@ -170,6 +175,24 @@ func Load(projectRoot, explicitPath string) (*HubConfig, string, error) {
 	cfg.Push.APNs.BundleID = strings.TrimSpace(expandEnv(cfg.Push.APNs.BundleID))
 	cfg.Push.APNs.DefaultEnv = strings.ToLower(strings.TrimSpace(expandEnv(cfg.Push.APNs.DefaultEnv)))
 
+	if cfg.Memory != nil {
+		if err := ValidateMemoryConfig(cfg.Memory); err != nil {
+			return nil, cfgPath, err
+		}
+		if c, err := NormalizeMemoryCoexistence(cfg.Memory.Coexistence); err == nil {
+			cfg.Memory.Coexistence = c
+		}
+		if cfg.Memory.Dream != nil {
+			cfg.Memory.Dream.DailyAt = strings.TrimSpace(cfg.Memory.Dream.DailyAt)
+			cfg.Memory.Dream.Model = strings.TrimSpace(expandEnv(cfg.Memory.Dream.Model))
+		}
+		if cfg.Memory.Embedding != nil {
+			cfg.Memory.Embedding.BaseURL = strings.TrimSpace(expandEnv(cfg.Memory.Embedding.BaseURL))
+			cfg.Memory.Embedding.APIKey = strings.TrimSpace(expandEnv(cfg.Memory.Embedding.APIKey))
+			cfg.Memory.Embedding.Model = strings.TrimSpace(expandEnv(cfg.Memory.Embedding.Model))
+		}
+	}
+
 	if cfg.SharedDir == "" {
 		cfg.SharedDir = "./workspaces/_shared"
 	}
@@ -263,6 +286,11 @@ type rawTokenDoc struct {
 			AuthKey string `json:"authKey"`
 		} `json:"tailscale"`
 	} `json:"http"`
+	Memory *struct {
+		Embedding *struct {
+			APIKey string `json:"apiKey"`
+		} `json:"embedding"`
+	} `json:"memory"`
 }
 
 func readRawAPIToken(configPath string) string {
@@ -307,6 +335,27 @@ func RawTailscaleAuthKeyEnvRef(configPath string) string {
 	ak := strings.TrimSpace(doc.HTTP.Tailscale.AuthKey)
 	if envRefRe.MatchString(ak) {
 		return ak
+	}
+	return ""
+}
+
+// RawMemoryEmbedAPIKeyEnvRef returns the raw memory.embedding.apiKey string if
+// it contains an unexpanded `${VAR}` environment reference, or empty string otherwise.
+func RawMemoryEmbedAPIKeyEnvRef(configPath string) string {
+	if configPath == "" {
+		return ""
+	}
+	raw, err := os.ReadFile(configPath)
+	if err != nil {
+		return ""
+	}
+	var doc rawTokenDoc
+	if json.Unmarshal(raw, &doc) != nil || doc.Memory == nil || doc.Memory.Embedding == nil {
+		return ""
+	}
+	key := strings.TrimSpace(doc.Memory.Embedding.APIKey)
+	if envRefRe.MatchString(key) {
+		return key
 	}
 	return ""
 }

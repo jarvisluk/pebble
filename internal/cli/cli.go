@@ -58,7 +58,7 @@ func Main(args []string) {
 		return
 	}
 	switch sub {
-	case "bot", "settings", "session", "routine", "node", "desktop", "update":
+	case "bot", "settings", "session", "routine", "memory", "node", "desktop", "update":
 		cwd, _ := os.Getwd()
 		os.Exit(runCommand(context.Background(), args, cwd, os.Stdout, os.Stderr))
 	}
@@ -118,6 +118,7 @@ func printUsage() {
   pebble settings <get|models|set> [flags]                       Read or update global Pebble settings and list available models
   pebble session  <list|recall|rotate> [flags]                   Inspect, recall, or rotate bot sessions
   pebble routine  <list|upsert|delete|run> [flags]               Manage and trigger scheduled routines
+  pebble memory   <search|list|get|save|forget|status|dream|reindex|import-magpie> [flags] Manage native Pebble memories
   pebble node     <list|exec|file> [flags]                       List or invoke remote computer nodes
   pebble desktop  <task|takeover|setup|power|targets> [flags]    Delegate desktop GUI tasks, list targets, setup virtual desktop, or control power
   pebble update   [check|auto|channel|proxy] [flags]             Check GitHub Releases for newer versions and configure update checks

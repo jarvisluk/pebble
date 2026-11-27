@@ -97,9 +97,14 @@ func (h *Hub) RunIsolated(ctx context.Context, botID, prompt string, opts Isolat
 
 	platPath := h.platformInstructionsPath()
 	effectivePrompt := prompt
+	if opts.Source != "memory_dream" && opts.Source != "memory_flush" && !strings.HasPrefix(strings.TrimSpace(prompt), "/") {
+		if snap := h.buildMemorySnapshot(ctx, bot, min(h.memorySnapshotMaxChars(), 4000)); snap != "" {
+			effectivePrompt = snap + "\n\n" + effectivePrompt
+		}
+	}
 	if bot.Harness == "dsh" && platPath != "" {
 		if raw, err := os.ReadFile(platPath); err == nil && len(raw) > 0 {
-			effectivePrompt = strings.TrimSpace(string(raw)) + "\n\n" + prompt
+			effectivePrompt = strings.TrimSpace(string(raw)) + "\n\n" + effectivePrompt
 		}
 	}
 
@@ -110,6 +115,11 @@ func (h *Hub) RunIsolated(ctx context.Context, botID, prompt string, opts Isolat
 	}
 	if h.cfg.ConfigPath != "" {
 		extraEnv["PEBBLE_CONFIG"] = h.cfg.ConfigPath
+	}
+	if h.memoryDisableClaudeAutoMemory() {
+		if _, overridden := bot.Env["CLAUDE_CODE_DISABLE_AUTO_MEMORY"]; !overridden {
+			extraEnv["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] = "1"
+		}
 	}
 	var mcpEnv map[string]string
 	if apiToken != "" {

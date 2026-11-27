@@ -142,7 +142,97 @@ CREATE TABLE IF NOT EXISTS sync_files (
   updated_by TEXT NOT NULL DEFAULT '',
   updated_at TEXT NOT NULL DEFAULT ''
 );
+
+CREATE TABLE IF NOT EXISTS memory_docs (
+  doc_id         TEXT PRIMARY KEY,
+  path           TEXT NOT NULL UNIQUE,
+  scope          TEXT NOT NULL DEFAULT 'global',
+  bot_id         TEXT NOT NULL DEFAULT '',
+  doc_type       TEXT NOT NULL DEFAULT 'item',
+  kind           TEXT NOT NULL DEFAULT '',
+  title          TEXT NOT NULL DEFAULT '',
+  body           TEXT NOT NULL DEFAULT '',
+  why            TEXT NOT NULL DEFAULT '',
+  tags_json      TEXT NOT NULL DEFAULT '[]',
+  status         TEXT NOT NULL DEFAULT 'active',
+  pin            INTEGER NOT NULL DEFAULT 0,
+  confidence     REAL NOT NULL DEFAULT 0.8,
+  valid_from     TEXT NOT NULL DEFAULT '',
+  valid_until    TEXT NOT NULL DEFAULT '',
+  superseded_by  TEXT NOT NULL DEFAULT '',
+  source_session TEXT NOT NULL DEFAULT '',
+  source_author  TEXT NOT NULL DEFAULT '',
+  created_at     TEXT NOT NULL DEFAULT '',
+  updated_at     TEXT NOT NULL DEFAULT '',
+  mtime_unix     INTEGER NOT NULL DEFAULT 0,
+  size           INTEGER NOT NULL DEFAULT 0,
+  sha256         TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_memory_docs_scope_bot ON memory_docs(scope, bot_id, status);
+CREATE INDEX IF NOT EXISTS idx_memory_docs_type      ON memory_docs(doc_type, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS memory_chunks (
+  chunk_id    TEXT PRIMARY KEY,
+  doc_id      TEXT NOT NULL,
+  chunk_index INTEGER NOT NULL DEFAULT 0,
+  heading     TEXT NOT NULL DEFAULT '',
+  start_line  INTEGER NOT NULL DEFAULT 1,
+  end_line    INTEGER NOT NULL DEFAULT 1,
+  text        TEXT NOT NULL,
+  sha256      TEXT NOT NULL DEFAULT '',
+  FOREIGN KEY(doc_id) REFERENCES memory_docs(doc_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_memory_chunks_doc ON memory_chunks(doc_id, chunk_index);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts_uni USING fts5(
+  chunk_id UNINDEXED,
+  doc_id UNINDEXED,
+  title,
+  tags,
+  text,
+  tokenize='unicode61 remove_diacritics 2'
+);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts_tri USING fts5(
+  chunk_id UNINDEXED,
+  doc_id UNINDEXED,
+  title,
+  tags,
+  text,
+  tokenize='trigram'
+);
+
+CREATE TABLE IF NOT EXISTS memory_embeddings (
+  chunk_id   TEXT PRIMARY KEY,
+  model      TEXT NOT NULL DEFAULT '',
+  dim        INTEGER NOT NULL DEFAULT 0,
+  vec        BLOB NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT '',
+  FOREIGN KEY(chunk_id) REFERENCES memory_chunks(chunk_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS memory_stats (
+  doc_id           TEXT PRIMARY KEY,
+  access_count     INTEGER NOT NULL DEFAULT 0,
+  last_accessed_at TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS memory_dismissed (
+  fingerprint  TEXT PRIMARY KEY,
+  scope        TEXT NOT NULL DEFAULT '',
+  bot_id       TEXT NOT NULL DEFAULT '',
+  summary      TEXT NOT NULL DEFAULT '',
+  dismissed_at TEXT NOT NULL DEFAULT ''
+);
 `
+
+// DB exposes the underlying SQLite database handle for derived index packages.
+func (s *Store) DB() *sql.DB {
+	if s == nil {
+		return nil
+	}
+	return s.db
+}
 
 func openSQLite(dbPath string) (*sql.DB, error) {
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {

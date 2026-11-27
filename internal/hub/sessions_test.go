@@ -14,11 +14,12 @@ import (
 )
 
 type fatalSessionHarness struct {
-	mu      sync.Mutex
-	calls   int
-	prompts []string
-	sessIDs []string
-	failAll bool
+	mu           sync.Mutex
+	calls        int
+	prompts      []string
+	sessIDs      []string
+	flushPrompts []string
+	failAll      bool
 }
 
 func (f *fatalSessionHarness) Kind() string { return "fataltest" }
@@ -30,6 +31,12 @@ func (f *fatalSessionHarness) Models(context.Context) ([]string, error) { return
 func (f *fatalSessionHarness) Close() {}
 
 func (f *fatalSessionHarness) RunTurn(_ context.Context, opts harness.RunOptions) (*harness.TurnResult, error) {
+	if opts.Ephemeral {
+		f.mu.Lock()
+		f.flushPrompts = append(f.flushPrompts, opts.Prompt)
+		f.mu.Unlock()
+		return &harness.TurnResult{BotID: opts.Bot.ID, Text: "NOOP"}, nil
+	}
 	f.mu.Lock()
 	f.calls++
 	idx := f.calls
