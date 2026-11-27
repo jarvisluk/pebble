@@ -1,15 +1,23 @@
 package channel
 
 import (
-	"bytes"
+	"bot-hub/internal/config"
+	"bot-hub/internal/desktop"
+	"bot-hub/internal/hub"
+	"bot-hub/internal/node"
+	"bot-hub/internal/protocol"
+	"bot-hub/internal/scheduler"
+	"bot-hub/internal/state"
+	"bot-hub/internal/syncer"
+	"bot-hub/internal/update"
+	"bot-hub/internal/web"
 	"context"
-	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"log"
 	"net"
@@ -17,22 +25,10 @@ import (
 	"net/url"
 	"os"
 	"path"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
-
-	"bot-hub/internal/config"
-	"bot-hub/internal/desktop"
-	"bot-hub/internal/harness"
-	"bot-hub/internal/hub"
-	"bot-hub/internal/node"
-	"bot-hub/internal/protocol"
-	"bot-hub/internal/scheduler"
-	"bot-hub/internal/state"
-	"bot-hub/internal/syncer"
-	"bot-hub/internal/web"
 )
 
 type RoutineScheduler interface {
@@ -42,12 +38,14 @@ type RoutineScheduler interface {
 }
 
 type HTTPServer struct {
-	hub     *hub.Hub
-	cfgMu   sync.RWMutex
-	cfg     config.HTTPConfig
-	srv     *http.Server
-	schedMu sync.RWMutex
-	sched   RoutineScheduler
+	hub       *hub.Hub
+	cfgMu     sync.RWMutex
+	cfg       config.HTTPConfig
+	srv       *http.Server
+	schedMu   sync.RWMutex
+	sched     RoutineScheduler
+	updaterMu sync.RWMutex
+	updater   *update.Manager
 
 	tailcat        tailcatServe
 	tailscale      tailscaleServe
@@ -90,6 +88,12 @@ func (s *HTTPServer) scheduler() RoutineScheduler {
 	s.schedMu.RLock()
 	defer s.schedMu.RUnlock()
 	return s.sched
+}
+
+func (s *HTTPServer) SetUpdater(u *update.Manager) {
+	s.updaterMu.Lock()
+	s.updater = u
+	s.updaterMu.Unlock()
 }
 
 func (s *HTTPServer) apiToken() string {
@@ -158,6 +162,14 @@ func NewHTTPServer(h *hub.Hub, cfg config.HTTPConfig) *HTTPServer {
 	mux.HandleFunc("GET /api/bots/{id}/sessions/{sessionId}", s.handleRecallBotSession)
 	mux.HandleFunc("GET /api/memory", s.handleMemorySearch)
 	mux.HandleFunc("POST /api/memory", s.handleMemorySave)
+	mux.HandleFunc("GET /api/memory/index", s.handleMemoryIndexGet)
+	mux.HandleFunc("PUT /api/memory/index", s.handleMemoryIndexPut)
+	mux.HandleFunc("GET /api/memory/status", s.handleMemoryStatus)
+	mux.HandleFunc("POST /api/memory/dream", s.handleMemoryDream)
+	mux.HandleFunc("POST /api/memory/reindex", s.handleMemoryReindex)
+	mux.HandleFunc("POST /api/memory/import/magpie", s.handleMemoryImportMagpie)
+	mux.HandleFunc("GET /api/memory/{id}", s.handleMemoryGet)
+	mux.HandleFunc("PATCH /api/memory/{id}", s.handleMemoryPatch)
 	mux.HandleFunc("DELETE /api/memory/{id}", s.handleMemoryDelete)
 	mux.HandleFunc("PATCH /api/bots/{id}", s.handleUpdateBot)
 	mux.HandleFunc("DELETE /api/bots/{id}", s.handleDeleteBot)
@@ -172,24 +184,31 @@ func NewHTTPServer(h *hub.Hub, cfg config.HTTPConfig) *HTTPServer {
 	mux.HandleFunc("DELETE /api/bots/{id}/routines/{routineId}", s.handleDeleteRoutine)
 	mux.HandleFunc("POST /api/bots/{id}/routines/{routineId}/run", s.handleRunRoutine)
 	mux.HandleFunc("GET /api/bots/{id}/routine-runs", s.handleListRoutineRuns)
+	mux.HandleFunc("GET /api/bots/{id}/tasks", s.handleListBotTasks)
+	mux.HandleFunc("POST /api/bots/{id}/tasks", s.handleSpawnTask)
+	mux.HandleFunc("GET /api/tasks/{taskId}", s.handleGetTask)
+	mux.HandleFunc("GET /api/tasks/{taskId}/events", s.handleListTaskEvents)
+	mux.HandleFunc("POST /api/tasks/{taskId}/send", s.handleSendToTask)
+	mux.HandleFunc("POST /api/tasks/{taskId}/cancel", s.handleCancelTask)
+	mux.HandleFunc("GET /api/tasks/{taskId}/diff", s.handleTaskDiff)
+	mux.HandleFunc("POST /api/tasks/{taskId}/rollback", s.handleTaskRollback)
 	mux.HandleFunc("GET /api/settings", s.handleSettings)
 	mux.HandleFunc("PUT /api/settings", s.handlePutSettings)
 	mux.HandleFunc("PATCH /api/settings", s.handlePutSettings)
+	mux.HandleFunc("GET /api/update", s.handleUpdateStatus)
+	mux.HandleFunc("POST /api/update/check", s.handleUpdateCheck)
+	mux.HandleFunc("PUT /api/update/config", s.handleUpdateConfig)
+	mux.HandleFunc("PATCH /api/update/config", s.handleUpdateConfig)
 	mux.HandleFunc("POST /api/desktop/reset", s.handleDesktopReset)
 	mux.HandleFunc("POST /api/push/register", s.handlePushRegister)
 	mux.HandleFunc("POST /api/push/activity-token", s.handlePushActivityToken)
 	mux.HandleFunc("DELETE /api/push/devices/{deviceId}", s.handlePushDeleteDevice)
 	mux.HandleFunc("GET /api/push/status", s.handlePushStatus)
 	mux.HandleFunc("GET /api/models", s.handleModels)
-	mux.HandleFunc("POST /api/harnesses/{id}/magpie", s.handleMagpieConnect)
 	mux.HandleFunc("POST /api/harnesses/{id}/install", s.handleHarnessInstallStart)
 	mux.HandleFunc("GET /api/harnesses/{id}/install", s.handleHarnessInstallStatus)
 	mux.HandleFunc("POST /api/harnesses/{id}/login", s.handleHarnessLoginStart)
 	mux.HandleFunc("GET /api/harnesses/{id}/login", s.handleHarnessLoginStatus)
-	mux.HandleFunc("POST /api/magpie/providers", s.handleMagpieProvider)
-	mux.HandleFunc("POST /api/magpie/open", s.handleMagpieOpen)
-	mux.HandleFunc("POST /api/magpie/install", s.handleMagpieInstallStart)
-	mux.HandleFunc("GET /api/magpie/install", s.handleMagpieInstallStatus)
 
 	mux.HandleFunc("GET /api/desktop/targets", s.handleDesktopTargets)
 	mux.HandleFunc("PUT /api/desktop/target", s.handleDesktopTargetSet)
@@ -221,6 +240,7 @@ func NewHTTPServer(h *hub.Hub, cfg config.HTTPConfig) *HTTPServer {
 
 	mux.HandleFunc("GET /api/nodes", s.handleNodes)
 	mux.HandleFunc("GET /api/local-node", s.handleLocalNodeStub)
+	mux.HandleFunc("GET /api/nodes/ws", s.handleNodeWS)
 	mux.HandleFunc("POST /api/nodes/poll", s.handleNodePoll)
 	mux.HandleFunc("POST /api/nodes/result", s.handleNodeResult)
 	mux.HandleFunc("POST /api/nodes/disconnect", s.handleNodeDisconnect)
@@ -266,11 +286,9 @@ func (s *HTTPServer) Start() error {
 	s.startTailcat(s.srv.Handler)
 	s.startTailscale(s.srv.Handler)
 	if s.hub != nil {
-		kinds := s.hub.HarnessKinds()
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
-			harness.WarmMagpieCache(ctx, kinds)
 			s.hub.WarmModelsCache(ctx)
 		}()
 	}
@@ -322,7 +340,7 @@ func (s *HTTPServer) guard(next http.Handler) http.Handler {
 				return
 			}
 		}
-		if (s.apiToken() != "" || tunneled) &&
+		if (s.hasAuthConfigured() || tunneled) &&
 			r.URL.Path != "/" &&
 			!strings.HasPrefix(r.URL.Path, "/assets/") &&
 			r.URL.Path != "/api/login" &&
@@ -339,14 +357,87 @@ func (s *HTTPServer) guard(next http.Handler) http.Handler {
 	})
 }
 
+func (s *HTTPServer) hasAuthConfigured() bool {
+	s.cfgMu.RLock()
+	defer s.cfgMu.RUnlock()
+	return s.cfg.APIToken != "" || len(s.cfg.DeviceTokens) > 0
+}
+
 func (s *HTTPServer) authorized(r *http.Request) bool {
-	got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	got := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
 	if got == "" {
 		if c, err := r.Cookie(authCookie); err == nil {
 			got = c.Value
 		}
 	}
-	return subtle.ConstantTimeCompare([]byte(got), []byte(s.apiToken())) == 1
+	if got == "" {
+		return false
+	}
+
+	s.cfgMu.RLock()
+	apiTok := s.cfg.APIToken
+	deviceTokens := append([]config.DeviceTokenConfig(nil), s.cfg.DeviceTokens...)
+	s.cfgMu.RUnlock()
+
+	if apiTok != "" && subtle.ConstantTimeCompare([]byte(got), []byte(apiTok)) == 1 {
+		return true
+	}
+
+	var gotHashHex string
+	for _, dt := range deviceTokens {
+		if dt.Revoked {
+			continue
+		}
+		matched := false
+		if dt.Token != "" && subtle.ConstantTimeCompare([]byte(got), []byte(dt.Token)) == 1 {
+			matched = true
+		} else if hashSpec := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(dt.TokenHash), "sha256:")); hashSpec != "" {
+			if gotHashHex == "" {
+				sum := sha256.Sum256([]byte(got))
+				gotHashHex = hex.EncodeToString(sum[:])
+			}
+			if subtle.ConstantTimeCompare([]byte(gotHashHex), []byte(hashSpec)) == 1 {
+				matched = true
+			}
+		}
+		if matched && deviceTokenAllowsPath(dt.Scopes, r.URL.Path) {
+			return true
+		}
+	}
+	return false
+}
+
+func deviceTokenAllowsPath(scopes []string, reqPath string) bool {
+	if len(scopes) == 0 {
+		return true
+	}
+	isNodePath := strings.HasPrefix(reqPath, "/api/nodes/")
+	isMCPHubPath := strings.HasPrefix(reqPath, "/api/bots/") ||
+		strings.HasPrefix(reqPath, "/api/sessions") ||
+		strings.HasPrefix(reqPath, "/api/memory") ||
+		strings.HasPrefix(reqPath, "/api/media")
+	for _, raw := range scopes {
+		sc := strings.ToLower(strings.TrimSpace(raw))
+		switch sc {
+		case "*", "all":
+			return true
+		case "api", "hub":
+			return true
+		case "node", "nodes", "node:ws":
+			if isNodePath {
+				return true
+			}
+		case "node:agent", "agent":
+			if isNodePath || isMCPHubPath {
+				return true
+			}
+		case "mcp":
+			if isMCPHubPath {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (s *HTTPServer) handleLogin(w http.ResponseWriter, r *http.Request) {
@@ -359,11 +450,15 @@ func (s *HTTPServer) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	token := s.apiToken()
 	if token == "" {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		if !s.hasAuthConfigured() {
+			writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+			return
+		}
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "invalid token"})
 		return
 	}
 	if subtle.ConstantTimeCompare([]byte(req.Token), []byte(token)) != 1 {
-		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "token 不正确"})
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "invalid token"})
 		return
 	}
 	http.SetCookie(w, &http.Cookie{
@@ -414,17 +509,48 @@ func (s *HTTPServer) handleEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	replay := false
+	var since uint64
+	if r.URL.Query().Has("since") {
+		rawSince := strings.TrimSpace(r.URL.Query().Get("since"))
+		if rawSince == "" {
+			replay = true
+		} else if v, err := strconv.ParseUint(rawSince, 10, 64); err == nil {
+			since = v
+			replay = true
+		} else {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid since cursor"})
+			return
+		}
+	} else if lastID := strings.TrimSpace(r.Header.Get("Last-Event-ID")); lastID != "" {
+		if v, err := strconv.ParseUint(lastID, 10, 64); err == nil {
+			since = v
+			replay = true
+		}
+	}
+
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
 
 	resetCh := s.sseResetChan()
-	subID, ch := s.hub.Subscribe()
+	subID, ch, missed := s.hub.SubscribeSince(since, replay)
 	defer s.hub.Unsubscribe(subID)
 
 	// Send an initial ping so clients mark connected immediately.
 	fmt.Fprintf(w, "event: ready\ndata: {}\n\n")
+	for _, evt := range missed {
+		raw, err := json.Marshal(evt)
+		if err != nil {
+			continue
+		}
+		if evt.Seq > 0 {
+			fmt.Fprintf(w, "id: %d\nevent: %s\ndata: %s\n\n", evt.Seq, evt.Type, raw)
+		} else {
+			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", evt.Type, raw)
+		}
+	}
 	flusher.Flush()
 
 	keepalive := time.NewTicker(25 * time.Second)
@@ -447,7 +573,11 @@ func (s *HTTPServer) handleEvents(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				continue
 			}
-			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", evt.Type, raw)
+			if evt.Seq > 0 {
+				fmt.Fprintf(w, "id: %d\nevent: %s\ndata: %s\n\n", evt.Seq, evt.Type, raw)
+			} else {
+				fmt.Fprintf(w, "event: %s\ndata: %s\n\n", evt.Type, raw)
+			}
 			flusher.Flush()
 		}
 	}
@@ -468,18 +598,6 @@ func (s *HTTPServer) handleMeta(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.serverInfo())
 }
 
-func (s *HTTPServer) handleStatus(w http.ResponseWriter, _ *http.Request) {
-	sts, err := s.hub.Status("")
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"bots":   sts,
-		"server": s.serverInfo(),
-	})
-}
-
 func queryBool(r *http.Request, name string) bool {
 	if r == nil || r.URL == nil {
 		return false
@@ -488,1719 +606,21 @@ func queryBool(r *http.Request, name string) bool {
 	return v == "1" || strings.EqualFold(v, "true")
 }
 
-func (s *HTTPServer) handleCreateBot(w http.ResponseWriter, r *http.Request) {
-	var req hub.CreateBotRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json body"})
-		return
-	}
-	if queryBool(r, "validate") {
-		vctx, vcancel := context.WithTimeout(r.Context(), 30*time.Second)
-		defer vcancel()
-		if err := s.hub.ValidateCreateBot(vctx, req, true); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
-			return
-		}
-	}
-	st, err := s.hub.CreateBot(req)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
-		return
-	}
-	writeJSON(w, http.StatusCreated, st)
-}
-
-func (s *HTTPServer) handleBotDetail(w http.ResponseWriter, r *http.Request) {
-	botID := r.PathValue("id")
-	detail, err := s.hub.GetBotDetail(botID)
-	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]any{"error": err.Error()})
-		return
-	}
-	writeJSON(w, http.StatusOK, detail)
-}
-
-func (s *HTTPServer) handleBotMessages(w http.ResponseWriter, r *http.Request) {
-	botID := r.PathValue("id")
-	limit := 200
-	if q := r.URL.Query().Get("limit"); q != "" {
-		if n, err := strconv.Atoi(q); err == nil && n > 0 {
-			limit = n
-		}
-	}
-	msgs, err := s.hub.Messages(botID, limit)
-	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]any{"error": err.Error()})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"messages": msgs})
-}
-
-func (s *HTTPServer) handleBotCollabMessages(w http.ResponseWriter, r *http.Request) {
-	botID := r.PathValue("id")
-	peerID := r.PathValue("peerId")
-	limit := 200
-	if q := r.URL.Query().Get("limit"); q != "" {
-		if n, err := strconv.Atoi(q); err == nil && n > 0 {
-			limit = n
-		}
-	}
-	msgs, err := s.hub.CollabMessages(botID, peerID, limit)
-	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]any{"error": err.Error()})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"messages": msgs})
-}
-
-type outboundMessageReq struct {
-	Text   string              `json:"text"`
-	Images []hub.OutboundImage `json:"images,omitempty"`
-	Files  []hub.OutboundFile  `json:"files,omitempty"`
-}
-
-func (s *HTTPServer) handleOutboundMessage(w http.ResponseWriter, r *http.Request) {
-	botID := r.PathValue("id")
-	var req outboundMessageReq
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<20)).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json body"})
-		return
-	}
-	msg, err := s.hub.SendOutboundMessage(botID, req.Text, req.Images, req.Files...)
-	if err != nil {
-		status := http.StatusBadRequest
-		if strings.Contains(err.Error(), "not found") {
-			status = http.StatusNotFound
-		}
-		writeJSON(w, status, map[string]any{"error": err.Error()})
-		return
-	}
-	writeJSON(w, http.StatusOK, msg)
-}
-
-func (s *HTTPServer) validMediaTicket(mediaID, ticket string) bool {
-	if mediaID == "" || ticket == "" || strings.Contains(mediaID, "/") {
-		return false
-	}
-	now := time.Now()
-	s.mediaTicketsMu.Lock()
-	defer s.mediaTicketsMu.Unlock()
-	if s.mediaTickets == nil {
-		return false
-	}
-	for k, v := range s.mediaTickets {
-		if now.After(v.expiresAt) {
-			delete(s.mediaTickets, k)
-		}
-	}
-	entry, ok := s.mediaTickets[ticket]
-	if !ok || now.After(entry.expiresAt) || entry.mediaID != mediaID {
-		return false
-	}
-	return true
-}
-
-func (s *HTTPServer) handleMediaTicket(w http.ResponseWriter, r *http.Request) {
-	mediaID := r.PathValue("id")
-	if _, _, err := s.hub.ResolveMediaFile(mediaID); err != nil {
-		status := http.StatusNotFound
-		if strings.Contains(err.Error(), "invalid") {
-			status = http.StatusBadRequest
-		}
-		writeJSON(w, status, map[string]any{"error": err.Error()})
-		return
-	}
-	rb := make([]byte, 16)
-	if _, err := rand.Read(rb); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "failed to issue ticket"})
-		return
-	}
-	ticket := hex.EncodeToString(rb)
-	now := time.Now()
-
-	s.mediaTicketsMu.Lock()
-	if s.mediaTickets == nil {
-		s.mediaTickets = make(map[string]mediaTicket)
-	}
-	for k, v := range s.mediaTickets {
-		if now.After(v.expiresAt) {
-			delete(s.mediaTickets, k)
-		}
-	}
-	s.mediaTickets[ticket] = mediaTicket{
-		mediaID:   mediaID,
-		expiresAt: now.Add(60 * time.Second),
-	}
-	s.mediaTicketsMu.Unlock()
-
-	writeJSON(w, http.StatusOK, map[string]any{
-		"ticket":    ticket,
-		"expiresIn": 60,
-	})
-}
-
-func isSafeInlineImageMIME(mimeType string) bool {
-	base := strings.TrimSpace(strings.Split(mimeType, ";")[0])
-	switch base {
-	case "image/png", "image/jpeg", "image/gif", "image/webp":
-		return true
-	default:
-		return false
-	}
-}
-
-func sanitizeASCIIName(name string) string {
-	var b strings.Builder
-	for _, r := range name {
-		if r >= 0x20 && r <= 0x7e && r != '"' && r != '\\' && r != ';' {
-			b.WriteRune(r)
-		} else if r > 0x7e {
-			b.WriteByte('_')
-		}
-	}
-	out := strings.TrimSpace(b.String())
-	if out == "" {
-		return "download"
-	}
-	return out
-}
-
-func (s *HTTPServer) handleMedia(w http.ResponseWriter, r *http.Request) {
-	mediaID := r.PathValue("id")
-	filePath, mimeType, err := s.hub.ResolveMediaFile(mediaID)
-	if err != nil {
-		status := http.StatusNotFound
-		if strings.Contains(err.Error(), "invalid") {
-			status = http.StatusBadRequest
-		}
-		writeJSON(w, status, map[string]any{"error": err.Error()})
-		return
-	}
-	w.Header().Set("Content-Type", mimeType)
-	w.Header().Set("Cache-Control", "private, max-age=86400")
-	w.Header().Set("X-Content-Type-Options", "nosniff")
-	if r.URL.Query().Get("download") == "1" || !isSafeInlineImageMIME(mimeType) {
-		dlName := strings.TrimSpace(r.URL.Query().Get("name"))
-		if dlName == "" {
-			dlName = mediaID
-		} else {
-			dlName = path.Base(dlName)
-		}
-		asciiName := sanitizeASCIIName(dlName)
-		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"; filename*=UTF-8''%s`, asciiName, url.PathEscape(dlName)))
-		w.Header().Set("Content-Security-Policy", "sandbox")
-	}
-	http.ServeFile(w, r, filePath)
-}
-
-type messageReq struct {
-	Message   string   `json:"message"`
-	FromBotID string   `json:"fromBotId,omitempty"`
-	Hop       int      `json:"hop,omitempty"`
-	Source    string   `json:"source,omitempty"`
-	MediaIDs  []string `json:"mediaIds,omitempty"`
-}
-
-func (s *HTTPServer) handleMessage(w http.ResponseWriter, r *http.Request) {
-	botID := r.PathValue("id")
-	var req messageReq
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json body"})
-		return
-	}
-	if strings.TrimSpace(req.Message) == "" && len(req.MediaIDs) == 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "message or mediaIds is required"})
-		return
-	}
-
-	if req.FromBotID != "" {
-		res, err := s.hub.MessageBot(r.Context(), req.FromBotID, botID, req.Message, req.Hop)
-		if err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
-			return
-		}
-		writeJSON(w, http.StatusOK, res)
-		return
-	}
-
-	src := req.Source
-	if src == "" {
-		src = "web"
-	}
-	res, err := s.hub.HandleInput(r.Context(), botID, req.Message, hub.SendOptions{
-		Source:   src,
-		MediaIDs: req.MediaIDs,
-	})
-	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]any{"error": err.Error()})
-		return
-	}
-	writeJSON(w, http.StatusOK, res)
-}
-
-func (s *HTTPServer) validWorkspaceFileRawRequest(r *http.Request) bool {
-	if r.Method != http.MethodGet {
-		return false
-	}
-	const prefix = "/api/bots/"
-	const suffix = "/files/raw"
-	if !strings.HasPrefix(r.URL.Path, prefix) || !strings.HasSuffix(r.URL.Path, suffix) {
-		return false
-	}
-	botID := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, prefix), suffix)
-	if botID == "" || strings.Contains(botID, "/") {
-		return false
-	}
-	ticket := r.URL.Query().Get("ticket")
-	relPath := r.URL.Query().Get("path")
-	if ticket == "" || relPath == "" {
-		return false
-	}
-	now := time.Now()
-	s.fileTicketsMu.Lock()
-	defer s.fileTicketsMu.Unlock()
-	if s.fileTickets == nil {
-		return false
-	}
-	for k, v := range s.fileTickets {
-		if now.After(v.expiresAt) {
-			delete(s.fileTickets, k)
-		}
-	}
-	entry, ok := s.fileTickets[ticket]
-	if !ok || now.After(entry.expiresAt) {
-		return false
-	}
-	return entry.botID == botID && entry.relPath == relPath
-}
-
-func writeWorkspaceFileErr(w http.ResponseWriter, err error) {
-	status := http.StatusInternalServerError
-	switch {
-	case errors.Is(err, hub.ErrBotNotFound), errors.Is(err, hub.ErrWorkspaceNotFound):
-		status = http.StatusNotFound
-	case errors.Is(err, hub.ErrWorkspacePathBlocked):
-		status = http.StatusForbidden
-	case errors.Is(err, hub.ErrWorkspaceIsDir), errors.Is(err, hub.ErrInvalidStageKind):
-		status = http.StatusBadRequest
-	}
-	writeJSON(w, status, map[string]any{"error": err.Error()})
-}
-
-func (s *HTTPServer) handleBotFilesList(w http.ResponseWriter, r *http.Request) {
-	botID := r.PathValue("id")
-	relPath := r.URL.Query().Get("path")
-	showHidden := r.URL.Query().Get("showHidden") == "1" || strings.EqualFold(r.URL.Query().Get("showHidden"), "true")
-	res, err := s.hub.ListWorkspaceFiles(botID, relPath, showHidden)
-	if err != nil {
-		writeWorkspaceFileErr(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, res)
-}
-
-func (s *HTTPServer) handleBotFileContent(w http.ResponseWriter, r *http.Request) {
-	botID := r.PathValue("id")
-	relPath := r.URL.Query().Get("path")
-	maxBytes := 0
-	if rawMax := r.URL.Query().Get("maxBytes"); rawMax != "" {
-		if n, err := strconv.Atoi(rawMax); err == nil && n > 0 {
-			maxBytes = n
-		}
-	}
-	res, err := s.hub.ReadWorkspaceFile(botID, relPath, maxBytes)
-	if err != nil {
-		writeWorkspaceFileErr(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, res)
-}
-
-func (s *HTTPServer) handleBotFileTicket(w http.ResponseWriter, r *http.Request) {
-	botID := r.PathValue("id")
-	var req struct {
-		Path string `json:"path"`
-	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json body"})
-		return
-	}
-	absPath, cleanRel, _, err := s.hub.ResolveWorkspacePath(botID, req.Path)
-	if err != nil {
-		writeWorkspaceFileErr(w, err)
-		return
-	}
-	if cleanRel == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "path is a directory"})
-		return
-	}
-	info, err := os.Stat(absPath)
-	if err != nil {
-		writeWorkspaceFileErr(w, hub.ErrWorkspaceNotFound)
-		return
-	}
-	if info.IsDir() {
-		writeWorkspaceFileErr(w, hub.ErrWorkspaceIsDir)
-		return
-	}
-
-	rb := make([]byte, 16)
-	if _, err := rand.Read(rb); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "failed to issue ticket"})
-		return
-	}
-	ticket := hex.EncodeToString(rb)
-	now := time.Now()
-
-	s.fileTicketsMu.Lock()
-	if s.fileTickets == nil {
-		s.fileTickets = make(map[string]fileTicket)
-	}
-	for k, v := range s.fileTickets {
-		if now.After(v.expiresAt) {
-			delete(s.fileTickets, k)
-		}
-	}
-	s.fileTickets[ticket] = fileTicket{
-		botID:     botID,
-		relPath:   cleanRel,
-		expiresAt: now.Add(60 * time.Second),
-	}
-	s.fileTicketsMu.Unlock()
-
-	writeJSON(w, http.StatusOK, map[string]any{
-		"ticket":    ticket,
-		"path":      cleanRel,
-		"expiresIn": 60,
-	})
-}
-
-func (s *HTTPServer) handleBotFileRaw(w http.ResponseWriter, r *http.Request) {
-	botID := r.PathValue("id")
-	relPath := r.URL.Query().Get("path")
-	absPath, cleanRel, _, err := s.hub.ResolveWorkspacePath(botID, relPath)
-	if err != nil {
-		writeWorkspaceFileErr(w, err)
-		return
-	}
-	if cleanRel == "" {
-		writeWorkspaceFileErr(w, hub.ErrWorkspaceIsDir)
-		return
-	}
-	info, err := os.Stat(absPath)
-	if err != nil {
-		writeWorkspaceFileErr(w, hub.ErrWorkspaceNotFound)
-		return
-	}
-	if info.IsDir() {
-		writeWorkspaceFileErr(w, hub.ErrWorkspaceIsDir)
-		return
-	}
-
-	meta, err := s.hub.ReadWorkspaceFile(botID, cleanRel, 512)
-	mimeType := "application/octet-stream"
-	if err == nil && meta.MimeType != "" {
-		mimeType = meta.MimeType
-	}
-	w.Header().Set("Content-Type", mimeType)
-	w.Header().Set("Cache-Control", "private, no-cache")
-	w.Header().Set("X-Content-Type-Options", "nosniff")
-	if r.URL.Query().Get("download") == "1" || !isSafeInlineImageMIME(mimeType) {
-		dlName := path.Base(cleanRel)
-		asciiName := sanitizeASCIIName(dlName)
-		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"; filename*=UTF-8''%s`, asciiName, url.PathEscape(dlName)))
-		w.Header().Set("Content-Security-Policy", "sandbox")
-	}
-	http.ServeFile(w, r, absPath)
-}
-
-func (s *HTTPServer) handleBotStageOpen(w http.ResponseWriter, r *http.Request) {
-	botID := r.PathValue("id")
-	var req hub.StageOpenPayload
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 32*1024)).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json body"})
-		return
-	}
-	out, err := s.hub.OpenBotStage(botID, req)
-	if err != nil {
-		writeWorkspaceFileErr(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, out)
-}
-
-func (s *HTTPServer) handleBotCommands(w http.ResponseWriter, r *http.Request) {
-	botID := r.PathValue("id")
-	cmds, err := s.hub.ListBotCommands(r.Context(), botID)
-	if err != nil {
-		status := http.StatusInternalServerError
-		if errors.Is(err, hub.ErrBotNotFound) {
-			status = http.StatusNotFound
-		}
-		writeJSON(w, status, map[string]any{"error": err.Error()})
-		return
-	}
-	if cmds == nil {
-		cmds = []harness.SlashCommand{}
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"commands": cmds})
-}
-
-func (s *HTTPServer) handleBotMentions(w http.ResponseWriter, r *http.Request) {
-	botID := r.PathValue("id")
-	q := r.URL.Query().Get("q")
-	limit := 30
-	if rawLimit := r.URL.Query().Get("limit"); rawLimit != "" {
-		if n, err := strconv.Atoi(rawLimit); err == nil && n > 0 && n <= 100 {
-			limit = n
-		}
-	}
-	items, err := s.hub.ListBotMentions(r.Context(), botID, q, limit)
-	if err != nil {
-		status := http.StatusInternalServerError
-		if errors.Is(err, hub.ErrBotNotFound) {
-			status = http.StatusNotFound
-		}
-		writeJSON(w, status, map[string]any{"error": err.Error()})
-		return
-	}
-	if items == nil {
-		items = []hub.MentionCandidate{}
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items})
-}
-
-func (s *HTTPServer) handleUploadAttachment(w http.ResponseWriter, r *http.Request) {
-	botID := r.PathValue("id")
-	r.Body = http.MaxBytesReader(w, r.Body, 52<<20)
-	if err := r.ParseMultipartForm(32 << 20); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid multipart upload"})
-		return
-	}
-	file, header, err := r.FormFile("file")
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "file field is required"})
-		return
-	}
-	defer file.Close()
-
-	raw, err := io.ReadAll(io.LimitReader(file, (50<<20)+1))
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "failed to read uploaded file"})
-		return
-	}
-	if len(raw) > 50<<20 {
-		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]any{"error": "file exceeds 50 MiB limit"})
-		return
-	}
-
-	att, err := s.hub.SaveInboundAttachment(botID, header.Filename, raw)
-	if err != nil {
-		status := http.StatusBadRequest
-		if errors.Is(err, hub.ErrBotNotFound) {
-			status = http.StatusNotFound
-		}
-		writeJSON(w, status, map[string]any{"error": err.Error()})
-		return
-	}
-	writeJSON(w, http.StatusOK, att)
-}
-
-func (s *HTTPServer) handleUpdateBot(w http.ResponseWriter, r *http.Request) {
-	var upd hub.BotUpdate
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&upd); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json body"})
-		return
-	}
-	botID := r.PathValue("id")
-	validate := queryBool(r, "validate")
-	dryRun := queryBool(r, "dryRun")
-	if validate || dryRun {
-		vctx, vcancel := context.WithTimeout(r.Context(), 30*time.Second)
-		defer vcancel()
-		preview, err := s.hub.ValidateBotUpdate(vctx, botID, upd, validate)
-		if err != nil {
-			status := http.StatusBadRequest
-			if errors.Is(err, hub.ErrBotNotFound) {
-				status = http.StatusNotFound
-			}
-			writeJSON(w, status, map[string]any{"error": err.Error()})
-			return
-		}
-		if dryRun {
-			writeJSON(w, http.StatusOK, preview)
-			return
-		}
-	}
-	st, err := s.hub.UpdateBot(botID, upd)
-	if err != nil {
-		status := http.StatusBadRequest
-		if errors.Is(err, hub.ErrBotNotFound) {
-			status = http.StatusNotFound
-		}
-		writeJSON(w, status, map[string]any{"error": err.Error()})
-		return
-	}
-	writeJSON(w, http.StatusOK, st)
-}
-
-func (s *HTTPServer) handleDeleteBot(w http.ResponseWriter, r *http.Request) {
-	if err := s.hub.DeleteBot(r.PathValue("id")); err != nil {
-		status := http.StatusBadRequest
-		if errors.Is(err, hub.ErrBotNotFound) {
-			status = http.StatusNotFound
-		}
-		writeJSON(w, status, map[string]any{"error": err.Error()})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
-}
-
-func (s *HTTPServer) handleInterrupt(w http.ResponseWriter, r *http.Request) {
-	ok, err := s.hub.Interrupt(r.PathValue("id"))
-	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]any{"error": err.Error()})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"interrupted": ok})
-}
-
-type settingsBody struct {
-	DefaultHarness        *string           `json:"defaultHarness,omitempty"`
-	DefaultPermissionMode *string           `json:"defaultPermissionMode,omitempty"`
-	DefaultModel          *string           `json:"defaultModel,omitempty"`
-	DefaultModels       map[string]string `json:"defaultModels,omitempty"`
-	DefaultModelsPatch  map[string]string `json:"defaultModelsPatch,omitempty"`
-	DesktopHarness      *string           `json:"desktopHarness,omitempty"`
-	DesktopModel        *string           `json:"desktopModel,omitempty"`
-	SharedUserMD        *string           `json:"sharedUserMd,omitempty"`
-	MagpieWebURL        *string           `json:"magpieWebUrl,omitempty"`
-	OnboardingCompleted *bool             `json:"onboardingCompleted,omitempty"`
-}
-
-// DesktopResetFunc is registered by the native desktop host (bot-hub-desktop)
-// so the onboarding wizard can navigate back to the mode selector page.
-var DesktopResetFunc func()
-
-// OnAPITokenChanged is registered by the native desktop host so local-mode
-// clients immediately receive newly generated or rotated API tokens.
-var OnAPITokenChanged func(token string)
-
-func (s *HTTPServer) handleDesktopReset(w http.ResponseWriter, r *http.Request) {
-	if DesktopResetFunc == nil {
-		writeJSON(w, http.StatusNotFound, map[string]any{"error": "desktop host unavailable"})
-		return
-	}
-	host := r.Host
-	if h, _, err := net.SplitHostPort(host); err == nil {
-		host = h
-	}
-	if host != "127.0.0.1" && host != "localhost" && host != "::1" {
-		writeJSON(w, http.StatusForbidden, map[string]any{"error": "loopback only"})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
-	DesktopResetFunc()
-}
-
-func (s *HTTPServer) handleSettings(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
-	defer cancel()
-	if r.URL.Query().Get("fresh") == "1" {
-		harness.InvalidateMagpieCache()
-		harness.InvalidateAuthCache()
-	}
-	defaultModel, defaultModels := s.hub.DefaultModelsSnapshot()
-	deskHarness, deskModel := s.hub.DesktopWorkerSnapshot()
-	installed := harness.MagpieInstalled()
-	var (
-		healthy   bool
-		providers []harness.MagpieProvider
-		presets   []harness.MagpiePreset
-		harnesses []hub.HarnessInfo
-		wg        sync.WaitGroup
-	)
-	wg.Add(1)
-	go func() { defer wg.Done(); harnesses = s.hub.Harnesses(ctx) }()
-	if installed {
-		wg.Add(3)
-		go func() { defer wg.Done(); healthy = harness.MagpieGatewayHealthy(ctx) }()
-		go func() { defer wg.Done(); providers = harness.MagpieListProviders(ctx) }()
-		go func() { defer wg.Done(); presets = harness.MagpiePresets(ctx) }()
-	}
-	wg.Wait()
-	if providers == nil {
-		providers = []harness.MagpieProvider{}
-	}
-	if presets == nil {
-		presets = []harness.MagpiePreset{}
-	}
-	installedIDs := []string{}
-	for _, hi := range harnesses {
-		if hi.Installed {
-			installedIDs = append(installedIDs, hi.ID)
-		}
-	}
-	completed := s.hub.OnboardingCompleted()
-	hasConversation := s.hub.HasAnyConversation()
-	writeJSON(w, http.StatusOK, map[string]any{
-		"magpie": map[string]any{
-			"installed": installed,
-			"healthy":   healthy,
-			"install":   harness.MagpieInstall,
-			"providers": providers,
-			"presets":   presets,
-			"webUrl":    s.hub.MagpieWebURL(),
-		},
-		"desktopHarness":        deskHarness,
-		"desktopModel":          deskModel,
-		"defaultHarness":        s.hub.DefaultHarness(),
-		"defaultPermissionMode": s.hub.DefaultPermissionMode(),
-		"defaultModel":          defaultModel,
-		"defaultModels":  defaultModels,
-		"sharedUserMd":        s.hub.SharedUserMD(),
-		"harnesses":           harnesses,
-		"canResetDesktopMode": DesktopResetFunc != nil,
-		"onboarding": map[string]any{
-			"completed":          completed,
-			"needsSetup":         !completed && !hasConversation,
-			"installedHarnesses": installedIDs,
-		},
-	})
-}
-
-func sortedMapKeys(m map[string]string) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
-}
-
-func (s *HTTPServer) handlePutSettings(w http.ResponseWriter, r *http.Request) {
-	var body settingsBody
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json body"})
-		return
-	}
-	if body.DefaultModels != nil && body.DefaultModelsPatch != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "cannot specify both defaultModels and defaultModelsPatch"})
-		return
-	}
-
-	curDefaultHarness := s.hub.DefaultHarness()
-	nextDefaultHarness := curDefaultHarness
-	if body.DefaultHarness != nil {
-		trimmed := strings.TrimSpace(*body.DefaultHarness)
-		if trimmed != "" {
-			if err := s.hub.ValidateHarnessKey(trimmed); err != nil {
-				writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
-				return
-			}
-			nextDefaultHarness = trimmed
-		} else {
-			nextDefaultHarness = "opencode"
-		}
-	}
-
-	curDefaultModel, curPerHarness := s.hub.DefaultModelsSnapshot()
-	nextDefaultModel := curDefaultModel
-	if body.DefaultModel != nil {
-		nextDefaultModel = strings.TrimSpace(*body.DefaultModel)
-		if err := config.ValidateModelID(nextDefaultModel); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
-			return
-		}
-	}
-
-	nextPerHarness := make(map[string]string, len(curPerHarness))
-	for k, v := range curPerHarness {
-		nextPerHarness[k] = v
-	}
-	if body.DefaultModels != nil {
-		nextPerHarness = make(map[string]string, len(body.DefaultModels))
-		for _, k := range sortedMapKeys(body.DefaultModels) {
-			v := strings.TrimSpace(body.DefaultModels[k])
-			if v == "" {
-				continue
-			}
-			if err := s.hub.ValidateHarnessKey(k); err != nil {
-				writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
-				return
-			}
-			if err := config.ValidateModelID(v); err != nil {
-				writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
-				return
-			}
-			nextPerHarness[k] = v
-		}
-	} else if body.DefaultModelsPatch != nil {
-		for _, rawK := range sortedMapKeys(body.DefaultModelsPatch) {
-			k := strings.TrimSpace(rawK)
-			if err := s.hub.ValidateHarnessKey(k); err != nil {
-				writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
-				return
-			}
-			v := strings.TrimSpace(body.DefaultModelsPatch[rawK])
-			if err := config.ValidateModelID(v); err != nil {
-				writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
-				return
-			}
-			if v == "" {
-				delete(nextPerHarness, k)
-			} else {
-				nextPerHarness[k] = v
-			}
-		}
-	}
-
-	curDeskHarness, curDeskModel := s.hub.DesktopWorkerSnapshot()
-	nextDeskHarness, nextDeskModel := curDeskHarness, curDeskModel
-	if body.DesktopHarness != nil {
-		nextDeskHarness = strings.TrimSpace(*body.DesktopHarness)
-		if nextDeskHarness != "" {
-			if err := s.hub.ValidateHarnessKey(nextDeskHarness); err != nil {
-				writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
-				return
-			}
-		}
-	}
-	if body.DesktopModel != nil {
-		nextDeskModel = strings.TrimSpace(*body.DesktopModel)
-		if err := config.ValidateModelID(nextDeskModel); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
-			return
-		}
-	}
-	if body.MagpieWebURL != nil {
-		if _, err := hub.ValidateMagpieWebURL(*body.MagpieWebURL); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
-			return
-		}
-	}
-
-	if queryBool(r, "validate") {
-		vctx, vcancel := context.WithTimeout(r.Context(), 30*time.Second)
-		defer vcancel()
-		if body.DefaultHarness != nil && strings.TrimSpace(*body.DefaultHarness) != "" {
-			if err := s.hub.ValidateHarnessReady(vctx, nextDefaultHarness); err != nil {
-				writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
-				return
-			}
-		}
-		if body.DefaultModel != nil && nextDefaultModel != "" {
-			if err := s.hub.ValidateGlobalDefaultModel(vctx, nextDefaultHarness, nextDefaultModel); err != nil {
-				writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
-				return
-			}
-		}
-		if body.DefaultModelsPatch != nil {
-			for _, rawK := range sortedMapKeys(body.DefaultModelsPatch) {
-				k := strings.TrimSpace(rawK)
-				v := strings.TrimSpace(body.DefaultModelsPatch[rawK])
-				if v == "" {
-					continue
-				}
-				if err := s.hub.ValidateHarnessReady(vctx, k); err != nil {
-					writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
-					return
-				}
-				if err := s.hub.ValidateModelForHarness(vctx, k, v); err != nil {
-					writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
-					return
-				}
-			}
-		} else if body.DefaultModels != nil {
-			for _, k := range sortedMapKeys(nextPerHarness) {
-				v := nextPerHarness[k]
-				if v == "" {
-					continue
-				}
-				if err := s.hub.ValidateHarnessReady(vctx, k); err != nil {
-					writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
-					return
-				}
-				if err := s.hub.ValidateModelForHarness(vctx, k, v); err != nil {
-					writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
-					return
-				}
-			}
-		}
-		if body.DesktopHarness != nil && nextDeskHarness != "" {
-			if err := s.hub.ValidateHarnessReady(vctx, nextDeskHarness); err != nil {
-				writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
-				return
-			}
-		}
-		desktopTargetChanged := nextDeskHarness != curDeskHarness || (nextDeskHarness == "" && nextDefaultHarness != curDefaultHarness)
-		if (body.DesktopModel != nil || desktopTargetChanged) && nextDeskModel != "" {
-			target := nextDeskHarness
-			if target == "" {
-				target = nextDefaultHarness
-			}
-			if err := s.hub.ValidateModelForHarness(vctx, target, nextDeskModel); err != nil {
-				writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
-				return
-			}
-		}
-	}
-
-	if queryBool(r, "dryRun") {
-		writeJSON(w, http.StatusOK, map[string]any{
-			"dryRun":         true,
-			"valid":          true,
-			"defaultHarness": nextDefaultHarness,
-			"defaultModel":   nextDefaultModel,
-			"defaultModels":  nextPerHarness,
-			"desktopHarness": nextDeskHarness,
-			"desktopModel":   nextDeskModel,
-			"affectedBots":   s.hub.PreviewDefaultModelsImpact(nextDefaultModel, nextPerHarness),
-		})
-		return
-	}
-
-	if body.DesktopHarness != nil || body.DesktopModel != nil {
-		if err := s.hub.SetDesktopWorker(nextDeskHarness, nextDeskModel); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
-			return
-		}
-	}
-	if body.DefaultHarness != nil {
-		if err := s.hub.SetDefaultHarness(*body.DefaultHarness); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
-			return
-		}
-	}
-	if body.DefaultPermissionMode != nil {
-		if err := s.hub.SetDefaultPermissionMode(*body.DefaultPermissionMode); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
-			return
-		}
-	}
-	if body.DefaultModel != nil || body.DefaultModels != nil || body.DefaultModelsPatch != nil {
-		if err := s.hub.SetDefaultModels(nextDefaultModel, nextPerHarness); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
-			return
-		}
-	}
-	if body.SharedUserMD != nil {
-		if err := s.hub.SetSharedUserMD(*body.SharedUserMD); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
-			return
-		}
-	}
-	if body.MagpieWebURL != nil {
-		if err := s.hub.SetMagpieWebURL(*body.MagpieWebURL); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
-			return
-		}
-	}
-	if body.OnboardingCompleted != nil {
-		if err := s.hub.SetOnboardingCompleted(*body.OnboardingCompleted); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
-			return
-		}
-	}
-	s.handleSettings(w, r)
-}
-
-func (s *HTTPServer) handleMagpieConnect(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Action string `json:"action"` // connect (default) | disconnect
-		Model  string `json:"model"`
-	}
-	_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<12)).Decode(&body)
-	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
-	defer cancel()
-
-	kind := r.PathValue("id")
-	var err error
-	if strings.EqualFold(strings.TrimSpace(body.Action), "disconnect") {
-		err = s.hub.MagpieDisconnect(ctx, kind)
-	} else {
-		err = s.hub.MagpieConnect(ctx, kind, body.Model)
-	}
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
-		return
-	}
-	s.handleSettings(w, r)
-}
-
-func (s *HTTPServer) handleMagpieOpen(w http.ResponseWriter, r *http.Request) {
-	if err := harness.MagpieOpen(); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
-}
-
-func (s *HTTPServer) handleHarnessInstallStart(w http.ResponseWriter, r *http.Request) {
-	kind := strings.TrimSpace(r.PathValue("id"))
-	if kind == "" || kind == "magpie" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid harness id"})
-		return
-	}
-	task, err := harness.StartInstall(kind)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
-		return
-	}
-	writeJSON(w, http.StatusOK, task)
-}
-
-func (s *HTTPServer) handleHarnessInstallStatus(w http.ResponseWriter, r *http.Request) {
-	kind := strings.TrimSpace(r.PathValue("id"))
-	if kind == "" || kind == "magpie" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid harness id"})
-		return
-	}
-	writeJSON(w, http.StatusOK, harness.GetInstallStatus(kind))
-}
-
-func (s *HTTPServer) handleHarnessLoginStart(w http.ResponseWriter, r *http.Request) {
-	kind := strings.TrimSpace(r.PathValue("id"))
-	if kind == "" || kind == "magpie" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid harness id"})
-		return
-	}
-	task, err := harness.StartLogin(kind)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
-		return
-	}
-	writeJSON(w, http.StatusOK, task)
-}
-
-func (s *HTTPServer) handleHarnessLoginStatus(w http.ResponseWriter, r *http.Request) {
-	kind := strings.TrimSpace(r.PathValue("id"))
-	if kind == "" || kind == "magpie" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid harness id"})
-		return
-	}
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-	defer cancel()
-	writeJSON(w, http.StatusOK, harness.GetLoginStatus(ctx, kind))
-}
-
-func (s *HTTPServer) handleMagpieInstallStart(w http.ResponseWriter, r *http.Request) {
-	task, err := harness.StartInstall("magpie")
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
-		return
-	}
-	writeJSON(w, http.StatusOK, task)
-}
-
-func (s *HTTPServer) handleMagpieInstallStatus(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, harness.GetInstallStatus("magpie"))
-}
-
-func (s *HTTPServer) handleMagpieProvider(w http.ResponseWriter, r *http.Request) {
-	var req harness.MagpieProviderReq
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<14)).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json body"})
-		return
-	}
-	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
-	defer cancel()
-	out, err := s.hub.MagpieProviderAction(ctx, req)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
-		return
-	}
-	providers := harness.MagpieListProviders(ctx)
-	if providers == nil {
-		providers = []harness.MagpieProvider{}
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":        true,
-		"output":    out,
-		"providers": providers,
-	})
-}
-
-func (s *HTTPServer) handleModels(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
-	defer cancel()
-	q := r.URL.Query()
-	models, err := s.hub.ModelsWithSource(ctx, q.Get("harness"), q.Get("source"))
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
-		return
-	}
-	if models == nil {
-		models = []string{}
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"models": models})
-}
-
-func (s *HTTPServer) handleReset(w http.ResponseWriter, r *http.Request) {
-	botID := r.PathValue("id")
-	prev, existed, err := s.hub.ResetSession(botID)
-	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]any{"error": err.Error()})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"reset":           existed,
-		"previousSession": prev.SessionID,
-		"sessionId":       prev.ID,
-	})
-}
-
-func (s *HTTPServer) handleRotate(w http.ResponseWriter, r *http.Request) {
-	botID := r.PathValue("id")
-	var body struct {
-		HandoffNote string `json:"handoffNote"`
-		Defer       bool   `json:"defer"`
-	}
-	_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&body)
-	res, err := s.hub.RotateSession(botID, body.HandoffNote, body.Defer)
-	if err != nil {
-		status := http.StatusBadRequest
-		if errors.Is(err, hub.ErrBotNotFound) {
-			status = http.StatusNotFound
-		}
-		writeJSON(w, status, map[string]any{"error": err.Error()})
-		return
-	}
-	writeJSON(w, http.StatusOK, res)
-}
-
-func (s *HTTPServer) handleListSessions(w http.ResponseWriter, r *http.Request) {
-	s.serveSessionList(w, r, r.URL.Query().Get("botId"))
-}
-
-func (s *HTTPServer) handleListBotSessions(w http.ResponseWriter, r *http.Request) {
-	s.serveSessionList(w, r, r.PathValue("id"))
-}
-
-func (s *HTTPServer) serveSessionList(w http.ResponseWriter, r *http.Request, botID string) {
-	q := r.URL.Query()
-	limit := 20
-	if raw := q.Get("limit"); raw != "" {
-		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
-			limit = n
-		}
-	}
-	callerBotID := strings.TrimSpace(q.Get("callerBotId"))
-	list, err := s.hub.ListSessions(callerBotID, state.SessionListOptions{
-		BotID:         botID,
-		Query:         q.Get("query"),
-		Limit:         limit,
-		IncludeActive: q.Get("includeActive") != "false",
-	})
-	if err != nil {
-		status := http.StatusBadRequest
-		if errors.Is(err, hub.ErrForbidden) {
-			status = http.StatusForbidden
-		}
-		writeJSON(w, status, map[string]any{"error": err.Error()})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"sessions": list})
-}
-
-func (s *HTTPServer) handleRecallSession(w http.ResponseWriter, r *http.Request) {
-	s.serveSessionRecall(w, r, r.URL.Query().Get("botId"), r.PathValue("sessionId"))
-}
-
-func (s *HTTPServer) handleRecallBotSession(w http.ResponseWriter, r *http.Request) {
-	s.serveSessionRecall(w, r, r.PathValue("id"), r.PathValue("sessionId"))
-}
-
-func (s *HTTPServer) serveSessionRecall(w http.ResponseWriter, r *http.Request, botID, sessionID string) {
-	q := r.URL.Query()
-	parseInt := func(name string) int {
-		if v := q.Get(name); v != "" {
-			if n, err := strconv.Atoi(v); err == nil && n > 0 {
-				return n
-			}
-		}
-		return 0
-	}
-	callerBotID := strings.TrimSpace(q.Get("callerBotId"))
-	res, err := s.hub.RecallSession(callerBotID, state.RecallOptions{
-		SessionID: sessionID,
-		BotID:     botID,
-		Tail:      parseInt("tail"),
-		Offset:    parseInt("offset"),
-		Limit:     parseInt("limit"),
-		Query:     q.Get("query"),
-		MaxChars:  parseInt("maxChars"),
-		MessageID: q.Get("messageId"),
-	})
-	if err != nil {
-		status := http.StatusBadRequest
-		switch {
-		case errors.Is(err, hub.ErrForbidden):
-			status = http.StatusForbidden
-		case errors.Is(err, state.ErrSessionNotFound):
-			status = http.StatusNotFound
-		}
-		writeJSON(w, status, map[string]any{"error": err.Error()})
-		return
-	}
-	writeJSON(w, http.StatusOK, res)
-}
-
-func (s *HTTPServer) handleMemorySearch(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
-	defer cancel()
-	q := r.URL.Query()
-	limit := 30
-	if raw := q.Get("limit"); raw != "" {
-		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
-			limit = n
-		}
-	}
-	res, err := s.hub.MemorySearch(ctx, q.Get("scope"), q.Get("botId"), q.Get("query"), q.Get("kind"), limit)
-	if err != nil {
-		status := http.StatusBadRequest
-		if errors.Is(err, hub.ErrBotNotFound) {
-			status = http.StatusNotFound
-		}
-		writeJSON(w, status, map[string]any{"error": err.Error()})
-		return
-	}
-	writeJSON(w, http.StatusOK, res)
-}
-
-func (s *HTTPServer) handleMemorySave(w http.ResponseWriter, r *http.Request) {
-	var req harness.MagpieMemorySaveReq
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<18)).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json body"})
-		return
-	}
-	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
-	defer cancel()
-	msg, err := s.hub.MemorySave(ctx, req)
-	if err != nil {
-		status := http.StatusBadRequest
-		if errors.Is(err, hub.ErrBotNotFound) {
-			status = http.StatusNotFound
-		}
-		writeJSON(w, status, map[string]any{"error": err.Error()})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": msg})
-}
-
-func (s *HTTPServer) handleMemoryDelete(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
-	defer cancel()
-	msg, err := s.hub.MemoryForget(ctx, id)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": msg})
-}
-
-func (s *HTTPServer) handleWebhook(w http.ResponseWriter, r *http.Request) {
-	if s.cfg.WebhookSecret != "" {
-		got := r.Header.Get("X-Webhook-Secret")
-		if got == "" {
-			got = strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-		}
-		if subtle.ConstantTimeCompare([]byte(got), []byte(s.cfg.WebhookSecret)) != 1 {
-			writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "invalid webhook secret"})
-			return
-		}
-	}
-
-	botID := r.PathValue("id")
-	var payload map[string]any
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&payload); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json payload"})
-		return
-	}
-	pretty, _ := json.MarshalIndent(payload, "", "  ")
-	prompt := fmt.Sprintf("[Webhook Event]\n```json\n%s\n```", string(pretty))
-
-	res, err := s.hub.Send(r.Context(), botID, prompt, hub.SendOptions{Source: "webhook"})
-	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]any{"error": err.Error()})
-		return
-	}
-	writeJSON(w, http.StatusOK, res)
-}
-
 func writeJSON(w http.ResponseWriter, status int, payload any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(payload)
 }
 
-type routineDTO struct {
-	ID               string            `json:"id"`
-	Name             string            `json:"name"`
-	EveryMinutes     int               `json:"everyMinutes,omitempty"`
-	DailyAt          string            `json:"dailyAt,omitempty"`
-	Cron             string            `json:"cron,omitempty"`
-	WebhookTrigger   bool              `json:"webhookTrigger,omitempty"`
-	WebhookPath      string            `json:"webhookPath,omitempty"`
-	WebhookSecretSet bool              `json:"webhookSecretSet,omitempty"`
-	WebhookURL       string            `json:"webhookUrl,omitempty"`
-	Prompt           string            `json:"prompt"`
-	Model            string            `json:"model,omitempty"`
-	MainDelivery     string            `json:"mainDelivery"`
-	Enabled          bool              `json:"enabled"`
-	Running          bool              `json:"running"`
-	NextRunAt        string            `json:"nextRunAt,omitempty"`
-	LastRun          *state.RoutineRun `json:"lastRun,omitempty"`
-}
-
-func (s *HTTPServer) buildRoutineDTO(botID string, sc config.ScheduleConfig, rt map[string]scheduler.RoutineRuntimeStatus) routineDTO {
-	rid := sc.EffectiveID()
-	dto := routineDTO{
-		ID:               rid,
-		Name:             sc.Name,
-		EveryMinutes:     sc.EveryMinutes,
-		DailyAt:          sc.DailyAt,
-		Cron:             sc.Cron,
-		WebhookTrigger:   sc.WebhookTrigger,
-		WebhookSecretSet: strings.TrimSpace(sc.WebhookSecret) != "",
-		WebhookURL:       sc.WebhookURL,
-		Prompt:           sc.Prompt,
-		Model:            sc.Model,
-		MainDelivery:     sc.EffectiveMainDelivery(),
-		Enabled:          sc.IsEnabled(),
-	}
-	if sc.WebhookTrigger {
-		dto.WebhookPath = fmt.Sprintf("/hooks/%s/routines/%s", botID, rid)
-	}
-	if st, ok := rt[rid]; ok {
-		dto.Running = st.Running
-		dto.NextRunAt = st.NextRunAt
-		dto.LastRun = st.LastRun
-	} else if last, ok := s.hub.LatestRoutineRun(botID, rid); ok {
-		copyLast := last
-		dto.LastRun = &copyLast
-	}
-	return dto
-}
-
-func (s *HTTPServer) routineStatusMap(botID string) map[string]scheduler.RoutineRuntimeStatus {
-	if sched := s.scheduler(); sched != nil {
-		return sched.Status(botID)
-	}
-	return nil
-}
-
 func writeHubErr(w http.ResponseWriter, err error) {
 	status := http.StatusBadRequest
 	switch {
-	case errors.Is(err, hub.ErrBotNotFound), errors.Is(err, hub.ErrRoutineNotFound):
+	case errors.Is(err, hub.ErrBotNotFound), errors.Is(err, hub.ErrRoutineNotFound), errors.Is(err, state.ErrTaskNotFound):
 		status = http.StatusNotFound
+	case errors.Is(err, hub.ErrForbidden):
+		status = http.StatusForbidden
 	case errors.Is(err, scheduler.ErrRoutineAlreadyRunning):
 		status = http.StatusConflict
 	}
 	writeJSON(w, status, map[string]any{"error": err.Error()})
-}
-
-func (s *HTTPServer) handleListRoutines(w http.ResponseWriter, r *http.Request) {
-	botID := r.PathValue("id")
-	list, err := s.hub.ListRoutines(botID)
-	if err != nil {
-		writeHubErr(w, err)
-		return
-	}
-	rt := s.routineStatusMap(botID)
-	out := make([]routineDTO, 0, len(list))
-	for _, sc := range list {
-		out = append(out, s.buildRoutineDTO(botID, sc, rt))
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"routines": out})
-}
-
-func (s *HTTPServer) handleCreateRoutine(w http.ResponseWriter, r *http.Request) {
-	botID := r.PathValue("id")
-	var req config.ScheduleConfig
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json body"})
-		return
-	}
-	var (
-		saved config.ScheduleConfig
-		err   error
-	)
-	if r.URL.Query().Get("upsert") == "1" {
-		saved, err = s.hub.UpsertRoutine(botID, req)
-	} else {
-		saved, err = s.hub.CreateRoutine(botID, req)
-	}
-	if err != nil {
-		writeHubErr(w, err)
-		return
-	}
-	dto := s.buildRoutineDTO(botID, saved, s.routineStatusMap(botID))
-	status := http.StatusCreated
-	if r.URL.Query().Get("upsert") == "1" {
-		status = http.StatusOK
-	}
-	writeJSON(w, status, dto)
-}
-
-func (s *HTTPServer) handleUpdateRoutine(w http.ResponseWriter, r *http.Request) {
-	botID := r.PathValue("id")
-	routineID := r.PathValue("routineId")
-	var patch hub.RoutinePatch
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&patch); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json body"})
-		return
-	}
-	saved, err := s.hub.UpdateRoutine(botID, routineID, patch)
-	if err != nil {
-		writeHubErr(w, err)
-		return
-	}
-	dto := s.buildRoutineDTO(botID, saved, s.routineStatusMap(botID))
-	writeJSON(w, http.StatusOK, dto)
-}
-
-func (s *HTTPServer) handleDeleteRoutine(w http.ResponseWriter, r *http.Request) {
-	botID := r.PathValue("id")
-	routineID := r.PathValue("routineId")
-	if err := s.hub.DeleteRoutine(botID, routineID); err != nil {
-		writeHubErr(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
-}
-
-func (s *HTTPServer) handleRunRoutine(w http.ResponseWriter, r *http.Request) {
-	sched := s.scheduler()
-	if sched == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "scheduler is not running"})
-		return
-	}
-	botID := r.PathValue("id")
-	routineID := r.PathValue("routineId")
-	if r.URL.Query().Get("async") == "1" {
-		list, err := s.hub.ListRoutines(botID)
-		if err != nil {
-			writeHubErr(w, err)
-			return
-		}
-		found := false
-		for _, sc := range list {
-			if sc.EffectiveID() == routineID {
-				found = true
-				break
-			}
-		}
-		if !found {
-			writeHubErr(w, fmt.Errorf("routine %q not found: %w", routineID, hub.ErrRoutineNotFound))
-			return
-		}
-		if rt := sched.Status(botID); rt[routineID].Running {
-			writeHubErr(w, scheduler.ErrRoutineAlreadyRunning)
-			return
-		}
-		go func() {
-			_, _ = sched.RunNow(context.Background(), botID, routineID)
-		}()
-		writeJSON(w, http.StatusAccepted, map[string]any{"started": true, "botId": botID, "routineId": routineID})
-		return
-	}
-	run, err := sched.RunNow(r.Context(), botID, routineID)
-	if err != nil {
-		if errors.Is(err, hub.ErrBotNotFound) || errors.Is(err, hub.ErrRoutineNotFound) || errors.Is(err, scheduler.ErrRoutineAlreadyRunning) {
-			writeHubErr(w, err)
-			return
-		}
-		writeJSON(w, http.StatusBadGateway, map[string]any{"error": err.Error(), "run": run})
-		return
-	}
-	writeJSON(w, http.StatusOK, run)
-}
-
-func (s *HTTPServer) handleListRoutineRuns(w http.ResponseWriter, r *http.Request) {
-	botID := r.PathValue("id")
-	q := r.URL.Query()
-	limit := 20
-	if raw := q.Get("limit"); raw != "" {
-		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
-			limit = n
-		}
-	}
-	runs, err := s.hub.ListRoutineRuns(botID, q.Get("routineId"), limit)
-	if err != nil {
-		writeHubErr(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"runs": runs})
-}
-
-func (s *HTTPServer) handleRoutineWebhook(w http.ResponseWriter, r *http.Request) {
-	sched := s.scheduler()
-	if sched == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "scheduler is not running"})
-		return
-	}
-	botID := r.PathValue("id")
-	routineID := r.PathValue("routineId")
-
-	list, err := s.hub.ListRoutines(botID)
-	if err != nil {
-		writeHubErr(w, err)
-		return
-	}
-	var target *config.ScheduleConfig
-	for i := range list {
-		if list[i].EffectiveID() == routineID {
-			sc := list[i]
-			target = &sc
-			break
-		}
-	}
-	if target == nil {
-		writeHubErr(w, fmt.Errorf("routine %q not found: %w", routineID, hub.ErrRoutineNotFound))
-		return
-	}
-	if !target.IsEnabled() {
-		writeJSON(w, http.StatusForbidden, map[string]any{"error": "routine is disabled"})
-		return
-	}
-	if !target.WebhookTrigger {
-		writeJSON(w, http.StatusForbidden, map[string]any{"error": "webhook trigger is not enabled for this routine"})
-		return
-	}
-
-	expectedSecret := strings.TrimSpace(target.WebhookSecret)
-	if expectedSecret == "" {
-		expectedSecret = s.cfg.WebhookSecret
-	}
-	if expectedSecret != "" {
-		got := r.Header.Get("X-Webhook-Secret")
-		if got == "" {
-			got = strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-		}
-		if subtle.ConstantTimeCompare([]byte(got), []byte(expectedSecret)) != 1 {
-			writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "invalid webhook secret"})
-			return
-		}
-	}
-
-	rawBody, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "failed to read webhook payload"})
-		return
-	}
-	payloadText := ""
-	if trimmed := bytes.TrimSpace(rawBody); len(trimmed) > 0 {
-		var formatted bytes.Buffer
-		if json.Indent(&formatted, trimmed, "", "  ") == nil {
-			payloadText = "```json\n" + formatted.String() + "\n```"
-		} else {
-			payloadText = string(trimmed)
-		}
-	}
-
-	if r.URL.Query().Get("async") == "1" {
-		if rt := sched.Status(botID); rt[routineID].Running {
-			writeHubErr(w, scheduler.ErrRoutineAlreadyRunning)
-			return
-		}
-		go func() {
-			_, _ = sched.TriggerWebhook(context.Background(), botID, routineID, payloadText)
-		}()
-		writeJSON(w, http.StatusAccepted, map[string]any{"started": true, "botId": botID, "routineId": routineID})
-		return
-	}
-
-	run, err := sched.TriggerWebhook(r.Context(), botID, routineID, payloadText)
-	if err != nil {
-		if errors.Is(err, hub.ErrBotNotFound) || errors.Is(err, hub.ErrRoutineNotFound) || errors.Is(err, scheduler.ErrRoutineAlreadyRunning) {
-			writeHubErr(w, err)
-			return
-		}
-		writeJSON(w, http.StatusBadGateway, map[string]any{"error": err.Error(), "run": run})
-		return
-	}
-	writeJSON(w, http.StatusOK, run)
-}
-
-func (s *HTTPServer) handleQuestions(w http.ResponseWriter, r *http.Request) {
-	if s.hub == nil {
-		writeJSON(w, http.StatusOK, map[string]any{"items": []hub.PendingQuestion{}})
-		return
-	}
-	botID := strings.TrimSpace(r.URL.Query().Get("botId"))
-	items := s.hub.ListQuestions(botID)
-	if items == nil {
-		items = []hub.PendingQuestion{}
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items})
-}
-
-func (s *HTTPServer) handleQuestionReply(w http.ResponseWriter, r *http.Request) {
-	if s.hub == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "hub unavailable"})
-		return
-	}
-	id := strings.TrimSpace(r.PathValue("id"))
-	if id == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "missing question id"})
-		return
-	}
-	var body struct {
-		Answers   map[string]any `json:"answers"`
-		Cancelled bool           `json:"cancelled"`
-		Message   string         `json:"message"`
-	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json body"})
-		return
-	}
-	items, err := s.hub.AnswerQuestion(id, body.Answers, body.Cancelled, body.Message)
-	if err != nil {
-		if errors.Is(err, hub.ErrQuestionNotFound) {
-			writeJSON(w, http.StatusNotFound, map[string]any{"error": err.Error()})
-			return
-		}
-		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "items": items})
-}
-
-func (s *HTTPServer) handleApprovals(w http.ResponseWriter, r *http.Request) {
-	if s.hub == nil {
-		writeJSON(w, http.StatusOK, map[string]any{"items": []hub.PendingApproval{}})
-		return
-	}
-	botID := strings.TrimSpace(r.URL.Query().Get("botId"))
-	items := s.hub.ListApprovals(botID)
-	if items == nil {
-		items = []hub.PendingApproval{}
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items})
-}
-
-func (s *HTTPServer) handleApprovalReply(w http.ResponseWriter, r *http.Request) {
-	if s.hub == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "hub unavailable"})
-		return
-	}
-	id := strings.TrimSpace(r.PathValue("id"))
-	if id == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "missing approval id"})
-		return
-	}
-	var body struct {
-		Decision string `json:"decision"`
-		OptionID string `json:"optionId"`
-		Reason   string `json:"reason"`
-	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json body"})
-		return
-	}
-	items, err := s.hub.ReplyApproval(id, body.Decision, body.OptionID, body.Reason)
-	if err != nil {
-		if errors.Is(err, hub.ErrApprovalNotFound) {
-			writeJSON(w, http.StatusNotFound, map[string]any{"error": err.Error()})
-			return
-		}
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "items": items})
-}
-
-func (s *HTTPServer) handlePushStatus(w http.ResponseWriter, r *http.Request) {
-	if s.hub == nil {
-		writeJSON(w, http.StatusOK, map[string]any{"configured": false, "mode": "disabled", "deviceCount": 0})
-		return
-	}
-	writeJSON(w, http.StatusOK, s.hub.PushStatus())
-}
-
-func (s *HTTPServer) handlePushRegister(w http.ResponseWriter, r *http.Request) {
-	if s.hub == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "hub unavailable"})
-		return
-	}
-	var body struct {
-		DeviceID               string `json:"deviceId"`
-		Platform               string `json:"platform"`
-		Env                    string `json:"env"`
-		BundleID               string `json:"bundleId"`
-		PushToken              string `json:"pushToken"`
-		LiveActivityStartToken string `json:"liveActivityStartToken"`
-		Enabled                *bool  `json:"enabled"`
-	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json body"})
-		return
-	}
-	if strings.TrimSpace(body.DeviceID) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "deviceId is required"})
-		return
-	}
-	enabled := true
-	if body.Enabled != nil {
-		enabled = *body.Enabled
-	}
-	err := s.hub.UpsertPushDevice(state.PushDevice{
-		DeviceID:               body.DeviceID,
-		Platform:               body.Platform,
-		Env:                    body.Env,
-		BundleID:               body.BundleID,
-		PushToken:              body.PushToken,
-		LiveActivityStartToken: body.LiveActivityStartToken,
-		Enabled:                enabled,
-	})
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "status": s.hub.PushStatus()})
-}
-
-func (s *HTTPServer) handlePushActivityToken(w http.ResponseWriter, r *http.Request) {
-	if s.hub == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "hub unavailable"})
-		return
-	}
-	var body struct {
-		DeviceID    string `json:"deviceId"`
-		ActivityKey string `json:"activityKey"`
-		Token       string `json:"token"`
-	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json body"})
-		return
-	}
-	if strings.TrimSpace(body.DeviceID) == "" || strings.TrimSpace(body.ActivityKey) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "deviceId and activityKey are required"})
-		return
-	}
-	if err := s.hub.SetPushActivityToken(body.DeviceID, body.ActivityKey, body.Token); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
-}
-
-func (s *HTTPServer) handlePushDeleteDevice(w http.ResponseWriter, r *http.Request) {
-	if s.hub == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "hub unavailable"})
-		return
-	}
-	deviceID := strings.TrimSpace(r.PathValue("deviceId"))
-	if deviceID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "deviceId is required"})
-		return
-	}
-	if err := s.hub.DeletePushDevice(deviceID); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }

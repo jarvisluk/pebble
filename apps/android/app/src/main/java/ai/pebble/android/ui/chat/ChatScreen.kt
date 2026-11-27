@@ -77,13 +77,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import ai.pebble.android.data.ChatMessage
 import ai.pebble.android.data.MentionCandidate
 import ai.pebble.android.data.MessageMedia
 import ai.pebble.android.data.PebbleStore
 import ai.pebble.android.data.PendingAttachment
 import ai.pebble.android.data.SlashCommandItem
+import ai.pebble.android.data.StageRef
 import ai.pebble.android.data.errText
 import ai.pebble.android.data.formatStamp
 import ai.pebble.android.data.parseIsoInstant
@@ -104,22 +104,6 @@ import java.util.UUID
 import androidx.compose.ui.res.painterResource
 import ai.pebble.android.ui.theme.PebbleIcons
 
-private sealed interface TimelineEntry {
-    val id: String
-    val createdAt: String?
-
-    data class Message(val msg: ChatMessage) : TimelineEntry {
-        override val id: String get() = msg.id
-        override val createdAt: String? get() = msg.createdAt
-    }
-
-    data class Collab(
-        override val id: String,
-        val peerId: String,
-        val items: List<ChatMessage>,
-        override val createdAt: String?,
-    ) : TimelineEntry
-}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -130,7 +114,9 @@ fun ChatScreen(
     inDesktopSidebar: Boolean = false,
     onBack: (() -> Unit)? = null,
     onOpenDesktop: (String) -> Unit = {},
-    onOpenFiles: (String) -> Unit = {},
+    onOpenStage: (String) -> Unit = {},
+    onOpenStageRef: (String, ai.pebble.android.data.StageRef) -> Unit = { _, _ -> },
+    hasUnreadLatestStage: Boolean = false,
     onToggleDetail: (() -> Unit)? = null,
     onOpenBotInfo: (() -> Unit)? = null,
     onSelectBot: ((String) -> Unit)? = null,
@@ -151,8 +137,6 @@ fun ChatScreen(
     var mentionJob by remember(botId) { mutableStateOf<Job?>(null) }
     var acDismissed by remember(botId) { mutableStateOf(false) }
     val pendingAttachments = remember(botId) { mutableStateListOf<PendingAttachment>() }
-    var attachMenuOpen by remember { mutableStateOf(false) }
-    var botSwitcherOpen by remember { mutableStateOf(false) }
 
     val index = store.bots.indexOfFirst { it.id == botId }
     val bot = if (index >= 0) store.bots[index] else null
@@ -185,6 +169,7 @@ fun ChatScreen(
     LaunchedEffect(botId) {
         store.setActiveChat(botId)
         runCatching { store.loadMessages(botId) }
+        runCatching { store.fetchBotTasks(botId) }
         commands = runCatching { store.fetchCommands(botId) }.getOrDefault(emptyList())
     }
 
@@ -349,234 +334,30 @@ fun ChatScreen(
             .fillMaxSize()
             .background(if (inDesktopSidebar) p.card else p.page),
     ) {
-        if (inDesktopSidebar) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box {
-                    Row(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(10.dp))
-                            .then(if (store.bots.size > 1) Modifier.clickable { botSwitcherOpen = true } else Modifier)
-                            .padding(vertical = 2.dp, horizontal = 2.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        BotAvatar(
-                            id = botId,
-                            size = 24.dp,
-                            index = index,
-                            avatar = bot?.avatar,
-                            color = bot?.color,
-                            busy = bot?.isBusy == true,
-                            interactive = true,
-                        )
-                        Text(
-                            text = botName,
-                            color = p.text,
-                            fontSize = PebbleFont.cardTitle,
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f, fill = false),
-                        )
-                        if (store.bots.size > 1) {
-                            Icon(painterResource(PebbleIcons.KeyboardArrowDown), contentDescription = null, tint = p.mute, modifier = Modifier.size(16.dp))
-                        }
-                    }
-                    DropdownMenu(
-                        expanded = botSwitcherOpen,
-                        onDismissRequest = { botSwitcherOpen = false },
-                        containerColor = p.card,
-                    ) {
-                        store.bots.forEach { b ->
-                            DropdownMenuItem(
-                                text = { Text(b.displayName, color = p.text) },
-                                trailingIcon = {
-                                    if (b.id == botId) {
-                                        Icon(painterResource(PebbleIcons.Check), contentDescription = null, tint = p.accent, modifier = Modifier.size(16.dp))
-                                    }
-                                },
-                                onClick = {
-                                    botSwitcherOpen = false
-                                    onSelectBot?.invoke(b.id)
-                                },
-                            )
-                        }
-                    }
-                }
-                Spacer(Modifier.weight(1f))
-                if (onCloseSidebar != null) {
-                    IconButton(onClick = onCloseSidebar, modifier = Modifier.size(28.dp)) {
-                        Icon(painterResource(PebbleIcons.Close), contentDescription = store.t("close"), tint = p.text, modifier = Modifier.size(18.dp))
-                    }
-                }
-            }
-            HorizontalDivider(thickness = 0.5.dp, color = p.s2)
-        } else {
-            TopAppBar(
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = p.page,
-                    titleContentColor = p.text,
-                ),
-                navigationIcon = {
-                    if (compact && onBack != null) {
-                        IconButton(onClick = onBack) {
-                            Icon(painterResource(PebbleIcons.ArrowBack), contentDescription = store.t("back"), tint = p.text)
-                        }
-                    }
-                },
-                title = {
-                    Row(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(10.dp))
-                            .then(if (onOpenBotInfo != null) Modifier.clickable { onOpenBotInfo() } else Modifier)
-                            .padding(vertical = 4.dp, horizontal = 2.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        BotAvatar(
-                            id = botId,
-                            size = 28.dp,
-                            index = index,
-                            avatar = bot?.avatar,
-                            color = bot?.color,
-                            busy = bot?.isBusy == true,
-                            interactive = true,
-                        )
-                        Text(
-                            text = botName,
-                            fontSize = PebbleFont.title,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f, fill = false),
-                        )
-                    }
-                },
-                actions = {
-                    IconButton(onClick = { onOpenFiles(botId) }) {
-                        Icon(
-                            painter = painterResource( PebbleIcons.Folder),
-                            contentDescription = store.t("workspaceFiles"),
-                            tint = p.text,
-                        )
-                    }
-                    IconButton(onClick = {
-                        val toTarget = store.takeovers.firstOrNull { it.botId == botId }?.target?.takeIf { it.isNotEmpty() }
-                            ?: bot?.desktopTarget?.takeIf { it.isNotEmpty() }
-                            ?: store.takeovers.firstOrNull()?.target?.takeIf { it.isNotEmpty() }
-                            ?: store.activeDesktopTarget.target.takeIf { it.isNotEmpty() }
-                            ?: "local"
-                        onOpenDesktop(toTarget)
-                    }) {
-                        Icon(
-                            painter = painterResource(if (store.takeovers.isEmpty()) PebbleIcons.DesktopWindows else PebbleIcons.Warning),
-                            contentDescription = store.t("remoteDesktop"),
-                            tint = if (store.takeovers.isEmpty()) p.text else p.busy,
-                        )
-                    }
-                    if (onToggleDetail != null) {
-                        IconButton(onClick = onToggleDetail) {
-                            Icon(painterResource(PebbleIcons.FormatListBulleted), contentDescription = store.t("rightPanelTitle"), tint = p.text)
-                        }
-                    }
-                },
-            )
-        }
+        ChatTopBar(
+            store = store,
+            botId = botId,
+            bot = bot,
+            index = index,
+            botName = botName,
+            compact = compact,
+            inDesktopSidebar = inDesktopSidebar,
+            onBack = onBack,
+            onOpenDesktop = onOpenDesktop,
+            onOpenStage = onOpenStage,
+            hasUnreadLatestStage = hasUnreadLatestStage,
+            onToggleDetail = onToggleDetail,
+            onOpenBotInfo = onOpenBotInfo,
+            onSelectBot = onSelectBot,
+            onCloseSidebar = onCloseSidebar,
+        )
 
-        // Status banners
-        if (!inDesktopSidebar && store.usingStandby) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(p.s1)
-                    .padding(horizontal = 16.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Icon(painterResource(PebbleIcons.SyncProblem), contentDescription = null, tint = p.text2, modifier = Modifier.size(16.dp))
-                Text(store.t("standbyActiveBanner"), color = p.text, fontSize = PebbleFont.secondary, modifier = Modifier.weight(1f))
-                TextButton(
-                    onClick = { scope.launch { store.reconnect() } },
-                    contentPadding = PaddingValues(horizontal = 8.dp),
-                ) {
-                    Text(store.t("retryPrimary"), fontSize = PebbleFont.secondary, color = p.accent)
-                }
-            }
-        }
-        if (!inDesktopSidebar && store.activeDesktopTarget.temporary) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(p.s1)
-                    .padding(horizontal = 16.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                Icon(painterResource(PebbleIcons.Computer), contentDescription = null, tint = p.text2, modifier = Modifier.size(16.dp))
-                Text(
-                    text = store.t(
-                        "tempDesktopBanner",
-                        mapOf("name" to (store.activeDesktopTarget.name ?: store.activeDesktopTarget.target)),
-                    ),
-                    color = p.text,
-                    fontSize = PebbleFont.secondary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
-                TextButton(
-                    onClick = { onOpenDesktop(store.activeDesktopTarget.target) },
-                    contentPadding = PaddingValues(horizontal = 6.dp),
-                ) {
-                    Text(store.t("desktopShort"), fontSize = PebbleFont.secondary, color = p.accent)
-                }
-                TextButton(
-                    onClick = { scope.launch { runCatching { store.setActiveDesktopTarget("local") } } },
-                    contentPadding = PaddingValues(horizontal = 6.dp),
-                ) {
-                    Text(store.t("switchBackLocal"), fontSize = PebbleFont.secondary, color = p.accent)
-                }
-            }
-        }
-        val to = store.takeovers.firstOrNull()
-        if (to != null) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(p.pink)
-                    .padding(horizontal = 16.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Icon(painterResource(PebbleIcons.PanTool), contentDescription = null, tint = p.pinkInk, modifier = Modifier.size(16.dp))
-                Text(
-                    text = store.t("takeoverInline", mapOf("reason" to to.reason.orEmpty())),
-                    color = p.pinkInk,
-                    fontSize = PebbleFont.body,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
-                OutlinedButton(
-                    onClick = { onOpenDesktop(to.target ?: "local") },
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                ) {
-                    Text(store.t("handleAction"), fontSize = PebbleFont.secondary, color = p.pinkInk)
-                }
-                Button(
-                    onClick = { scope.launch { runCatching { store.resolveTakeover(to.id) } } },
-                    colors = ButtonDefaults.buttonColors(containerColor = pal.accent, contentColor = pal.onAccent),
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                ) {
-                    Text(store.t("resumeShort"), fontSize = PebbleFont.secondary)
-                }
-            }
-        }
+        ChatStatusBanners(
+            store = store,
+            pal = pal,
+            inDesktopSidebar = inDesktopSidebar,
+            onOpenDesktop = onOpenDesktop,
+        )
 
         // Message List + Floating Composer overlaid cleanly without black bottom cutoff
         Box(
@@ -585,572 +366,72 @@ fun ChatScreen(
                 .fillMaxWidth()
                 .windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars)),
         ) {
-            LazyColumn(
-                state = listState,
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(
-                    start = if (inDesktopSidebar) 12.dp else if (compact) 10.dp else 16.dp,
-                    end = if (inDesktopSidebar) 12.dp else if (compact) 10.dp else 16.dp,
-                    top = 12.dp,
-                    bottom = 86.dp,
-                ),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                if (messages.isEmpty()) {
-                    item(key = "empty_state") {
-                        Column(
-                            modifier = Modifier
-                                .widthIn(max = 840.dp)
-                                .fillMaxWidth()
-                                .padding(top = 40.dp, bottom = 20.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(10.dp),
-                        ) {
-                            BotAvatar(
-                                id = botId,
-                                size = 72.dp,
-                                index = index,
-                                avatar = bot?.avatar,
-                                color = bot?.color,
-                                interactive = true,
-                            )
-                            Text(botName, color = p.text, fontSize = PebbleFont.hero, fontWeight = FontWeight.Bold)
-                            Text(
-                                text = bot?.description?.takeIf { it.isNotEmpty() } ?: store.t("emptyChatHint"),
-                                color = p.text2,
-                                fontSize = PebbleFont.body,
-                                textAlign = TextAlign.Center,
-                            )
-                        }
-                    }
-                }
+            ChatMessageList(
+                store = store,
+                botId = botId,
+                bot = bot,
+                index = index,
+                botName = botName,
+                pal = pal,
+                inDesktopSidebar = inDesktopSidebar,
+                compact = compact,
+                listState = listState,
+                timelineEntries = timelineEntries,
+                botApprovals = botApprovals,
+                botQuestions = botQuestions,
+                sendErr = sendErr,
+                isEmptyMessages = messages.isEmpty(),
+                onCollabClick = { if (it.isNotEmpty()) collabPeerId = it },
+                onPreviewMedia = { previewMedia = it },
+                onOpenStageRef = { ref -> onOpenStageRef(botId, ref) },
+            )
 
-                itemsIndexed(timelineEntries, key = { _, e -> e.id }) { i, entry ->
-                    val prevAt = if (i > 0) timelineEntries[i - 1].createdAt else null
-                    val showStamp = shouldShowStamp(entry.createdAt, prevAt)
-                    Column(
-                        modifier = Modifier
-                            .widthIn(max = 840.dp)
-                            .fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        if (showStamp) {
-                            Text(
-                                text = formatStamp(entry.createdAt),
-                                color = p.mute,
-                                fontSize = PebbleFont.secondary,
-                                textAlign = TextAlign.Center,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(top = 4.dp),
-                            )
-                        }
-                        when (entry) {
-                            is TimelineEntry.Collab -> {
-                                val peerIdx = store.bots.indexOfFirst { it.id == entry.peerId }
-                                val peerBot = if (peerIdx >= 0) store.bots[peerIdx] else null
-                                val peerName = peerBot?.displayName ?: entry.peerId
-                                val peerPal = p.bot(entry.peerId, peerIdx.coerceAtLeast(0), peerBot?.color)
-                                Surface(
-                                    color = peerPal.collabBg,
-                                    shape = CircleShape,
-                                    modifier = Modifier
-                                        .clip(CircleShape)
-                                        .clickable {
-                                            if (entry.peerId.isNotEmpty()) collabPeerId = entry.peerId
-                                        },
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    ) {
-                                        BotAvatar(
-                                            id = entry.peerId,
-                                            size = 16.dp,
-                                            index = peerIdx,
-                                            avatar = peerBot?.avatar,
-                                            color = peerBot?.color,
-                                        )
-                                        Text(
-                                            text = "${store.t("collabWith", mapOf("peer" to peerName))} · ${store.t("collabCount", mapOf("count" to entry.items.size))}",
-                                            color = peerPal.collabInk,
-                                            fontSize = PebbleFont.secondary,
-                                            fontWeight = FontWeight.SemiBold,
-                                        )
-                                        Icon(painterResource( PebbleIcons.ChevronRight),
-                                            contentDescription = null,
-                                            tint = peerPal.collabInk.copy(alpha = 0.75f),
-                                            modifier = Modifier.size(16.dp),
-                                        )
-                                    }
-                                }
-                            }
-                            is TimelineEntry.Message -> {
-                                MessageBubble(
-                                    store = store,
-                                    msg = entry.msg,
-                                    soft = pal.soft,
-                                    onPreviewMedia = { previewMedia = it },
-                                    botId = botId,
-                                    inSidebar = inDesktopSidebar,
+            ChatComposer(
+                store = store,
+                botId = botId,
+                bot = bot,
+                botName = botName,
+                pal = pal,
+                compact = compact,
+                inDesktopSidebar = inDesktopSidebar,
+                input = input,
+                sending = sending,
+                showStop = showStop,
+                slashQuery = slashQuery,
+                filteredCommands = filteredCommands,
+                activeMentionRange = activeMentionRange,
+                mentions = mentions,
+                pendingAttachments = pendingAttachments,
+                onInputChange = ::onInputChange,
+                onUpdateInput = { input = it },
+                onDismissAutocomplete = { acDismissed = true },
+                onRemoveAttachment = { id -> pendingAttachments.removeAll { it.id == id } },
+                onPickPhotos = { photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                onPickFiles = { filePicker.launch(arrayOf("*/*")) },
+                onInterrupt = ::interrupt,
+                onSubmit = ::submit,
+                onError = { sendErr = it },
+                topDock = if (!inDesktopSidebar) {
+                    {
+                        BotChatTaskStrip(
+                            store = store,
+                            botId = botId,
+                            pal = pal,
+                            onSelectTask = { task ->
+                                onOpenStageRef(
+                                    botId,
+                                    StageRef(
+                                        id = "task:${task.id}",
+                                        kind = "task",
+                                        taskId = task.id,
+                                        title = task.displayTitle,
+                                    ),
                                 )
-                            }
-                        }
-                    }
-                }
-
-                if (bot?.isBusy == true) {
-                    item(key = "busy_indicator") {
-                        Row(
-                            modifier = Modifier
-                                .widthIn(max = 840.dp)
-                                .fillMaxWidth()
-                                .padding(vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            BotAvatar(
-                                id = botId,
-                                size = 24.dp,
-                                index = index,
-                                avatar = bot.avatar,
-                                color = bot.color,
-                                busy = true,
-                            )
-                            val tool = store.tools[botId].orEmpty()
-                            Text(
-                                text = if (tool.isNotEmpty()) store.t("callingTool", mapOf("tool" to tool)) else store.t("processing"),
-                                color = p.busy,
-                                fontSize = PebbleFont.body,
-                            )
-                        }
-                    }
-                }
-
-                botApprovals.forEach { apr ->
-                    item(key = "apr_${apr.id}") {
-                        Box(modifier = Modifier.widthIn(max = 840.dp)) {
-                            ApprovalCardView(store = store, approval = apr, pal = pal)
-                        }
-                    }
-                }
-
-                botQuestions.forEach { q ->
-                    item(key = "q_${q.id}") {
-                        Box(modifier = Modifier.widthIn(max = 840.dp)) {
-                            QuestionCardView(store = store, question = q, pal = pal)
-                        }
-                    }
-                }
-
-                if (sendErr.isNotEmpty()) {
-                    item(key = "send_err") {
-                        Box(modifier = Modifier.widthIn(max = 840.dp)) {
-                            StatusTextBanner(text = sendErr, error = true)
-                        }
-                    }
-                }
-
-                item(key = "bottom_pad") {
-                    Spacer(Modifier.height(4.dp))
-                }
-            }
-
-            // Floating bottom composer
-            val showSlashAC = slashQuery != null && filteredCommands.isNotEmpty()
-            val showMentionAC = activeMentionRange != null && mentions.isNotEmpty()
-            val hasContent = input.trim().isNotEmpty() || pendingAttachments.isNotEmpty()
-            val hasUploading = pendingAttachments.any { it.uploading }
-
-            Column(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .widthIn(max = 840.dp)
-                    .fillMaxWidth()
-                    .background(if (inDesktopSidebar) p.card else Color.Transparent),
-            ) {
-                if (inDesktopSidebar) {
-                    HorizontalDivider(thickness = 0.5.dp, color = p.s2)
-                }
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(
-                            horizontal = if (inDesktopSidebar) 12.dp else if (compact) 10.dp else 14.dp,
-                            vertical = if (inDesktopSidebar) 10.dp else 8.dp,
-                        ),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                if (showSlashAC || showMentionAC) {
-                    Surface(
-                        color = p.card,
-                        shape = RoundedCornerShape(16.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(max = 220.dp)
-                            .shadow(10.dp, RoundedCornerShape(16.dp)),
-                    ) {
-                        LazyColumn(contentPadding = PaddingValues(6.dp)) {
-                            if (showSlashAC) {
-                                itemsIndexed(filteredCommands.take(12), key = { _, c -> c.id }) { _, cmd ->
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clip(RoundedCornerShape(10.dp))
-                                            .clickable {
-                                                val immediate = setOf("status", "bots", "reset", "compact", "clear", "cost", "context")
-                                                acDismissed = true
-                                                input = if (cmd.name in immediate && cmd.argumentHint.isNullOrEmpty()) {
-                                                    "/${cmd.name}"
-                                                } else {
-                                                    "/${cmd.name} "
-                                                }
-                                            }
-                                            .padding(horizontal = 12.dp, vertical = 8.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                    ) {
-                                        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                            val hint = cmd.argumentHint?.takeIf { it.isNotEmpty() }?.let { " $it" }.orEmpty()
-                                            Text(
-                                                text = "/${cmd.name}$hint",
-                                                fontFamily = MonoFont,
-                                                fontSize = PebbleFont.body,
-                                                fontWeight = FontWeight.Medium,
-                                                color = p.text,
-                                            )
-                                            if (!cmd.description.isNullOrEmpty()) {
-                                                Text(cmd.description, color = p.mute, fontSize = PebbleFont.caption, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                            }
-                                        }
-                                        TagPill(
-                                            text = when (cmd.source) {
-                                                "hub" -> store.t("cmdSourceHub")
-                                                "skill" -> store.t("cmdSourceSkill")
-                                                "workflow" -> store.t("cmdSourceWorkflow")
-                                                else -> store.t("cmdSourceHarness")
-                                            },
-                                            bg = p.s1,
-                                            fg = p.text2,
-                                        )
-                                    }
-                                }
-                            } else if (activeMentionRange != null) {
-                                val range = activeMentionRange.first
-                                itemsIndexed(mentions.take(12), key = { _, m -> m.id }) { _, item ->
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clip(RoundedCornerShape(10.dp))
-                                            .clickable {
-                                                acDismissed = true
-                                                val before = input.substring(0, range.first)
-                                                input = "$before@${item.value} "
-                                            }
-                                            .padding(horizontal = 12.dp, vertical = 8.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                    ) {
-                                        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                            Text(
-                                                text = if (item.kind == "file") item.value else "@${item.value}",
-                                                fontFamily = MonoFont,
-                                                fontSize = PebbleFont.body,
-                                                fontWeight = FontWeight.Medium,
-                                                color = p.text,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                            )
-                                            if (!item.description.isNullOrEmpty() && item.description != item.value) {
-                                                Text(item.description, color = p.mute, fontSize = PebbleFont.caption, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                            }
-                                        }
-                                        TagPill(
-                                            text = when (item.kind) {
-                                                "bot" -> store.t("mentionBot")
-                                                "agent" -> store.t("mentionAgent")
-                                                else -> store.t("mentionFile")
-                                            },
-                                            bg = p.s1,
-                                            fg = p.text2,
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if (pendingAttachments.isNotEmpty()) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        pendingAttachments.forEach { att ->
-                            Box(modifier = Modifier.padding(top = 6.dp, end = 6.dp)) {
-                                val borderColor = if (att.error != null) p.danger else p.s2
-                                if (att.isImage && att.previewBytes != null) {
-                                    val bmp = remember(att.id) {
-                                        BitmapFactory.decodeByteArray(att.previewBytes, 0, att.previewBytes.size)
-                                    }
-                                    if (bmp != null) {
-                                        Image(
-                                            bitmap = bmp.asImageBitmap(),
-                                            contentDescription = att.name,
-                                            contentScale = ContentScale.Crop,
-                                            modifier = Modifier
-                                                .size(54.dp)
-                                                .clip(RoundedCornerShape(10.dp))
-                                                .border(1.dp, borderColor, RoundedCornerShape(10.dp)),
-                                        )
-                                    }
-                                } else {
-                                    Row(
-                                        modifier = Modifier
-                                            .widthIn(max = 180.dp)
-                                            .clip(RoundedCornerShape(12.dp))
-                                            .background(p.card)
-                                            .border(1.dp, borderColor, RoundedCornerShape(12.dp))
-                                            .padding(horizontal = 10.dp, vertical = 8.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                    ) {
-                                        Icon(painterResource(PebbleIcons.Description), contentDescription = null, tint = p.text2, modifier = Modifier.size(15.dp))
-                                        Text(att.name, color = p.text, fontSize = PebbleFont.secondary, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
-                                        if (att.uploading) {
-                                            CircularProgressIndicator(modifier = Modifier.size(12.dp), strokeWidth = 1.5.dp, color = p.accent)
-                                        }
-                                    }
-                                }
-                                Box(
-                                    modifier = Modifier
-                                        .align(Alignment.TopEnd)
-                                        .size(18.dp)
-                                        .clip(CircleShape)
-                                        .background(p.text)
-                                        .clickable { pendingAttachments.removeAll { it.id == att.id } },
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    Icon(painterResource(PebbleIcons.Close), contentDescription = null, tint = p.card, modifier = Modifier.size(12.dp))
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Floating Input Row
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.Bottom,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Box {
-                        Surface(
-                            color = if (inDesktopSidebar) p.s1 else p.card,
-                            shape = CircleShape,
-                            shadowElevation = if (inDesktopSidebar) 0.dp else 3.dp,
-                            modifier = Modifier
-                                .size(44.dp)
-                                .clip(CircleShape)
-                                .then(if (inDesktopSidebar) Modifier.border(0.5.dp, p.s2, CircleShape) else Modifier)
-                                .clickable { attachMenuOpen = true },
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(painterResource(PebbleIcons.Add), contentDescription = store.t("attachFile"), tint = p.text, modifier = Modifier.size(22.dp))
-                            }
-                        }
-                        DropdownMenu(
-                            expanded = attachMenuOpen,
-                            onDismissRequest = { attachMenuOpen = false },
-                            containerColor = p.card,
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text(store.t("photoLibrary"), color = p.text) },
-                                leadingIcon = { Icon(painterResource(PebbleIcons.PhotoLibrary), contentDescription = null, tint = p.text2) },
-                                onClick = {
-                                    attachMenuOpen = false
-                                    photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                                },
-                            )
-                            DropdownMenuItem(
-                                text = { Text(store.t("chooseFile"), color = p.text) },
-                                leadingIcon = { Icon(painterResource(PebbleIcons.Description), contentDescription = null, tint = p.text2) },
-                                onClick = {
-                                    attachMenuOpen = false
-                                    filePicker.launch(arrayOf("*/*"))
-                                },
-                            )
-                        }
-                    }
-
-                    Surface(
-                        color = if (inDesktopSidebar) p.s1 else if (p.dark) p.card else Color.White,
-                        shape = PebbleDimens.composerShape,
-                        shadowElevation = if (inDesktopSidebar) 0.dp else 3.dp,
-                        modifier = Modifier
-                            .weight(1f)
-                            .border(0.5.dp, p.s2, PebbleDimens.composerShape),
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 11.dp),
-                            contentAlignment = Alignment.CenterStart,
-                        ) {
-                            if (input.isEmpty()) {
-                                Text(
-                                    text = store.t("msgBotPh", mapOf("name" to botName)),
-                                    color = p.mute,
-                                    fontSize = PebbleFont.body,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                            }
-                            BasicTextField(
-                                value = input,
-                                onValueChange = { onInputChange(it) },
-                                textStyle = TextStyle(color = p.text, fontSize = PebbleFont.body, lineHeight = 22.sp),
-                                cursorBrush = SolidColor(pal.accent),
-                                maxLines = 6,
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                        }
-                    }
-
-                    val permModes = store.supportedPermissionModes(bot?.harness)
-                    if (permModes.size > 1) {
-                        val activePermMode = store.clampPermissionMode(bot?.permissionMode, bot?.harness)
-                        var permMenuOpen by remember { mutableStateOf(false) }
-                        Box {
-                            Surface(
-                                color = when {
-                                    activePermMode == "plan" -> p.lilac
-                                    inDesktopSidebar -> p.s1
-                                    else -> p.card
-                                },
-                                shape = CircleShape,
-                                shadowElevation = if (inDesktopSidebar) 0.dp else 3.dp,
-                                modifier = Modifier
-                                    .height(44.dp)
-                                    .clip(CircleShape)
-                                    .border(0.5.dp, if (activePermMode == "plan") p.lilacInk.copy(alpha = 0.4f) else p.s2, CircleShape)
-                                    .clickable { permMenuOpen = true },
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 10.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(2.dp),
-                                ) {
-                                    Text(
-                                        text = store.t("permMode_$activePermMode"),
-                                        color = if (activePermMode == "plan") p.lilacInk else p.text2,
-                                        fontSize = PebbleFont.caption,
-                                        fontWeight = FontWeight.Medium,
-                                        maxLines = 1,
-                                    )
-                                    Icon(
-                                        painter = painterResource(PebbleIcons.ExpandMore),
-                                        contentDescription = store.t("permMode"),
-                                        tint = if (activePermMode == "plan") p.lilacInk else p.mute,
-                                        modifier = Modifier.size(14.dp),
-                                    )
-                                }
-                            }
-                            DropdownMenu(
-                                expanded = permMenuOpen,
-                                onDismissRequest = { permMenuOpen = false },
-                                containerColor = p.card,
-                            ) {
-                                permModes.forEach { m ->
-                                    DropdownMenuItem(
-                                        text = { Text(store.t("permMode_$m"), color = p.text, fontSize = PebbleFont.body) },
-                                        trailingIcon = {
-                                            if (activePermMode == m) {
-                                                Icon(painterResource(PebbleIcons.Check), contentDescription = null, tint = pal.accent, modifier = Modifier.size(16.dp))
-                                            }
-                                        },
-                                        onClick = {
-                                            permMenuOpen = false
-                                            if (m != activePermMode) {
-                                                scope.launch {
-                                                    runCatching { store.updateBot(botId, mapOf("permissionMode" to m)) }
-                                                        .onFailure { sendErr = errText(it, store.t("updateFailed")) }
-                                                }
-                                            }
-                                        },
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    val sendEnabled = showStop || (hasContent && !hasUploading && !sending)
-                    val btnBg = when {
-                        showStop -> p.danger
-                        sendEnabled -> pal.accent
-                        else -> p.s2
-                    }
-                    val btnFg = when {
-                        showStop -> Color.White
-                        sendEnabled -> pal.onAccent
-                        else -> p.mute
-                    }
-                    Surface(
-                        color = btnBg,
-                        shape = CircleShape,
-                        shadowElevation = if (sendEnabled) 3.dp else 0.dp,
-                        modifier = Modifier
-                            .size(44.dp)
-                            .clip(CircleShape)
-                            .clickable(enabled = sendEnabled) {
-                                if (showStop) interrupt() else submit()
                             },
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                painter = painterResource(if (showStop) PebbleIcons.Stop else PebbleIcons.ArrowUpward),
-                                contentDescription = store.t(if (showStop) "stopOutput" else "sendMsg"),
-                                tint = btnFg,
-                                modifier = Modifier.size(if (showStop) 18.dp else 22.dp),
-                            )
-                        }
+                        )
                     }
-                }
-                }
-            }
+                } else null,
+            )
         }
     }
-}
-
-private fun shouldShowStamp(cur: String?, prev: String?): Boolean {
-    if (prev == null) return true
-    val a = parseIsoInstant(cur) ?: return false
-    val b = parseIsoInstant(prev) ?: return false
-    return Duration.between(b, a).seconds > 300
-}
-
-private data class PickedPayload(val name: String, val mime: String, val isImage: Boolean, val bytes: ByteArray)
-
-private fun readUriPayload(context: Context, uri: Uri, forceImage: Boolean): PickedPayload? {
-    val resolver = context.contentResolver
-    val mime = resolver.getType(uri) ?: if (forceImage) "image/jpeg" else "application/octet-stream"
-    var name = ""
-    runCatching {
-        resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
-            if (c.moveToFirst()) {
-                val idx = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                if (idx >= 0) name = c.getString(idx).orEmpty()
-            }
-        }
-    }
-    if (name.isBlank()) {
-        name = if (forceImage) "photo_${System.currentTimeMillis()}.jpg" else "file_${System.currentTimeMillis()}"
-    }
-    val bytes = resolver.openInputStream(uri)?.use { it.readBytes() } ?: return null
-    val isImg = forceImage || mime.startsWith("image/")
-    return PickedPayload(name = name, mime = mime, isImage = isImg, bytes = bytes)
 }

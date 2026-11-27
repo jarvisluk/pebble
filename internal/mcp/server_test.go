@@ -65,6 +65,15 @@ func TestMCPStdioToolsFlow(t *testing.T) {
 		"request_takeover": true,
 		"recall_session":   true,
 		"open_stage":       true,
+		"recall_memory":    true,
+		"read_memory":      true,
+		"save_memory":      true,
+		"forget_memory":    true,
+		"task_spawn":       true,
+		"task_status":      true,
+		"task_read":        true,
+		"task_send":        true,
+		"task_cancel":      true,
 	}
 	if len(listResp.Result.Tools) != len(want) {
 		t.Fatalf("expected %d core tools, got %d: %+v", len(want), len(listResp.Result.Tools), listResp.Result.Tools)
@@ -179,7 +188,7 @@ func TestMCPDesktopTaskAndRoleFiltering(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(cfgPath), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(cfgPath, []byte(`{"desktopModel":"magpie/flash","bots":[{"id":"assistant"}]}`), 0o600); err != nil {
+	if err := os.WriteFile(cfgPath, []byte(`{"desktopModel":"anthropic/claude-haiku-4-5","bots":[{"id":"assistant"}]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -285,5 +294,178 @@ func TestMCPSendMessageTool(t *testing.T) {
 	files, ok := gotBody["files"].([]any)
 	if !ok || len(files) != 2 {
 		t.Fatalf("expected 2 files forwarded, got %#v", gotBody["files"])
+	}
+}
+
+func TestMCPMemoryToolsAndComputerUseBlock(t *testing.T) {
+	var (
+		gotRecallQuery string
+		gotReadPath    string
+		gotReadQuery   string
+		gotSavePayload map[string]any
+		gotDeletePath  string
+		gotDeleteQuery string
+	)
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/memory":
+			gotRecallQuery = r.URL.RawQuery
+			_, _ = w.Write([]byte(`{"backend":"pebble","installed":true,"available":true,"items":[{"id":"mem_1","title":"Rule","snippet":"always test"}]}`))
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/memory/"):
+			gotReadPath = r.URL.Path
+			gotReadQuery = r.URL.RawQuery
+			_, _ = w.Write([]byte(`{"path":"assistant/memory/items/rule-1.md","content":"always test","startLine":1,"endLine":1,"totalLines":1}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/memory":
+			gotSavePayload = map[string]any{}
+			_ = json.NewDecoder(r.Body).Decode(&gotSavePayload)
+			_, _ = w.Write([]byte(`{"ok":true,"id":"mem_2","item":{"id":"mem_2","text":"saved"}}`))
+		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/api/memory/"):
+			gotDeletePath = r.URL.Path
+			gotDeleteQuery = r.URL.RawQuery
+			_, _ = w.Write([]byte(`{"ok":true,"id":"mem_1","action":"deleted"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer api.Close()
+
+	input := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"recall_memory","arguments":{"query":"deploy","tags":["ops","prod"],"includeSessions":true,"limit":10}}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"read_memory","arguments":{"path":"MEMORY.md","startLine":1,"endLine":20}}}`,
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"save_memory","arguments":{"text":"Use blue-green deploys","title":"Deploy policy","kind":"rule","tags":["ops"],"pin":true,"supersedes":"mem_1"}}}`,
+		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"forget_memory","arguments":{"id":"mem_1","reason":"superseded","hardDelete":true}}}`,
+		"",
+	}, "\n")
+
+	var out bytes.Buffer
+	srv := NewServer(api.URL, "assistant")
+	if err := srv.ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatalf("ServeStdio failed: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 4 {
+		t.Fatalf("expected 4 responses, got %d:\n%s", len(lines), out.String())
+	}
+	if !strings.Contains(gotRecallQuery, "compact=1") || !strings.Contains(gotRecallQuery, "callerBotId=assistant") ||
+		!strings.Contains(gotRecallQuery, "includeSessions=1") || !strings.Contains(gotRecallQuery, "tags=ops%2Cprod") {
+		t.Fatalf("unexpected recall_memory query: %q", gotRecallQuery)
+	}
+	if gotReadPath != "/api/memory/_" || !strings.Contains(gotReadQuery, "path=MEMORY.md") ||
+		!strings.Contains(gotReadQuery, "botId=assistant") || !strings.Contains(gotReadQuery, "startLine=1") {
+		t.Fatalf("unexpected read_memory request: path=%q query=%q", gotReadPath, gotReadQuery)
+	}
+	if gotSavePayload["scope"] != "bot" || gotSavePayload["botId"] != "assistant" ||
+		gotSavePayload["callerBotId"] != "assistant" || gotSavePayload["supersedes"] != "mem_1" ||
+		gotSavePayload["sourceAuthor"] != "agent" || gotSavePayload["pin"] != true {
+		t.Fatalf("unexpected save_memory payload: %#v", gotSavePayload)
+	}
+	if gotDeletePath != "/api/memory/mem_1" || !strings.Contains(gotDeleteQuery, "hard=1") || !strings.Contains(gotDeleteQuery, "callerBotId=assistant") {
+		t.Fatalf("unexpected forget_memory request: path=%q query=%q", gotDeletePath, gotDeleteQuery)
+	}
+
+	// computer_use role hides and rejects all 4 memory tools.
+	t.Setenv("PEBBLE_MCP_ROLE", "computer_use")
+	cuSrv := NewServer(api.URL, "assistant")
+	cuInput := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"recall_memory","arguments":{"query":"x"}}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"save_memory","arguments":{"text":"x"}}}`,
+		"",
+	}, "\n")
+	var cuOut bytes.Buffer
+	if err := cuSrv.ServeStdio(context.Background(), strings.NewReader(cuInput), &cuOut); err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range strings.Split(strings.TrimSpace(cuOut.String()), "\n") {
+		if !strings.Contains(line, `"isError":true`) {
+			t.Fatalf("expected computer_use to reject memory tool, got: %s", line)
+		}
+	}
+}
+
+func TestMCPTaskToolsAndCoordinatorApproval(t *testing.T) {
+	var gotSpawn, gotSend, gotApprove map[string]any
+	var gotAsyncMsg map[string]any
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/bots/assistant/tasks":
+			_ = json.NewDecoder(r.Body).Decode(&gotSpawn)
+			_, _ = w.Write([]byte(`{"id":"tsk_1","botId":"assistant","kind":"worker","status":"queued"}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/tasks/tsk_1":
+			_, _ = w.Write([]byte(`{"id":"tsk_1","botId":"assistant","status":"completed","output":"done"}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/tasks/tsk_1/events":
+			_, _ = w.Write([]byte(`{"events":[{"seq":1,"taskId":"tsk_1","eventType":"status"}]}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/bots/assistant/tasks":
+			_, _ = w.Write([]byte(`{"tasks":[{"id":"tsk_1","status":"completed"}]}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/tasks/tsk_1/send":
+			_ = json.NewDecoder(r.Body).Decode(&gotSend)
+			_, _ = w.Write([]byte(`{"id":"tsk_1","status":"queued"}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/tasks/tsk_1/cancel":
+			_, _ = w.Write([]byte(`{"id":"tsk_1","status":"cancelled"}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/approvals/apr_1/reply":
+			_ = json.NewDecoder(r.Body).Decode(&gotApprove)
+			_, _ = w.Write([]byte(`{"ok":true,"items":[]}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/bots/researcher/message":
+			_ = json.NewDecoder(r.Body).Decode(&gotAsyncMsg)
+			_, _ = w.Write([]byte(`{"async":true,"task":{"id":"tsk_msg_1","status":"queued"}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer api.Close()
+
+	t.Setenv("PEBBLE_COORDINATOR_CAN_APPROVE", "1")
+	t.Setenv("PEBBLE_TASK_ID", "tsk_parent")
+	input := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"task_spawn","arguments":{"prompt":"audit repo","delivery":"wake","deviceId":"mac-mini","workspaceId":"repo","isolation":"worktree"}}}`,
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"task_status","arguments":{"taskId":"tsk_1"}}}`,
+		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"task_read","arguments":{"taskId":"tsk_1","afterSeq":0}}}`,
+		`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"task_send","arguments":{"taskId":"tsk_1","message":"more detail"}}}`,
+		`{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"task_cancel","arguments":{"taskId":"tsk_1"}}}`,
+		`{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"task_approve","arguments":{"approvalId":"apr_1","decision":"allow_once"}}}`,
+		`{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"message_bot","arguments":{"botId":"researcher","message":"bg check","async":true}}}`,
+		"",
+	}, "\n")
+
+	var out bytes.Buffer
+	srv := NewServer(api.URL, "assistant")
+	if err := srv.ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatalf("ServeStdio failed: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 8 {
+		t.Fatalf("expected 8 responses, got %d:\n%s", len(lines), out.String())
+	}
+	if !strings.Contains(lines[0], `"task_approve"`) {
+		t.Fatalf("expected task_approve exposed when PEBBLE_COORDINATOR_CAN_APPROVE=1:\n%s", lines[0])
+	}
+	if gotSpawn["prompt"] != "audit repo" || gotSpawn["delivery"] != "wake" || gotSpawn["parentTaskId"] != "tsk_parent" ||
+		gotSpawn["deviceId"] != "mac-mini" || gotSpawn["workspaceId"] != "repo" || gotSpawn["isolation"] != "worktree" {
+		t.Fatalf("unexpected task_spawn payload: %#v", gotSpawn)
+	}
+	var readResp struct {
+		Result struct {
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(lines[3]), &readResp); err != nil || len(readResp.Result.Content) == 0 ||
+		!strings.Contains(readResp.Result.Content[0].Text, `"events"`) || !strings.Contains(readResp.Result.Content[0].Text, `"tsk_1"`) {
+		t.Fatalf("unexpected task_read output: %s", lines[3])
+	}
+	if gotSend["message"] != "more detail" {
+		t.Fatalf("unexpected task_send payload: %#v", gotSend)
+	}
+	if !strings.Contains(lines[5], "cancelled") {
+		t.Fatalf("unexpected task_cancel output: %s", lines[5])
+	}
+	if gotApprove["decision"] != "allow_once" || gotApprove["callerBotId"] != "assistant" {
+		t.Fatalf("unexpected task_approve payload: %#v", gotApprove)
+	}
+	if gotAsyncMsg["async"] != true {
+		t.Fatalf("unexpected async message_bot payload: %#v", gotAsyncMsg)
 	}
 }

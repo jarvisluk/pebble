@@ -1,14 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
-import type { HarnessInfo, ResolvedLang, SettingsData, SetupTaskStatus } from '../../types';
+import type { HarnessInfo, SettingsData, SetupTaskStatus } from '../../types';
 import { api } from '../../lib/api';
 import { HarnessIcon } from '../HarnessIcon';
 import { ModelCombo } from '../ModelCombo';
-import { StepMagpie } from './StepMagpie';
 
 interface StepHarnessProps {
   t: (k: string, vars?: Record<string, string | number>) => string;
-  lang: ResolvedLang;
-  settings: SettingsData | null;
   harnesses: HarnessInfo[];
   selectedHarness: string;
   onSelectHarness: (id: string) => void;
@@ -17,11 +14,8 @@ interface StepHarnessProps {
   models: Record<string, string[]>;
   loadingModels: Record<string, boolean>;
   busy: boolean;
-  onBusyChange: (b: boolean) => void;
   onRecheck: () => void;
-  onSettingsUpdated: (s: SettingsData) => void;
   onFetchModels: (harnessId: string, force?: boolean) => Promise<void>;
-  onLoadModels: (harness: string, force?: boolean) => Promise<string[]>;
   onLoadSettings: (fresh?: boolean) => Promise<SettingsData>;
   onResetModels: () => void;
   onToast: (msg: string) => void;
@@ -30,8 +24,6 @@ interface StepHarnessProps {
 
 export const StepHarness: React.FC<StepHarnessProps> = ({
   t,
-  lang,
-  settings,
   harnesses,
   selectedHarness,
   onSelectHarness,
@@ -40,11 +32,8 @@ export const StepHarness: React.FC<StepHarnessProps> = ({
   models,
   loadingModels,
   busy,
-  onBusyChange,
   onRecheck,
-  onSettingsUpdated,
   onFetchModels,
-  onLoadModels,
   onLoadSettings,
   onResetModels,
   onToast,
@@ -221,20 +210,18 @@ export const StepHarness: React.FC<StepHarnessProps> = ({
     recommendedUninstalled[0]?.id ||
     '';
 
-  const advSummary = hInfo?.magpie?.connected
-    ? t('ubAdvModelSummaryMagpie', { model: hInfo.magpie.model || t('defaultTag') })
-    : defaultModel.trim()
-      ? t('ubAdvModelSummaryCustom', { model: defaultModel.trim() })
-      : t('ubAdvModelSummaryDefault', { label: hLabel });
+  const advSummary = defaultModel.trim()
+    ? t('ubAdvModelSummaryCustom', { model: defaultModel.trim() })
+    : t('ubAdvModelSummaryDefault', { label: hLabel });
 
   const renderHarnessRow = (h: HarnessInfo) => {
     const selected = h.installed && h.id === selectedHarness;
     const isRecommended = h.id === recommendedId;
     const expanded = expandedInstall.has(h.id);
-    const rawCmd = h.install?.command || '';
-    const isShellCmd = rawCmd.includes(' ') && !rawCmd.startsWith('查看');
-    const cmdText = isShellCmd ? rawCmd : rawCmd ? t('ubManualInstall', { name: h.label }) : '';
+    const rawCmd = (h.install?.command || '').trim();
     const url = h.install?.url || '';
+    const isShellCmd = Boolean(rawCmd);
+    const cmdText = isShellCmd ? rawCmd : url ? t('ubManualInstall', { name: h.label }) : '';
 
     const instTask = installTasks[h.id];
     const loginTask = loginTasks[h.id];
@@ -492,25 +479,6 @@ export const StepHarness: React.FC<StepHarnessProps> = ({
                       dropUp
                     />
                   </div>
-                  <StepMagpie
-                    t={t}
-                    lang={lang}
-                    settings={settings}
-                    selectedHarness={selectedHarness}
-                    hLabel={hLabel}
-                    hInfo={hInfo}
-                    defaultModel={defaultModel}
-                    onChangeDefaultModel={onChangeDefaultModel}
-                    busy={busy}
-                    onBusyChange={onBusyChange}
-                    onRecheck={onRecheck}
-                    onSettingsUpdated={onSettingsUpdated}
-                    onLoadSettings={onLoadSettings}
-                    onLoadModels={onLoadModels}
-                    onResetModels={onResetModels}
-                    onToast={onToast}
-                    onError={onError}
-                  />
                 </div>
               )}
             </div>

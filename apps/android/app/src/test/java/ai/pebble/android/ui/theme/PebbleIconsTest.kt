@@ -32,6 +32,7 @@ class PebbleIconsTest {
             PebbleIcons.Devices,
             PebbleIcons.ExpandLess,
             PebbleIcons.ExpandMore,
+            PebbleIcons.Extension,
             PebbleIcons.FlashlightOff,
             PebbleIcons.FlashlightOn,
             PebbleIcons.Folder,
@@ -57,6 +58,7 @@ class PebbleIconsTest {
             PebbleIcons.PhotoLibrary,
             PebbleIcons.PlayArrow,
             PebbleIcons.Psychology,
+            PebbleIcons.Public,
             PebbleIcons.PushPin,
             PebbleIcons.QrCodeScanner,
             PebbleIcons.Refresh,
@@ -68,12 +70,13 @@ class PebbleIconsTest {
             PebbleIcons.SwapVert,
             PebbleIcons.SyncProblem,
             PebbleIcons.Tune,
+            PebbleIcons.WebAsset,
             PebbleIcons.Visibility,
             PebbleIcons.VisibilityOff,
             PebbleIcons.VpnKey,
             PebbleIcons.Warning,
         )
-        assertEquals(64, all.size)
+        assertEquals(67, all.size)
         assertTrue(all.all { it != 0 })
         assertEquals(all.size, all.toSet().size)
     }

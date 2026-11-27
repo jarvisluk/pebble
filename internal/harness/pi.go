@@ -100,20 +100,20 @@ func (h *PiHarness) PermissionCapabilities() PermissionCapabilities {
 
 func (h *PiHarness) ListCommands(_ context.Context, bot config.BotConfig) ([]SlashCommand, error) {
 	builtins := []SlashCommand{
-		{Name: "compact", Description: "压缩当前会话上下文", Source: "harness"},
-		{Name: "new", Description: "开启新会话", Source: "harness"},
-		{Name: "clear", Description: "清空当前会话", Source: "harness"},
-		{Name: "model", Description: "查看或切换模型", Source: "harness"},
-		{Name: "thinking", Description: "调整思考强度", Source: "harness"},
-		{Name: "tree", Description: "查看会话分支树", Source: "harness"},
-		{Name: "fork", Description: "从当前节点分叉新会话", Source: "harness"},
-		{Name: "resume", Description: "恢复历史会话", Source: "harness"},
-		{Name: "export", Description: "导出当前会话", Source: "harness"},
-		{Name: "session", Description: "查看当前会话信息", Source: "harness"},
-		{Name: "reload", Description: "重载扩展与配置", Source: "harness"},
-		{Name: "settings", Description: "查看或修改设置", Source: "harness"},
-		{Name: "hotkeys", Description: "查看快捷键说明", Source: "harness"},
-		{Name: "help", Description: "查看可用命令帮助", Source: "harness"},
+		{Name: "compact", Description: "Compact current session context", Source: "harness"},
+		{Name: "new", Description: "Start a new session", Source: "harness"},
+		{Name: "clear", Description: "Clear current session", Source: "harness"},
+		{Name: "model", Description: "View or switch model", Source: "harness"},
+		{Name: "thinking", Description: "Adjust thinking level", Source: "harness"},
+		{Name: "tree", Description: "View session branch tree", Source: "harness"},
+		{Name: "fork", Description: "Fork a new session from current node", Source: "harness"},
+		{Name: "resume", Description: "Resume a previous session", Source: "harness"},
+		{Name: "export", Description: "Export current session", Source: "harness"},
+		{Name: "session", Description: "Show current session info", Source: "harness"},
+		{Name: "reload", Description: "Reload extensions and config", Source: "harness"},
+		{Name: "settings", Description: "View or update settings", Source: "harness"},
+		{Name: "hotkeys", Description: "Show keyboard shortcuts", Source: "harness"},
+		{Name: "help", Description: "Show available commands", Source: "harness"},
 	}
 	h.mu.Lock()
 	cached := append([]SlashCommand(nil), h.commands[bot.ID]...)
@@ -327,7 +327,7 @@ func (h *PiHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnResult, 
 		if err != nil {
 			return partial, fmt.Errorf("pi compact for bot %q: %w", bot.ID, err)
 		}
-		text := "会话上下文已压缩。"
+		text := "Session context compacted."
 		if evt != nil && strings.TrimSpace(evt.Data.Summary) != "" {
 			text = strings.TrimSpace(evt.Data.Summary)
 		}
@@ -350,7 +350,7 @@ func (h *PiHarness) RunTurn(ctx context.Context, opts RunOptions) (*TurnResult, 
 
 	if _, err := h.call(ctx, p, promptReq); err != nil {
 		if errors.Is(err, errPiCommandHandled) {
-			return finish(partial, "已执行命令。", Usage{}, started), nil
+			return finish(partial, "Command executed.", Usage{}, started), nil
 		}
 		return partial, fmt.Errorf("pi failed for bot %q: %w", bot.ID, err)
 	}

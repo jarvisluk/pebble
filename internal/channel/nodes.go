@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/coder/websocket"
+
 	"bot-hub/internal/node"
 	"bot-hub/internal/protocol"
 )
@@ -28,6 +30,16 @@ func (s *HTTPServer) nodes() *node.Registry {
 
 func (s *HTTPServer) handleNodes(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"nodes": s.nodes().List()})
+}
+
+func (s *HTTPServer) handleNodeWS(w http.ResponseWriter, r *http.Request) {
+	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+		InsecureSkipVerify: true, // Origin is already verified by s.guard.
+	})
+	if err != nil {
+		return
+	}
+	s.nodes().ServeWS(r.Context(), conn)
 }
 
 func (s *HTTPServer) handleLocalNodeStub(w http.ResponseWriter, _ *http.Request) {
@@ -128,7 +140,7 @@ func (s *HTTPServer) handleNodeCall(w http.ResponseWriter, r *http.Request) {
 			writeNodeUpgradeErr(
 				w,
 				http.StatusUnprocessableEntity,
-				fmt.Sprintf("远端节点 %q 版本过低，不支持独立虚拟屏，请升级该节点或在 Bot 详情中改绑其主桌面", targetNode.ID),
+				fmt.Sprintf("remote node %q is outdated and does not support dedicated virtual screens; upgrade the node or bind its main desktop in Bot Details", targetNode.ID),
 				protocol.CapNodeVirtualSlots,
 			)
 			return

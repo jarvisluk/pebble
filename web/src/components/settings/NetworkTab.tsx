@@ -376,6 +376,7 @@ export const NetworkTab: React.FC<NetworkTabProps> = ({
                 ['files', 'permFiles'],
                 ['exec', 'permExec'],
                 ['desktop', 'permDesktop'],
+                ['agent', 'permAgent'],
               ] as const
             ).map(([perm, labelKey]) => {
               const checked = (localNode.permissions || []).includes(perm);
@@ -797,10 +798,23 @@ export const NetworkTab: React.FC<NetworkTabProps> = ({
           ) : (
             nodes.map((n) => {
               const permLabel = (p: string) =>
-                t(({ files: 'permFileShort', exec: 'permExecShort', desktop: 'permDeskShort' } as Record<string, string>)[p] || p);
+                t(
+                  ({
+                    files: 'permFileShort',
+                    exec: 'permExecShort',
+                    desktop: 'permDeskShort',
+                    agent: 'permAgentShort',
+                  } as Record<string, string>)[p] || p
+                );
               const perms = (n.permissions || []).map(permLabel).join(' · ') || t('noPerm');
               const meta = [n.os && n.arch ? `${n.os}/${n.arch}` : n.os || '', perms].filter(Boolean).join(' · ');
               const canDesk = n.connected && (n.permissions || []).includes('desktop');
+              const hasAgentPerm =
+                (n.permissions || []).includes('agent') ||
+                (n.capabilities || []).includes('node.agent_exec');
+              const installedHarnesses = (n.harnesses || []).filter((h) => h.installed);
+              const workspaces = n.workspaces || [];
+              const activeCount = (n.activeTaskIds || []).length;
               const isOutdated = typeof n.protocolVersion === 'number' && n.protocolVersion < CLIENT_PROTOCOL;
               return (
                 <div key={n.id} className="node-row">
@@ -809,6 +823,60 @@ export const NetworkTab: React.FC<NetworkTabProps> = ({
                     <div className="meta" title={isOutdated ? t('nodeOutdatedHint') : undefined}>
                       {isOutdated ? [meta, t('nodeOutdatedHint')].filter(Boolean).join(' · ') : meta}
                     </div>
+                    {(hasAgentPerm || n.maxPermissionMode || installedHarnesses.length > 0 || workspaces.length > 0 || activeCount > 0) && (
+                      <div className="node-caps-wrap">
+                        {(hasAgentPerm || n.maxPermissionMode || activeCount > 0 || n.reconnecting) && (
+                          <div className="node-tags-row">
+                            {hasAgentPerm && <span className="task-pill device">{t('nodeCapAgent')}</span>}
+                            {n.maxPermissionMode && (
+                              <span className="mp">
+                                {t('nodeMaxPerm', {
+                                  mode:
+                                    translate(lang, `permMode_${n.maxPermissionMode}`) ===
+                                    `permMode_${n.maxPermissionMode}`
+                                      ? n.maxPermissionMode
+                                      : t(`permMode_${n.maxPermissionMode}`),
+                                })}
+                              </span>
+                            )}
+                            {activeCount > 0 && (
+                              <span className="mp ok">{t('nodeActiveTasks', { n: activeCount })}</span>
+                            )}
+                            {n.reconnecting && <span className="mp">{t('nodeReconnecting')}</span>}
+                          </div>
+                        )}
+                        {installedHarnesses.length > 0 && (
+                          <div className="node-tags-row">
+                            <span className="node-tags-lbl">{t('nodeHarnessesLbl')}</span>
+                            {installedHarnesses.map((h) => (
+                              <span
+                                key={h.kind}
+                                className="node-tag-mono"
+                                title={h.authDetail || undefined}
+                              >
+                                {h.label || h.kind}
+                                {h.authStatus === 'needs_login'
+                                  ? ` · ${t('nodeHarnessNeedsLogin')}`
+                                  : h.authStatus === 'ready'
+                                    ? ` · ${t('nodeHarnessReady')}`
+                                    : ''}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        {workspaces.length > 0 && (
+                          <div className="node-tags-row">
+                            <span className="node-tags-lbl">{t('nodeWorkspacesLbl')}</span>
+                            {workspaces.map((ws) => (
+                              <span key={ws.id || ws.path} className="node-tag-mono" title={ws.path}>
+                                {ws.name || ws.path}
+                                {ws.isGit && ws.defaultBranch ? ` (${ws.defaultBranch})` : ''}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                   <div className="row-inline-sm">
                     {isOutdated && (

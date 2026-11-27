@@ -71,6 +71,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.Locale
 import androidx.compose.ui.res.painterResource
+import ai.pebble.android.data.StageRef
 import ai.pebble.android.ui.theme.PebbleIcons
 
 @Composable
@@ -84,6 +85,7 @@ fun MessageBubble(
     bubbleColor: Color? = null,
     botId: String = "",
     inSidebar: Boolean = false,
+    onOpenStageRef: ((StageRef) -> Unit)? = null,
 ) {
     val p = LocalPalette.current
     val bubbleShape = if (inSidebar) RoundedCornerShape(16.dp) else PebbleDimens.bubbleShape
@@ -207,6 +209,22 @@ fun MessageBubble(
                         MarkdownText(text = msg.body)
                     }
                     MediaGrid(store = store, media = msg.media.orEmpty(), onPreviewMedia = onPreviewMedia)
+                }
+            }
+        }
+        "stage" -> {
+            val st = msg.stage
+            if (st != null) {
+                Row(
+                    modifier = modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Start,
+                ) {
+                    StageJumpCard(
+                        store = store,
+                        ref = st,
+                        inSidebar = inSidebar,
+                        onOpen = { onOpenStageRef?.invoke(st) },
+                    )
                 }
             }
         }

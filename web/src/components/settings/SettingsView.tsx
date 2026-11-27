@@ -8,6 +8,7 @@ import type {
   ServerInfo,
   SettingsData,
   SettingsTab,
+  UpdateStatus,
 } from '../../types';
 import { translate } from '../../lib/i18n';
 import type { ViewDir, ViewState } from '../../lib/useViewTransition';
@@ -26,12 +27,17 @@ interface SettingsViewProps {
   bots: BotStatus[];
   settings: SettingsData | null;
   serverInfo: ServerInfo | null;
+  updateStatus: UpdateStatus | null;
+  updateChecking: boolean;
+  canCheckUpdate: boolean;
   models: Record<string, string[]>;
   nodesFromEvents: NodeInfo[] | null;
   lang: ResolvedLang;
   langPref: LangPref;
   onOpenMenu: () => void;
   onLangChange: (pref: LangPref) => void;
+  onCheckUpdates: () => Promise<void>;
+  onSaveUpdateConfig: (patch: { autoCheck?: boolean; interval?: string; channel?: string }) => Promise<void>;
   onToast: (msg: string) => void;
   onConfirm: (opts: ConfirmOptions) => void;
   onSettingsUpdated: (s: SettingsData) => void;
@@ -54,12 +60,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   bots,
   settings,
   serverInfo,
+  updateStatus,
+  updateChecking,
+  canCheckUpdate,
   models,
   nodesFromEvents,
   lang,
   langPref,
   onOpenMenu,
   onLangChange,
+  onCheckUpdates,
+  onSaveUpdateConfig,
   onToast,
   onConfirm,
   onSettingsUpdated,
@@ -124,15 +135,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     [onLoadModels]
   );
 
-  const handleAfterMagpieInstall = useCallback(
-    (fresh: SettingsData) => {
-      onSettingsUpdated(fresh);
-      onResetModels();
-      preloadAllModels(fresh.harnesses, true);
-    },
-    [onSettingsUpdated, onResetModels, preloadAllModels]
-  );
-
   const titleKey =
     tab === 'remote'
       ? 'tabRemote'
@@ -159,10 +161,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     };
     pushH(list.find((h) => h.id === defHarness));
     for (const h of list) {
-      if ((!anyInstalled || h.installed) && !h.magpie?.connected) pushH(h);
-    }
-    for (const h of list) {
-      if ((!anyInstalled || h.installed) && h.magpie?.connected) pushH(h);
+      if (!anyInstalled || h.installed) pushH(h);
     }
     for (const h of list) {
       if (!anyInstalled || (models[h.id]?.length ?? 0) > 0) pushH(h);
@@ -170,11 +169,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     const seen = new Set<string>();
     const out: { value: string; label: string }[] = [];
     for (const h of ordered) {
-      const tag = h.magpie?.connected ? `${h.label} · Magpie` : h.label;
       for (const m of models[h.id] || []) {
         if (seen.has(m)) continue;
         seen.add(m);
-        out.push({ value: m, label: `${m} (${tag})` });
+        out.push({ value: m, label: `${m} (${h.label})` });
       }
     }
     return out;
@@ -239,7 +237,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               lang={lang}
               langPref={langPref}
               serverInfo={serverInfo}
+              updateStatus={updateStatus}
+              updateChecking={updateChecking}
+              canCheckUpdate={canCheckUpdate}
               onLangChange={onLangChange}
+              onCheckUpdates={onCheckUpdates}
+              onSaveUpdateConfig={onSaveUpdateConfig}
               onReopenUnbox={onReopenUnbox}
             />
           )}
@@ -269,7 +272,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               lang={lang}
               onToast={onToast}
               onSettingsUpdated={onSettingsUpdated}
-              onAfterMagpieInstall={handleAfterMagpieInstall}
               onDirtyChange={setMemoryDirty}
               saveRef={memorySaveRef}
               resetRef={memoryResetRef}

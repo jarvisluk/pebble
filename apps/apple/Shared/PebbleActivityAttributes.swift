@@ -10,6 +10,7 @@ struct PebbleActivityAttributes: ActivityAttributes {
         var startedAt: Double        // Unix epoch seconds
         var summary: String?
         var takeoverReason: String?
+        var activeTaskCount: Int?
 
         var startedDate: Date {
             Date(timeIntervalSince1970: startedAt)

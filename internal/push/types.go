@@ -46,7 +46,7 @@ type Status struct {
 // LiveActivityContentState mirrors PebbleActivityAttributes.ContentState on iOS.
 type LiveActivityContentState struct {
 	Phase          string  `json:"phase"`                    // "running" | "takeover" | "completed" | "error"
-	StatusText     string  `json:"statusText"`               // e.g. "正在运行 bash"
+	StatusText     string  `json:"statusText"`               // e.g. "Running bash"
 	StepCount      int     `json:"stepCount"`                // tool call count
 	StartedAt      float64 `json:"startedAt"`                // Unix timestamp seconds
 	Summary        string  `json:"summary,omitempty"`        // final result or error summary

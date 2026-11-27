@@ -23,21 +23,34 @@ type PortableBotConfig struct {
 	UpdatedBy        string           `json:"updatedBy,omitempty"`
 }
 
+// PortableMemoryConfig contains cross-machine portable memory settings.
+// Secret fields such as embedding.apiKey are intentionally excluded.
+type PortableMemoryConfig struct {
+	Enabled                 *bool              `json:"enabled,omitempty"`
+	Coexistence             string             `json:"coexistence,omitempty"`
+	SnapshotMaxChars        int                `json:"snapshotMaxChars,omitempty"`
+	DisableClaudeAutoMemory *bool              `json:"disableClaudeAutoMemory,omitempty"`
+	Dream                   *MemoryDreamConfig `json:"dream,omitempty"`
+	Embedding               *MemoryEmbedConfig `json:"embedding,omitempty"`
+}
+
 // PortableBundle is the versioned portable snapshot exchanged across hosts or
 // committed to the checkpoint repository.
 type PortableBundle struct {
-	Version    int                 `json:"version"`
-	UpdatedAt  string              `json:"updatedAt"`
-	SourceHost string              `json:"sourceHost,omitempty"`
-	Bots       []PortableBotConfig `json:"bots"`
+	Version    int                   `json:"version"`
+	UpdatedAt  string                `json:"updatedAt"`
+	SourceHost string                `json:"sourceHost,omitempty"`
+	Memory     *PortableMemoryConfig `json:"memory,omitempty"`
+	Bots       []PortableBotConfig   `json:"bots"`
 }
 
-// ExportPortable extracts only portable bot definitions from cfg.
+// ExportPortable extracts only portable bot definitions and non-secret memory config from cfg.
 func ExportPortable(cfg *HubConfig, sourceHost string) PortableBundle {
 	out := PortableBundle{
 		Version:    1,
 		UpdatedAt:  time.Now().UTC().Format(time.RFC3339),
 		SourceHost: strings.TrimSpace(sourceHost),
+		Memory:     exportPortableMemory(cfg.Memory),
 		Bots:       make([]PortableBotConfig, 0, len(cfg.Bots)),
 	}
 	for _, b := range cfg.Bots {
@@ -54,6 +67,109 @@ func ExportPortable(cfg *HubConfig, sourceHost string) PortableBundle {
 		})
 	}
 	return out
+}
+
+func exportPortableMemory(m *MemoryConfig) *PortableMemoryConfig {
+	if m == nil {
+		return nil
+	}
+	pm := &PortableMemoryConfig{
+		Coexistence:      m.EffectiveCoexistence(),
+		SnapshotMaxChars: m.SnapshotMaxChars,
+	}
+	if m.Enabled != nil {
+		v := *m.Enabled
+		pm.Enabled = &v
+	}
+	if m.DisableClaudeAutoMemory != nil {
+		v := *m.DisableClaudeAutoMemory
+		pm.DisableClaudeAutoMemory = &v
+	}
+	if m.Dream != nil {
+		d := *m.Dream
+		if m.Dream.Enabled != nil {
+			v := *m.Dream.Enabled
+			d.Enabled = &v
+		}
+		pm.Dream = &d
+	}
+	if m.Embedding != nil {
+		// Never export APIKey in portable bundles.
+		pm.Embedding = &MemoryEmbedConfig{
+			Enabled: m.Embedding.Enabled,
+			BaseURL: strings.TrimSpace(m.Embedding.BaseURL),
+			Model:   strings.TrimSpace(m.Embedding.Model),
+		}
+	}
+	return pm
+}
+
+func applyPortableMemory(dst *MemoryConfig, src *PortableMemoryConfig) (*MemoryConfig, bool) {
+	if src == nil {
+		return dst, false
+	}
+	next := &MemoryConfig{}
+	if dst != nil {
+		*next = *dst
+		if dst.Enabled != nil {
+			v := *dst.Enabled
+			next.Enabled = &v
+		}
+		if dst.DisableClaudeAutoMemory != nil {
+			v := *dst.DisableClaudeAutoMemory
+			next.DisableClaudeAutoMemory = &v
+		}
+		if dst.Dream != nil {
+			d := *dst.Dream
+			if dst.Dream.Enabled != nil {
+				v := *dst.Dream.Enabled
+				d.Enabled = &v
+			}
+			next.Dream = &d
+		}
+		if dst.Embedding != nil {
+			e := *dst.Embedding
+			next.Embedding = &e
+		}
+	}
+	if src.Enabled != nil {
+		v := *src.Enabled
+		next.Enabled = &v
+	}
+	if c, err := NormalizeMemoryCoexistence(src.Coexistence); err == nil && src.Coexistence != "" {
+		next.Coexistence = c
+	}
+	if src.SnapshotMaxChars > 0 {
+		next.SnapshotMaxChars = src.SnapshotMaxChars
+	}
+	if src.DisableClaudeAutoMemory != nil {
+		v := *src.DisableClaudeAutoMemory
+		next.DisableClaudeAutoMemory = &v
+	}
+	if src.Dream != nil {
+		d := *src.Dream
+		if src.Dream.Enabled != nil {
+			v := *src.Dream.Enabled
+			d.Enabled = &v
+		}
+		next.Dream = &d
+	}
+	if src.Embedding != nil {
+		existingKey := ""
+		if next.Embedding != nil {
+			existingKey = next.Embedding.APIKey
+		}
+		next.Embedding = &MemoryEmbedConfig{
+			Enabled: src.Embedding.Enabled,
+			BaseURL: strings.TrimSpace(src.Embedding.BaseURL),
+			APIKey:  existingKey, // Strictly preserve local API key / ${ENV_VAR}.
+			Model:   strings.TrimSpace(src.Embedding.Model),
+		}
+	}
+	if reflect.DeepEqual(dst, next) {
+		return dst, false
+	}
+	return next, true
 }
 
 // ApplyPortable merges portable bot definitions into cfg while strictly preserving
@@ -141,11 +257,23 @@ func ApplyPortable(cfg *HubConfig, bundle PortableBundle) (changed bool, added [
 		added = append(added, id)
 	}
 
+	if bundle.Memory != nil {
+		if nextMem, memChanged := applyPortableMemory(cfg.Memory, bundle.Memory); memChanged {
+			cfg.Memory = nextMem
+			changed = true
+		}
+	}
+
 	if !changed || strings.TrimSpace(cfg.ConfigPath) == "" {
 		return changed, added, updated, nil
 	}
 
 	err = UpdateRaw(cfg, func(raw *HubConfig) error {
+		if bundle.Memory != nil {
+			if nextMem, _ := applyPortableMemory(raw.Memory, bundle.Memory); nextMem != nil {
+				raw.Memory = nextMem
+			}
+		}
 		rawIdx := make(map[string]int, len(raw.Bots))
 		for i, b := range raw.Bots {
 			rawIdx[b.ID] = i

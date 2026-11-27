@@ -25,7 +25,7 @@ var (
 	// ErrSessionNotFound indicates the requested session does not exist.
 	ErrSessionNotFound = errors.New("session not found")
 
-	legacyResetSessionRe = regexp.MustCompile(`旧 Session:\s*([^\s）)]+)`)
+	legacyResetSessionRe = regexp.MustCompile(`(?:旧 Session:|previous:)\s*([^\s）)]+)`) // i18n:allow-cjk
 )
 
 const defaultRecallMaxChars = 2000
@@ -67,6 +67,7 @@ CREATE TABLE IF NOT EXISTS messages (
   recipient     TEXT NOT NULL DEFAULT '',
   text          TEXT NOT NULL,
   media_json    TEXT NOT NULL DEFAULT '[]',
+  stage_json    TEXT NOT NULL DEFAULT '',
   tools_json    TEXT NOT NULL DEFAULT '[]',
   duration_ms   INTEGER NOT NULL DEFAULT 0,
   cost_usd      REAL NOT NULL DEFAULT 0,
@@ -142,7 +143,156 @@ CREATE TABLE IF NOT EXISTS sync_files (
   updated_by TEXT NOT NULL DEFAULT '',
   updated_at TEXT NOT NULL DEFAULT ''
 );
+
+CREATE TABLE IF NOT EXISTS memory_docs (
+  doc_id         TEXT PRIMARY KEY,
+  path           TEXT NOT NULL UNIQUE,
+  scope          TEXT NOT NULL DEFAULT 'global',
+  bot_id         TEXT NOT NULL DEFAULT '',
+  doc_type       TEXT NOT NULL DEFAULT 'item',
+  kind           TEXT NOT NULL DEFAULT '',
+  title          TEXT NOT NULL DEFAULT '',
+  body           TEXT NOT NULL DEFAULT '',
+  why            TEXT NOT NULL DEFAULT '',
+  tags_json      TEXT NOT NULL DEFAULT '[]',
+  status         TEXT NOT NULL DEFAULT 'active',
+  pin            INTEGER NOT NULL DEFAULT 0,
+  confidence     REAL NOT NULL DEFAULT 0.8,
+  valid_from     TEXT NOT NULL DEFAULT '',
+  valid_until    TEXT NOT NULL DEFAULT '',
+  superseded_by  TEXT NOT NULL DEFAULT '',
+  source_session TEXT NOT NULL DEFAULT '',
+  source_author  TEXT NOT NULL DEFAULT '',
+  created_at     TEXT NOT NULL DEFAULT '',
+  updated_at     TEXT NOT NULL DEFAULT '',
+  mtime_unix     INTEGER NOT NULL DEFAULT 0,
+  size           INTEGER NOT NULL DEFAULT 0,
+  sha256         TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_memory_docs_scope_bot ON memory_docs(scope, bot_id, status);
+CREATE INDEX IF NOT EXISTS idx_memory_docs_type      ON memory_docs(doc_type, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS memory_chunks (
+  chunk_id    TEXT PRIMARY KEY,
+  doc_id      TEXT NOT NULL,
+  chunk_index INTEGER NOT NULL DEFAULT 0,
+  heading     TEXT NOT NULL DEFAULT '',
+  start_line  INTEGER NOT NULL DEFAULT 1,
+  end_line    INTEGER NOT NULL DEFAULT 1,
+  text        TEXT NOT NULL,
+  sha256      TEXT NOT NULL DEFAULT '',
+  FOREIGN KEY(doc_id) REFERENCES memory_docs(doc_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_memory_chunks_doc ON memory_chunks(doc_id, chunk_index);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts_uni USING fts5(
+  chunk_id UNINDEXED,
+  doc_id UNINDEXED,
+  title,
+  tags,
+  text,
+  tokenize='unicode61 remove_diacritics 2'
+);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts_tri USING fts5(
+  chunk_id UNINDEXED,
+  doc_id UNINDEXED,
+  title,
+  tags,
+  text,
+  tokenize='trigram'
+);
+
+CREATE TABLE IF NOT EXISTS memory_embeddings (
+  chunk_id   TEXT PRIMARY KEY,
+  model      TEXT NOT NULL DEFAULT '',
+  dim        INTEGER NOT NULL DEFAULT 0,
+  vec        BLOB NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT '',
+  FOREIGN KEY(chunk_id) REFERENCES memory_chunks(chunk_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS memory_stats (
+  doc_id           TEXT PRIMARY KEY,
+  access_count     INTEGER NOT NULL DEFAULT 0,
+  last_accessed_at TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS memory_dismissed (
+  fingerprint  TEXT PRIMARY KEY,
+  scope        TEXT NOT NULL DEFAULT '',
+  bot_id       TEXT NOT NULL DEFAULT '',
+  summary      TEXT NOT NULL DEFAULT '',
+  dismissed_at TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS bot_tasks (
+  id                 TEXT PRIMARY KEY,
+  bot_id             TEXT NOT NULL,
+  kind               TEXT NOT NULL DEFAULT 'worker',
+  title              TEXT NOT NULL DEFAULT '',
+  prompt             TEXT NOT NULL DEFAULT '',
+  status             TEXT NOT NULL DEFAULT 'queued',
+  device_id          TEXT NOT NULL DEFAULT 'local',
+  harness            TEXT NOT NULL DEFAULT '',
+  model              TEXT NOT NULL DEFAULT '',
+  permission_mode    TEXT NOT NULL DEFAULT '',
+  workdir            TEXT NOT NULL DEFAULT '',
+  workspace_id       TEXT NOT NULL DEFAULT '',
+  isolation          TEXT NOT NULL DEFAULT '',
+  worktree_branch    TEXT NOT NULL DEFAULT '',
+  worktree_path      TEXT NOT NULL DEFAULT '',
+  checkpoint_ref     TEXT NOT NULL DEFAULT '',
+  delivery           TEXT NOT NULL DEFAULT 'receipt',
+  depends_on_json    TEXT NOT NULL DEFAULT '[]',
+  parent_task_id     TEXT NOT NULL DEFAULT '',
+  routine_id         TEXT NOT NULL DEFAULT '',
+  routine_name       TEXT NOT NULL DEFAULT '',
+  trigger            TEXT NOT NULL DEFAULT '',
+  slot_key           TEXT NOT NULL DEFAULT '',
+  runtime_session_id TEXT NOT NULL DEFAULT '',
+  output             TEXT NOT NULL DEFAULT '',
+  error              TEXT NOT NULL DEFAULT '',
+  tools_json         TEXT NOT NULL DEFAULT '[]',
+  duration_ms        INTEGER NOT NULL DEFAULT 0,
+  cost_usd           REAL NOT NULL DEFAULT 0,
+  input_tokens       INTEGER NOT NULL DEFAULT 0,
+  output_tokens      INTEGER NOT NULL DEFAULT 0,
+  created_at         TEXT NOT NULL,
+  started_at         TEXT NOT NULL DEFAULT '',
+  finished_at        TEXT NOT NULL DEFAULT '',
+  injected_at        TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_bot_tasks_bot_created ON bot_tasks(bot_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_bot_tasks_status      ON bot_tasks(status);
+CREATE INDEX IF NOT EXISTS idx_bot_tasks_routine     ON bot_tasks(bot_id, routine_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_bot_tasks_slot_key    ON bot_tasks(slot_key);
+CREATE INDEX IF NOT EXISTS idx_bot_tasks_pending     ON bot_tasks(bot_id, delivery, status, injected_at);
+
+CREATE TABLE IF NOT EXISTS bot_task_events (
+  seq          INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id      TEXT NOT NULL,
+  bot_id       TEXT NOT NULL,
+  event_type   TEXT NOT NULL,
+  payload_json TEXT NOT NULL DEFAULT '{}',
+  created_at   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_bot_task_events_task_seq ON bot_task_events(task_id, seq);
+
+CREATE TABLE IF NOT EXISTS bot_stage_latest (
+  bot_id     TEXT PRIMARY KEY,
+  stage_json TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
 `
+
+// DB exposes the underlying SQLite database handle for derived index packages.
+func (s *Store) DB() *sql.DB {
+	if s == nil {
+		return nil
+	}
+	return s.db
+}
 
 func openSQLite(dbPath string) (*sql.DB, error) {
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
@@ -175,11 +325,60 @@ func openSQLite(dbPath string) (*sql.DB, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("migrate messages.media_json: %w", err)
 	}
+	if err := ensureMessagesStageColumn(db); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("migrate messages.stage_json: %w", err)
+	}
 	if err := ensureRoutineRunsSlotKeyColumn(db); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("migrate routine_runs.slot_key: %w", err)
 	}
+	if err := ensureBotTasksWorktreeColumns(db); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("migrate bot_tasks worktree columns: %w", err)
+	}
 	return db, nil
+}
+
+func ensureBotTasksWorktreeColumns(db *sql.DB) error {
+	rows, err := db.Query(`PRAGMA table_info(bot_tasks)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	existing := make(map[string]bool)
+	for rows.Next() {
+		var (
+			cid        int
+			name, ctyp string
+			notnull    int
+			dflt       sql.NullString
+			pk         int
+		)
+		if err := rows.Scan(&cid, &name, &ctyp, &notnull, &dflt, &pk); err != nil {
+			return err
+		}
+		existing[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	cols := []string{
+		"workspace_id",
+		"isolation",
+		"worktree_branch",
+		"worktree_path",
+		"checkpoint_ref",
+	}
+	for _, col := range cols {
+		if existing[col] {
+			continue
+		}
+		if _, err := db.Exec(`ALTER TABLE bot_tasks ADD COLUMN ` + col + ` TEXT NOT NULL DEFAULT ''`); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func ensureRoutineRunsSlotKeyColumn(db *sql.DB) error {
@@ -241,6 +440,34 @@ func ensureMessagesMediaColumn(db *sql.DB) error {
 		return err
 	}
 	_, err = db.Exec(`ALTER TABLE messages ADD COLUMN media_json TEXT NOT NULL DEFAULT '[]'`)
+	return err
+}
+
+func ensureMessagesStageColumn(db *sql.DB) error {
+	rows, err := db.Query(`PRAGMA table_info(messages)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			cid        int
+			name, ctyp string
+			notnull    int
+			dflt       sql.NullString
+			pk         int
+		)
+		if err := rows.Scan(&cid, &name, &ctyp, &notnull, &dflt, &pk); err != nil {
+			return err
+		}
+		if name == "stage_json" {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	_, err = db.Exec(`ALTER TABLE messages ADD COLUMN stage_json TEXT NOT NULL DEFAULT ''`)
 	return err
 }
 
@@ -389,7 +616,7 @@ func (s *Store) migrateLegacyIfNeeded() error {
 			lastErr := ""
 			hasResetMarker := false
 			for _, m := range seg.msgs {
-				if m.Role == "system" && strings.HasPrefix(m.Text, "Session 已重置") {
+				if m.Role == "system" && (strings.HasPrefix(m.Text, "Session reset") || strings.HasPrefix(m.Text, "Session 已重置")) { // i18n:allow-cjk
 					hasResetMarker = true
 				}
 				if m.Role == "system" && m.From == "error" {
@@ -523,7 +750,7 @@ func splitLegacySegments(msgs []ChatMessage) []legacySegment {
 
 	for _, m := range msgs {
 		msgRuntime := strings.TrimSpace(m.SessionID)
-		isReset := m.Role == "system" && strings.HasPrefix(m.Text, "Session 已重置")
+		isReset := m.Role == "system" && (strings.HasPrefix(m.Text, "Session reset") || strings.HasPrefix(m.Text, "Session 已重置")) // i18n:allow-cjk
 		if isReset && msgRuntime == "" {
 			if match := legacyResetSessionRe.FindStringSubmatch(m.Text); len(match) == 2 {
 				msgRuntime = strings.TrimSpace(match[1])
@@ -678,6 +905,7 @@ func toSummary(rec SessionRecord) SessionSummary {
 func scanMessageRow(scanner interface{ Scan(...any) error }) (ChatMessage, error) {
 	var m ChatMessage
 	var mediaJSON string
+	var stageJSON string
 	var toolsJSON string
 	err := scanner.Scan(
 		&m.ID,
@@ -689,6 +917,7 @@ func scanMessageRow(scanner interface{ Scan(...any) error }) (ChatMessage, error
 		&m.To,
 		&m.Text,
 		&mediaJSON,
+		&stageJSON,
 		&toolsJSON,
 		&m.DurationMs,
 		&m.CostUSD,
@@ -700,6 +929,7 @@ func scanMessageRow(scanner interface{ Scan(...any) error }) (ChatMessage, error
 		return ChatMessage{}, err
 	}
 	m.Media = decodeMediaJSON(mediaJSON)
+	m.Stage = decodeStageJSON(stageJSON)
 	m.Tools = decodeToolsJSON(toolsJSON)
 	return m, nil
 }
@@ -713,6 +943,64 @@ func decodeMediaJSON(raw string) []MessageMedia {
 		return nil
 	}
 	return out
+}
+
+func decodeStageJSON(raw string) *StageRef {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "null" || raw == "{}" {
+		return nil
+	}
+	var out StageRef
+	if err := json.Unmarshal([]byte(raw), &out); err != nil || strings.TrimSpace(out.Kind) == "" {
+		return nil
+	}
+	return &out
+}
+
+// UpsertBotLatestStage persists the latest stage reference submitted by botID.
+func (s *Store) UpsertBotLatestStage(botID string, ref StageRef) error {
+	if s == nil || s.db == nil || strings.TrimSpace(botID) == "" {
+		return nil
+	}
+	b, err := json.Marshal(ref)
+	if err != nil {
+		return err
+	}
+	now := ref.CreatedAt
+	if now == "" {
+		now = time.Now().UTC().Format(time.RFC3339Nano)
+	}
+	_, err = s.db.Exec(`
+		INSERT INTO bot_stage_latest(bot_id, stage_json, updated_at)
+		VALUES (?, ?, ?)
+		ON CONFLICT(bot_id) DO UPDATE SET stage_json = excluded.stage_json, updated_at = excluded.updated_at
+	`, botID, string(b), now)
+	return err
+}
+
+// GetBotLatestStage returns the persisted latest stage reference for botID, if any.
+func (s *Store) GetBotLatestStage(botID string) (*StageRef, bool) {
+	if s == nil || s.db == nil || strings.TrimSpace(botID) == "" {
+		return nil, false
+	}
+	var raw string
+	if err := s.db.QueryRow(`SELECT stage_json FROM bot_stage_latest WHERE bot_id = ? LIMIT 1`, botID).Scan(&raw); err != nil {
+		return nil, false
+	}
+	ref := decodeStageJSON(raw)
+	if ref == nil {
+		return nil, false
+	}
+	return ref, true
+}
+
+// DeleteBotLatestStage removes any persisted latest stage reference for botID.
+func (s *Store) DeleteBotLatestStage(botID string) error {
+	if s == nil || s.db == nil || strings.TrimSpace(botID) == "" {
+		return nil
+	}
+	_, err := s.db.Exec(`DELETE FROM bot_stage_latest WHERE bot_id = ?`, botID)
+	return err
 }
 
 func isValidMsgRowID(id string) (int64, bool) {

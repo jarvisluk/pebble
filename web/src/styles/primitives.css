@@ -69,7 +69,7 @@ svg { display: block; }
 .msg-err { font-size: var(--fs-sm); color: var(--danger); padding: 0 2px; }
 .msg-err:empty { display: none; }
 
-.btn { display: inline-flex; align-items: center; justify-content: center; height: 36px; padding: 0 16px; border-radius: 999px; font-size: var(--fs-base); font-weight: 600; white-space: nowrap; background: var(--s1); color: var(--text); transition: background var(--dur-fast), filter var(--dur-fast); }
+.btn { display: inline-flex; align-items: center; justify-content: center; height: 36px; padding: 0 16px; border-radius: 999px; font-size: var(--fs-base); font-weight: 600; white-space: nowrap; text-decoration: none; background: var(--s1); color: var(--text); transition: background var(--dur-fast), filter var(--dur-fast); }
 .btn:hover:not(:disabled) { background: var(--s2); }
 .btn.go { background: var(--accent); color: var(--accent-text); }
 .btn.go:hover:not(:disabled) { background: var(--accent); filter: brightness(1.06); }
@@ -90,13 +90,13 @@ svg { display: block; }
 .note[hidden] { display: none; }
 .note a { color: var(--text); }
 
-.mp { display: inline-flex; align-items: center; height: 24px; font-size: var(--fs-xs); font-weight: 600; padding: 0 10px; border-radius: 999px; background: var(--s1); color: var(--text-2); white-space: nowrap; }
+.mp { display: inline-flex; align-items: center; height: 24px; font-size: var(--fs-xs); font-weight: 600; padding: 0 10px; border-radius: 999px; text-decoration: none; background: var(--s1); color: var(--text-2); white-space: nowrap; }
 button.mp:hover { background: var(--s2); color: var(--text); }
 .note button.mp, .note .mp { background: var(--float); color: var(--text-2); }
 .note button.mp:hover { background: var(--s2); color: var(--text); }
 .mp.ok, .note .mp.ok, .note button.mp.ok { background: var(--sage); color: var(--sage-ink); }
-.mp.go, .note button.mp.go { background: var(--accent); color: var(--accent-text); }
-.note button.mp.go:hover, .mp.go:hover { background: var(--accent); color: var(--accent-text); filter: brightness(1.06); }
+.mp.go, .note .mp.go, .note button.mp.go { background: var(--accent); color: var(--accent-text); }
+.note a.mp.go:hover, .note button.mp.go:hover, a.mp.go:hover, .mp.go:hover { background: var(--accent); color: var(--accent-text); filter: brightness(1.06); }
 .mp.bad, .note button.mp.bad { background: var(--pink); color: var(--pink-ink); }
 .note button.mp.bad:hover, .mp.bad:hover { background: var(--pink); color: var(--pink-ink); filter: brightness(.95); }
 

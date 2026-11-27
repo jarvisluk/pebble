@@ -1,13 +1,22 @@
 package ai.pebble.android
 
 import ai.pebble.android.data.BotStatus
+import ai.pebble.android.data.BotTask
+import ai.pebble.android.data.BotTaskEvent
 import ai.pebble.android.data.BotsResp
 import ai.pebble.android.data.CLIENT_PROTOCOL
 import ai.pebble.android.data.HarnessInfo
 import ai.pebble.android.data.HubJson
 import ai.pebble.android.data.NodeInfo
 import ai.pebble.android.data.PebbleStore
+import ai.pebble.android.data.PendingApproval
+import ai.pebble.android.data.PendingQuestion
 import ai.pebble.android.data.ServerInfo
+import ai.pebble.android.data.StageKind
+import ai.pebble.android.data.StageOpenEvent
+import ai.pebble.android.data.StageRef
+import ai.pebble.android.data.TakeoverRequest
+import ai.pebble.android.data.TaskDiffResult
 import ai.pebble.android.data.buildPairingLink
 import ai.pebble.android.data.countToolCalls
 import ai.pebble.android.data.formatDurationMs
@@ -15,6 +24,8 @@ import ai.pebble.android.data.maskedPairingLink
 import ai.pebble.android.data.normalizeAddress
 import ai.pebble.android.data.resolveDefaultModel
 import ai.pebble.android.data.stripLinkFragment
+import ai.pebble.android.ui.desktop.BotStageState
+import ai.pebble.android.ui.desktop.StageStateOps
 import ai.pebble.android.ui.chat.MarkdownBlock
 import ai.pebble.android.ui.chat.MarkdownParser
 import ai.pebble.android.ui.chat.TableAlign
@@ -75,8 +86,9 @@ class PebbleCoreTest {
 
     @Test
     fun storeHelpersAndLenientDecodingWork() {
-        assertEquals("claude-sonnet-4", resolveDefaultModel("magpie/claude-sonnet-4", "claude"))
-        assertEquals("magpie/claude-sonnet-4", resolveDefaultModel("magpie/claude-sonnet-4", "opencode"))
+        assertEquals("claude-sonnet-4", resolveDefaultModel("claude-sonnet-4", "claude"))
+        assertEquals("openai/gpt-5", resolveDefaultModel("openai/gpt-5", "opencode"))
+        assertEquals("", resolveDefaultModel("openai/gpt-5", "claude"))
         assertEquals(5, countToolCalls(listOf("bash×3", "read_file", "grep")))
         assertEquals("1m 5s", formatDurationMs(65_000.0))
         assertEquals("pebble-2", normalizeBotAvatar("cat"))
@@ -91,8 +103,6 @@ class PebbleCoreTest {
             """{"id":"codex","label":"Codex","installed":true,"magpie":{"installed":true,"connected":false,"nativeModel":"codex/gpt-6-luna"}}""",
         )
         assertEquals(true, harness.installed)
-        assertEquals(false, harness.magpie?.connected)
-        assertEquals("codex/gpt-6-luna", harness.magpie?.nativeModel)
     }
 
     @Test
@@ -221,5 +231,134 @@ class PebbleCoreTest {
             maskedPairingLink("tailcat://connect/tc123?port=3789#token=old"),
         )
         assertEquals("", maskedPairingLink("   "))
+    }
+
+    @Test
+    fun taskAndNodeCapabilityModelsDecodeCleanly() {
+        val task = HubJson.decodeFromString<BotTask>(
+            """
+            {
+              "id": "tsk_1",
+              "botId": "b1",
+              "kind": "worker",
+              "title": "Run tests",
+              "prompt": "go test ./...",
+              "status": "waiting_approval",
+              "deviceId": "mac-mini",
+              "harness": "claude",
+              "durationMs": 1250
+            }
+            """.trimIndent(),
+        )
+        assertEquals("Run tests", task.displayTitle)
+        assertTrue(task.isActive)
+        assertTrue(task.isWaiting)
+        assertFalse(task.isTerminal)
+
+        val ev = HubJson.decodeFromString<BotTaskEvent>(
+            """{"seq": 7, "taskId": "tsk_1", "botId": "b1", "eventType": "tool_use", "payload": {"tool": "bash"}}""",
+        )
+        assertEquals(7L, ev.seq)
+        assertEquals("tool_use", ev.eventType)
+
+        val node = HubJson.decodeFromString<NodeInfo>(
+            """
+            {
+              "id": "n1",
+              "name": "Mac Mini",
+              "permissions": ["files", "exec", "desktop", "agent"],
+              "maxPermissionMode": "edit",
+              "activeTaskIds": ["tsk_1"],
+              "harnesses": [{"kind": "claude", "label": "Claude Code", "installed": true, "authStatus": "ready"}],
+              "workspaces": [{"id": "ws1", "name": "app", "path": "/Users/dev/app", "isGit": true, "defaultBranch": "main"}]
+            }
+            """.trimIndent(),
+        )
+        assertEquals("edit", node.maxPermissionMode)
+        assertEquals(1, node.harnesses?.size)
+        assertEquals("Claude Code", node.harnesses?.first()?.title)
+        assertEquals(1, node.workspaces?.size)
+        assertEquals(listOf("tsk_1"), node.activeTaskIds)
+
+        val apr = HubJson.decodeFromString<PendingApproval>(
+            """{"id": "apr_1", "botId": "b1", "taskId": "tsk_1", "deviceId": "mac-mini", "toolName": "bash"}""",
+        )
+        assertEquals("tsk_1", apr.taskId)
+        assertEquals("mac-mini", apr.deviceId)
+
+        val q = HubJson.decodeFromString<PendingQuestion>(
+            """{"id": "q_1", "botId": "b1", "taskId": "tsk_1", "deviceId": "mac-mini", "fields": []}""",
+        )
+        assertEquals("tsk_1", q.taskId)
+
+        val to = HubJson.decodeFromString<TakeoverRequest>(
+            """{"id": "to_1", "botId": "b1", "taskId": "tsk_1", "deviceId": "mac-mini", "reason": "Sign in"}""",
+        )
+        assertEquals("tsk_1", to.taskId)
+        assertEquals("mac-mini", to.deviceId)
+    }
+
+    @Test
+    fun stageStateOpsAndRefDecodingWork() {
+        val bot = HubJson.decodeFromString<BotStatus>(
+            """{"id":"b1","latestStage":{"id":"file:notes/plan.md","kind":"file","path":"notes/plan.md","title":"Plan"}}""",
+        )
+        assertEquals(StageKind.FILE, bot.latestStage?.resolvedKind)
+        assertEquals("Plan", bot.latestStage?.title)
+
+        val ev = StageOpenEvent(id = "file:README.md", kind = "file", path = "README.md", autoOpen = false)
+        val fileTab = StageStateOps.tabFromOpenEvent(ev, filesTitle = "Files", desktopTitle = "Desktop", newTabTitle = "New Tab")
+        assertEquals("README.md", fileTab.title)
+
+        var st = BotStageState()
+        st = StageStateOps.ensureNonEmpty(st, newTabTitle = "New Tab")
+        assertEquals(1, st.tabs.size)
+        assertEquals(StageKind.NEW, st.activeTab?.kind)
+
+        val desk = StageStateOps.desktopTab(target = "local", title = "Desktop")
+        st = StageStateOps.replaceNewOrOpen(st, desk)
+        assertEquals(1, st.tabs.size)
+        assertEquals("desktop", st.activeTabId)
+
+        st = StageStateOps.upsert(st, fileTab, activate = true)
+        assertEquals(2, st.tabs.size)
+        assertEquals("file:README.md", st.activeTabId)
+
+        st = StageStateOps.close(st, "file:README.md", newTabTitle = "New Tab")
+        assertEquals(1, st.tabs.size)
+        assertEquals("desktop", st.activeTabId)
+
+        st = StageStateOps.close(st, "desktop", newTabTitle = "New Tab")
+        assertEquals(1, st.tabs.size)
+        assertEquals(StageKind.NEW, st.activeTab?.kind)
+
+        val taskRef = StageRef(id = "task:tsk_1", kind = "task", taskId = "tsk_1", title = "Audit")
+        assertEquals(StageKind.TASK, taskRef.resolvedKind)
+        val taskTab = StageStateOps.tabFromRef(
+            ref = taskRef,
+            botId = "b1",
+            filesTitle = "Files",
+            desktopTitle = "Desktop",
+            newTabTitle = "New Tab",
+        )
+        assertEquals(StageKind.TASK, taskTab.kind)
+        assertEquals("tsk_1", taskTab.taskId)
+        assertEquals("Audit", taskTab.title)
+
+        val diff = HubJson.decodeFromString<TaskDiffResult>(
+            """{"taskId":"tsk_1","branch":"pebble/tsk_1","checkpointRef":"refs/pebble/ckpt/tsk_1","files":[{"path":"README.md","status":"M","additions":2,"deletions":1}],"patch":"diff --git a/README.md b/README.md"}""",
+        )
+        assertEquals("tsk_1", diff.taskId)
+        assertEquals("pebble/tsk_1", diff.branch)
+        assertEquals(1, diff.files.size)
+
+        val stripFiltered = ai.pebble.android.ui.chat.stripTasks(
+            listOf(
+                BotTask(id = "t_run", botId = "b1", kind = "worker", prompt = "run", status = "running"),
+                BotTask(id = "t_wait", botId = "b1", kind = "worker", prompt = "wait", status = "waiting_approval"),
+                BotTask(id = "t_done", botId = "b1", kind = "worker", prompt = "done", status = "completed"),
+            ),
+        )
+        assertEquals(listOf("t_run", "t_wait"), stripFiltered.map { it.id })
     }
 }

@@ -2,26 +2,30 @@ import React, { useEffect, useState } from 'react';
 import type {
   BotDetail,
   BotStatus,
+  BotTask,
   ConfirmOptions,
   DesktopTarget,
-  MemoryResponse,
+  NodeInfo,
   PermissionMode,
   ResolvedLang,
-  RoutineItem,
-  RoutineRun,
   SettingsData,
 } from '../types';
 import { api } from '../lib/api';
 import { translate } from '../lib/i18n';
-import { botColor, contrastText, formatStamp } from '../lib/theme';
+import { botColor, contrastText } from '../lib/theme';
 import { BotAppearancePicker } from './BotAppearancePicker';
 import { BotAvatar } from './BotAvatar';
-import { MagpieInstallBanner } from './MagpieInstallBanner';
+import { BotMemorySection } from './bot-detail/BotMemorySection';
+import { BotRoutinesSection } from './bot-detail/BotRoutinesSection';
+import { BotTasksSection } from './bot-detail/BotTasksSection';
+import { BotTechDetailsSection } from './bot-detail/BotTechDetailsSection';
 
 interface BotDetailPanelProps {
   open: boolean;
   detail: BotDetail | null;
   bots: BotStatus[];
+  tasks: BotTask[];
+  nodes: NodeInfo[];
   settings: SettingsData | null;
   models: Record<string, string[]>;
   routineRefreshSeq: number;
@@ -36,6 +40,8 @@ interface BotDetailPanelProps {
   onReloadBots: () => Promise<void>;
   onLoadModels: (harness: string, force?: boolean) => Promise<unknown>;
   onRefreshDetail: (id: string) => Promise<void>;
+  onTasksLoaded: (botId: string, tasks: BotTask[]) => void;
+  onInspectTask: (taskId: string) => void;
   onSettingsUpdated?: (s: SettingsData) => void;
   onOpenFiles?: (botId: string) => void;
 }
@@ -44,6 +50,8 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
   open,
   detail,
   bots,
+  tasks,
+  nodes,
   settings,
   models,
   routineRefreshSeq,
@@ -58,12 +66,12 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
   onReloadBots,
   onLoadModels,
   onRefreshDetail,
+  onTasksLoaded,
+  onInspectTask,
   onSettingsUpdated,
   onOpenFiles,
 }) => {
   const t = (k: string, vars?: Record<string, string | number>) => translate(lang, k, vars);
-
-  const [techOpen, setTechOpen] = useState(false);
 
   // Inline edit form fields
   const [editName, setEditName] = useState('');
@@ -82,65 +90,6 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
   const [editErr, setEditErr] = useState('');
   const [editSaving, setEditSaving] = useState(false);
 
-  // Memories
-  const [memData, setMemData] = useState<MemoryResponse | null>(null);
-  const [memLoading, setMemLoading] = useState(false);
-  const [memErr, setMemErr] = useState('');
-  const [memAddOpen, setMemAddOpen] = useState(false);
-  const [memKind, setMemKind] = useState('fact');
-  const [memText, setMemText] = useState('');
-  const [memSaving, setMemSaving] = useState(false);
-
-  // Routines
-  const [routines, setRoutines] = useState<RoutineItem[]>([]);
-  const [rtLoading, setRtLoading] = useState(false);
-  const [rtErr, setRtErr] = useState('');
-  const [rtFormOpen, setRtFormOpen] = useState(false);
-  const [rtEditId, setRtEditId] = useState('');
-  const [rtName, setRtName] = useState('');
-  const [rtMode, setRtMode] = useState<'interval' | 'daily' | 'cron' | 'webhook'>('interval');
-  const [rtEvery, setRtEvery] = useState('60');
-  const [rtDaily, setRtDaily] = useState('09:00');
-  const [rtCron, setRtCron] = useState('0 9 * * 1-5');
-  const [rtWebhookTrigger, setRtWebhookTrigger] = useState(false);
-  const [rtWebhookSecret, setRtWebhookSecret] = useState('');
-  const [rtWebhookSecretSet, setRtWebhookSecretSet] = useState(false);
-  const [rtClearSecret, setRtClearSecret] = useState(false);
-  const [rtWebhookUrl, setRtWebhookUrl] = useState('');
-  const [rtDelivery, setRtDelivery] = useState('receipt');
-  const [rtPermMode, setRtPermMode] = useState('');
-  const [rtPrompt, setRtPrompt] = useState('');
-  const [rtEnabled, setRtEnabled] = useState(true);
-  const [rtSaving, setRtSaving] = useState(false);
-  const [runsOpenId, setRunsOpenId] = useState('');
-  const [runsMap, setRunsMap] = useState<Record<string, RoutineRun[]>>({});
-
-  const loadMemories = async (botId: string) => {
-    setMemLoading(true);
-    setMemErr('');
-    try {
-      const d = await api<MemoryResponse>(`/api/memory?botId=${encodeURIComponent(botId)}&limit=30`);
-      setMemData(d);
-    } catch (e) {
-      if (e instanceof Error && e.message !== 'unauthorized') setMemErr(e.message);
-    } finally {
-      setMemLoading(false);
-    }
-  };
-
-  const loadRoutines = async (botId: string) => {
-    if (!routines.length) setRtLoading(true);
-    setRtErr('');
-    try {
-      const d = await api<{ routines?: RoutineItem[] }>(`/api/bots/${encodeURIComponent(botId)}/routines`);
-      setRoutines(d.routines || []);
-    } catch (e) {
-      if (e instanceof Error && e.message !== 'unauthorized') setRtErr(e.message);
-    } finally {
-      setRtLoading(false);
-    }
-  };
-
   const loadDesktopTargets = async () => {
     try {
       const d = await api<{ targets?: DesktopTarget[] }>('/api/desktop/targets');
@@ -150,18 +99,11 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
 
   useEffect(() => {
     if (!open || !detail) return;
-    setTechOpen(false);
     setAppearanceOpen(false);
-    setMemAddOpen(false);
-    setMemErr('');
-    setRtFormOpen(false);
-    setRtErr('');
-    setRunsOpenId('');
-    void loadMemories(detail.id);
-    void loadRoutines(detail.id);
     void loadDesktopTargets();
     if (detail.harness) void onLoadModels(detail.harness);
   }, [open, detail?.id]);
+
 
   useEffect(() => {
     if (!open || !detail) return;
@@ -194,12 +136,6 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
     detail?.instructions,
   ]);
 
-  useEffect(() => {
-    if (open && detail && routineRefreshSeq > 0) {
-      void loadRoutines(detail.id);
-    }
-  }, [routineRefreshSeq]);
-
   const botAccentStyle: React.CSSProperties | undefined = detail
     ? ({
         '--bot-accent': botColor(detail.id, bots, editColor),
@@ -212,7 +148,6 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
 
   const resolveBotDefaultModel = (g: string, h: string) => {
     if (!g) return '';
-    if (g.startsWith('magpie/')) return h === 'claude' ? g.slice(7) : g;
     if (!g.includes('/')) return g;
     return h === '' || h === 'opencode' || h === 'pi' ? g : '';
   };
@@ -270,141 +205,6 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
       if (err instanceof Error && err.message !== 'unauthorized') setEditErr(err.message);
     } finally {
       setEditSaving(false);
-    }
-  };
-
-  const openRoutineForm = (rt?: RoutineItem) => {
-    setRtErr('');
-    setRtEditId(rt?.id || '');
-    setRtName(rt?.name || '');
-    const hasEvery = (rt?.everyMinutes || 0) > 0;
-    const hasDaily = Boolean(rt?.dailyAt);
-    const hasCron = Boolean(rt?.cron);
-    let mode: 'interval' | 'daily' | 'cron' | 'webhook' = 'interval';
-    if (hasCron) mode = 'cron';
-    else if (hasDaily && !hasEvery) mode = 'daily';
-    else if (!hasEvery && !hasDaily && rt?.webhookTrigger) mode = 'webhook';
-    setRtMode(mode);
-    setRtEvery(hasEvery ? String(rt?.everyMinutes) : '60');
-    setRtDaily(rt?.dailyAt || '09:00');
-    setRtCron(rt?.cron || '0 9 * * 1-5');
-    setRtWebhookTrigger(Boolean(rt?.webhookTrigger) || mode === 'webhook');
-    setRtWebhookSecret('');
-    setRtWebhookSecretSet(Boolean(rt?.webhookSecretSet));
-    setRtClearSecret(false);
-    setRtWebhookUrl(rt?.webhookUrl || '');
-    setRtDelivery(rt?.mainDelivery || 'receipt');
-    setRtPermMode(rt?.permissionMode || '');
-    setRtPrompt(rt?.prompt || '');
-    setRtEnabled(rt ? rt.enabled !== false : true);
-    setRtFormOpen(true);
-  };
-
-  const saveRoutine = async () => {
-    if (!detail) return;
-    const name = rtName.trim();
-    const prompt = rtPrompt.trim();
-    if (!name) {
-      setRtErr(t('rtNameRequired'));
-      return;
-    }
-    if (!prompt) {
-      setRtErr(t('rtPromptRequired'));
-      return;
-    }
-    const everyMinutes = rtMode === 'interval' ? parseInt(rtEvery, 10) : 0;
-    const dailyAt = rtMode === 'daily' ? rtDaily.trim() : '';
-    const cronExpr = rtMode === 'cron' ? rtCron.trim() : '';
-    const webhookTrigger = rtMode === 'webhook' ? true : rtWebhookTrigger;
-    if (rtMode === 'interval' && !(everyMinutes > 0)) {
-      setRtErr(t('rtEveryPositive'));
-      return;
-    }
-    if (rtMode === 'daily' && !/^\d{2}:\d{2}$/.test(dailyAt)) {
-      setRtErr(t('rtTimeFormatErr'));
-      return;
-    }
-    if (rtMode === 'cron' && !cronExpr) {
-      setRtErr(t('rtCronRequired'));
-      return;
-    }
-
-    setRtSaving(true);
-    setRtErr('');
-    const body: Record<string, unknown> = {
-      name,
-      everyMinutes,
-      dailyAt,
-      cron: cronExpr,
-      webhookTrigger,
-      webhookUrl: rtWebhookUrl.trim(),
-      prompt,
-      mainDelivery: rtDelivery,
-      permissionMode: rtPermMode,
-      enabled: rtEnabled,
-    };
-    if (rtClearSecret) {
-      body.clearWebhookSecret = true;
-    } else if (rtWebhookSecret.trim()) {
-      body.webhookSecret = rtWebhookSecret.trim();
-    }
-    try {
-      if (rtEditId) {
-        await api(`/api/bots/${encodeURIComponent(detail.id)}/routines/${encodeURIComponent(rtEditId)}`, {
-          method: 'PATCH',
-          body,
-        });
-        onToast(t('rtUpdated'));
-      } else {
-        await api(`/api/bots/${encodeURIComponent(detail.id)}/routines`, {
-          method: 'POST',
-          body,
-        });
-        onToast(t('rtCreated'));
-      }
-      setRtFormOpen(false);
-      await loadRoutines(detail.id);
-    } catch (e) {
-      if (e instanceof Error && e.message !== 'unauthorized') setRtErr(e.message);
-    } finally {
-      setRtSaving(false);
-    }
-  };
-
-  const handleSaveMemory = async () => {
-    if (!detail) return;
-    const text = memText.trim();
-    if (!text) {
-      setMemErr(t('memContentReq'));
-      return;
-    }
-    setMemSaving(true);
-    setMemErr('');
-    try {
-      await api('/api/memory', {
-        method: 'POST',
-        body: { botId: detail.id, kind: memKind, text },
-      });
-      setMemText('');
-      setMemAddOpen(false);
-      onToast(t('botMemSaved'));
-      await loadMemories(detail.id);
-    } catch (e) {
-      if (e instanceof Error && e.message !== 'unauthorized') setMemErr(e.message);
-    } finally {
-      setMemSaving(false);
-    }
-  };
-
-  const handleDeleteMemory = async (memId: string) => {
-    if (!detail) return;
-    setMemErr('');
-    try {
-      await api(`/api/memory/${encodeURIComponent(memId)}`, { method: 'DELETE' });
-      onToast(t('memDeleted'));
-      await loadMemories(detail.id);
-    } catch (e) {
-      if (e instanceof Error && e.message !== 'unauthorized') setMemErr(e.message);
     }
   };
 
@@ -491,743 +291,58 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
               </div>
             </div>
 
-            <div className="sec row-between">
-              <span>{t('botMemory')}</span>
-              <button
-                type="button"
-                id="pMemAddToggle"
-                className="mp go"
-                onClick={() => setMemAddOpen((v) => !v)}
-              >
-                {t('addShort')}
-              </button>
-            </div>
-            {memAddOpen && (
-              <div id="pMemAddBox" className="add-prov mem-add mb-8">
-                <div className="fld">
-                  <label>{t('memType')}</label>
-                  <select id="pMemKind" value={memKind} onChange={(e) => setMemKind(e.target.value)}>
-                    <option value="fact">{t('kindFact')}</option>
-                    <option value="rule">{t('kindRule')}</option>
-                    <option value="reference">{t('kindReference')}</option>
-                    <option value="procedure">{t('kindProcedure')}</option>
-                    <option value="episode">{t('kindEpisode')}</option>
-                  </select>
-                </div>
-                <div className="fld">
-                  <label>{t('memContent')}</label>
-                  <textarea
-                    id="pMemText"
-                    rows={3}
-                    className="ta-sm ta-font"
-                    placeholder={t('botMemPh')}
-                    value={memText}
-                    onChange={(e) => setMemText(e.target.value)}
-                  />
-                </div>
-                <div className="row-end-sm">
-                  <button
-                    type="button"
-                    id="pMemAddCancel"
-                    className="mp"
-                    onClick={() => {
-                      setMemAddOpen(false);
-                      setMemErr('');
-                    }}
-                  >
-                    {t('cancel')}
-                  </button>
-                  <button
-                    type="button"
-                    id="pMemAddSubmit"
-                    className="mp go"
-                    disabled={memSaving}
-                    onClick={() => void handleSaveMemory()}
-                  >
-                    {t('save')}
-                  </button>
-                </div>
-              </div>
-            )}
+            <BotMemorySection
+              open={open}
+              botId={detail.id}
+              lang={lang}
+              onToast={onToast}
+            />
 
-            <div id="pMemList" className="stack6">
-              {memLoading && !memData ? (
-                <div className="set-card-desc">{t('loadingEllipsis')}</div>
-              ) : !memData || !memData.installed ? (
-                <div className="note">
-                  <MagpieInstallBanner
-                    lang={lang}
-                    hint={t('memNotInstalled')}
-                    installCmds={settings?.magpie?.install}
-                    onToast={onToast}
-                    onInstalled={async () => {
-                      if (onSettingsUpdated) {
-                        const fresh = await api<SettingsData>('/api/settings?fresh=1');
-                        onSettingsUpdated(fresh);
-                      }
-                      await loadMemories(detail.id);
-                    }}
-                  />
-                </div>
-              ) : !memData.available ? (
-                <div className="set-card-desc">
-                  {t('memUnavailable')}
-                  {memData.error ? `: ${memData.error}` : ''}
-                </div>
-              ) : !(memData.items || []).length ? (
-                <div className="set-card-desc">{t('memEmpty')}</div>
-              ) : (
-                (memData.items || []).map((it) => {
-                  const tags = (it.tags || []).filter((tag) => !tag.startsWith('bot:'));
-                  const tm = it.updatedAt ? it.updatedAt.replace('T', ' ').slice(0, 16) : '';
-                  return (
-                    <div key={it.id} className="mem-row">
-                      <div className="mem-top">
-                        <div className="mem-meta">
-                          {it.kind && <span className="mp ok">{it.kind}</span>}
-                          {tags.map((tg) => (
-                            <span key={tg} className="mp">
-                              #{tg}
-                            </span>
-                          ))}
-                          {tm && <span className="mem-time">{tm}</span>}
-                        </div>
-                        <button type="button" className="mp bad" onClick={() => void handleDeleteMemory(it.id)}>
-                          {t('delBtn')}
-                        </button>
-                      </div>
-                      <div className="mem-txt">{it.text}</div>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-            <div id="pMemErr" className="msg-err">
-              {memErr}
-            </div>
+            <BotRoutinesSection
+              open={open}
+              botId={detail.id}
+              routineRefreshSeq={routineRefreshSeq}
+              lang={lang}
+              onToast={onToast}
+              onConfirm={onConfirm}
+            />
 
-            <div className="sec row-between">
-              <span>{t('routines')}</span>
-              <button
-                type="button"
-                id="pRtAddToggle"
-                className="mp go"
-                onClick={() => {
-                  if (!rtFormOpen || rtEditId) openRoutineForm();
-                  else setRtFormOpen(false);
-                }}
-              >
-                {t('addShort')}
-              </button>
-            </div>
-            {rtFormOpen && (
-              <div id="pRtFormBox" className="add-prov mem-add mb-8">
-                <div className="fld">
-                  <label>{t('name')}</label>
-                  <input id="pRtName" placeholder={t('rtNamePh')} value={rtName} onChange={(e) => setRtName(e.target.value)} />
-                </div>
-                <div className="two">
-                  <div className="fld">
-                    <label>{t('rtTriggerMode')}</label>
-                    <select
-                      id="pRtMode"
-                      value={rtMode}
-                      onChange={(e) => {
-                        const next = e.target.value as 'interval' | 'daily' | 'cron' | 'webhook';
-                        setRtMode(next);
-                        if (next === 'webhook') setRtWebhookTrigger(true);
-                      }}
-                    >
-                      <option value="interval">{t('rtModeInterval')}</option>
-                      <option value="daily">{t('rtModeDaily')}</option>
-                      <option value="cron">{t('rtModeCron')}</option>
-                      <option value="webhook">{t('rtModeWebhook')}</option>
-                    </select>
-                  </div>
-                  {rtMode === 'interval' ? (
-                    <div className="fld" id="pRtEveryWrap">
-                      <label>{t('rtEveryMinutes')}</label>
-                      <input
-                        id="pRtEvery"
-                        className="mono"
-                        type="number"
-                        min={1}
-                        value={rtEvery}
-                        onChange={(e) => setRtEvery(e.target.value)}
-                      />
-                    </div>
-                  ) : rtMode === 'daily' ? (
-                    <div className="fld" id="pRtDailyWrap">
-                      <label>
-                        {t('rtTime')} <em>HH:MM</em>
-                      </label>
-                      <input
-                        id="pRtDaily"
-                        className="mono"
-                        placeholder="09:00"
-                        value={rtDaily}
-                        onChange={(e) => setRtDaily(e.target.value)}
-                      />
-                    </div>
-                  ) : rtMode === 'cron' ? (
-                    <div className="fld" id="pRtCronWrap">
-                      <label>{t('rtCronExpr')}</label>
-                      <input
-                        id="pRtCron"
-                        className="mono"
-                        placeholder={t('rtCronPh')}
-                        value={rtCron}
-                        onChange={(e) => setRtCron(e.target.value)}
-                      />
-                      <div className="set-card-desc mt-4">{t('rtCronHint')}</div>
-                    </div>
-                  ) : (
-                    <div className="fld" />
-                  )}
-                </div>
-                {rtMode !== 'webhook' && (
-                  <label className="perm perm-card mb-6">
-                    <input
-                      type="checkbox"
-                      id="pRtWebhookTrigger"
-                      checked={rtWebhookTrigger}
-                      onChange={(e) => setRtWebhookTrigger(e.target.checked)}
-                    />
-                    {t('rtAllowWebhook')}
-                  </label>
-                )}
-                {(rtMode === 'webhook' || rtWebhookTrigger) && (
-                  <div className="fld">
-                    <label>
-                      {t('rtWebhookSecret')} <em>{t('rtOptional')}</em>
-                    </label>
-                    <input
-                      id="pRtWebhookSecret"
-                      type="password"
-                      className="mono"
-                      placeholder={rtWebhookSecretSet && !rtClearSecret ? t('rtWebhookSecretSetPh') : t('rtWebhookSecretPh')}
-                      value={rtWebhookSecret}
-                      disabled={rtClearSecret}
-                      onChange={(e) => setRtWebhookSecret(e.target.value)}
-                    />
-                    {rtWebhookSecretSet && (
-                      <label className="perm perm-card mt-4">
-                        <input
-                          type="checkbox"
-                          checked={rtClearSecret}
-                          onChange={(e) => {
-                            setRtClearSecret(e.target.checked);
-                            if (e.target.checked) setRtWebhookSecret('');
-                          }}
-                        />
-                        {t('rtWebhookClearSecret')}
-                      </label>
-                    )}
-                  </div>
-                )}
-                <div className="fld">
-                  <label>
-                    {t('rtWebhookUrl')} <em>{t('rtOptional')}</em>
-                  </label>
-                  <input
-                    id="pRtWebhookUrl"
-                    className="mono"
-                    placeholder={t('rtWebhookUrlPh')}
-                    value={rtWebhookUrl}
-                    onChange={(e) => setRtWebhookUrl(e.target.value)}
-                  />
-                </div>
-                <div className="two">
-                  <div className="fld">
-                    <label>{t('rtMainDelivery')}</label>
-                    <select id="pRtDelivery" value={rtDelivery} onChange={(e) => setRtDelivery(e.target.value)}>
-                      <option value="receipt">{t('rtDeliveryReceiptFull')}</option>
-                      <option value="notify">{t('rtDeliveryNotifyFull')}</option>
-                      <option value="none">{t('rtDeliveryNoneFull')}</option>
-                    </select>
-                  </div>
-                  <div className="fld">
-                    <label>{t('rtPermMode')}</label>
-                    <select id="pRtPermMode" value={rtPermMode} onChange={(e) => setRtPermMode(e.target.value)}>
-                      <option value="">{t('rtPermFollow')}</option>
-                      <option value="auto">{t('rtPermAuto')}</option>
-                      <option value="plan">{t('rtPermPlan')}</option>
-                    </select>
-                  </div>
-                </div>
-                <div className="fld">
-                  <label>{t('rtPrompt')}</label>
-                  <textarea
-                    id="pRtPrompt"
-                    rows={3}
-                    className="ta-sm ta-font"
-                    placeholder={t('rtPromptPh')}
-                    value={rtPrompt}
-                    onChange={(e) => setRtPrompt(e.target.value)}
-                  />
-                </div>
-                <div className="row-between row-wrap">
-                  <label className="perm perm-card">
-                    <input
-                      type="checkbox"
-                      id="pRtEnabled"
-                      checked={rtEnabled}
-                      onChange={(e) => setRtEnabled(e.target.checked)}
-                    />
-                    {t('rtEnabled')}
-                  </label>
-                  <div className="row-inline-sm">
-                    <button
-                      type="button"
-                      id="pRtCancel"
-                      className="mp"
-                      onClick={() => {
-                        setRtFormOpen(false);
-                        setRtErr('');
-                      }}
-                    >
-                      {t('cancel')}
-                    </button>
-                    <button
-                      type="button"
-                      id="pRtSave"
-                      className="mp go"
-                      disabled={rtSaving}
-                      onClick={() => void saveRoutine()}
-                    >
-                      {t('save')}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
+            <BotTasksSection
+              open={open}
+              detail={detail}
+              tasks={tasks}
+              nodes={nodes}
+              lang={lang}
+              onTasksLoaded={onTasksLoaded}
+              onInspectTask={onInspectTask}
+            />
 
-            <div id="pRtList" className="stack6">
-              {rtLoading && routines.length === 0 ? (
-                <div className="set-card-desc">{t('loadingEllipsis')}</div>
-              ) : routines.length === 0 ? (
-                <div className="set-card-desc">{t('rtEmpty')}</div>
-              ) : (
-                routines.map((rt) => {
-                  const trig = [
-                    (rt.everyMinutes || 0) > 0 ? t('rtEveryShort', { n: rt.everyMinutes || 0 }) : '',
-                    rt.dailyAt ? t('rtDailyShort', { time: rt.dailyAt }) : '',
-                    rt.cron ? `Cron ${rt.cron}` : '',
-                    rt.webhookTrigger ? t('rtWebhookTag') : '',
-                  ]
-                    .filter(Boolean)
-                    .join(' · ');
-                  const delivLbl =
-                    rt.mainDelivery === 'notify'
-                      ? t('rtDeliveryNotify')
-                      : rt.mainDelivery === 'none'
-                        ? t('rtDeliveryNone')
-                        : t('rtDeliveryReceipt');
-                  const nextTxt =
-                    rt.enabled && rt.nextRunAt
-                      ? t('rtNextAt', {
-                          time: new Date(rt.nextRunAt).toLocaleTimeString(lang === 'en' ? 'en-US' : 'zh-CN', {
-                            hour: '2-digit',
-                            minute: '2-digit',
-                            second: rt.cron ? '2-digit' : undefined,
-                          }),
-                        })
-                      : rt.enabled
-                        ? ''
-                        : t('rtDisabled');
-                  const lastTxt = rt.lastRun
-                    ? `${formatStamp(rt.lastRun.finishedAt, lang)} · ${(rt.lastRun.durationMs / 1000).toFixed(1)}s`
-                    : '';
-                  const meta = [
-                    trig,
-                    delivLbl,
-                    rt.permissionMode ? t(`permMode_${rt.permissionMode}`) : '',
-                    rt.webhookUrl ? t('rtWebhookPushTag') : '',
-                    rt.model,
-                    nextTxt,
-                    lastTxt,
-                  ]
-                    .filter(Boolean)
-                    .join(' · ');
-                  const runsOpen = runsOpenId === rt.id;
-                  const runs = runsMap[rt.id] || [];
-
-                  return (
-                    <div key={rt.id} className="mem-row">
-                      <div className="mem-top">
-                        <div className="mem-meta">
-                          <span className="rt-title">{rt.name}</span>
-                          {rt.running ? (
-                            <span className="mp ok">{t('rtStatusRunning')}</span>
-                          ) : rt.lastRun?.status === 'ok' ? (
-                            <span className="mp ok">{t('rtStatusOk')}</span>
-                          ) : rt.lastRun?.status === 'silent' ? (
-                            <span className="mp">{t('rtStatusSilent')}</span>
-                          ) : rt.lastRun?.status === 'error' ? (
-                            <span className="mp bad">{t('rtStatusError')}</span>
-                          ) : null}
-                        </div>
-                        <div className="prov-acts">
-                          <button
-                            type="button"
-                            className="mp"
-                            onClick={async () => {
-                              setRtErr('');
-                              try {
-                                await api(`/api/bots/${encodeURIComponent(detail.id)}/routines/${encodeURIComponent(rt.id)}`, {
-                                  method: 'PATCH',
-                                  body: { enabled: !rt.enabled },
-                                });
-                                await loadRoutines(detail.id);
-                              } catch (e) {
-                                if (e instanceof Error && e.message !== 'unauthorized') setRtErr(e.message);
-                              }
-                            }}
-                          >
-                            {rt.enabled ? t('rtDisableBtn') : t('rtEnableBtn')}
-                          </button>
-                          <button
-                            type="button"
-                            className="mp"
-                            disabled={rt.running}
-                            onClick={async () => {
-                              setRtErr('');
-                              try {
-                                await api(
-                                  `/api/bots/${encodeURIComponent(detail.id)}/routines/${encodeURIComponent(rt.id)}/run?async=1`,
-                                  { method: 'POST' }
-                                );
-                                onToast(t('rtTriggered', { name: rt.name }));
-                                await loadRoutines(detail.id);
-                              } catch (e) {
-                                if (e instanceof Error && e.message !== 'unauthorized') setRtErr(e.message);
-                              }
-                            }}
-                          >
-                            {rt.running ? t('rtRunningBtn') : t('rtRunBtn')}
-                          </button>
-                          <button
-                            type="button"
-                            className="mp"
-                            onClick={async () => {
-                              if (runsOpen) {
-                                setRunsOpenId('');
-                                return;
-                              }
-                              setRunsOpenId(rt.id);
-                              try {
-                                const d = await api<{ runs?: RoutineRun[] }>(
-                                  `/api/bots/${encodeURIComponent(detail.id)}/routine-runs?routineId=${encodeURIComponent(rt.id)}&limit=8`
-                                );
-                                setRunsMap((prev) => ({ ...prev, [rt.id]: d.runs || [] }));
-                              } catch {}
-                            }}
-                          >
-                            {t('rtRunsBtn')}
-                          </button>
-                          <button type="button" className="mp" onClick={() => openRoutineForm(rt)}>
-                            {t('rtEditBtn')}
-                          </button>
-                          {rt.webhookTrigger && rt.webhookPath && (
-                            <button
-                              type="button"
-                              className="mp"
-                              onClick={() => {
-                                const fullUrl = `${window.location.origin}${rt.webhookPath}`;
-                                void navigator.clipboard?.writeText(fullUrl).then(() => onToast(t('rtWebhookCopied')));
-                              }}
-                            >
-                              {t('rtCopyWebhook')}
-                            </button>
-                          )}
-                          <button
-                            type="button"
-                            className="mp bad"
-                            onClick={() => {
-                              onConfirm({
-                                title: t('rtDeleteTitle', { name: rt.name }),
-                                text: t('rtDeleteDesc'),
-                                okText: t('delBtn'),
-                                okClass: 'bad',
-                                onOk: async () => {
-                                  await api(
-                                    `/api/bots/${encodeURIComponent(detail.id)}/routines/${encodeURIComponent(rt.id)}`,
-                                    { method: 'DELETE' }
-                                  );
-                                  onToast(t('rtDeleted'));
-                                  await loadRoutines(detail.id);
-                                },
-                              });
-                            }}
-                          >
-                            {t('delBtn')}
-                          </button>
-                        </div>
-                      </div>
-                      <div className="mem-time">{meta}</div>
-                      <div className="mem-txt">{rt.prompt}</div>
-                      {runsOpen && (
-                        <div className="rt-runs">
-                          {runs.length === 0 ? (
-                            <div className="set-card-desc">{t('rtRunsEmpty')}</div>
-                          ) : (
-                            runs.map((r, idx) => {
-                              const stText =
-                                r.status === 'ok'
-                                  ? t('rtStatusOk')
-                                  : r.status === 'silent'
-                                    ? t('rtStatusSilent')
-                                    : t('rtStatusError');
-                              const costTxt = r.costUsd ? ` · $${Number(r.costUsd).toFixed(4)}` : '';
-                              return (
-                                <div key={r.id || idx} className="rt-run">
-                                  <div className="rt-run-hd">
-                                    <span>
-                                      {stText} · {r.trigger} · {(r.durationMs / 1000).toFixed(1)}s{costTxt}
-                                    </span>
-                                    <span>{formatStamp(r.finishedAt, lang)}</span>
-                                  </div>
-                                  {r.error ? (
-                                    <div className="rt-run-err">{r.error}</div>
-                                  ) : r.output ? (
-                                    <div>
-                                      {r.output.slice(0, 180)}
-                                      {r.output.length > 180 ? '…' : ''}
-                                    </div>
-                                  ) : null}
-                                </div>
-                              );
-                            })
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })
-              )}
-            </div>
-            <div id="pRtErr" className="msg-err">
-              {rtErr}
-            </div>
-
-            <details
-              id="pTechDetails"
-              className="p-tech"
-              open={techOpen}
-              onToggle={(e) => setTechOpen(e.currentTarget.open)}
-            >
-              <summary>
-                <span>{t('techDetails')}</span>
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="m9 18 6-6-6-6" />
-                </svg>
-              </summary>
-              <div className="p-tech-body">
-                <dl className="kv">
-                  <div>
-                    <dt>ID</dt>
-                    <dd id="pId">{detail.id}</dd>
-                  </div>
-                  <div>
-                    <dt>Session</dt>
-                    <dd id="pSession">{detail.session?.sessionId || '—'}</dd>
-                  </div>
-                  <div>
-                    <dt>{t('archivedSessions')}</dt>
-                    <dd id="pArchived">
-                      {t('archivedCount', { n: detail.archivedSessions || 0 }) +
-                        (detail.privateSessions ? t('privateTag') : '')}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>Workspace</dt>
-                    <dd id="pWs">
-                      {onOpenFiles ? (
-                        <button
-                          type="button"
-                          className="ws-link-btn"
-                          onClick={() => onOpenFiles(detail.id)}
-                          title={t('workspaceFiles')}
-                        >
-                          <span>{detail.workspace}</span>
-                        </button>
-                      ) : (
-                        detail.workspace
-                      )}
-                    </dd>
-                  </div>
-                </dl>
-                <div className="stack6 mt-10">
-                  <div className="fld">
-                    <label htmlFor="peHarness">{t('statHarness')}</label>
-                    <select
-                      id="peHarness"
-                      value={editHarness}
-                      onChange={(e) => {
-                        const nextH = e.target.value;
-                        if (nextH === editHarness) return;
-                        setEditHarness(nextH);
-                        setEditModel('');
-                        void onLoadModels(nextH);
-                      }}
-                    >
-                      {(settings?.harnesses || [{ id: editHarness, label: harnessLabel(editHarness) }]).map((h) => (
-                        <option key={h.id} value={h.id}>
-                          {h.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="fld">
-                    <label htmlFor="peModel">{t('model')}</label>
-                    <input
-                      id="peModel"
-                      className="mono"
-                      list="bot-detail-models"
-                      spellCheck={false}
-                      placeholder={(() => {
-                        const per = settings?.defaultModels?.[editHarness]?.trim() || '';
-                        const def =
-                          per || resolveBotDefaultModel((settings?.defaultModel || '').trim(), editHarness);
-                        return def ? t('defaultModelPh', { model: def }) : t('inheritGlobalPh');
-                      })()}
-                      value={editModel}
-                      onFocus={() => void onLoadModels(editHarness)}
-                      onChange={(e) => setEditModel(e.target.value)}
-                    />
-                    <datalist id="bot-detail-models">
-                      {(models[editHarness] || []).map((m) => (
-                        <option key={m} value={m} />
-                      ))}
-                    </datalist>
-                  </div>
-                </div>
-                {(() => {
-                  const seenOpts = new Set<string>(['', 'local']);
-                  const screenOpts: Array<{ value: string; label: string }> = [
-                    { value: '', label: t('deskBindDefault') },
-                    { value: 'local', label: t('localDesktopName') },
-                  ];
-                  const localEntry = desktopTargets.find((tr) => tr.id === 'local');
-                  if (localEntry?.virtualSupported) {
-                    const vId = `virtual:${detail.id}`;
-                    seenOpts.add(vId);
-                    screenOpts.push({ value: vId, label: t('deskBindLocalVirtual') });
-                  }
-                  for (const tr of desktopTargets) {
-                    if (tr.id === 'local') continue;
-                    if (!seenOpts.has(tr.id)) {
-                      seenOpts.add(tr.id);
-                      screenOpts.push({ value: tr.id, label: tr.name || tr.id });
-                    }
-                    if (!tr.virtual && tr.virtualSupported) {
-                      const rvId = `${tr.id}:virtual:${detail.id}`;
-                      if (!seenOpts.has(rvId)) {
-                        seenOpts.add(rvId);
-                        screenOpts.push({
-                          value: rvId,
-                          label: t('deskBindRemoteVirtual', { name: tr.name || tr.id }),
-                        });
-                      }
-                    }
-                  }
-                  if (editDesktopTarget && !seenOpts.has(editDesktopTarget)) {
-                    screenOpts.push({
-                      value: editDesktopTarget,
-                      label: t('deskBindOfflineTag', { id: editDesktopTarget }),
-                    });
-                  }
-                  if (!canBindDesktop && !canIsolateBrowser) return null;
-                  return (
-                    <div className="stack6 mt-10">
-                      {canBindDesktop && (
-                        <div className="fld">
-                          <label htmlFor="peDesktopTarget">{t('botDesktopTarget')}</label>
-                          <select
-                            id="peDesktopTarget"
-                            value={editDesktopTarget}
-                            onChange={(e) => setEditDesktopTarget(e.target.value)}
-                          >
-                            {screenOpts.map((opt) => (
-                              <option key={opt.value || '_default'} value={opt.value}>
-                                {opt.label}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                      )}
-                      {canIsolateBrowser && (
-                        <div className="fld">
-                          <label htmlFor="peBrowserMode">{t('botBrowserMode')}</label>
-                          <select
-                            id="peBrowserMode"
-                            value={editBrowserMode}
-                            onChange={(e) => setEditBrowserMode(e.target.value)}
-                          >
-                            <option value="">{t('browserModeAuto')}</option>
-                            <option value="isolated">{t('browserModeIsolated')}</option>
-                            <option value="attach">{t('browserModeAttach')}</option>
-                          </select>
-                        </div>
-                      )}
-                      {(() => {
-                        const hCaps = settings?.harnesses.find((h) => h.id === detail.harness)?.permissions?.modes;
-                        const supported: PermissionMode[] = hCaps && hCaps.length > 0 ? hCaps : ['auto', 'edit', 'ask', 'plan'];
-                        const activeVal = supported.includes(editPermissionMode) ? editPermissionMode : supported[0] || 'auto';
-                        return (
-                          <div className="fld">
-                            <label htmlFor="pePermissionMode">{t('permMode')}</label>
-                            <select
-                              id="pePermissionMode"
-                              disabled={supported.length <= 1}
-                              value={activeVal}
-                              onChange={(e) => setEditPermissionMode(e.target.value as PermissionMode)}
-                            >
-                              {supported.map((m) => (
-                                <option key={m} value={m}>
-                                  {t(`permMode_${m}`)}
-                                </option>
-                              ))}
-                            </select>
-                            <div className="set-card-desc mt-4">
-                              {supported.length <= 1
-                                ? t('permModeUnsupported', { mode: t(`permMode_${supported[0] || 'auto'}`) })
-                                : t(`permDesc_${activeVal}`)}
-                            </div>
-                          </div>
-                        );
-                      })()}
-                    </div>
-                  );
-                })()}
-                <label className="perm self-start mt-10">
-                  <input
-                    type="checkbox"
-                    id="pePrivate"
-                    checked={editPrivate}
-                    onChange={(e) => setEditPrivate(e.target.checked)}
-                  />
-                  <span>{t('privateSessionsLabel')}</span>
-                </label>
-                <div className="sec">AGENTS.md</div>
-                <textarea
-                  id="pInst"
-                  className="agents p-agents-in"
-                  rows={10}
-                  spellCheck={false}
-                  placeholder={t('agentsPh')}
-                  value={editInst}
-                  onChange={(e) => setEditInst(e.target.value)}
-                />
-              </div>
-            </details>
+            <BotTechDetailsSection
+              open={open}
+              detail={detail}
+              settings={settings}
+              models={models}
+              desktopTargets={desktopTargets}
+              editHarness={editHarness}
+              editModel={editModel}
+              editDesktopTarget={editDesktopTarget}
+              editBrowserMode={editBrowserMode}
+              editPermissionMode={editPermissionMode}
+              editPrivate={editPrivate}
+              editInst={editInst}
+              canBindDesktop={canBindDesktop}
+              canIsolateBrowser={canIsolateBrowser}
+              lang={lang}
+              onChangeHarness={setEditHarness}
+              onChangeModel={setEditModel}
+              onChangeDesktopTarget={setEditDesktopTarget}
+              onChangeBrowserMode={setEditBrowserMode}
+              onChangePermissionMode={setEditPermissionMode}
+              onChangePrivate={setEditPrivate}
+              onChangeInst={setEditInst}
+              onLoadModels={onLoadModels}
+              onOpenFiles={onOpenFiles}
+            />
           </div>
         )}
       </div>

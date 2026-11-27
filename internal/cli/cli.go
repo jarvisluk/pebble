@@ -4,8 +4,10 @@ package cli
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -24,9 +26,11 @@ import (
 	"bot-hub/internal/hub"
 	"bot-hub/internal/mcp"
 	"bot-hub/internal/node"
+	"bot-hub/internal/protocol"
 	"bot-hub/internal/scheduler"
 	"bot-hub/internal/state"
 	"bot-hub/internal/tunnel"
+	"bot-hub/internal/update"
 )
 
 // Main runs a pebble command; args excludes the program name.
@@ -37,6 +41,10 @@ func Main(args []string) {
 	}
 
 	sub := args[0]
+	if sub == "version" || sub == "--version" || sub == "-v" {
+		runVersion(args[1:])
+		return
+	}
 	if sub == "mcp" {
 		runMCP(args[1:])
 		return
@@ -50,7 +58,7 @@ func Main(args []string) {
 		return
 	}
 	switch sub {
-	case "bot", "settings", "session", "routine", "node", "desktop":
+	case "bot", "settings", "session", "routine", "task", "memory", "node", "desktop", "update":
 		cwd, _ := os.Getwd()
 		os.Exit(runCommand(context.Background(), args, cwd, os.Stdout, os.Stderr))
 	}
@@ -110,8 +118,52 @@ func printUsage() {
   pebble settings <get|models|set> [flags]                       Read or update global Pebble settings and list available models
   pebble session  <list|recall|rotate> [flags]                   Inspect, recall, or rotate bot sessions
   pebble routine  <list|upsert|delete|run> [flags]               Manage and trigger scheduled routines
+  pebble task     <list|get|spawn|read|send|cancel|approve>      Manage durable background bot tasks
+  pebble memory   <search|list|get|save|forget|status|dream|reindex|import-magpie> [flags] Manage native Pebble memories
   pebble node     <list|exec|file> [flags]                       List or invoke remote computer nodes
-  pebble desktop  <task|takeover|setup|power|targets> [flags]    Delegate desktop GUI tasks, list targets, setup virtual desktop, or control power`)
+  pebble desktop  <task|takeover|setup|power|targets> [flags]    Delegate desktop GUI tasks, list targets, setup virtual desktop, or control power
+  pebble update   [check|auto|channel|proxy] [flags]             Check GitHub Releases for newer versions and configure update checks
+  pebble version  [--json]                                       Print Pebble version and build metadata`)
+}
+
+func runVersion(args []string) {
+	fs := flag.NewFlagSet("version", flag.ExitOnError)
+	jsonFlag := fs.Bool("json", false, "output version info as JSON")
+	_ = fs.Parse(args)
+	if err := writeVersion(os.Stdout, *jsonFlag); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func writeVersion(w io.Writer, jsonOut bool) error {
+	if jsonOut {
+		payload := struct {
+			Version         string `json:"version"`
+			Commit          string `json:"commit,omitempty"`
+			BuildDate       string `json:"buildDate,omitempty"`
+			ProtocolVersion int    `json:"protocolVersion"`
+		}{
+			Version:         protocol.AppVersion,
+			Commit:          protocol.BuildCommit,
+			BuildDate:       protocol.BuildDate,
+			ProtocolVersion: protocol.CurrentProtocol,
+		}
+		enc := json.NewEncoder(w)
+		return enc.Encode(payload)
+	}
+	var meta []string
+	if protocol.BuildCommit != "" {
+		meta = append(meta, protocol.BuildCommit)
+	}
+	if protocol.BuildDate != "" {
+		meta = append(meta, "built "+protocol.BuildDate)
+	}
+	if len(meta) > 0 {
+		_, err := fmt.Fprintf(w, "pebble %s (%s)\n", protocol.AppVersion, strings.Join(meta, ", "))
+		return err
+	}
+	_, err := fmt.Fprintf(w, "pebble %s\n", protocol.AppVersion)
+	return err
 }
 
 func runHostDaemon(args []string) {
@@ -295,11 +347,21 @@ func runServe(parent context.Context, h *hub.Hub, cfgPath string) error {
 	h.SetOnSchedulesChanged(sched.Sync)
 	sched.Start(ctx)
 
+	upd := update.NewManager(update.Options{
+		StateDir:       filepath.Dir(h.Config().StateFile),
+		CurrentVersion: protocol.AppVersion,
+		OnChange: func(st update.Status) {
+			h.BroadcastUpdateStatus(st)
+		},
+	})
+	upd.Start(ctx)
+
 	var httpSrv *channel.HTTPServer
 	httpErr := make(chan error, 1)
 	if h.Config().HTTP.IsEnabled() {
 		httpSrv = channel.NewHTTPServer(h, h.Config().HTTP)
 		httpSrv.SetScheduler(sched)
+		httpSrv.SetUpdater(upd)
 		go func() {
 			if err := httpSrv.Start(); err != nil {
 				log.Printf("[http] server error: %v", err)
@@ -318,6 +380,7 @@ func runServe(parent context.Context, h *hub.Hub, cfgPath string) error {
 		cancel()
 	}
 	sched.Wait()
+	upd.Wait()
 	log.Printf("[hub] stopped")
 	select {
 	case err := <-httpErr:

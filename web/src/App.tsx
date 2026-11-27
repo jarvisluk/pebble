@@ -3,37 +3,59 @@ import type {
   ActiveDesktopTarget,
   BotDetail,
   BotStatus,
+  BotTask,
   ChatMessage,
   ConfirmOptions,
   LangPref,
   NodeInfo,
   PendingApproval,
   PendingQuestion,
-  PermissionMode,
   ResolvedLang,
   ScreenState,
   ServerInfo,
   SettingsData,
   SettingsTab,
-  StageKind,
   StageOpenEvent,
+  StageRef,
   StageTab,
   TakeoverRequest,
+  UpdateStatus,
 } from './types';
-import { api, CLIENT_PROTOCOL, setUnauthorizedHandler } from './lib/api';
+import {
+  checkForUpdates,
+  CLIENT_PROTOCOL,
+  fetchUpdateStatus,
+  isUnsupportedCapabilityError,
+  saveUpdateConfig,
+  setUnauthorizedHandler,
+} from './lib/api';
 import { getLangPref, resolveLang, setLangPref, translate } from './lib/i18n';
 import { installMacWindowDragBridge } from './lib/macShell';
-import { botColor, contrastText } from './lib/theme';
 import { useViewTransition } from './lib/useViewTransition';
+import { useAppLayout } from './hooks/useAppLayout';
+import { useHubData } from './hooks/useHubData';
+import { useHubActions } from './hooks/useHubActions';
+import { useHubEvents } from './hooks/useHubEvents';
+import {
+  type BotStageState,
+  closeTab,
+  createDesktopTab,
+  createFilesTab,
+  createNewTab,
+  createTaskTab,
+  ensureNonEmptyStageState,
+  replaceNewTabOrOpen,
+  stageTabFromRef,
+  upsertTab,
+} from './lib/stageTabs';
+import { upsertTaskList } from './lib/tasks';
 import { Sidebar } from './components/Sidebar';
 import { ChatView } from './components/ChatView';
-import { DesktopStage } from './components/DesktopStage';
-import { WorkspaceFilesPane } from './components/WorkspaceFilesPane';
+import { AppOverlays } from './components/AppOverlays';
+import { StageShell } from './components/StageShell';
 import { SettingsView } from './components/settings/SettingsView';
-import { BotDetailPanel } from './components/BotDetailPanel';
-import { CollabPanel } from './components/CollabPanel';
 import { UnboxPage } from './components/onboarding/UnboxPage';
-import { ConfirmModal, CreateBotModal, LoginModal } from './components/Modals';
+
 
 const VIEW_ORDER = ['chat', 'settings'] as const;
 
@@ -51,11 +73,16 @@ export default function App() {
   const [lastMap, setLastMap] = useState<Record<string, ChatMessage>>({});
   const [unreadMap, setUnreadMap] = useState<Record<string, number>>({});
   const [toolMap, setToolMap] = useState<Record<string, string>>({});
+  const [tasksMap, setTasksMap] = useState<Record<string, BotTask[]>>({});
+  const [taskToolMap, setTaskToolMap] = useState<Record<string, string>>({});
+  const [taskChunksMap, setTaskChunksMap] = useState<Record<string, string>>({});
+  const [taskEventSeqMap, setTaskEventSeqMap] = useState<Record<string, number>>({});
   const [filter, setFilter] = useState('');
   const [settings, setSettings] = useState<SettingsData | null>(null);
   const [modelsMap, setModelsMap] = useState<Record<string, string[]>>({});
   const modelsRef = useRef<Record<string, string[]>>({});
   const modelsInFlightRef = useRef<Record<string, Promise<string[]> | undefined>>({});
+  const [nodes, setNodes] = useState<NodeInfo[]>([]);
   const [nodesFromEvents, setNodesFromEvents] = useState<NodeInfo[] | null>(null);
   const [takeovers, setTakeovers] = useState<TakeoverRequest[]>([]);
   const [approvals, setApprovals] = useState<PendingApproval[]>([]);
@@ -65,6 +92,15 @@ export default function App() {
   const [serverInfo, setServerInfo] = useState<ServerInfo | null>(null);
   const [unsupportedCaps, setUnsupportedCaps] = useState<Set<string>>(() => new Set());
   const [compatDismissedProto, setCompatDismissedProto] = useState(0);
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
+  const [updateChecking, setUpdateChecking] = useState(false);
+  const [dismissedUpdateVer, setDismissedUpdateVer] = useState<string>(() => {
+    try {
+      return localStorage.getItem('pebble.dismissedUpdate') || '';
+    } catch {
+      return '';
+    }
+  });
 
   const [view, setView] = useState<'chat' | 'settings'>('chat');
   const viewTx = useViewTransition(view, VIEW_ORDER);
@@ -94,11 +130,7 @@ export default function App() {
   const [mobileSideOpen, setMobileSideOpen] = useState(false);
 
   const [deskOpen, setDeskOpen] = useState(false);
-  const [stageKind, setStageKind] = useState<StageKind>('desktop');
-  const [stageTabs, setStageTabs] = useState<StageTab[]>([]);
-  const [activeStageTabId, setActiveStageTabId] = useState<string>('desktop');
-  const [filesOpenPath, setFilesOpenPath] = useState('');
-  const [filesOpenSeq, setFilesOpenSeq] = useState(0);
+  const [botStages, setBotStages] = useState<Record<string, BotStageState>>({});
   const [stageInsert, setStageInsert] = useState<{ seq: number; text: string } | null>(null);
   const [deskTarget, setDeskTarget] = useState('local');
   const [activeDeskTarget, setActiveDeskTarget] = useState<ActiveDesktopTarget>({
@@ -124,6 +156,7 @@ export default function App() {
   const toastTimerRef = useRef<number | null>(null);
   const unboxAutoPromptedRef = useRef(false);
   const esRef = useRef<EventSource | null>(null);
+  const lastEventIdRef = useRef<number>(0);
   const activeBotIdRef = useRef(activeBotId);
   const viewRef = useRef(view);
   const deskOpenRef = useRef(deskOpen);
@@ -172,13 +205,70 @@ export default function App() {
   }, []);
 
   const canUseFiles = hasServerCap('stage.files');
+  const canCheckUpdate = hasServerCap('update.check');
+
+  const refreshUpdateStatus = useCallback(async () => {
+    try {
+      const st = await fetchUpdateStatus();
+      setUpdateStatus(st);
+    } catch (e) {
+      if (isUnsupportedCapabilityError(e)) {
+        markCapUnsupported('update.check');
+      }
+    }
+  }, [markCapUnsupported]);
+
+  const handleCheckUpdates = useCallback(async () => {
+    setUpdateChecking(true);
+    try {
+      const st = await checkForUpdates();
+      setUpdateStatus(st);
+    } catch (e) {
+      if (isUnsupportedCapabilityError(e)) {
+        markCapUnsupported('update.check');
+      } else if (e instanceof Error && e.message !== 'unauthorized') {
+        showToast(e.message);
+      }
+    } finally {
+      setUpdateChecking(false);
+    }
+  }, [markCapUnsupported, showToast]);
+
+  const handleSaveUpdateConfig = useCallback(
+    async (patch: { autoCheck?: boolean; interval?: string; channel?: string }) => {
+      try {
+        const st = await saveUpdateConfig(patch);
+        setUpdateStatus(st);
+        showToast(t('updateConfigSaved'));
+      } catch (e) {
+        if (isUnsupportedCapabilityError(e)) {
+          markCapUnsupported('update.check');
+        } else if (e instanceof Error && e.message !== 'unauthorized') {
+          showToast(e.message);
+        }
+      }
+    },
+    [markCapUnsupported, showToast, t]
+  );
 
   useEffect(() => {
-    if (!canUseFiles && activeStageTabId === 'files') {
-      setStageKind('desktop');
-      setActiveStageTabId('desktop');
+    if (!canUseFiles) {
+      setBotStages((prev) => {
+        let changed = false;
+        const next: Record<string, BotStageState> = {};
+        for (const [bid, st] of Object.entries(prev)) {
+          const filtered = st.tabs.filter((x) => x.kind !== 'files' && x.kind !== 'file');
+          if (filtered.length !== st.tabs.length) {
+            changed = true;
+            next[bid] = ensureNonEmptyStageState({ ...st, tabs: filtered }, t);
+          } else {
+            next[bid] = st;
+          }
+        }
+        return changed ? next : prev;
+      });
     }
-  }, [activeStageTabId, canUseFiles]);
+  }, [canUseFiles, t]);
 
   useEffect(() => {
     document.documentElement.style.removeProperty('--accent');
@@ -236,550 +326,88 @@ export default function App() {
     setCreateOpen(false);
   }, []);
 
-  const loadMessages = useCallback(
-    async (id: string, initial = false) => {
-      try {
-        const data = await api<{ messages?: ChatMessage[] }>(
-          `/api/bots/${encodeURIComponent(id)}/messages?limit=200`
-        );
-        const list = data.messages || [];
-        setMsgsMap((prev) => ({ ...prev, [id]: list }));
-        if (list.length > 0) {
-          setLastMap((prev) => ({ ...prev, [id]: list[list.length - 1] }));
-        }
-        if (initial) {
-          list.forEach((m) => seenIdsRef.current.add(m.id));
-        }
-      } catch (e) {
-        if (e instanceof Error && e.message !== 'unauthorized') showToast(e.message);
-      }
-    },
-    [showToast]
-  );
 
-  const loadBots = useCallback(async () => {
-    const data = await api<{ bots?: BotStatus[]; server?: ServerInfo }>('/api/bots');
-    setServerInfo(data.server ?? null);
-    const list = data.bots || [];
-    setBots(list);
-    let saved: string | null = null;
-    try {
-      saved = localStorage.getItem('bothub.active');
-    } catch {}
-    let nextActive = activeBotIdRef.current;
-    if (!list.some((b) => b.id === nextActive)) {
-      nextActive = list.some((b) => b.id === saved) ? saved : list[0]?.id || null;
-      setActiveBotId(nextActive);
-    }
-    if (nextActive) {
-      await loadMessages(nextActive, true);
-    }
-    await Promise.all(
-      list
-        .filter((b) => b.id !== nextActive)
-        .map(async (b) => {
-          try {
-            const d = await api<{ messages?: ChatMessage[] }>(
-              `/api/bots/${encodeURIComponent(b.id)}/messages?limit=1`
-            );
-            const m = d.messages?.[d.messages.length - 1];
-            if (m) setLastMap((prev) => ({ ...prev, [b.id]: m }));
-          } catch {}
-        })
-    );
-  }, [loadMessages]);
+  const {
+    loadMessages,
+    loadBotTasks,
+    loadBots,
+    loadSettings,
+    loadModels,
+    resetModels,
+    refreshNodes,
+    refreshTakeovers,
+    applyActiveDesktopTarget,
+    refreshActiveDesktopTarget,
+    selectDesktopTarget,
+    refreshQuestions,
+    refreshApprovals,
+    removeBotLocally,
+  } = useHubData({
+    t,
+    showToast,
+    activeBotIdRef,
+    activeBotDesktopTargetRef,
+    activeDeskTargetRef,
+    panelOpenRef,
+    panelDetailRef,
+    seenIdsRef,
+    modelsRef,
+    modelsInFlightRef,
+    setBots,
+    setTasksMap,
+    setNodes,
+    setActiveBotId,
+    setMsgsMap,
+    setLastMap,
+    setUnreadMap,
+    setToolMap,
+    setSettings,
+    setModelsMap,
+    setTakeovers,
+    setApprovals,
+    setQuestions,
+    setServerInfo,
+    setActiveDeskTarget,
+    setDeskTarget,
+    setPanelOpen,
+  });
 
-  const loadSettings = useCallback(async (fresh = false) => {
-    const s = await api<SettingsData>(fresh ? '/api/settings?fresh=1' : '/api/settings');
-    setSettings(s);
-    return s;
-  }, []);
 
-  const loadModels = useCallback(async (harness: string, force = false): Promise<string[]> => {
-    if (!harness) return [];
-    const existing = modelsRef.current[harness];
-    if (!force && existing && existing.length > 0) return existing;
-    const inflight = modelsInFlightRef.current[harness];
-    if (!force && inflight) {
-      return inflight;
-    }
-    const req = api<{ models?: string[] }>(`/api/models?harness=${encodeURIComponent(harness)}`)
-      .then((d) => {
-        const list = d.models || [];
-        if (list.length > 0 || force || modelsRef.current[harness] === undefined) {
-          modelsRef.current = { ...modelsRef.current, [harness]: list };
-          setModelsMap(modelsRef.current);
-        }
-        return modelsRef.current[harness] || list;
-      })
-      .catch(() => modelsRef.current[harness] || [])
-      .finally(() => {
-        if (modelsInFlightRef.current[harness] === req) {
-          delete modelsInFlightRef.current[harness];
-        }
-      });
-    modelsInFlightRef.current[harness] = req;
-    return req;
-  }, []);
-
-  const resetModels = useCallback(() => {
-    modelsRef.current = {};
-    modelsInFlightRef.current = {};
-    setModelsMap({});
-  }, []);
-
-  const refreshTakeovers = useCallback(async () => {
-    try {
-      const d = await api<{ items?: TakeoverRequest[] }>('/api/desktop/takeovers');
-      setTakeovers(d.items || []);
-    } catch {}
-  }, []);
-
-  const applyActiveDesktopTarget = useCallback(
-    (next: ActiveDesktopTarget, notifyFallback = false) => {
-      const prev = activeDeskTargetRef.current;
-      const normalized: ActiveDesktopTarget = {
-        target: next?.target || 'local',
-        name: next?.name,
-        temporary: !!next?.temporary,
-        expiresAt: next?.expiresAt,
-      };
-      setActiveDeskTarget(normalized);
-      if (!activeBotDesktopTargetRef.current) {
-        setDeskTarget(normalized.target);
-      }
-      if (notifyFallback && prev.temporary && !normalized.temporary && normalized.target === 'local') {
-        showToast(t('deskTargetFallback'));
-      }
-    },
-    [showToast, t]
-  );
-
-  const refreshActiveDesktopTarget = useCallback(async () => {
-    try {
-      const d = await api<{ activeTarget?: ActiveDesktopTarget }>('/api/desktop/targets');
-      if (d.activeTarget) {
-        applyActiveDesktopTarget(d.activeTarget);
-      }
-    } catch {}
-  }, [applyActiveDesktopTarget]);
-
-  const selectDesktopTarget = useCallback(
-    async (nextTarget: string) => {
-      const want = nextTarget || 'local';
-      setDeskTarget(want);
-      try {
-        const res = await api<{ activeTarget?: ActiveDesktopTarget }>('/api/desktop/target', {
-          method: 'PUT',
-          body: { target: want },
-        });
-        if (res.activeTarget) {
-          applyActiveDesktopTarget(res.activeTarget);
-          if (res.activeTarget.temporary) {
-            showToast(t('deskTargetSwitched', { name: res.activeTarget.name || res.activeTarget.target }));
-          } else {
-            showToast(t('deskTargetFallback'));
-          }
-        }
-      } catch (e) {
-        if (e instanceof Error && e.message !== 'unauthorized') showToast(e.message);
-      }
-    },
-    [applyActiveDesktopTarget, showToast, t]
-  );
-
-  const refreshQuestions = useCallback(async () => {
-    try {
-      const d = await api<{ items?: PendingQuestion[] }>('/api/questions');
-      setQuestions(d.items || []);
-    } catch {}
-  }, []);
-
-  const refreshApprovals = useCallback(async () => {
-    try {
-      const d = await api<{ items?: PendingApproval[] }>('/api/approvals');
-      setApprovals(d.items || []);
-    } catch {}
-  }, []);
-
-  const removeBotLocally = useCallback(
-    (id: string) => {
-      setBots((prev) => {
-        const nextList = prev.filter((b) => b.id !== id);
-        if (panelDetailRef.current?.id === id && panelOpenRef.current) {
-          setPanelOpen(false);
-        }
-        if (activeBotIdRef.current === id) {
-          const nextActive = nextList[0]?.id || null;
-          setActiveBotId(nextActive);
-          try {
-            if (nextActive) localStorage.setItem('bothub.active', nextActive);
-            else localStorage.removeItem('bothub.active');
-          } catch {}
-          if (nextActive) void loadMessages(nextActive, true);
-        }
-        return nextList;
-      });
-      setMsgsMap((prev) => {
-        const copy = { ...prev };
-        delete copy[id];
-        return copy;
-      });
-      setLastMap((prev) => {
-        const copy = { ...prev };
-        delete copy[id];
-        return copy;
-      });
-      setUnreadMap((prev) => {
-        const copy = { ...prev };
-        delete copy[id];
-        return copy;
-      });
-      setToolMap((prev) => {
-        const copy = { ...prev };
-        delete copy[id];
-        return copy;
-      });
-    },
-    [loadMessages]
-  );
-
-  const connectEvents = useCallback(() => {
-    esRef.current?.close();
-    const es = new EventSource('/api/events');
-    esRef.current = es;
-    const on = (type: string, fn: (data: any) => void) => {
-      es.addEventListener(type, (e) => {
-        try {
-          fn(JSON.parse((e as MessageEvent).data));
-        } catch {}
-      });
-    };
-
-    on('message', ({ payload: m }: { payload?: ChatMessage }) => {
-      if (!m?.botId) return;
-      setMsgsMap((prev) => {
-        const list = prev[m.botId] || [];
-        if (m.id && list.some((x) => x.id === m.id)) return prev;
-        return { ...prev, [m.botId]: [...list, m] };
-      });
-      if (m.role !== 'system') {
-        setLastMap((prev) => ({ ...prev, [m.botId]: m }));
-        if (activeBotIdRef.current !== m.botId) {
-          setUnreadMap((prev) => ({ ...prev, [m.botId]: (prev[m.botId] || 0) + 1 }));
-        }
-      }
-    });
-
-    on('message_updated', ({ payload: m }: { payload?: ChatMessage }) => {
-      if (!m?.botId || !m.id) return;
-      setMsgsMap((prev) => {
-        const list = prev[m.botId];
-        if (!list) return prev;
-        const idx = list.findIndex((x) => x.id === m.id);
-        if (idx < 0) return prev;
-        const copy = [...list];
-        copy[idx] = m;
-        return { ...prev, [m.botId]: copy };
-      });
-      setLastMap((prev) => (prev[m.botId]?.id === m.id ? { ...prev, [m.botId]: m } : prev));
-    });
-
-    on('bot_status', ({ payload: st }: { payload?: BotStatus }) => {
-      if (!st) return;
-      setBots((prev) => {
-        const idx = prev.findIndex((b) => b.id === st.id);
-        if (idx >= 0) {
-          const copy = [...prev];
-          copy[idx] = st;
-          return copy;
-        }
-        return [...prev, st];
-      });
-      if (!st.busy) {
-        setToolMap((prev) => {
-          const copy = { ...prev };
-          delete copy[st.id];
-          return copy;
-        });
-      }
-    });
-
-    on('tool_use', ({ payload: p }: { payload?: { botId?: string; tool?: string } }) => {
-      if (!p?.botId) return;
-      setToolMap((prev) => ({ ...prev, [p.botId!]: p.tool || '' }));
-    });
-
-    on('bot_created', ({ payload: st }: { payload?: BotStatus }) => {
-      if (!st) return;
-      setBots((prev) => (prev.some((b) => b.id === st.id) ? prev : [...prev, st]));
-    });
-
-    on('bot_deleted', ({ botId, payload }: { botId?: string; payload?: { id?: string } }) => {
-      const id = botId || payload?.id;
-      if (id) removeBotLocally(id);
-    });
-
-    on('nodes_changed', ({ payload }: { payload?: { nodes?: NodeInfo[] } }) => {
-      setNodesFromEvents(payload?.nodes || []);
-    });
-
-    on('desktop', ({ payload }: { payload?: ScreenState }) => {
-      if (payload && deskOpenRef.current && payload.target === deskTargetRef.current) {
-        setLiveScreen(payload);
-        setScreenSeq((n) => n + 1);
-      }
-    });
-
-    on('desktop_target', ({ payload }: { payload?: ActiveDesktopTarget }) => {
-      if (payload) {
-        applyActiveDesktopTarget(payload, true);
-      }
-    });
-
-    on('stage_open', ({ botId, payload }: { botId?: string; payload?: StageOpenEvent }) => {
-      if (!payload?.kind) return;
-      const targetBotId = payload.botId || botId;
-      if (targetBotId && targetBotId !== activeBotIdRef.current) {
-        void selectBot(targetBotId);
-      }
-      if (payload.kind === 'files') {
-        setStageKind('files');
-        setActiveStageTabId('files');
-        setFilesOpenPath(payload.path || '');
-        setFilesOpenSeq((n) => n + 1);
-        setDeskOpen(true);
-        return;
-      }
-      if (payload.kind === 'desktop') {
-        setStageKind('desktop');
-        setActiveStageTabId('desktop');
-        setDeskOpen(true);
-        return;
-      }
-      const tabId = payload.id || `${payload.kind}:${Date.now()}`;
-      const newTab: StageTab = {
-        id: tabId,
-        kind: payload.kind,
-        title: payload.title || payload.kind,
-        botId: targetBotId,
-        path: payload.path,
-        url: payload.url,
-        resourceUri: payload.resourceUri,
-        closable: payload.closable !== false,
-      };
-      setStageTabs((prev) => {
-        const idx = prev.findIndex((x) => x.id === tabId);
-        if (idx >= 0) {
-          const copy = [...prev];
-          copy[idx] = newTab;
-          return copy;
-        }
-        return [...prev, newTab];
-      });
-      setStageKind(payload.kind);
-      setActiveStageTabId(tabId);
-      setDeskOpen(true);
-    });
-
-    on('takeover', ({ payload }: { payload?: { items?: TakeoverRequest[] } }) => {
-      setTakeovers(payload?.items || []);
-    });
-
-    on('questions', ({ payload }: { payload?: { items?: PendingQuestion[] } }) => {
-      setQuestions(payload?.items || []);
-    });
-
-    on('approvals', ({ payload }: { payload?: { items?: PendingApproval[] } }) => {
-      setApprovals(payload?.items || []);
-    });
-
-    on('routine_updated', ({ botId }: { botId?: string }) => {
-      if (panelOpenRef.current && panelDetailRef.current?.id === botId) {
-        setRoutineRefreshSeq((n) => n + 1);
-      }
-    });
-
-    on('routine_run', ({ payload: run }: { payload?: { botId?: string } }) => {
-      if (run?.botId && panelOpenRef.current && panelDetailRef.current?.id === run.botId) {
-        setRoutineRefreshSeq((n) => n + 1);
-      }
-    });
-  }, [removeBotLocally]);
-
-  const maybeAutoOpenUnbox = useCallback((s: SettingsData | null) => {
-    if (unboxAutoPromptedRef.current || loginOpenRef.current) return;
-    if (s?.onboarding?.needsSetup) {
-      unboxAutoPromptedRef.current = true;
-      setUnboxStep(1);
-      setUnboxOpen(true);
-    }
-  }, []);
-
-  useEffect(() => {
-    Promise.all([loadBots(), loadSettings()])
-      .then(([, s]) => {
-        connectEvents();
-        void refreshTakeovers();
-        void refreshActiveDesktopTarget();
-        void refreshApprovals();
-        void refreshQuestions();
-        maybeAutoOpenUnbox(s);
-        setBootReady(true);
-      })
-      .catch(() => {
-        setBootReady(true);
-      });
-    return () => {
-      esRef.current?.close();
-    };
-  }, []);
-
-  const toggleDesktopSidebar = useCallback((forceCollapsed: boolean | null = null) => {
-    setSideCollapsed((prev) => {
-      const next = forceCollapsed !== null ? forceCollapsed : !prev;
-      try {
-        if (next) localStorage.setItem('bothub.sideCollapsed', '1');
-        else localStorage.removeItem('bothub.sideCollapsed');
-      } catch {}
-      return next;
-    });
-  }, []);
-
-  useEffect(() => {
-    const mq = window.matchMedia('(max-width: 820px)');
-    const onMq = (e: MediaQueryListEvent) => {
-      if (!e.matches) setMobileSideOpen(false);
-    };
-    mq.addEventListener('change', onMq);
-
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (document.activeElement?.hasAttribute('data-desk-stage')) return;
-      if (e.key === 'Escape') {
-        if (confirmOpts) setConfirmOpts(null);
-        else if (unboxOpen) setUnboxOpen(false);
-        else if (createOpen || panelOpen || collabPeerId || mobileSideOpen) closeAllOverlays();
-        else if (viewRef.current === 'settings') leaveSettings();
-      }
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
-        e.preventDefault();
-        if (viewRef.current !== 'settings') filterInputRef.current?.focus();
-      }
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'b' && matchMedia('(min-width: 821px)').matches) {
-        e.preventDefault();
-        if (viewRef.current !== 'settings') toggleDesktopSidebar();
-      }
-      if ((e.metaKey || e.ctrlKey) && e.key === ',') {
-        e.preventDefault();
-        if (viewRef.current === 'settings') leaveSettings();
-        else {
-          closeAllOverlays();
-          setDeskOpen(false);
-          setSettingsTab('general');
-          setView('settings');
-          void loadSettings();
-        }
-      }
-    };
-    document.addEventListener('keydown', onKeyDown);
-    return () => {
-      mq.removeEventListener('change', onMq);
-      document.removeEventListener('keydown', onKeyDown);
-    };
-  }, [closeAllOverlays, collabPeerId, confirmOpts, createOpen, leaveSettings, loadSettings, mobileSideOpen, panelOpen, toggleDesktopSidebar, unboxOpen]);
-
-  const selectBot = async (id: string) => {
-    const go = async () => {
-      setActiveBotId(id);
-      setUnreadMap((prev) => ({ ...prev, [id]: 0 }));
-      try {
-        localStorage.setItem('bothub.active', id);
-      } catch {}
-      closeAllOverlays();
-      if (viewRef.current === 'settings') setView('chat');
-      await loadMessages(id, true);
-      if (matchMedia('(min-width: 821px)').matches) inputRef.current?.focus();
-    };
-    if (viewRef.current === 'settings' && settingsDirtyRef.current) {
-      confirmLeaveSettingsThen(() => void go(), false);
-      return;
-    }
-    await go();
-  };
-
-  const openPanel = async (botId?: string) => {
-    const targetId = botId || activeBotId;
-    if (!targetId) return;
-    try {
-      const d = await api<BotDetail>(`/api/bots/${encodeURIComponent(targetId)}`);
-      setPanelDetail(d);
-      setPanelOpen(true);
-    } catch (e) {
-      if (e instanceof Error && e.message !== 'unauthorized') showToast(e.message);
-    }
-  };
-
-  const handleResolveTakeover = async (to: TakeoverRequest) => {
-    try {
-      const res = await api<{ items?: TakeoverRequest[] }>('/api/desktop/takeover/resolve', {
-        method: 'POST',
-        body: { id: to.id, note: t('takeoverDoneNote') },
-      });
-      setTakeovers(res.items || []);
-      showToast(t('resumedAI'));
-    } catch (e) {
-      if (e instanceof Error && e.message !== 'unauthorized') showToast(e.message);
-    }
-  };
-
-  const handleReplyApproval = async (
-    id: string,
-    decision: 'allow_once' | 'allow_always' | 'reject',
-    optionId?: string,
-    reason?: string
-  ) => {
-    try {
-      const res = await api<{ items?: PendingApproval[] }>(`/api/approvals/${encodeURIComponent(id)}/reply`, {
-        method: 'POST',
-        body: { decision, optionId, reason },
-      });
-      setApprovals(res.items || []);
-    } catch (e) {
-      await refreshApprovals();
-      if (e instanceof Error && e.message !== 'unauthorized') {
-        showToast(e.message);
-        throw e;
-      }
-    }
-  };
-
-  const handleChangePermissionMode = async (botId: string, mode: PermissionMode) => {
-    try {
-      const st = await api<BotStatus>(`/api/bots/${encodeURIComponent(botId)}`, {
-        method: 'PATCH',
-        body: { permissionMode: mode },
-      });
-      setBots((prev) => prev.map((b) => (b.id === st.id ? { ...b, ...st } : b)));
-      if (panelDetailRef.current?.id === st.id) {
-        setPanelDetail((prev) => (prev ? { ...prev, permissionMode: st.permissionMode } : prev));
-      }
-    } catch (e) {
-      if (e instanceof Error && e.message !== 'unauthorized') showToast(e.message);
-    }
-  };
-
-  const handleReplyQuestion = async (id: string, answers: Record<string, unknown>, cancelled: boolean) => {
-    try {
-      const res = await api<{ items?: PendingQuestion[] }>(`/api/questions/${encodeURIComponent(id)}/reply`, {
-        method: 'POST',
-        body: { answers, cancelled },
-      });
-      setQuestions(res.items || []);
-    } catch (e) {
-      if (e instanceof Error && e.message !== 'unauthorized') showToast(e.message);
-      await refreshQuestions();
-    }
-  };
+  const {
+    selectBot,
+    openPanel,
+    handleResolveTakeover,
+    handleReplyApproval,
+    handleChangePermissionMode,
+    handleReplyQuestion,
+    handleSendMessage,
+    handleInterrupt,
+  } = useHubActions({
+    t,
+    showToast,
+    activeBotId,
+    viewRef,
+    settingsDirtyRef,
+    panelDetailRef,
+    inputRef,
+    closeAllOverlays,
+    confirmLeaveSettingsThen,
+    loadMessages,
+    loadBotTasks,
+    loadBots,
+    refreshApprovals,
+    refreshQuestions,
+    setActiveBotId,
+    setUnreadMap,
+    setView,
+    setPanelDetail,
+    setPanelOpen,
+    setTakeovers,
+    setApprovals,
+    setBots,
+    setQuestions,
+    setMsgsMap,
+  });
 
   const activeBot = bots.find((b) => b.id === activeBotId);
   activeBotDesktopTargetRef.current = activeBot?.desktopTarget || '';
@@ -791,100 +419,200 @@ export default function App() {
       setDeskTarget(activeDeskTargetRef.current.target || 'local');
     }
   }, [activeBotId, activeBot?.desktopTarget]);
+  const effectiveNodes = nodesFromEvents ?? nodes;
   const shadeOpen = mobileSideOpen || panelOpen || Boolean(collabPeerId);
 
-  const handleSendMessage = useCallback(
-    async (text: string, mediaIds?: string[]) => {
-      if (!activeBotId) return;
-      const pushLocal = (from: string, msgText: string) => {
-        const msg: ChatMessage = {
-          id: `${from}_${Date.now()}`,
-          botId: activeBotId,
-          role: 'system',
-          from,
-          text: msgText,
-          createdAt: new Date().toISOString(),
+
+  const openStageShell = useCallback(() => {
+    setPanelOpen(false);
+    setMobileSideOpen(false);
+    setCollabPeerId(null);
+    setCreateOpen(false);
+    if (!deskOpenRef.current) {
+      setDeskChatOpen(window.innerWidth > 820);
+      setDeskOpen(true);
+    }
+  }, []);
+
+  const clearUnreadLatestStage = useCallback((botId: string) => {
+    setBotStages((prev) => {
+      const cur = prev[botId];
+      if (!cur?.unreadLatestStageId) return prev;
+      return { ...prev, [botId]: { ...cur, unreadLatestStageId: undefined } };
+    });
+  }, []);
+
+  const openStageWithTab = useCallback(
+    (botId: string, tab: StageTab, replaceNew = false) => {
+      if (!botId) return;
+      setBotStages((prev) => {
+        const cur = prev[botId];
+        const updated = replaceNew ? replaceNewTabOrOpen(cur, tab) : upsertTab(cur, tab, true);
+        return {
+          ...prev,
+          [botId]: { ...updated, unreadLatestStageId: undefined },
         };
-        setMsgsMap((prev) => ({ ...prev, [activeBotId]: [...(prev[activeBotId] || []), msg] }));
-      };
-      try {
-        const body: Record<string, unknown> = { message: text, source: 'web' };
-        if (mediaIds && mediaIds.length > 0) {
-          body.mediaIds = mediaIds;
-        }
-        const data = await api<{ text?: string }>(
-          `/api/bots/${encodeURIComponent(activeBotId)}/message`,
-          { method: 'POST', body }
-        );
-        if ((/^\/(bots|status|reset|mode)$/.test(text) || /^\/mode\s+/.test(text)) && data.text) {
-          pushLocal('command', data.text);
-        }
-        if (text === '/reset' || text === '/mode' || /^\/mode\s+/.test(text)) void loadBots();
-      } catch (e) {
-        if (
-          e instanceof Error &&
-          e.message !== 'unauthorized' &&
-          !/interrupted$/.test(e.message)
-        ) {
-          pushLocal('error', e.message);
+      });
+      if (tab.kind === 'desktop' && tab.target) {
+        setDeskTarget(tab.target);
+      }
+      openStageShell();
+    },
+    [openStageShell]
+  );
+
+  const openTaskInStage = useCallback(
+    (botId: string, taskOrId: BotTask | string) => {
+      if (!botId) return;
+      const resolved =
+        typeof taskOrId === 'string'
+          ? (tasksMap[botId] || []).find((item) => item.id === taskOrId) || {
+              id: taskOrId,
+              botId,
+            }
+          : taskOrId;
+      openStageWithTab(botId, createTaskTab(resolved, t), false);
+    },
+    [openStageWithTab, t, tasksMap]
+  );
+
+  const openStageByRef = useCallback(
+    (botId: string, ref: StageRef) => {
+      if (!botId) return;
+      const tab = stageTabFromRef(ref, t, botId);
+      if (!canUseFiles && (tab.kind === 'files' || tab.kind === 'file')) {
+        return;
+      }
+      openStageWithTab(botId, tab, false);
+    },
+    [canUseFiles, openStageWithTab, t]
+  );
+
+  const openLatestStageForBot = useCallback(
+    (botId: string) => {
+      const bot = bots.find((b) => b.id === botId);
+      const cur = botStages[botId];
+      if (bot?.latestStage) {
+        const tab = stageTabFromRef(bot.latestStage, t, botId);
+        if (canUseFiles || (tab.kind !== 'files' && tab.kind !== 'file')) {
+          openStageWithTab(botId, tab, false);
+          return;
         }
       }
+      if (cur && cur.tabs.length > 0) {
+        clearUnreadLatestStage(botId);
+        openStageShell();
+        return;
+      }
+      openStageWithTab(botId, createNewTab(t), false);
     },
-    [activeBotId, loadBots]
+    [botStages, bots, canUseFiles, clearUnreadLatestStage, openStageShell, openStageWithTab, t]
   );
 
-  const handleInterrupt = useCallback(async () => {
-    if (!activeBotId) return;
-    try {
-      const r = await api<{ interrupted?: boolean }>(
-        `/api/bots/${encodeURIComponent(activeBotId)}/interrupt`,
-        { method: 'POST' }
-      );
-      if (!r.interrupted) showToast(t('notRunning'));
-    } catch (e) {
-      if (e instanceof Error && e.message !== 'unauthorized') showToast(e.message);
-    }
-  }, [activeBotId, showToast, t]);
+  const handleStageOpenEvent = useCallback(
+    (targetBotId: string, payload: StageOpenEvent) => {
+      const tab = stageTabFromRef(payload, t, targetBotId);
+      const alreadyViewingThisBot = deskOpenRef.current && activeBotIdRef.current === targetBotId;
+      const shouldAutoActivate = alreadyViewingThisBot || Boolean(payload.autoOpen);
 
-  const handleSideResizeStart = useCallback(
-    (e: React.MouseEvent<HTMLDivElement>) => {
-      if (e.button !== 0) return;
-      e.preventDefault();
-      const sideEl = e.currentTarget.previousElementSibling as HTMLElement | null;
-      const startWidth = sideWidth ?? (sideEl ? Math.round(sideEl.getBoundingClientRect().width) : 300);
-      const startX = e.clientX;
-      let latest = startWidth;
+      setBotStages((prev) => {
+        const cur = prev[targetBotId];
+        const next = upsertTab(cur, tab, shouldAutoActivate || !cur?.activeTabId);
+        return {
+          ...prev,
+          [targetBotId]: {
+            ...next,
+            unreadLatestStageId: shouldAutoActivate
+              ? undefined
+              : payload.id || tab.id || payload.createdAt || payload.kind,
+          },
+        };
+      });
 
-      setSideResizing(true);
-      document.body.classList.add('resizing-side');
-
-      const onMove = (ev: MouseEvent) => {
-        const maxW = Math.min(480, Math.floor(window.innerWidth * 0.45));
-        const next = Math.min(maxW, Math.max(220, Math.round(startWidth + (ev.clientX - startX))));
-        latest = next;
-        setSideWidth(next);
-      };
-      const onUp = () => {
-        window.removeEventListener('mousemove', onMove);
-        window.removeEventListener('mouseup', onUp);
-        document.body.classList.remove('resizing-side');
-        setSideResizing(false);
-        try {
-          localStorage.setItem('bothub.sideWidth', String(latest));
-        } catch {}
-      };
-      window.addEventListener('mousemove', onMove);
-      window.addEventListener('mouseup', onUp);
+      if (alreadyViewingThisBot) {
+        if (tab.kind === 'desktop' && tab.target) {
+          setDeskTarget(tab.target);
+        }
+      } else if (payload.autoOpen) {
+        if (targetBotId !== activeBotIdRef.current) {
+          void selectBot(targetBotId);
+        }
+        if (tab.kind === 'desktop' && tab.target) {
+          setDeskTarget(tab.target);
+        }
+        openStageShell();
+      }
     },
-    [sideWidth]
+    [openStageShell, selectBot, t]
   );
 
-  const handleSideResizeReset = useCallback(() => {
-    setSideWidth(null);
-    try {
-      localStorage.removeItem('bothub.sideWidth');
-    } catch {}
-  }, []);
+  const { connectEvents, maybeAutoOpenUnbox } = useHubEvents({
+    esRef,
+    lastEventIdRef,
+    activeBotIdRef,
+    deskOpenRef,
+    deskTargetRef,
+    panelOpenRef,
+    panelDetailRef,
+    unboxAutoPromptedRef,
+    loginOpenRef,
+    loadBots,
+    loadSettings,
+    refreshNodes,
+    refreshTakeovers,
+    refreshActiveDesktopTarget,
+    refreshApprovals,
+    refreshQuestions,
+    refreshUpdateStatus,
+    removeBotLocally,
+    applyActiveDesktopTarget,
+    onStageOpenEvent: handleStageOpenEvent,
+    setMsgsMap,
+    setLastMap,
+    setUnreadMap,
+    setToolMap,
+    setBots,
+    setTasksMap,
+    setTaskToolMap,
+    setTaskChunksMap,
+    setTaskEventSeqMap,
+    setNodesFromEvents,
+    setLiveScreen,
+    setScreenSeq,
+    setTakeovers,
+    setQuestions,
+    setApprovals,
+    setRoutineRefreshSeq,
+    setUpdateStatus,
+    setUnboxStep,
+    setUnboxOpen,
+    setBootReady,
+  });
+
+  const { toggleDesktopSidebar, handleSideResizeStart, handleSideResizeReset } = useAppLayout({
+    sideWidth,
+    confirmOpts,
+    unboxOpen,
+    createOpen,
+    panelOpen,
+    collabPeerId,
+    mobileSideOpen,
+    deskOpen,
+    viewRef,
+    filterInputRef,
+    closeAllOverlays,
+    leaveSettings,
+    loadSettings,
+    setSideCollapsed,
+    setMobileSideOpen,
+    setConfirmOpts,
+    setUnboxOpen,
+    setDeskOpen,
+    setSettingsTab,
+    setView,
+    setSideWidth,
+    setSideResizing,
+  });
 
   if (unboxOpen) {
     return (
@@ -932,6 +660,19 @@ export default function App() {
         })()
       : null;
 
+  const updateNotice =
+    !compatNotice?.required &&
+    updateStatus?.hasUpdate &&
+    updateStatus.latest?.version &&
+    updateStatus.latest.url &&
+    dismissedUpdateVer !== updateStatus.latest.version
+      ? {
+          version: updateStatus.latest.version,
+          url: updateStatus.latest.url,
+          text: t('updateBannerText', { version: updateStatus.latest.tag || `v${updateStatus.latest.version}` }),
+        }
+      : null;
+
   return (
     <>
       <div
@@ -958,11 +699,22 @@ export default function App() {
           filter={filter}
           lang={lang}
           compatNotice={compatNotice}
+          updateNotice={updateNotice}
           filterInputRef={filterInputRef}
           onFilterChange={setFilter}
           onDismissCompatNotice={
             compatNotice && !compatNotice.required
               ? () => setCompatDismissedProto(serverInfo?.protocolVersion ?? 0)
+              : undefined
+          }
+          onDismissUpdateNotice={
+            updateNotice
+              ? () => {
+                  setDismissedUpdateVer(updateNotice.version);
+                  try {
+                    localStorage.setItem('pebble.dismissedUpdate', updateNotice.version);
+                  } catch {}
+                }
               : undefined
           }
           onSelectBot={(id) => void selectBot(id)}
@@ -1019,6 +771,9 @@ export default function App() {
               bots={bots}
             activeBot={activeBot}
             messages={activeBotId ? msgsMap[activeBotId] || [] : []}
+            tasks={activeBotId ? tasksMap[activeBotId] || [] : []}
+            taskToolMap={taskToolMap}
+            nodes={effectiveNodes}
             seenIds={seenIdsRef.current}
             toolName={activeBotId ? toolMap[activeBotId] : undefined}
             takeovers={takeovers}
@@ -1027,6 +782,7 @@ export default function App() {
             questions={activeBotId ? questions.filter((q) => q.botId === activeBotId) : []}
             harnesses={settings?.harnesses}
             deskOpen={deskOpen}
+            hasUnreadLatestStage={Boolean(activeBotId && botStages[activeBotId]?.unreadLatestStageId)}
             lang={lang}
             inputRef={inputRef}
             onReplyApproval={handleReplyApproval}
@@ -1040,31 +796,39 @@ export default function App() {
               }
             }}
             onToggleDesktop={() => {
-              if (deskOpen && stageKind === 'desktop') {
+              if (!activeBotId) return;
+              const target = activeBot?.desktopTarget || activeDeskTarget.target || 'local';
+              const tab = createDesktopTab(t, target);
+              if (deskOpen && botStages[activeBotId]?.activeTabId === tab.id) {
                 setDeskOpen(false);
               } else {
-                setDeskTarget(activeBot?.desktopTarget || activeDeskTarget.target || 'local');
-                setStageKind('desktop');
-                setActiveStageTabId('desktop');
-                setDeskOpen(true);
+                openStageWithTab(activeBotId, tab, false);
               }
             }}
-            onOpenFiles={() => {
-              setStageKind('files');
-              setActiveStageTabId('files');
-              setFilesOpenPath('');
-              setFilesOpenSeq((n) => n + 1);
-              setDeskOpen(true);
+            onOpenStage={() => {
+              if (!activeBotId) return;
+              openLatestStageForBot(activeBotId);
+            }}
+            onOpenStageRef={(ref) => {
+              if (!activeBotId) return;
+              openStageByRef(activeBotId, ref);
             }}
             onOpenDesktopTarget={(target) => {
-              void selectDesktopTarget(target || 'local');
-              setStageKind('desktop');
-              setActiveStageTabId('desktop');
-              setDeskOpen(true);
+              const resolved = target || 'local';
+              void selectDesktopTarget(resolved);
+              if (activeBotId) {
+                openStageWithTab(activeBotId, createDesktopTab(t, resolved), false);
+              } else {
+                setDeskTarget(resolved);
+                openStageShell();
+              }
             }}
             onSwitchBackLocal={() => void selectDesktopTarget('local')}
             onResolveTakeover={(to) => void handleResolveTakeover(to)}
             onOpenDetail={() => void openPanel()}
+            onInspectTask={(taskId) => {
+              if (activeBotId) openTaskInStage(activeBotId, taskId);
+            }}
             onOpenCollab={(peerId) => {
               setPanelOpen(false);
               setCollabPeerId(peerId);
@@ -1086,6 +850,9 @@ export default function App() {
             bots={bots}
             settings={settings}
             serverInfo={serverInfo}
+            updateStatus={updateStatus}
+            updateChecking={updateChecking}
+            canCheckUpdate={canCheckUpdate}
             models={modelsMap}
             nodesFromEvents={nodesFromEvents}
             lang={lang}
@@ -1095,6 +862,8 @@ export default function App() {
               setLangPrefState(pref);
               setLang(setLangPref(pref));
             }}
+            onCheckUpdates={handleCheckUpdates}
+            onSaveUpdateConfig={handleSaveUpdateConfig}
             onToast={showToast}
             onConfirm={setConfirmOpts}
             onSettingsUpdated={setSettings}
@@ -1102,9 +871,14 @@ export default function App() {
             onLoadModels={loadModels}
             onResetModels={resetModels}
             onOpenDesktopTarget={(target) => {
+              const resolved = target || 'local';
               setView('chat');
-              setDeskTarget(target || 'local');
-              setDeskOpen(true);
+              if (activeBotId) {
+                openStageWithTab(activeBotId, createDesktopTab(t, resolved), false);
+              } else {
+                setDeskTarget(resolved);
+                openStageShell();
+              }
             }}
             onReopenUnbox={() => {
               closeAllOverlays();
@@ -1122,285 +896,147 @@ export default function App() {
         </main>
       </div>
 
-      <div
-        id="deskShell"
-        className={`desk-fs-shell stage-shell${deskChatOpen ? ' chat-open' : ''}`}
-        data-surface={stageKind === 'desktop' ? 'dark' : 'adaptive'}
-        hidden={!deskOpen}
-      >
-        {deskChatOpen && (
-          <div className="desk-chat-shade" onClick={() => setDeskChatOpen(false)} />
-        )}
-        <aside id="deskChatSide" className="desk-chat-side" hidden={!deskChatOpen}>
-          {deskChatOpen && (
-            <ChatView
-              hidden={false}
-              viewState="active"
-              viewDir="forward"
-              viewAnim={false}
-              bots={bots}
-              activeBot={activeBot}
-              messages={activeBotId ? msgsMap[activeBotId] || [] : []}
-              seenIds={seenIdsRef.current}
-              toolName={activeBotId ? toolMap[activeBotId] : undefined}
-              takeovers={takeovers}
-              approvals={activeBotId ? approvals.filter((a) => a.botId === activeBotId) : []}
-              questions={activeBotId ? questions.filter((q) => q.botId === activeBotId) : []}
-              harnesses={settings?.harnesses}
-              deskOpen={deskOpen}
-              inDesktopSidebar
-              lang={lang}
-              inputRef={deskInputRef}
-              pendingInsert={stageInsert}
-              onReplyApproval={handleReplyApproval}
-              onReplyQuestion={handleReplyQuestion}
-              onChangePermissionMode={handleChangePermissionMode}
-              onOpenMenu={() => {}}
-              onToggleDesktop={() => {}}
-              onOpenDesktopTarget={(target) => {
-                setDeskTarget(target || 'local');
-                setStageKind('desktop');
-                setActiveStageTabId('desktop');
-              }}
-              onResolveTakeover={(to) => void handleResolveTakeover(to)}
-              onOpenDetail={() => {}}
-              onOpenCollab={(peerId) => {
-                setCollabPeerId(peerId);
-              }}
-              onOpenCreate={() => {
-                setDeskOpen(false);
-                closeAllOverlays();
-                setCreateOpen(true);
-              }}
-              onSelectBot={(id) => void selectBot(id)}
-              onCloseDesktopChat={() => setDeskChatOpen(false)}
-              onSendMessage={handleSendMessage}
-              onInterrupt={handleInterrupt}
-            />
-          )}
-        </aside>
-        <div className="desk-fs-main">
-          <header className="stage-topbar">
-            <div className="stage-topbar-left">
-              <button
-                type="button"
-                className={`stage-pill-btn${deskChatOpen ? ' on' : ''}`}
-                title={t('deskChatSidebarTitle')}
-                onClick={() => setDeskChatOpen((v) => !v)}
-              >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-                </svg>
-                <span>{activeBot?.name || t('stageChatToggle')}</span>
-              </button>
-              <nav className="stage-tabs" aria-label={t('stageTabsAria')}>
-                {canUseFiles && (
-                  <button
-                    type="button"
-                    className={`stage-tab${activeStageTabId === 'files' ? ' active' : ''}`}
-                    onClick={() => {
-                      setStageKind('files');
-                      setActiveStageTabId('files');
-                    }}
-                  >
-                    {t('stageFilesTab')}
-                  </button>
-                )}
-                <button
-                  type="button"
-                  className={`stage-tab${activeStageTabId === 'desktop' ? ' active' : ''}`}
-                  onClick={() => {
-                    setStageKind('desktop');
-                    setActiveStageTabId('desktop');
-                  }}
-                >
-                  {t('stageDesktopTab')}
-                </button>
-                {stageTabs.map((tab) => (
-                  <div key={tab.id} className={`stage-tab-wrap${activeStageTabId === tab.id ? ' active' : ''}`}>
-                    <button
-                      type="button"
-                      className={`stage-tab${activeStageTabId === tab.id ? ' active' : ''}`}
-                      onClick={() => {
-                        setStageKind(tab.kind);
-                        setActiveStageTabId(tab.id);
-                      }}
-                    >
-                      {tab.title}
-                    </button>
-                    {tab.closable !== false && (
-                      <button
-                        type="button"
-                        className="stage-tab-x"
-                        aria-label={t('close')}
-                        onClick={() => {
-                          setStageTabs((prev) => prev.filter((x) => x.id !== tab.id));
-                          if (activeStageTabId === tab.id) {
-                            const nextTab = canUseFiles ? 'files' : 'desktop';
-                            setStageKind(nextTab);
-                            setActiveStageTabId(nextTab);
-                          }
-                        }}
-                      >
-                        ×
-                      </button>
-                    )}
-                  </div>
-                ))}
-              </nav>
-            </div>
-            <button
-              type="button"
-              className="stage-pill-btn stage-close-btn"
-              title={t('stageClose')}
-              aria-label={t('stageClose')}
-              onClick={() => setDeskOpen(false)}
-            >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                <path d="M6 6l12 12M18 6 6 18" />
-              </svg>
-            </button>
-          </header>
 
-          {deskOpen && (
-            <>
-              <div className="stage-pane-slot" hidden={activeStageTabId !== 'desktop'}>
-                <DesktopStage
-                  open={deskOpen && activeStageTabId === 'desktop'}
-                  target={deskTarget}
-                  activeDeskTarget={activeDeskTarget}
-                  screenUpdateSeq={screenSeq}
-                  liveScreen={liveScreen}
-                  takeovers={takeovers}
-                  chatOpen={deskChatOpen}
-                  embeddedInStage
-                  activeBotName={activeBot?.name}
-                  lang={lang}
-                  supportsWS={hasServerCap('desktop.ws_h264')}
-                  supportsHEVC={hasServerCap('desktop.ws_hevc')}
-                  onUnsupportedCap={markCapUnsupported}
-                  onChangeTarget={(next) => void selectDesktopTarget(next)}
-                  onActiveTargetSync={(next) => applyActiveDesktopTarget(next)}
-                  onTakeoversChange={setTakeovers}
-                  onResolveTakeover={handleResolveTakeover}
-                  onToggleChat={() => setDeskChatOpen((v) => !v)}
-                  onOpenPermissions={() => {
-                    setDeskOpen(false);
-                    setSettingsTab('desktop');
-                    setView('settings');
-                    void loadSettings();
-                  }}
-                  onClose={() => setDeskOpen(false)}
-                />
-              </div>
-              {canUseFiles && (
-                <div
-                  className="stage-pane-slot"
-                  hidden={activeStageTabId !== 'files'}
-                  style={
-                    activeBot
-                      ? ({
-                          '--bot-accent': botColor(activeBot.id, bots),
-                          '--bot-accent-text': contrastText(botColor(activeBot.id, bots)),
-                        } as React.CSSProperties)
-                      : undefined
-                  }
-                >
-                  <WorkspaceFilesPane
-                    botId={activeBotId || ''}
-                    initialPath={filesOpenPath}
-                    openSeq={filesOpenSeq}
-                    lang={lang}
-                    onQuotePath={(relPath) => {
-                      setDeskChatOpen(true);
-                      setStageInsert({ seq: Date.now(), text: `@${relPath} ` });
-                    }}
-                    onToast={showToast}
-                  />
-                </div>
-              )}
-              {activeStageTabId !== 'desktop' && activeStageTabId !== 'files' && (
-                <div className="ws-preview-empty">
-                  {t('stagePlaceholderDesc', { kind: stageKind })}
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      </div>
-
-      <div id="shade" className={`shade${shadeOpen ? ' open' : ''}`} onClick={closeAllOverlays} />
-
-      <BotDetailPanel
-        open={panelOpen}
-        detail={panelDetail}
+      <StageShell
+        deskOpen={deskOpen}
+        deskChatOpen={deskChatOpen}
+        botStageState={activeBotId ? botStages[activeBotId] : undefined}
+        canUseFiles={canUseFiles}
         bots={bots}
+        activeBot={activeBot}
+        activeBotId={activeBotId}
+        msgsMap={msgsMap}
+        tasksMap={tasksMap}
+        taskToolMap={taskToolMap}
+        taskChunksMap={taskChunksMap}
+        taskEventSeqMap={taskEventSeqMap}
+        nodes={effectiveNodes}
+        seenIds={seenIdsRef.current}
+        toolMap={toolMap}
+        takeovers={takeovers}
+        approvals={approvals}
+        questions={questions}
+        harnesses={settings?.harnesses}
+        lang={lang}
+        deskInputRef={deskInputRef}
+        stageInsert={stageInsert}
+        deskTarget={deskTarget}
+        activeDeskTarget={activeDeskTarget}
+        screenSeq={screenSeq}
+        liveScreen={liveScreen}
+        supportsWS={hasServerCap('desktop.ws_h264')}
+        supportsHEVC={hasServerCap('desktop.ws_hevc')}
+        onUnsupportedCap={markCapUnsupported}
+        setDeskOpen={setDeskOpen}
+        setDeskChatOpen={setDeskChatOpen}
+        setDeskTarget={setDeskTarget}
+        onSelectStageTab={(tabId) => {
+          if (!activeBotId) return;
+          setBotStages((prev) => {
+            const cur = ensureNonEmptyStageState(prev[activeBotId], t);
+            return {
+              ...prev,
+              [activeBotId]: { ...cur, activeTabId: tabId, unreadLatestStageId: undefined },
+            };
+          });
+        }}
+        onCloseStageTab={(tabId) => {
+          if (!activeBotId) return;
+          setBotStages((prev) => ({
+            ...prev,
+            [activeBotId]: closeTab(prev[activeBotId], tabId, t),
+          }));
+        }}
+        onOpenStageTab={(tab, replaceNew) => {
+          if (!activeBotId) return;
+          openStageWithTab(activeBotId, tab, Boolean(replaceNew));
+        }}
+        onOpenStageRef={(ref) => {
+          if (!activeBotId) return;
+          openStageByRef(activeBotId, ref);
+        }}
+        setCollabPeerId={setCollabPeerId}
+        setCreateOpen={setCreateOpen}
+        setStageInsert={setStageInsert}
+        setTakeovers={setTakeovers}
+        onConfirm={setConfirmOpts}
+        onTaskUpdated={(task) => {
+          setTasksMap((prev) => ({
+            ...prev,
+            [task.botId]: upsertTaskList(prev[task.botId] || [], task),
+          }));
+        }}
+        closeAllOverlays={closeAllOverlays}
+        selectBot={selectBot}
+        selectDesktopTarget={selectDesktopTarget}
+        applyActiveDesktopTarget={applyActiveDesktopTarget}
+        handleReplyApproval={handleReplyApproval}
+        handleReplyQuestion={handleReplyQuestion}
+        handleChangePermissionMode={handleChangePermissionMode}
+        handleResolveTakeover={handleResolveTakeover}
+        handleSendMessage={handleSendMessage}
+        handleInterrupt={handleInterrupt}
+        onInspectTask={(taskId) => {
+          if (activeBotId) openTaskInStage(activeBotId, taskId);
+        }}
+        onOpenPermissions={() => {
+          setDeskOpen(false);
+          setSettingsTab('desktop');
+          setView('settings');
+          void loadSettings();
+        }}
+        showToast={showToast}
+      />
+
+
+      <AppOverlays
+        shadeOpen={shadeOpen}
+        panelOpen={panelOpen}
+        panelDetail={panelDetail}
+        bots={bots}
+        nodes={effectiveNodes}
+        tasksMap={tasksMap}
         settings={settings}
-        models={modelsMap}
+        modelsMap={modelsMap}
         routineRefreshSeq={routineRefreshSeq}
         lang={lang}
         canBindDesktop={hasServerCap('bot.desktop_binding')}
         canIsolateBrowser={hasServerCap('bot.browser_isolation')}
-        onClose={() => setPanelOpen(false)}
-        onToast={showToast}
-        onConfirm={setConfirmOpts}
-        onBotUpdated={(st) => {
-          setBots((prev) => prev.map((b) => (b.id === st.id ? { ...b, ...st } : b)));
-        }}
-        onBotDeleted={removeBotLocally}
-        onReloadBots={loadBots}
-        onLoadModels={loadModels}
-        onRefreshDetail={(id) => openPanel(id)}
-        onSettingsUpdated={setSettings}
-        onOpenFiles={(botId) => {
-          if (!canUseFiles) return;
-          setPanelOpen(false);
+        canUseFiles={canUseFiles}
+        activeBot={activeBot}
+        activeBotId={activeBotId}
+        msgsMap={msgsMap}
+        collabPeerId={collabPeerId}
+        createOpen={createOpen}
+        confirmOpts={confirmOpts}
+        loginOpen={loginOpen}
+        toastMsg={toastMsg}
+        closeAllOverlays={closeAllOverlays}
+        setPanelOpen={setPanelOpen}
+        setTasksMap={setTasksMap}
+        showToast={showToast}
+        setConfirmOpts={setConfirmOpts}
+        setBots={setBots}
+        removeBotLocally={removeBotLocally}
+        loadBots={loadBots}
+        loadModels={loadModels}
+        openPanel={openPanel}
+        setSettings={setSettings}
+        selectBot={selectBot}
+        onOpenBotFiles={(botId) => openStageWithTab(botId, createFilesTab(t), false)}
+        onInspectTask={(botId, taskId) => {
           if (botId !== activeBotId) void selectBot(botId);
-          setStageKind('files');
-          setActiveStageTabId('files');
-          setFilesOpenPath('');
-          setFilesOpenSeq((n) => n + 1);
-          setDeskOpen(true);
+          openTaskInStage(botId, taskId);
         }}
-      />
-
-      <CollabPanel
-        open={Boolean(collabPeerId)}
-        bot={activeBot}
-        peerId={collabPeerId}
-        bots={bots}
-        liveMessages={activeBot ? msgsMap[activeBot.id] || [] : []}
-        lang={lang}
-        onClose={() => setCollabPeerId(null)}
-      />
-
-      <CreateBotModal
-        open={createOpen}
-        bots={bots}
-        settings={settings}
-        models={modelsMap}
-        lang={lang}
-        onClose={() => setCreateOpen(false)}
-        onCreated={async (st) => {
-          setCreateOpen(false);
-          setBots((prev) => (prev.some((b) => b.id === st.id) ? prev : [...prev, st]));
-          showToast(t('botOnlineToast', { name: st.name }));
-          await selectBot(st.id);
-        }}
-        onLoadModels={loadModels}
-      />
-
-      <ConfirmModal options={confirmOpts} lang={lang} onClose={() => setConfirmOpts(null)} />
-
-      <LoginModal
-        open={loginOpen}
-        lang={lang}
-        onSuccess={async () => {
+        setCollabPeerId={setCollabPeerId}
+        setCreateOpen={setCreateOpen}
+        onLoginSuccess={async () => {
           setLoginOpen(false);
           setUnsupportedCaps(new Set());
           setCompatDismissedProto(0);
           connectEvents();
           await loadBots();
+          void refreshNodes();
           void refreshTakeovers();
           void refreshActiveDesktopTarget();
           void refreshApprovals();
@@ -1410,8 +1046,6 @@ export default function App() {
             .catch(() => {});
         }}
       />
-
-      {toastMsg && <div className="toast">{toastMsg}</div>}
     </>
   );
 }

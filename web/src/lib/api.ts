@@ -1,7 +1,14 @@
 import type {
+  BotTask,
+  BotTaskEvent,
   MentionCandidate,
   MessageMedia,
+  NodeInfo,
   SlashCommandItem,
+  SpawnTaskRequest,
+  TaskDiffResult,
+  TaskRollbackResult,
+  UpdateStatus,
   WorkspaceFileContent,
   WorkspaceListResult,
 } from '../types';
@@ -182,4 +189,92 @@ export function workspaceFileRawURL(
   const qs = new URLSearchParams({ path, ticket });
   if (download) qs.set('download', '1');
   return `/api/bots/${encodeURIComponent(botId)}/files/raw?${qs.toString()}`;
+}
+
+export async function fetchUpdateStatus(): Promise<UpdateStatus> {
+  return api<UpdateStatus>('/api/update');
+}
+
+export async function checkForUpdates(): Promise<UpdateStatus> {
+  return api<UpdateStatus>('/api/update/check', { method: 'POST', body: {} });
+}
+
+export async function saveUpdateConfig(patch: {
+  autoCheck?: boolean;
+  interval?: string;
+  channel?: string;
+  proxy?: string;
+}): Promise<UpdateStatus> {
+  return api<UpdateStatus>('/api/update/config', { method: 'PATCH', body: patch });
+}
+
+export async function fetchNodes(): Promise<NodeInfo[]> {
+  const data = await api<{ nodes?: NodeInfo[] }>('/api/nodes');
+  return data.nodes || [];
+}
+
+export async function fetchBotTasks(
+  botId: string,
+  opts: { kind?: string; status?: string; limit?: number } = {}
+): Promise<BotTask[]> {
+  const qs = new URLSearchParams();
+  if (opts.kind) qs.set('kind', opts.kind);
+  if (opts.status) qs.set('status', opts.status);
+  if (opts.limit && opts.limit > 0) qs.set('limit', String(opts.limit));
+  const q = qs.toString();
+  const data = await api<{ tasks?: BotTask[] }>(
+    `/api/bots/${encodeURIComponent(botId)}/tasks${q ? `?${q}` : ''}`
+  );
+  return data.tasks || [];
+}
+
+export async function spawnBotTask(botId: string, req: SpawnTaskRequest): Promise<BotTask> {
+  return api<BotTask>(`/api/bots/${encodeURIComponent(botId)}/tasks`, {
+    method: 'POST',
+    body: req,
+  });
+}
+
+export async function fetchTask(taskId: string): Promise<BotTask> {
+  return api<BotTask>(`/api/tasks/${encodeURIComponent(taskId)}`);
+}
+
+export async function fetchTaskEvents(
+  taskId: string,
+  opts: { afterSeq?: number; limit?: number } = {}
+): Promise<BotTaskEvent[]> {
+  const qs = new URLSearchParams();
+  if (typeof opts.afterSeq === 'number' && opts.afterSeq > 0) {
+    qs.set('afterSeq', String(opts.afterSeq));
+  }
+  if (opts.limit && opts.limit > 0) qs.set('limit', String(opts.limit));
+  const q = qs.toString();
+  const data = await api<{ events?: BotTaskEvent[] }>(
+    `/api/tasks/${encodeURIComponent(taskId)}/events${q ? `?${q}` : ''}`
+  );
+  return data.events || [];
+}
+
+export async function sendToTask(taskId: string, message: string): Promise<BotTask> {
+  return api<BotTask>(`/api/tasks/${encodeURIComponent(taskId)}/send`, {
+    method: 'POST',
+    body: { message },
+  });
+}
+
+export async function cancelTask(taskId: string): Promise<BotTask> {
+  return api<BotTask>(`/api/tasks/${encodeURIComponent(taskId)}/cancel`, {
+    method: 'POST',
+  });
+}
+
+export async function fetchTaskDiff(taskId: string): Promise<TaskDiffResult> {
+  return api<TaskDiffResult>(`/api/tasks/${encodeURIComponent(taskId)}/diff`);
+}
+
+export async function rollbackTask(taskId: string, removeWorktree = false): Promise<TaskRollbackResult> {
+  return api<TaskRollbackResult>(`/api/tasks/${encodeURIComponent(taskId)}/rollback`, {
+    method: 'POST',
+    body: { removeWorktree },
+  });
 }

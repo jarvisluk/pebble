@@ -49,7 +49,7 @@ func TestExportAndApplyPortablePreservesLocalRuntime(t *testing.T) {
 				Avatar:      "pebble-2",
 				Color:       "#7fa14a",
 				Harness:     "opencode",
-				Model:       "magpie/auto",
+				Model:       "anthropic/claude-sonnet-4-5",
 				Schedules: []ScheduleConfig{
 					{ID: "daily", Name: "Daily", DailyAt: "09:00", Prompt: "Hi"},
 				},

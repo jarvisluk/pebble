@@ -32,9 +32,11 @@ interface SidebarProps {
   filter: string;
   lang: ResolvedLang;
   compatNotice?: { required: boolean; text: string } | null;
+  updateNotice?: { version: string; url: string; text: string } | null;
   filterInputRef: React.RefObject<HTMLInputElement | null>;
   onFilterChange: (v: string) => void;
   onDismissCompatNotice?: () => void;
+  onDismissUpdateNotice?: () => void;
   onSelectBot: (id: string) => void;
   onOpenCreate: () => void;
   onCollapse: () => void;
@@ -62,9 +64,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
   filter,
   lang,
   compatNotice,
+  updateNotice,
   filterInputRef,
   onFilterChange,
   onDismissCompatNotice,
+  onDismissUpdateNotice,
   onSelectBot,
   onOpenCreate,
   onCollapse,
@@ -164,6 +168,28 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </div>
             </div>
           )}
+          {updateNotice && (
+            <div className="note compat-note">
+              <div className="compat-note-row">
+                <span>{updateNotice.text}</span>
+                <div className="row-inline-sm">
+                  <a
+                    className="mp go"
+                    href={updateNotice.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    {t('updateBannerView')}
+                  </a>
+                  {onDismissUpdateNotice && (
+                    <button type="button" className="mp" onClick={onDismissUpdateNotice}>
+                      {t('dismiss')}
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
           {filteredBots.length === 0 ? (
             <div className="none">{q ? t('noMatchedBots') : t('noBotsYetSide')}</div>
           ) : (
@@ -223,7 +249,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     ? `[${t('fileAltFallback')}] ${att.name || ''}`.trim()
                     : `[${t('imageAltFallback')}]`
                   : '';
-                const previewTxt = plainPreviewText(m.text, lang) || attPreview;
+                const stagePreview =
+                  m.role === 'stage' && m.stage
+                    ? m.stage.title ||
+                      m.stage.path ||
+                      (m.stage.kind === 'desktop'
+                        ? t('stageDesktopTab')
+                        : m.stage.kind === 'files'
+                          ? t('stageFilesTab')
+                          : m.stage.kind)
+                    : '';
+                const previewTxt = stagePreview || plainPreviewText(m.text, lang) || attPreview;
                 previewNode = (
                   <div className="pv">
                     <span>

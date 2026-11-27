@@ -8,20 +8,24 @@ import (
 	"strings"
 )
 
+func nativeScreenRecordingGranted() (granted bool, supported bool) {
+	return false, false
+}
+
 func platformPermissions(_ context.Context) []PermissionItem {
 	return []PermissionItem{
 		{
 			ID:              "screen_recording",
-			Name:            "屏幕录制",
-			Description:     "用于采集本机桌面画面并在远程桌面中实时预览。",
+			Name:            "Screen Recording",
+			Description:     "Capture the host desktop screen for live remote desktop preview.",
 			Status:          "unsupported",
 			CanPrompt:       false,
 			CanOpenSettings: false,
 		},
 		{
 			ID:              "accessibility",
-			Name:            "辅助功能",
-			Description:     "用于远程鼠标点击、滚轮、键盘输入以及桌面窗口识别与控制。",
+			Name:            "Accessibility",
+			Description:     "Inject remote mouse, scroll, and keyboard input and inspect desktop windows.",
 			Status:          "unsupported",
 			CanPrompt:       false,
 			CanOpenSettings: false,

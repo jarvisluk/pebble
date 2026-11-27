@@ -23,7 +23,7 @@ func (stubVirtualBackend) HasWindows(context.Context) (bool, error) {
 	return false, nil
 }
 func (stubVirtualBackend) Install(context.Context) (*SetupResult, error) {
-	return &SetupResult{OK: false, Error: "当前平台不需要虚拟桌面"}, nil
+	return &SetupResult{OK: false, Error: "virtual desktop is not required on this platform"}, nil
 }
 
 func wakeLinuxNativeDisplay() {}

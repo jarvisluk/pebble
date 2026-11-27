@@ -4,4 +4,5 @@ APP_BUNDLE_ID = local.pebble.mobile
 APP_GROUP_ID = group.$(APP_BUNDLE_ID)
 DEVELOPMENT_TEAM =
 
+#include "Version.xcconfig"
 #include? "Signing.local.xcconfig"

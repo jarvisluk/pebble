@@ -378,6 +378,49 @@ fun BotListScreen(
                     }
                 }
 
+                // Update available notice banner
+                if (store.showUpdateBanner) {
+                    val latest = store.updateStatus?.latest
+                    val ver = latest?.tag?.takeIf { it.isNotBlank() } ?: "v${latest?.version.orEmpty()}"
+                    item(key = "update_notice") {
+                        Surface(
+                            color = p.s1,
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                Text(
+                                    text = store.t("updateBannerText", mapOf("version" to ver)),
+                                    color = p.text2,
+                                    fontSize = PebbleFont.secondary,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                if (!latest?.url.isNullOrBlank()) {
+                                    val releaseUrl = latest.url
+                                    TextButton(
+                                        onClick = { store.onOpenExternalUrl?.invoke(releaseUrl) },
+                                        contentPadding = PaddingValues(horizontal = 8.dp),
+                                    ) {
+                                        Text(store.t("updateBannerView"), color = p.accent, fontSize = PebbleFont.caption, fontWeight = FontWeight.SemiBold)
+                                    }
+                                }
+                                TextButton(
+                                    onClick = { store.dismissUpdateBanner() },
+                                    contentPadding = PaddingValues(horizontal = 8.dp),
+                                ) {
+                                    Text(store.t("dismiss"), color = p.text2, fontSize = PebbleFont.caption, fontWeight = FontWeight.Medium)
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // Active takeover alert banner
                 val to = store.takeovers.firstOrNull()
                 if (to != null) {
@@ -565,10 +608,18 @@ private fun BotListRow(
         hasQuestion -> store.t("questionWaitingBadge")
         bot.isBusy -> if (tool.isNotEmpty()) store.t("callingTool", mapOf("tool" to tool)) else store.t("thinking")
         lastMsg != null -> {
-            val prefix = if (lastMsg.role == "user") store.t("youPrefix") else ""
-            val txt = plainPreview(lastMsg.body)
-            val display = if (txt.isEmpty() && !lastMsg.media.isNullOrEmpty()) "[${store.t("attachments")}]" else txt
-            "$prefix$display"
+            if (lastMsg.role == "stage") {
+                val st = lastMsg.stage
+                val label = st?.title?.takeIf { it.isNotBlank() }
+                    ?: st?.path?.substringAfterLast('/')?.takeIf { it.isNotBlank() }
+                    ?: store.t("stageLatestTab")
+                "${store.t("stageCardSubmitted")}: $label"
+            } else {
+                val prefix = if (lastMsg.role == "user") store.t("youPrefix") else ""
+                val txt = plainPreview(lastMsg.body)
+                val display = if (txt.isEmpty() && !lastMsg.media.isNullOrEmpty()) "[${store.t("attachments")}]" else txt
+                "$prefix$display"
+            }
         }
         else -> bot.description.orEmpty()
     }

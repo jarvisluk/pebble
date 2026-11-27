@@ -2,13 +2,7 @@ import SwiftUI
 
 @MainActor
 func harnessDisplayLabel(_ h: HarnessInfo, hub: HubStore) -> String {
-    if h.magpie?.connected == true {
-        return "\(h.title) · Magpie"
-    }
-    if hub.settings?.magpie?.installed == true {
-        return "\(h.title) · \(hub.t("mpNative"))"
-    }
-    return h.title
+    h.title
 }
 
 func orderedGlobalHarnesses(harnesses: [HarnessInfo], defaultHarness: String, models: [String: [String]]) -> [HarnessInfo] {
@@ -22,10 +16,7 @@ func orderedGlobalHarnesses(harnesses: [HarnessInfo], defaultHarness: String, mo
     if let def = harnesses.first(where: { $0.id == defaultHarness }) {
         appendIfNeeded(def)
     }
-    for h in harnesses where (!anyInstalled || h.installed == true) && h.magpie?.connected != true {
-        appendIfNeeded(h)
-    }
-    for h in harnesses where (!anyInstalled || h.installed == true) && h.magpie?.connected == true {
+    for h in harnesses where !anyInstalled || h.installed == true {
         appendIfNeeded(h)
     }
     for h in harnesses where !anyInstalled || !(models[h.id] ?? []).isEmpty {
@@ -47,6 +38,7 @@ func localizedMemoryKind(_ raw: String?, hub: HubStore) -> String {
     case "fact": return hub.t("kindFact")
     case "preference": return hub.t("kindPreference")
     case "rule": return hub.t("kindRule")
+    case "decision": return hub.t("kindDecision")
     case "reference": return hub.t("kindReference")
     case "profile": return hub.t("kindProfile")
     case "procedure": return hub.t("kindProcedure")

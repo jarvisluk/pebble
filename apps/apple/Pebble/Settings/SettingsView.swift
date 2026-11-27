@@ -56,18 +56,18 @@ struct SettingsView: View {
             }
             if tab == .models && hub.isConnected {
                 ToolbarItem(placement: .confirmationAction) {
-                    if saving {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Button(hub.t("save")) {
-                            Task {
-                                saving = true
-                                _ = await router.settingsSaveAction?()
-                                saving = false
-                            }
+                    // Keep the same Button while saving so the toolbar item keeps its
+                    // size and capsule; the spinner overlays the hidden title.
+                    Button {
+                        Task {
+                            saving = true
+                            _ = await router.settingsSaveAction?()
+                            saving = false
                         }
-                        .disabled(!router.settingsDirty)
+                    } label: {
+                        HubLoadingLabel(loading: saving) { Text(hub.t("save")) }
                     }
+                    .disabled(!router.settingsDirty || saving)
                 }
             }
         }

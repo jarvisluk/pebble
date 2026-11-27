@@ -77,6 +77,7 @@ import ai.pebble.android.ui.theme.PebbleFont
 import ai.pebble.android.ui.theme.CardDivider
 import ai.pebble.android.ui.theme.ConfirmAlertDialog
 import ai.pebble.android.ui.theme.ConfirmItem
+import ai.pebble.android.ui.theme.LoadingContent
 import ai.pebble.android.ui.theme.LocalPalette
 import ai.pebble.android.ui.theme.MonoFont
 import ai.pebble.android.ui.theme.PEBBLE_COLOR_HEX
@@ -501,16 +502,8 @@ fun ConnectScreen(
                     }
                 },
                 actions = {
-                    if (submitting) {
-                        CircularProgressIndicator(
-                            modifier = Modifier
-                                .padding(end = 16.dp)
-                                .size(20.dp),
-                            strokeWidth = 2.dp,
-                            color = p.accent,
-                        )
-                    } else {
-                        TextButton(onClick = { submit() }) {
+                    TextButton(onClick = { submit() }, enabled = !submitting) {
+                        LoadingContent(loading = submitting, color = p.accent) {
                             Text(
                                 text = store.t("connect"),
                                 color = p.accent,

@@ -19,7 +19,6 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -48,6 +47,7 @@ import ai.pebble.android.ui.nav.PebbleRouter
 import ai.pebble.android.ui.theme.CardDivider
 import ai.pebble.android.ui.theme.ConfirmAlertDialog
 import ai.pebble.android.ui.theme.ConfirmItem
+import ai.pebble.android.ui.theme.LoadingContent
 import ai.pebble.android.ui.theme.LocalPalette
 import ai.pebble.android.ui.theme.PebbleDimens
 import ai.pebble.android.ui.theme.PebbleFont
@@ -295,19 +295,17 @@ fun SettingsDetailScreen(
                 },
                 actions = {
                     if (tab == SettingsTab.MODELS && store.isConnected) {
-                        if (saving) {
-                            CircularProgressIndicator(modifier = Modifier.padding(end = 16.dp).size(20.dp), strokeWidth = 2.dp, color = p.accent)
-                        } else {
-                            TextButton(
-                                onClick = {
-                                    scope.launch {
-                                        saving = true
-                                        router.settingsSaveAction?.invoke()
-                                        saving = false
-                                    }
-                                },
-                                enabled = router.settingsDirty,
-                            ) {
+                        TextButton(
+                            onClick = {
+                                scope.launch {
+                                    saving = true
+                                    router.settingsSaveAction?.invoke()
+                                    saving = false
+                                }
+                            },
+                            enabled = router.settingsDirty && !saving,
+                        ) {
+                            LoadingContent(loading = saving, color = p.accent) {
                                 Text(
                                     text = store.t("save"),
                                     color = if (router.settingsDirty) p.accent else p.mute,

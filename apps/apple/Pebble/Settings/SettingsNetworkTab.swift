@@ -575,7 +575,12 @@ struct SettingsNetworkTab: View {
     }
 
     private var connectedNodesSection: some View {
-        let permLabels = ["files": hub.t("permFiles"), "exec": hub.t("permExec"), "desktop": hub.t("permDesktop")]
+        let permLabels = [
+            "files": hub.t("permFiles"),
+            "exec": hub.t("permExec"),
+            "desktop": hub.t("permDesktop"),
+            "agent": hub.t("permAgent"),
+        ]
         return Section {
             if hub.nodes.isEmpty {
                 Text(hub.t("noRemoteNodes")).foregroundStyle(.secondary)
@@ -584,11 +589,17 @@ struct SettingsNetworkTab: View {
                     let on = node.connected ?? false
                     let outdated = hub.serverInfo != nil && node.isOutdated
                     let perms = node.permissions ?? []
+                    let harnesses = node.harnesses ?? []
+                    let workspaces = node.workspaces ?? []
+                    let activeCount = node.activeTaskIds?.count ?? 0
                     VStack(alignment: .leading, spacing: 6) {
                         HStack(spacing: 8) {
                             Text(node.name ?? node.id)
                                 .font(.system(size: AppFont.body, weight: .semibold))
                             Spacer()
+                            if activeCount > 0 {
+                                Tag(text: hub.t("nodeActiveTasks", ["n": activeCount]), bg: p.sage, fg: p.sageInk)
+                            }
                             if outdated {
                                 Tag(text: hub.t("nodeOutdatedTag"), bg: p.pink, fg: p.pinkInk)
                             }
@@ -597,6 +608,13 @@ struct SettingsNetworkTab: View {
                         Text("\(node.os ?? "")/\(node.arch ?? "")\((node.hostname ?? "").isEmpty ? "" : " · \(node.hostname!)")")
                             .font(.system(size: AppFont.caption, design: .monospaced))
                             .foregroundStyle(.secondary)
+                        if let maxMode = node.maxPermissionMode, !maxMode.isEmpty {
+                            let modeKey = "permMode_\(maxMode)"
+                            let modeLabel = hub.t(modeKey) == modeKey ? maxMode : hub.t(modeKey)
+                            Text(hub.t("nodeMaxPermMode", ["mode": modeLabel]))
+                                .font(.system(size: AppFont.caption))
+                                .foregroundStyle(.secondary)
+                        }
                         if outdated {
                             Text(hub.t("nodeOutdatedHint"))
                                 .font(.system(size: AppFont.caption))
@@ -604,10 +622,17 @@ struct SettingsNetworkTab: View {
                         }
                         if !perms.isEmpty || (on && perms.contains("desktop")) {
                             HStack(spacing: 6) {
-                                ForEach(perms, id: \.self) {
-                                    Tag(text: permLabels[$0] ?? $0, bg: p.s1, fg: .secondary)
+                                FlowLayout(spacing: 6) {
+                                    ForEach(perms, id: \.self) { perm in
+                                        let isAgent = perm == "agent"
+                                        Tag(
+                                            text: permLabels[perm] ?? perm,
+                                            bg: isAgent ? p.lilac : p.s1,
+                                            fg: isAgent ? p.lilacInk : .secondary
+                                        )
+                                    }
                                 }
-                                Spacer()
+                                Spacer(minLength: 4)
                                 if on && perms.contains("desktop") {
                                     Button(hub.t("openDesktop")) {
                                         router.openDesktop(node.id)
@@ -616,6 +641,59 @@ struct SettingsNetworkTab: View {
                                     .controlSize(.small)
                                 }
                             }
+                        }
+                        if !harnesses.isEmpty {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(hub.t("nodeHarnesses"))
+                                    .font(.system(size: AppFont.caption, weight: .medium))
+                                    .foregroundStyle(.secondary)
+                                FlowLayout(spacing: 6) {
+                                    ForEach(harnesses) { h in
+                                        let installed = h.installed ?? false
+                                        let ready = installed && h.authStatus == "ready"
+                                        let needsLogin = installed && h.authStatus == "needs_login"
+                                        let suffix = !installed
+                                            ? hub.t("nodeNotInstalled")
+                                            : ready ? hub.t("nodeAuthReady")
+                                            : needsLogin ? hub.t("nodeAuthNeedsLogin")
+                                            : ""
+                                        let label = suffix.isEmpty ? h.title : "\(h.title) · \(suffix)"
+                                        Tag(
+                                            text: label,
+                                            bg: ready ? p.sage : needsLogin ? p.pink : p.s1,
+                                            fg: ready ? p.sageInk : needsLogin ? p.pinkInk : .secondary
+                                        )
+                                    }
+                                }
+                            }
+                            .padding(.top, 2)
+                        }
+                        if !workspaces.isEmpty {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(hub.t("nodeWorkspaces"))
+                                    .font(.system(size: AppFont.caption, weight: .medium))
+                                    .foregroundStyle(.secondary)
+                                ForEach(workspaces) { ws in
+                                    HStack(spacing: 6) {
+                                        Text(ws.name.isEmpty ? ws.id : ws.name)
+                                            .font(.system(size: AppFont.caption, weight: .semibold))
+                                            .foregroundStyle(p.text)
+                                        Text(ws.path)
+                                            .font(.system(size: AppFont.caption, design: .monospaced))
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                            .truncationMode(.middle)
+                                        if ws.isGit == true {
+                                            Tag(
+                                                text: (ws.defaultBranch ?? "").isEmpty ? "git" : ws.defaultBranch!,
+                                                bg: p.s1,
+                                                fg: .secondary
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                            .padding(.top, 2)
                         }
                     }
                     .padding(.vertical, 2)
