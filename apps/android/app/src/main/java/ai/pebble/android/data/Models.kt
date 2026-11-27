@@ -58,6 +58,7 @@ data class BotStatus(
     val queued: Int? = null,
     val session: SessionRecord? = null,
     val instructions: String? = null,
+    val latestStage: StageRef? = null,
 ) {
     val displayName: String get() = if (name.isNullOrEmpty()) id else name
     val isBusy: Boolean get() = busy == true
@@ -90,6 +91,7 @@ data class ChatMessage(
     val to: String? = null,
     val text: String? = null,
     val media: List<MessageMedia>? = null,
+    val stage: StageRef? = null,
     val createdAt: String? = null,
     val tools: List<String>? = null,
     val durationMs: Double? = null,
@@ -564,13 +566,73 @@ data class TunnelStartResp(
 )
 
 enum class StageKind(val raw: String) {
+    NEW("new"),
+    FILES("files"),
+    FILE("file"),
     DESKTOP("desktop"),
-    FILES("files");
+    BROWSER("browser"),
+    ARTIFACT("artifact"),
+    MCP_APP("mcp_app");
 
     companion object {
-        fun fromRaw(raw: String?): StageKind =
-            entries.firstOrNull { it.raw.equals(raw?.trim(), ignoreCase = true) } ?: FILES
+        fun fromRaw(raw: String?): StageKind {
+            val clean = raw?.trim()?.lowercase().orEmpty()
+            return when (clean) {
+                "mcp-app", "mcp_app" -> MCP_APP
+                else -> entries.firstOrNull { it.raw == clean } ?: FILES
+            }
+        }
     }
+}
+
+@Serializable
+data class StageRef(
+    val id: String? = null,
+    val kind: String = "files",
+    val title: String? = null,
+    val subtitle: String? = null,
+    val path: String? = null,
+    val url: String? = null,
+    val resourceUri: String? = null,
+    val target: String? = null,
+    val closable: Boolean? = null,
+    val createdAt: String? = null,
+) {
+    val resolvedKind: StageKind get() = StageKind.fromRaw(kind)
+
+    val resolvedId: String
+        get() {
+            val explicit = id?.trim().orEmpty()
+            if (explicit.isNotEmpty()) return explicit
+            return when (resolvedKind) {
+                StageKind.FILES -> "files"
+                StageKind.FILE -> "file:${path.orEmpty()}"
+                StageKind.DESKTOP -> {
+                    val dest = target?.trim().orEmpty().ifEmpty { "local" }
+                    if (dest == "local") "desktop" else "desktop:$dest"
+                }
+                StageKind.NEW -> "new"
+                StageKind.BROWSER -> "browser:${url.orEmpty().ifEmpty { "default" }}"
+                StageKind.ARTIFACT -> "artifact:${path.orEmpty().ifEmpty { title.orEmpty().ifEmpty { "default" } }}"
+                StageKind.MCP_APP -> "mcp_app:${resourceUri.orEmpty().ifEmpty { title.orEmpty().ifEmpty { "default" } }}"
+            }
+        }
+}
+
+data class StageTab(
+    val id: String,
+    val kind: StageKind,
+    val rawKind: String,
+    val title: String,
+    val subtitle: String? = null,
+    val botId: String? = null,
+    val path: String? = null,
+    val url: String? = null,
+    val resourceUri: String? = null,
+    val target: String? = null,
+    val closable: Boolean = true,
+) {
+    val isDesktop: Boolean get() = kind == StageKind.DESKTOP
 }
 
 @Serializable
@@ -620,11 +682,15 @@ data class StageOpenEvent(
     val id: String? = null,
     val kind: String = "files",
     val title: String? = null,
+    val subtitle: String? = null,
     val botId: String? = null,
     val path: String? = null,
     val url: String? = null,
     val resourceUri: String? = null,
+    val target: String? = null,
     val closable: Boolean? = null,
+    val autoOpen: Boolean? = null,
+    val createdAt: String? = null,
 )
 
 data class PendingChatInsert(
