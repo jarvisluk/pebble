@@ -278,3 +278,18 @@ internal suspend fun PebbleStore.cancelTaskImpl(taskId: String): BotTask {
     taskTools.remove(taskId)
     return updated
 }
+
+internal suspend fun PebbleStore.fetchTaskDiffImpl(taskId: String): TaskDiffResult {
+    return api.call("/api/tasks/${encodeURIComponent(taskId)}/diff")
+}
+
+internal suspend fun PebbleStore.rollbackTaskImpl(
+    taskId: String,
+    removeWorktree: Boolean = false,
+): TaskRollbackResult {
+    return api.call(
+        "/api/tasks/${encodeURIComponent(taskId)}/rollback",
+        method = "POST",
+        body = mapOf("removeWorktree" to removeWorktree),
+    )
+}

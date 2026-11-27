@@ -427,6 +427,9 @@ class PebbleStore(context: Context) {
         fetchTaskEventsImpl(taskId, afterSeq, limit)
     suspend fun sendToTask(taskId: String, message: String): BotTask = sendToTaskImpl(taskId, message)
     suspend fun cancelTask(taskId: String): BotTask = cancelTaskImpl(taskId)
+    suspend fun fetchTaskDiff(taskId: String): TaskDiffResult = fetchTaskDiffImpl(taskId)
+    suspend fun rollbackTask(taskId: String, removeWorktree: Boolean = false): TaskRollbackResult =
+        rollbackTaskImpl(taskId, removeWorktree)
 
     suspend fun loadSettings(fresh: Boolean = false) : SettingsData = loadSettingsImpl(fresh)
     suspend fun loadModels(harness: String, force: Boolean = false) : List<String> = loadModelsImpl(harness, force)

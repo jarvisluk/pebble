@@ -6,6 +6,8 @@ import type {
   NodeInfo,
   SlashCommandItem,
   SpawnTaskRequest,
+  TaskDiffResult,
+  TaskRollbackResult,
   UpdateStatus,
   WorkspaceFileContent,
   WorkspaceListResult,
@@ -263,5 +265,16 @@ export async function sendToTask(taskId: string, message: string): Promise<BotTa
 export async function cancelTask(taskId: string): Promise<BotTask> {
   return api<BotTask>(`/api/tasks/${encodeURIComponent(taskId)}/cancel`, {
     method: 'POST',
+  });
+}
+
+export async function fetchTaskDiff(taskId: string): Promise<TaskDiffResult> {
+  return api<TaskDiffResult>(`/api/tasks/${encodeURIComponent(taskId)}/diff`);
+}
+
+export async function rollbackTask(taskId: string, removeWorktree = false): Promise<TaskRollbackResult> {
+  return api<TaskRollbackResult>(`/api/tasks/${encodeURIComponent(taskId)}/rollback`, {
+    method: 'POST',
+    body: { removeWorktree },
   });
 }

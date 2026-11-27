@@ -77,13 +77,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import ai.pebble.android.data.ChatMessage
 import ai.pebble.android.data.MentionCandidate
 import ai.pebble.android.data.MessageMedia
 import ai.pebble.android.data.PebbleStore
 import ai.pebble.android.data.PendingAttachment
 import ai.pebble.android.data.SlashCommandItem
+import ai.pebble.android.data.StageRef
 import ai.pebble.android.data.errText
 import ai.pebble.android.data.formatStamp
 import ai.pebble.android.data.parseIsoInstant
@@ -131,7 +131,6 @@ fun ChatScreen(
     var sending by remember(botId) { mutableStateOf(false) }
     var sendErr by remember(botId) { mutableStateOf("") }
     var collabPeerId by remember(botId) { mutableStateOf<String?>(null) }
-    var inspectTaskId by remember(botId) { mutableStateOf<String?>(null) }
     var previewMedia by remember(botId) { mutableStateOf<MessageMedia?>(null) }
     var commands by remember(botId) { mutableStateOf<List<SlashCommandItem>>(emptyList()) }
     var mentions by remember(botId) { mutableStateOf<List<MentionCandidate>>(emptyList()) }
@@ -330,24 +329,6 @@ fun ChatScreen(
         }
     }
 
-    inspectTaskId?.let { tid ->
-        ModalBottomSheet(
-            onDismissRequest = { inspectTaskId = null },
-            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-            containerColor = p.page,
-        ) {
-            Box(modifier = Modifier.heightIn(min = 380.dp, max = 720.dp)) {
-                TaskInspectorSheet(
-                    store = store,
-                    botId = botId,
-                    taskId = tid,
-                    onDismiss = { inspectTaskId = null },
-                    onOpenDesktop = onOpenDesktop,
-                )
-            }
-        }
-    }
-
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -377,15 +358,6 @@ fun ChatScreen(
             inDesktopSidebar = inDesktopSidebar,
             onOpenDesktop = onOpenDesktop,
         )
-
-        if (!inDesktopSidebar) {
-            BotChatTaskStrip(
-                store = store,
-                botId = botId,
-                pal = pal,
-                onSelectTask = { inspectTaskId = it.id },
-            )
-        }
 
         // Message List + Floating Composer overlaid cleanly without black bottom cutoff
         Box(
@@ -439,6 +411,26 @@ fun ChatScreen(
                 onInterrupt = ::interrupt,
                 onSubmit = ::submit,
                 onError = { sendErr = it },
+                topDock = if (!inDesktopSidebar) {
+                    {
+                        BotChatTaskStrip(
+                            store = store,
+                            botId = botId,
+                            pal = pal,
+                            onSelectTask = { task ->
+                                onOpenStageRef(
+                                    botId,
+                                    StageRef(
+                                        id = "task:${task.id}",
+                                        kind = "task",
+                                        taskId = task.id,
+                                        title = task.displayTitle,
+                                    ),
+                                )
+                            },
+                        )
+                    }
+                } else null,
             )
         }
     }

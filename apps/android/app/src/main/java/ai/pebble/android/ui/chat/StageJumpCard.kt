@@ -44,6 +44,7 @@ internal fun StageJumpCard(
         when (kind) {
             StageKind.FILES -> store.t("stageFilesTab")
             StageKind.DESKTOP -> store.t("stageDesktopTab")
+            StageKind.TASK -> store.t("stageTaskTab")
             else -> StageStateOps.basename(ref.path).ifEmpty { ref.kind }
         }
     }
@@ -51,6 +52,7 @@ internal fun StageJumpCard(
         ref.path?.takeIf { it.isNotBlank() }
             ?: ref.url?.takeIf { it.isNotBlank() }
             ?: ref.resourceUri?.takeIf { it.isNotBlank() }
+            ?: ref.taskId?.takeIf { it.isNotBlank() }
             ?: ref.target?.takeIf { it.isNotBlank() && it != "local" }
             ?: store.t("stageCardSubmitted")
     }

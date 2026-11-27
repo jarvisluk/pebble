@@ -1,5 +1,6 @@
 package ai.pebble.android.ui.desktop
 
+import ai.pebble.android.data.BotTask
 import ai.pebble.android.data.StageKind
 import ai.pebble.android.data.StageOpenEvent
 import ai.pebble.android.data.StageRef
@@ -27,6 +28,7 @@ object StageStateOps {
         StageKind.FILES -> PebbleIcons.Folder
         StageKind.FILE -> PebbleIcons.Description
         StageKind.DESKTOP -> PebbleIcons.DesktopWindows
+        StageKind.TASK -> PebbleIcons.List
         StageKind.BROWSER -> PebbleIcons.Public
         StageKind.ARTIFACT -> PebbleIcons.Code
         StageKind.MCP_APP -> PebbleIcons.Extension
@@ -73,6 +75,36 @@ object StageStateOps {
             title = title,
             subtitle = if (dest == "local") null else dest,
             target = dest,
+            closable = true,
+        )
+    }
+
+    fun taskTab(task: BotTask): StageTab {
+        val sub = listOfNotNull(
+            task.kind.takeIf { it.isNotBlank() },
+            task.deviceId?.takeIf { it.isNotBlank() && it != "local" },
+        ).joinToString(" · ")
+        return StageTab(
+            id = "task:${task.id}",
+            kind = StageKind.TASK,
+            rawKind = StageKind.TASK.raw,
+            title = task.displayTitle,
+            subtitle = sub.ifEmpty { null },
+            botId = task.botId,
+            taskId = task.id,
+            closable = true,
+        )
+    }
+
+    fun taskTab(taskId: String, title: String?, botId: String?, defaultTitle: String): StageTab {
+        val cleanTitle = title?.trim().orEmpty()
+        return StageTab(
+            id = "task:$taskId",
+            kind = StageKind.TASK,
+            rawKind = StageKind.TASK.raw,
+            title = cleanTitle.ifEmpty { defaultTitle },
+            botId = botId,
+            taskId = taskId,
             closable = true,
         )
     }
@@ -125,6 +157,22 @@ object StageStateOps {
                 )
             }
             StageKind.NEW -> newTab(title = rawTitle.ifEmpty { newTabTitle })
+            StageKind.TASK -> {
+                val rawId = ref.id?.trim().orEmpty()
+                val tid = ref.taskId?.trim().orEmpty().ifEmpty {
+                    if (rawId.startsWith("task:")) rawId.removePrefix("task:") else rawId
+                }
+                StageTab(
+                    id = rawId.ifEmpty { "task:$tid" },
+                    kind = StageKind.TASK,
+                    rawKind = ref.kind,
+                    title = rawTitle.ifEmpty { tid.ifEmpty { "Task" } },
+                    subtitle = rawSub.ifEmpty { null },
+                    botId = botId,
+                    taskId = tid.ifEmpty { null },
+                    closable = ref.closable ?: true,
+                )
+            }
             StageKind.BROWSER, StageKind.ARTIFACT, StageKind.MCP_APP -> {
                 val fallbackSub = ref.url ?: ref.resourceUri
                 StageTab(
@@ -159,6 +207,7 @@ object StageStateOps {
             url = ev.url,
             resourceUri = ev.resourceUri,
             target = ev.target,
+            taskId = ev.taskId,
             closable = ev.closable,
             createdAt = ev.createdAt,
         )

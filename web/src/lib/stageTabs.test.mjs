@@ -6,6 +6,7 @@ import {
   createFileTab,
   createFilesTab,
   createNewTab,
+  createTaskTab,
   ensureNonEmptyStageState,
   replaceNewTabOrOpen,
   stageTabFromRef,
@@ -14,7 +15,7 @@ import {
 
 const t = (k) => k;
 
-test('stageTabFromRef normalizes files+path to file tab and preserves desktop/extension tabs', () => {
+test('stageTabFromRef normalizes files+path to file tab and preserves desktop/task/extension tabs', () => {
   const fileTab = stageTabFromRef({ kind: 'files', path: 'memory/notes.md' }, t, 'assistant');
   assert.equal(fileTab.kind, 'file');
   assert.equal(fileTab.id, 'file:memory/notes.md');
@@ -29,6 +30,17 @@ test('stageTabFromRef normalizes files+path to file tab and preserves desktop/ex
   assert.equal(deskTab.kind, 'desktop');
   assert.equal(deskTab.id, 'desktop:node-1');
   assert.equal(deskTab.target, 'node-1');
+
+  const taskTab = stageTabFromRef({ kind: 'task', taskId: 'tsk_42', title: 'Run tests' }, t, 'assistant');
+  assert.equal(taskTab.kind, 'task');
+  assert.equal(taskTab.id, 'task:tsk_42');
+  assert.equal(taskTab.taskId, 'tsk_42');
+  assert.equal(taskTab.title, 'Run tests');
+
+  const directTaskTab = createTaskTab({ id: 'tsk_99', prompt: 'Refactor stage pane\nSecond line', kind: 'worker', deviceId: 'mac-mini' }, t);
+  assert.equal(directTaskTab.id, 'task:tsk_99');
+  assert.equal(directTaskTab.taskId, 'tsk_99');
+  assert.equal(directTaskTab.title, 'Refactor stage pane');
 
   const extTab = stageTabFromRef({ id: 'b1', kind: 'browser', title: 'Docs', url: 'https://example.com' }, t);
   assert.equal(extTab.kind, 'browser');

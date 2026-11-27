@@ -78,22 +78,19 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import ai.pebble.android.data.BotStatus
+import ai.pebble.android.data.BotTask
 import ai.pebble.android.data.HubException
 import ai.pebble.android.data.MemoryItem
 import ai.pebble.android.data.MemoryList
 import ai.pebble.android.data.PebbleStore
 import ai.pebble.android.data.RoutineItem
-import ai.pebble.android.data.RoutineRun
 import ai.pebble.android.data.errText
 import ai.pebble.android.data.resolveDefaultModel
 import ai.pebble.android.ui.settings.ModelInputWithMenu
 import ai.pebble.android.ui.settings.localizedMemoryKind
 import ai.pebble.android.ui.settings.settingsHarnessList
 import ai.pebble.android.ui.chat.BotTasksBlock
-import ai.pebble.android.ui.chat.NewTaskSheet
-import ai.pebble.android.ui.chat.TaskInspectorSheet
 import ai.pebble.android.ui.desktop.H264SurfaceView
 import ai.pebble.android.ui.theme.BotAppearancePicker
 import ai.pebble.android.ui.theme.PebbleFont
@@ -126,6 +123,7 @@ fun BotDetailScreen(
     botId: String,
     onClose: () -> Unit,
     onOpenDesktop: (String) -> Unit,
+    onOpenTask: (BotTask) -> Unit,
 ) {
     val p = LocalPalette.current
 
@@ -137,8 +135,6 @@ fun BotDetailScreen(
     var previewFrameError by remember(botId) { mutableStateOf("") }
     var editingRoutine by remember(botId) { mutableStateOf<RoutineItem?>(null) }
     var creatingRoutine by remember(botId) { mutableStateOf(false) }
-    var inspectTaskId by remember(botId) { mutableStateOf<String?>(null) }
-    var creatingTask by remember(botId) { mutableStateOf(false) }
 
     LaunchedEffect(botId) {
         if (store.desktopTargets.isEmpty()) {
@@ -146,37 +142,6 @@ fun BotDetailScreen(
         }
         runCatching { store.fetchBotTasks(botId) }
         runCatching { store.fetchRoutines(botId) }
-    }
-
-    inspectTaskId?.let { tid ->
-        ModalBottomSheet(
-            onDismissRequest = { inspectTaskId = null },
-            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-            containerColor = p.page,
-        ) {
-            TaskInspectorSheet(
-                store = store,
-                botId = botId,
-                taskId = tid,
-                onDismiss = { inspectTaskId = null },
-                onOpenDesktop = onOpenDesktop,
-            )
-        }
-    }
-
-    if (creatingTask) {
-        ModalBottomSheet(
-            onDismissRequest = { creatingTask = false },
-            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-            containerColor = p.page,
-        ) {
-            NewTaskSheet(
-                store = store,
-                botId = botId,
-                onDismiss = { creatingTask = false },
-                onCreated = { created -> inspectTaskId = created.id },
-            )
-        }
     }
 
     if (creatingRoutine || editingRoutine != null) {
@@ -387,8 +352,7 @@ fun BotDetailScreen(
             BotTasksBlock(
                 store = store,
                 botId = botId,
-                onSelectTask = { inspectTaskId = it.id },
-                onNewTask = { creatingTask = true },
+                onSelectTask = onOpenTask,
                 onError = { err = it },
             )
 

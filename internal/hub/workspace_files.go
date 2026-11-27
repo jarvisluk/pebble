@@ -70,7 +70,7 @@ type WorkspaceFileContent struct {
 // StageOpenPayload describes a stage panel/tab open request pushed to clients.
 type StageOpenPayload struct {
 	ID          string         `json:"id,omitempty"`
-	Kind        string         `json:"kind"` // file | files | desktop | browser | artifact | mcp-app
+	Kind        string         `json:"kind"` // file | files | desktop | task | browser | artifact | mcp-app
 	Title       string         `json:"title,omitempty"`
 	Subtitle    string         `json:"subtitle,omitempty"`
 	BotID       string         `json:"botId,omitempty"`
@@ -78,6 +78,7 @@ type StageOpenPayload struct {
 	URL         string         `json:"url,omitempty"`
 	ResourceURI string         `json:"resourceUri,omitempty"`
 	Target      string         `json:"target,omitempty"`
+	TaskID      string         `json:"taskId,omitempty"`
 	Closable    *bool          `json:"closable,omitempty"`
 	AutoOpen    bool           `json:"autoOpen,omitempty"`
 	Silent      bool           `json:"silent,omitempty"`
@@ -485,7 +486,7 @@ func (h *Hub) OpenBotStage(botID string, req StageOpenPayload) (*StageOpenPayloa
 	}
 	kind := strings.TrimSpace(req.Kind)
 	switch kind {
-	case "file", "files", "desktop", "browser", "artifact", "mcp-app":
+	case "file", "files", "desktop", "task", "browser", "artifact", "mcp-app":
 	default:
 		return nil, fmt.Errorf("%w: %s", ErrInvalidStageKind, kind)
 	}
@@ -501,6 +502,7 @@ func (h *Hub) OpenBotStage(botID string, req StageOpenPayload) (*StageOpenPayloa
 		URL:         strings.TrimSpace(req.URL),
 		ResourceURI: strings.TrimSpace(req.ResourceURI),
 		Target:      strings.TrimSpace(req.Target),
+		TaskID:      strings.TrimSpace(req.TaskID),
 		Closable:    req.Closable,
 		AutoOpen:    req.AutoOpen,
 		Silent:      req.Silent,
@@ -530,6 +532,60 @@ func (h *Hub) OpenBotStage(botID string, req StageOpenPayload) (*StageOpenPayloa
 		if out.Subtitle == "" && out.Target != "local" {
 			out.Subtitle = out.Target
 		}
+	} else if kind == "task" {
+		resolvedTaskID := out.TaskID
+		if resolvedTaskID == "" && out.Payload != nil {
+			if v, ok := out.Payload["taskId"].(string); ok {
+				resolvedTaskID = strings.TrimSpace(v)
+			}
+		}
+		if resolvedTaskID == "" && strings.HasPrefix(out.ID, "task:") {
+			resolvedTaskID = strings.TrimSpace(strings.TrimPrefix(out.ID, "task:"))
+		}
+		if resolvedTaskID == "" {
+			return nil, fmt.Errorf("%w: taskId is required", state.ErrTaskNotFound)
+		}
+		task, err := h.GetTask(resolvedTaskID)
+		if err != nil {
+			return nil, err
+		}
+		if task.BotID != botID {
+			return nil, fmt.Errorf("%w: task %s does not belong to bot %s", state.ErrTaskNotFound, task.ID, botID)
+		}
+		out.TaskID = task.ID
+		if out.Title == "" {
+			title := strings.TrimSpace(task.Title)
+			if title == "" {
+				title = strings.TrimSpace(task.RoutineName)
+			}
+			if title == "" {
+				line := strings.TrimSpace(strings.SplitN(task.Prompt, "\n", 2)[0])
+				if len([]rune(line)) > 64 {
+					line = string([]rune(line)[:61]) + "..."
+				}
+				title = line
+			}
+			if title == "" {
+				title = task.ID
+			}
+			out.Title = title
+		}
+		if out.Subtitle == "" {
+			var parts []string
+			if task.Kind != "" {
+				parts = append(parts, task.Kind)
+			}
+			if task.DeviceID != "" && task.DeviceID != "local" {
+				parts = append(parts, task.DeviceID)
+			}
+			if task.Harness != "" {
+				parts = append(parts, task.Harness)
+			}
+			if task.Status != "" {
+				parts = append(parts, task.Status)
+			}
+			out.Subtitle = strings.Join(parts, " · ")
+		}
 	} else if kind == "browser" || kind == "artifact" || kind == "mcp-app" {
 		if out.Subtitle == "" {
 			if out.URL != "" {
@@ -552,6 +608,8 @@ func (h *Hub) OpenBotStage(botID string, req StageOpenPayload) (*StageOpenPayloa
 			} else {
 				out.ID = "desktop"
 			}
+		case kind == "task":
+			out.ID = "task:" + out.TaskID
 		default:
 			out.ID = kind + ":" + botID + ":" + strconv.FormatInt(time.Now().UnixMilli(), 10)
 		}
@@ -566,6 +624,7 @@ func (h *Hub) OpenBotStage(botID string, req StageOpenPayload) (*StageOpenPayloa
 		URL:         out.URL,
 		ResourceURI: out.ResourceURI,
 		Target:      out.Target,
+		TaskID:      out.TaskID,
 		Closable:    out.Closable,
 		Payload:     out.Payload,
 		CreatedAt:   out.CreatedAt,

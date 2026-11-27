@@ -16,6 +16,7 @@ struct StageJumpCard: View {
         switch kind {
         case .files: return hub.t("stageFilesTab")
         case .desktop: return hub.t("stageDesktopTab")
+        case .task: return hub.t("stageTaskTab")
         default:
             let base = StageStateOps.basename(of: ref.path)
             return base.isEmpty ? ref.kind : base
@@ -28,6 +29,7 @@ struct StageJumpCard: View {
         if let path = ref.path, !path.isEmpty { return path }
         if let url = ref.url, !url.isEmpty { return url }
         if let uri = ref.resourceUri, !uri.isEmpty { return uri }
+        if let tid = ref.taskId, !tid.isEmpty { return tid }
         if let target = ref.target, !target.isEmpty, target != "local" { return target }
         return hub.t("stageCardSubmitted")
     }

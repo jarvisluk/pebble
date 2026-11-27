@@ -20,13 +20,16 @@ export const StageJumpCard: React.FC<StageJumpCardProps> = ({ stageRef, lang, on
       ? t('stageFilesTab')
       : kind === 'desktop'
         ? t('stageDesktopTab')
-        : stageRef.path?.split('/').pop() || stageRef.kind);
+        : kind === 'task'
+          ? t('stageTaskTab')
+          : stageRef.path?.split('/').pop() || stageRef.kind);
 
   const subtitle =
     (stageRef.subtitle || '').trim() ||
     stageRef.path ||
     stageRef.url ||
     stageRef.resourceUri ||
+    (stageRef.kind === 'task' ? stageRef.taskId : undefined) ||
     (stageRef.target && stageRef.target !== 'local' ? stageRef.target : t('stageCardSubmitted'));
 
   return (

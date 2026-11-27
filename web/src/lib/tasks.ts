@@ -49,12 +49,14 @@ export function taskElapsedMs(task: BotTask, nowMs = Date.now()): number {
   return Math.max(0, nowMs - start);
 }
 
-export function isRecentTaskForStrip(task: BotTask, nowMs = Date.now()): boolean {
-  if (!isTaskTerminal(task.status)) return true;
-  const ref = task.finishedAt || task.createdAt;
-  const ts = Date.parse(ref);
-  if (Number.isNaN(ts)) return false;
-  return nowMs - ts < 10 * 60 * 1000;
+export function activeTasksForStrip(tasks: BotTask[], limit = 6): BotTask[] {
+  return tasks.filter((task) => isTaskActive(task.status)).slice(0, limit);
+}
+
+export function tasksForStageLauncher(tasks: BotTask[], limit = 8): BotTask[] {
+  const active = tasks.filter((t) => isTaskActive(t.status));
+  const recent = tasks.filter((t) => isTaskTerminal(t.status));
+  return [...active, ...recent].slice(0, limit);
 }
 
 export function taskDisplayTitle(task: BotTask): string {

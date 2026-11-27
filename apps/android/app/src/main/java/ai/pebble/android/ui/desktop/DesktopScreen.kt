@@ -602,6 +602,7 @@ fun DesktopScreen(
                         when (activeKind) {
                             StageKind.NEW -> StageNewTabView(
                                 store = store,
+                                botId = resolvedBotId.orEmpty(),
                                 canUseFiles = canUseFiles,
                                 inWideStage = isWide,
                                 onOpenFiles = {
@@ -615,6 +616,12 @@ fun DesktopScreen(
                                     router.replaceNewOrOpenStageTab(
                                         stageBotKey,
                                         StageStateOps.desktopTab(target = preferredTarget, title = store.t("stageDesktopTab")),
+                                    )
+                                },
+                                onOpenTask = { task ->
+                                    router.replaceNewOrOpenStageTab(
+                                        stageBotKey,
+                                        StageStateOps.taskTab(task),
                                     )
                                 },
                             )
@@ -702,6 +709,16 @@ fun DesktopScreen(
                                     streamMode = preferredDesktopStreamMode(store, target)
                                     streaming = false
                                     streaming = true
+                                },
+                            )
+                            StageKind.TASK -> StageTaskView(
+                                store = store,
+                                botId = resolvedBotId.orEmpty(),
+                                taskId = activeTab?.taskId.orEmpty().ifEmpty { activeTab?.id?.removePrefix("task:").orEmpty() },
+                                inWideStage = isWide,
+                                onOpenDesktop = { dest ->
+                                    target = dest
+                                    router.openDesktop(dest)
                                 },
                             )
                             StageKind.BROWSER, StageKind.ARTIFACT, StageKind.MCP_APP -> {

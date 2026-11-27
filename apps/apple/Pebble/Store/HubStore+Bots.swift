@@ -260,6 +260,15 @@ extension HubStore {
         return updated
     }
 
+    func fetchTaskDiff(_ taskId: String) async throws -> TaskDiffResult {
+        try await callAPI("/api/tasks/\(enc(taskId))/diff")
+    }
+
+    @discardableResult
+    func rollbackTask(_ taskId: String, removeWorktree: Bool = false) async throws -> TaskRollbackResult {
+        try await callAPI("/api/tasks/\(enc(taskId))/rollback", method: "POST", body: ["removeWorktree": removeWorktree])
+    }
+
     // MARK: 工作区文件
 
     func listWorkspaceFiles(botId: String, path: String = "", showHidden: Bool = false) async throws -> WorkspaceListResult {

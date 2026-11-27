@@ -501,6 +501,11 @@ export interface BotTask {
   model?: string;
   permissionMode?: PermissionMode | string;
   workdir?: string;
+  workspaceId?: string;
+  isolation?: 'current' | 'worktree' | 'temp_dir' | string;
+  branch?: string;
+  worktreePath?: string;
+  checkpointRef?: string;
   delivery: BotTaskDelivery | string;
   dependsOn?: string[];
   parentTaskId?: string;
@@ -555,6 +560,30 @@ export interface SpawnTaskRequest {
   parentTaskId?: string;
 }
 
+export interface TaskDiffFile {
+  path: string;
+  status?: string;
+  additions?: number;
+  deletions?: number;
+}
+
+export interface TaskDiffResult {
+  taskId: string;
+  branch?: string;
+  worktreePath?: string;
+  checkpointRef?: string;
+  files: TaskDiffFile[];
+  patch: string;
+}
+
+export interface TaskRollbackResult {
+  taskId: string;
+  rolledBack: boolean;
+  removedWorktree?: boolean;
+  branch?: string;
+  worktreePath?: string;
+}
+
 export interface WorkspaceFileEntry {
   name: string;
   path: string;
@@ -586,7 +615,7 @@ export interface WorkspaceFileContent {
   truncated?: boolean;
 }
 
-export type StageKind = 'new' | 'files' | 'file' | 'desktop' | 'browser' | 'artifact' | 'mcp-app' | string;
+export type StageKind = 'new' | 'files' | 'file' | 'desktop' | 'task' | 'browser' | 'artifact' | 'mcp-app' | string;
 
 export interface StageRef {
   id?: string;
@@ -597,6 +626,7 @@ export interface StageRef {
   url?: string;
   resourceUri?: string;
   target?: string;
+  taskId?: string;
   closable?: boolean;
   payload?: Record<string, unknown>;
   createdAt?: string;
@@ -612,6 +642,7 @@ export interface StageTab {
   url?: string;
   resourceUri?: string;
   target?: string;
+  taskId?: string;
   closable?: boolean;
 }
 
@@ -625,6 +656,7 @@ export interface StageOpenEvent {
   url?: string;
   resourceUri?: string;
   target?: string;
+  taskId?: string;
   closable?: boolean;
   autoOpen?: boolean;
   createdAt?: string;

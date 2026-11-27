@@ -4,6 +4,7 @@ import type {
   BotStatus,
   BotTask,
   ChatMessage,
+  ConfirmOptions,
   HarnessInfo,
   NodeInfo,
   PendingApproval,
@@ -22,6 +23,7 @@ import {
   createFileTab,
   createFilesTab,
   createNewTab,
+  createTaskTab,
   ensureNonEmptyStageState,
 } from '../lib/stageTabs';
 import { botColor, contrastText } from '../lib/theme';
@@ -32,6 +34,7 @@ import { StageExtensionPane } from './stage/StageExtensionPane';
 import { StageFilePreviewPane } from './stage/StageFilePreviewPane';
 import { StageNewTabPane } from './stage/StageNewTabPane';
 import { StageTabBar } from './stage/StageTabBar';
+import { StageTaskPane } from './stage/StageTaskPane';
 
 interface StageShellProps {
   deskOpen: boolean;
@@ -44,6 +47,8 @@ interface StageShellProps {
   msgsMap: Record<string, ChatMessage[]>;
   tasksMap: Record<string, BotTask[]>;
   taskToolMap: Record<string, string>;
+  taskChunksMap: Record<string, string>;
+  taskEventSeqMap: Record<string, number>;
   nodes: NodeInfo[];
   seenIds: Set<string>;
   toolMap: Record<string, string>;
@@ -72,6 +77,8 @@ interface StageShellProps {
   setCreateOpen: React.Dispatch<React.SetStateAction<boolean>>;
   setStageInsert: React.Dispatch<React.SetStateAction<{ seq: number; text: string } | null>>;
   setTakeovers: React.Dispatch<React.SetStateAction<TakeoverRequest[]>>;
+  onConfirm: React.Dispatch<React.SetStateAction<ConfirmOptions | null>>;
+  onTaskUpdated: (task: BotTask) => void;
   closeAllOverlays: () => void;
   selectBot: (id: string) => Promise<void>;
   selectDesktopTarget: (next: string) => Promise<void>;
@@ -103,6 +110,8 @@ export const StageShell: React.FC<StageShellProps> = ({
   msgsMap,
   tasksMap,
   taskToolMap,
+  taskChunksMap,
+  taskEventSeqMap,
   nodes,
   seenIds,
   toolMap,
@@ -131,6 +140,8 @@ export const StageShell: React.FC<StageShellProps> = ({
   setCreateOpen,
   setStageInsert,
   setTakeovers,
+  onConfirm,
+  onTaskUpdated,
   closeAllOverlays,
   selectBot,
   selectDesktopTarget,
@@ -153,6 +164,17 @@ export const StageShell: React.FC<StageShellProps> = ({
   const hasDesktopTab = stageState.tabs.some((x) => x.kind === 'desktop');
   const activeDesktopTarget =
     (activeTab?.kind === 'desktop' && activeTab.target) || deskTarget || 'local';
+  const activeBotTasks = activeBotId ? tasksMap[activeBotId] || [] : [];
+  const activeTaskId =
+    activeTab?.kind === 'task'
+      ? activeTab.taskId ||
+        (activeTab.id.startsWith('task:') ? activeTab.id.slice('task:'.length) : activeTab.id)
+      : '';
+  const activeTask = activeTaskId
+    ? Object.values(tasksMap)
+        .flat()
+        .find((item) => item.id === activeTaskId) || null
+    : null;
 
   const botAccentStyle: React.CSSProperties | undefined = activeBot
     ? ({
@@ -272,12 +294,15 @@ export const StageShell: React.FC<StageShellProps> = ({
               <div className="stage-pane-slot">
                 <StageNewTabPane
                   canUseFiles={canUseFiles}
+                  tasks={activeBotTasks}
+                  nodes={nodes}
                   lang={lang}
                   onOpenFiles={() => onOpenStageTab(createFilesTab(t), true)}
                   onOpenDesktop={() => {
                     const target = activeBot?.desktopTarget || activeDeskTarget.target || 'local';
                     onOpenStageTab(createDesktopTab(t, target), true);
                   }}
+                  onOpenTask={(task) => onOpenStageTab(createTaskTab(task, t), true)}
                 />
               </div>
             )}
@@ -309,10 +334,40 @@ export const StageShell: React.FC<StageShellProps> = ({
               </div>
             )}
 
+            {activeTab.kind === 'task' && activeTaskId && (
+              <div className="stage-pane-slot">
+                <StageTaskPane
+                  taskId={activeTaskId}
+                  task={activeTask}
+                  bots={bots}
+                  nodes={nodes}
+                  liveTool={taskToolMap[activeTaskId]}
+                  liveChunk={taskChunksMap[activeTaskId] || ''}
+                  taskRefreshSeq={taskEventSeqMap[activeTaskId] || 0}
+                  approvals={approvals}
+                  questions={questions}
+                  takeovers={takeovers}
+                  lang={lang}
+                  onToast={showToast}
+                  onConfirm={onConfirm}
+                  onTaskUpdated={onTaskUpdated}
+                  onReplyApproval={handleReplyApproval}
+                  onReplyQuestion={handleReplyQuestion}
+                  onResolveTakeover={handleResolveTakeover}
+                  onOpenDesktopTarget={(target) => {
+                    const resolved = target || 'local';
+                    void selectDesktopTarget(resolved);
+                    onOpenStageTab(createDesktopTab(t, resolved), false);
+                  }}
+                />
+              </div>
+            )}
+
             {activeTab.kind !== 'new' &&
               activeTab.kind !== 'files' &&
               activeTab.kind !== 'file' &&
-              activeTab.kind !== 'desktop' && (
+              activeTab.kind !== 'desktop' &&
+              activeTab.kind !== 'task' && (
                 <div className="stage-pane-slot">
                   <StageExtensionPane tab={activeTab} lang={lang} />
                 </div>

@@ -490,6 +490,16 @@ final class Router {
         openStage(botId: botId, tab: tab, replaceNew: false)
     }
 
+    func openTask(botId: String, task: BotTask, replaceNew: Bool = false) {
+        let tab = StageStateOps.taskTab(task: task)
+        openStage(botId: botId, tab: tab, replaceNew: replaceNew)
+    }
+
+    func openTask(botId: String, taskId: String, title: String? = nil, replaceNew: Bool = false) {
+        let tab = StageStateOps.taskTab(taskId: taskId, title: title, botId: botId, defaultTitle: L.t("stageTaskTab"))
+        openStage(botId: botId, tab: tab, replaceNew: replaceNew)
+    }
+
     func handleStageOpen(_ ev: StageOpenEvent) {
         let targetBot = (ev.botId ?? selected ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         guard !targetBot.isEmpty else { return }

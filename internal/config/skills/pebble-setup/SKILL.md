@@ -121,7 +121,7 @@ Note: `pebble settings set` rejects empty strings for `--default-harness`, `--de
 - `request_takeover(reason, nodeId?, app?)`: Pause automation and request human intervention in Remote Desktop (QR login, 2FA, CAPTCHA, payment) until resumed.
 - `node_exec(command, nodeId?, cwd?, timeoutSec?)`: Execute a shell command on a connected remote device node (requires node `exec` permission).
 - `node_file(op, path, nodeId?, content?, append?)`: Read, write, or list files on a connected remote device node (requires node `files` permission).
-- `open_stage(kind, path?, title?, subtitle?, url?, target?, autoOpen?)`: Submit a side tab in the user's Stage UI (`file` | `files` | `desktop` | `browser` | `artifact` | `mcp-app`) and post a clickable jump card in chat (`autoOpen` defaults to `false`).
+- `open_stage(kind, path?, taskId?, title?, subtitle?, url?, target?, autoOpen?)`: Submit a side tab in the user's Stage UI (`file` | `files` | `desktop` | `task` | `browser` | `artifact` | `mcp-app`) and post a clickable jump card in chat (`autoOpen` defaults to `false`).
 
 ### 2. Full `pebble` CLI Reference
 

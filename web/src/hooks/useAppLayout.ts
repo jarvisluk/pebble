@@ -9,7 +9,6 @@ export interface UseAppLayoutOpts {
   createOpen: boolean;
   panelOpen: boolean;
   collabPeerId: string | null;
-  inspectedTaskId: string | null;
   mobileSideOpen: boolean;
   deskOpen: boolean;
   viewRef: React.MutableRefObject<'chat' | 'settings'>;
@@ -26,7 +25,6 @@ export interface UseAppLayoutOpts {
   setView: React.Dispatch<React.SetStateAction<'chat' | 'settings'>>;
   setSideWidth: React.Dispatch<React.SetStateAction<number | null>>;
   setSideResizing: React.Dispatch<React.SetStateAction<boolean>>;
-  setInspectedTaskId: React.Dispatch<React.SetStateAction<string | null>>;
 }
 
 export function useAppLayout(opts: UseAppLayoutOpts) {
@@ -37,7 +35,6 @@ export function useAppLayout(opts: UseAppLayoutOpts) {
     createOpen,
     panelOpen,
     collabPeerId,
-    inspectedTaskId,
     mobileSideOpen,
     deskOpen,
     viewRef,
@@ -54,7 +51,6 @@ export function useAppLayout(opts: UseAppLayoutOpts) {
     setView,
     setSideWidth,
     setSideResizing,
-    setInspectedTaskId,
   } = opts;
 
   const toggleDesktopSidebar = useCallback((forceCollapsed: boolean | null = null) => {
@@ -80,7 +76,6 @@ export function useAppLayout(opts: UseAppLayoutOpts) {
       if (e.key === 'Escape') {
         if (confirmOpts) setConfirmOpts(null);
         else if (unboxOpen) setUnboxOpen(false);
-        else if (inspectedTaskId) setInspectedTaskId(null);
         else if (createOpen || panelOpen || collabPeerId || mobileSideOpen) closeAllOverlays();
         else if (deskOpen) setDeskOpen(false);
         else if (viewRef.current === 'settings') leaveSettings();
@@ -110,7 +105,7 @@ export function useAppLayout(opts: UseAppLayoutOpts) {
       mq.removeEventListener('change', onMq);
       document.removeEventListener('keydown', onKeyDown);
     };
-  }, [closeAllOverlays, collabPeerId, confirmOpts, createOpen, deskOpen, inspectedTaskId, leaveSettings, loadSettings, mobileSideOpen, panelOpen, toggleDesktopSidebar, unboxOpen]);
+  }, [closeAllOverlays, collabPeerId, confirmOpts, createOpen, deskOpen, leaveSettings, loadSettings, mobileSideOpen, panelOpen, toggleDesktopSidebar, unboxOpen]);
 
   const handleSideResizeStart = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {

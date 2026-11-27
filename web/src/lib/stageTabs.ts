@@ -74,6 +74,26 @@ export function createDesktopTab(t: TranslateFn, target = 'local', label?: strin
   };
 }
 
+export function createTaskTab(
+  task: { id: string; title?: string; routineName?: string; prompt?: string; botId?: string; deviceId?: string; kind?: string },
+  t?: TranslateFn
+): StageTab {
+  const rawTitle = (task.title || task.routineName || '').trim();
+  const firstLine = (task.prompt || '').trim().split(/\r?\n/)[0] || '';
+  const fallbackLine = firstLine.length > 64 ? `${firstLine.slice(0, 61)}…` : firstLine;
+  const title = rawTitle || fallbackLine || (t ? t('stageTaskTab') : task.id);
+  const subParts = [task.kind, task.deviceId && task.deviceId !== 'local' ? task.deviceId : ''].filter(Boolean);
+  return {
+    id: `task:${task.id}`,
+    kind: 'task',
+    title,
+    subtitle: subParts.length > 0 ? subParts.join(' · ') : undefined,
+    botId: task.botId,
+    taskId: task.id,
+    closable: true,
+  };
+}
+
 export function stageTabFromRef(ref: StageRef, t: TranslateFn, botId?: string): StageTab {
   const kind = normalizeStageKind(ref.kind, ref.path);
   if (kind === 'file') {
@@ -108,6 +128,21 @@ export function stageTabFromRef(ref: StageRef, t: TranslateFn, botId?: string): 
       subtitle: (ref.subtitle || '').trim() || (target !== 'local' ? target : undefined),
       botId,
       target,
+      closable: ref.closable !== false,
+    };
+  }
+  if (kind === 'task') {
+    const rawId = (ref.id || '').trim();
+    const taskId =
+      (ref.taskId || '').trim() ||
+      (rawId.startsWith('task:') ? rawId.slice('task:'.length) : rawId);
+    return {
+      id: rawId || (taskId ? `task:${taskId}` : `task:${Date.now()}`),
+      kind: 'task',
+      title: (ref.title || '').trim() || t('stageTaskTab'),
+      subtitle: (ref.subtitle || '').trim() || undefined,
+      botId,
+      taskId: taskId || undefined,
       closable: ref.closable !== false,
     };
   }

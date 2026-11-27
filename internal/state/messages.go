@@ -23,13 +23,14 @@ type MessageMedia struct {
 
 type StageRef struct {
 	ID          string         `json:"id,omitempty"`
-	Kind        string         `json:"kind"` // file | files | desktop | browser | artifact | mcp-app
+	Kind        string         `json:"kind"` // file | files | desktop | task | browser | artifact | mcp-app
 	Title       string         `json:"title,omitempty"`
 	Subtitle    string         `json:"subtitle,omitempty"`
 	Path        string         `json:"path,omitempty"`
 	URL         string         `json:"url,omitempty"`
 	ResourceURI string         `json:"resourceUri,omitempty"`
 	Target      string         `json:"target,omitempty"`
+	TaskID      string         `json:"taskId,omitempty"`
 	Closable    *bool          `json:"closable,omitempty"`
 	Payload     map[string]any `json:"payload,omitempty"`
 	CreatedAt   string         `json:"createdAt,omitempty"`

@@ -251,6 +251,10 @@ class PebbleRouter {
         openStage(botId = botId, tab = tab, replaceNew = false)
     }
 
+    fun openTask(botId: String, task: ai.pebble.android.data.BotTask, replaceNew: Boolean = false) {
+        openStage(botId = botId, tab = StageStateOps.taskTab(task), replaceNew = replaceNew)
+    }
+
     fun handleStageOpen(ev: StageOpenEvent) {
         val bid = ev.botId?.takeIf { it.isNotBlank() } ?: selectedBotId.orEmpty()
         val tab = StageStateOps.tabFromOpenEvent(
@@ -383,6 +387,7 @@ fun RootScaffold(
                             botId = bid,
                             onClose = { router.detailOpen = false },
                             onOpenDesktop = { router.openDesktop(it) },
+                            onOpenTask = { router.openTask(bid, it) },
                         )
                     } else {
                         ChatScreen(
@@ -503,6 +508,7 @@ fun RootScaffold(
                                 botId = selId,
                                 onClose = { router.detailOpen = false },
                                 onOpenDesktop = { router.openDesktop(it) },
+                                onOpenTask = { router.openTask(selId, it) },
                             )
                         }
                     }
@@ -521,6 +527,7 @@ fun RootScaffold(
                             botId = selId,
                             onClose = { router.detailOpen = false },
                             onOpenDesktop = { router.openDesktop(it) },
+                            onOpenTask = { router.openTask(selId, it) },
                         )
                     }
                 }

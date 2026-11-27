@@ -12,7 +12,6 @@ struct ChatView: View {
 
     @State private var sendErr = ""
     @State private var collabPeer: CollabTarget?
-    @State private var inspectTask: BotTask?
     @State private var previewMedia: MessageMedia?
     @State private var commands: [SlashCommandItem] = []
     @State private var pendingDrop: (seq: Int, urls: [URL])?
@@ -107,12 +106,12 @@ struct ChatView: View {
                 }
             }
             topBanners(pal)
+            thread(pal)
             if !inDesktopSidebar {
                 BotChatTaskStrip(botId: botId, pal: pal) { task in
-                    inspectTask = task
+                    router.openTask(botId: botId, task: task)
                 }
             }
-            thread(pal)
             ChatComposerView(
                 botId: botId,
                 name: name,
@@ -150,12 +149,6 @@ struct ChatView: View {
                 NavigationStack {
                     CollabSheetView(botId: botId, peerId: target.id)
                 }
-            }
-            .sheet(item: $inspectTask) { task in
-                TaskInspectorSheet(botId: botId, taskId: task.id) { target in
-                    router.openDesktop(target)
-                }
-                .hubSheetFrame(width: 560, height: 660)
             }
             .sheet(item: $previewMedia) { media in
                 MediaPreviewSheet(media: media)

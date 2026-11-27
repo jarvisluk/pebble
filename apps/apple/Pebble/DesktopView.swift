@@ -181,6 +181,7 @@ struct DesktopView: View {
 
             if activeTab.kind == .new {
                 StageNewTabView(
+                    botId: resolvedBotId,
                     canUseFiles: hub.supports("stage.files"),
                     onOpenFiles: {
                         let tab = StageStateOps.filesTab(title: hub.t("stageFilesTab"))
@@ -193,6 +194,9 @@ struct DesktopView: View {
                         target = dest
                         let tab = StageStateOps.desktopTab(target: dest, title: hub.t("stageDesktopTab"))
                         router.openStage(botId: resolvedBotId, tab: tab, replaceNew: true)
+                    },
+                    onOpenTask: { task in
+                        router.openTask(botId: resolvedBotId, task: task, replaceNew: true)
                     }
                 )
             } else if activeTab.kind == .files, hub.supports("stage.files") {
@@ -220,6 +224,13 @@ struct DesktopView: View {
                             showChatSheet = true
                         }
                     }
+                )
+            } else if activeTab.kind == .task {
+                let tid = activeTab.taskId ?? (activeTab.id.hasPrefix("task:") ? String(activeTab.id.dropFirst(5)) : activeTab.id)
+                StageTaskView(
+                    botId: resolvedBotId,
+                    taskId: tid,
+                    inWideStage: isWide
                 )
             } else if activeTab.kind != .desktop {
                 ContentUnavailableView(

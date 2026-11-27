@@ -382,18 +382,22 @@ func toolDefinitions() []map[string]any {
 		},
 		{
 			"name":        "open_stage",
-			"description": "Submit a side-tab item to the user's Single-Bot Stage UI and post a clickable jump card in chat. By default autoOpen is false (the user clicks the jump card or topbar Stage button to jump to fullscreen; set autoOpen=true only when explicitly asked to jump immediately). Use kind='file' (or 'files' with path) to submit a file preview tab, kind='files' without path for the workspace browser, or kind='desktop' for Remote Desktop.",
+			"description": "Submit a side-tab item to the user's Single-Bot Stage UI and post a clickable jump card in chat. By default autoOpen is false (the user clicks the jump card or topbar Stage button to jump to fullscreen; set autoOpen=true only when explicitly asked to jump immediately). Use kind='file' (or 'files' with path) to submit a file preview tab, kind='files' without path for the workspace browser, kind='task' with taskId for a child task detail tab, or kind='desktop' for Remote Desktop.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"kind": map[string]any{
 						"type":        "string",
-						"enum":        []string{"file", "files", "desktop", "browser", "artifact", "mcp-app"},
+						"enum":        []string{"file", "files", "desktop", "task", "browser", "artifact", "mcp-app"},
 						"description": "Stage tab kind to submit.",
 					},
 					"path": map[string]any{
 						"type":        "string",
 						"description": "Workspace-relative file path (for kind='file' or 'files').",
+					},
+					"taskId": map[string]any{
+						"type":        "string",
+						"description": "Child BotTask ID (for kind='task').",
 					},
 					"title": map[string]any{
 						"type":        "string",
@@ -900,6 +904,7 @@ func (s *Server) callTool(ctx context.Context, name string, rawArgs json.RawMess
 		var args struct {
 			Kind     string `json:"kind"`
 			Path     string `json:"path"`
+			TaskID   string `json:"taskId"`
 			Title    string `json:"title"`
 			Subtitle string `json:"subtitle"`
 			URL      string `json:"url"`
@@ -912,6 +917,7 @@ func (s *Server) callTool(ctx context.Context, name string, rawArgs json.RawMess
 		body, err := s.client.DoJSON(ctx, http.MethodPost, "/api/bots/"+url.PathEscape(selfBotID)+"/stage", map[string]any{
 			"kind":     strings.TrimSpace(args.Kind),
 			"path":     strings.TrimSpace(args.Path),
+			"taskId":   strings.TrimSpace(args.TaskID),
 			"title":    strings.TrimSpace(args.Title),
 			"subtitle": strings.TrimSpace(args.Subtitle),
 			"url":      strings.TrimSpace(args.URL),

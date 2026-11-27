@@ -421,15 +421,6 @@ export const ChatView: React.FC<ChatViewProps> = ({
 
       <div className="main-split">
         <div ref={chatColRef} className="chat-col">
-          {activeBot && onInspectTask && (
-            <TaskStrip
-              tasks={tasks}
-              taskToolMap={taskToolMap}
-              nodes={nodes}
-              lang={lang}
-              onInspectTask={onInspectTask}
-            />
-          )}
           <ChatMessageList
             scrollRef={scrollRef}
             inDesktopSidebar={inDesktopSidebar}
@@ -450,6 +441,17 @@ export const ChatView: React.FC<ChatViewProps> = ({
           />
 
           <ChatComposer
+            topDock={
+              !inDesktopSidebar && activeBot && onInspectTask ? (
+                <TaskStrip
+                  tasks={tasks}
+                  taskToolMap={taskToolMap}
+                  nodes={nodes}
+                  lang={lang}
+                  onInspectTask={onInspectTask}
+                />
+              ) : null
+            }
             composerWrapRef={composerWrapRef}
             fileInputRef={fileInputRef}
             inputRef={inputRef}

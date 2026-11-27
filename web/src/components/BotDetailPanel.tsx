@@ -41,7 +41,6 @@ interface BotDetailPanelProps {
   onLoadModels: (harness: string, force?: boolean) => Promise<unknown>;
   onRefreshDetail: (id: string) => Promise<void>;
   onTasksLoaded: (botId: string, tasks: BotTask[]) => void;
-  onTaskCreated: (task: BotTask) => void;
   onInspectTask: (taskId: string) => void;
   onSettingsUpdated?: (s: SettingsData) => void;
   onOpenFiles?: (botId: string) => void;
@@ -68,7 +67,6 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
   onLoadModels,
   onRefreshDetail,
   onTasksLoaded,
-  onTaskCreated,
   onInspectTask,
   onSettingsUpdated,
   onOpenFiles,
@@ -305,14 +303,9 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
               detail={detail}
               tasks={tasks}
               nodes={nodes}
-              settings={settings}
-              models={models}
               lang={lang}
-              onToast={onToast}
               onTasksLoaded={onTasksLoaded}
-              onTaskCreated={onTaskCreated}
               onInspectTask={onInspectTask}
-              onLoadModels={onLoadModels}
             />
 
             <BotRoutinesSection
@@ -322,7 +315,6 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
               lang={lang}
               onToast={onToast}
               onConfirm={onConfirm}
-              onInspectTask={onInspectTask}
             />
 
             <BotTechDetailsSection

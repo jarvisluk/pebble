@@ -505,6 +505,11 @@ struct BotTask: Codable, Identifiable, Hashable {
     var model: String?
     var permissionMode: String?
     var workdir: String?
+    var workspaceId: String?
+    var isolation: String?
+    var branch: String?
+    var worktreePath: String?
+    var checkpointRef: String?
     var delivery: String?
     var dependsOn: [String]?
     var parentTaskId: String?
@@ -560,6 +565,31 @@ struct BotTaskEvent: Codable, Identifiable, Hashable {
 
 struct TasksResp: Decodable { var tasks: [BotTask]? }
 struct TaskEventsResp: Decodable { var events: [BotTaskEvent]? }
+
+struct TaskDiffFile: Codable, Hashable, Identifiable {
+    var path: String
+    var status: String?
+    var additions: Int?
+    var deletions: Int?
+    var id: String { path }
+}
+
+struct TaskDiffResult: Codable, Hashable {
+    var taskId: String
+    var branch: String?
+    var worktreePath: String?
+    var checkpointRef: String?
+    var files: [TaskDiffFile]
+    var patch: String
+}
+
+struct TaskRollbackResult: Codable, Hashable {
+    var taskId: String
+    var rolledBack: Bool
+    var removedWorktree: Bool?
+    var branch: String?
+    var worktreePath: String?
+}
 struct ModelsResp: Decodable { var models: [String]? }
 struct TextResp: Decodable { var text: String? }
 struct InterruptResp: Decodable { var interrupted: Bool? }
@@ -688,6 +718,7 @@ enum StageKind: String, Codable, Hashable {
     case files
     case file
     case desktop
+    case task
     case browser
     case artifact
     case mcpApp = "mcp-app"
@@ -707,6 +738,7 @@ struct StageRef: Codable, Hashable, Identifiable {
     var url: String?
     var resourceUri: String?
     var target: String?
+    var taskId: String?
     var closable: Bool?
     var createdAt: String?
 
@@ -714,6 +746,7 @@ struct StageRef: Codable, Hashable, Identifiable {
         if let id, !id.isEmpty { return id }
         if let path, !path.isEmpty { return "\(kind):\(path)" }
         if let target, !target.isEmpty { return "\(kind):\(target)" }
+        if let taskId, !taskId.isEmpty { return "\(kind):\(taskId)" }
         return kind
     }
 
@@ -734,6 +767,7 @@ struct StageTab: Identifiable, Hashable {
     var url: String?
     var resourceUri: String?
     var target: String?
+    var taskId: String?
     var closable: Bool = true
 }
 
@@ -747,6 +781,7 @@ struct StageOpenEvent: Decodable, Equatable {
     var url: String?
     var resourceUri: String?
     var target: String?
+    var taskId: String?
     var closable: Bool?
     var autoOpen: Bool?
     var createdAt: String?

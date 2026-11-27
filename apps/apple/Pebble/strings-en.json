@@ -778,5 +778,15 @@
   "taskEvent_takeover": "Takeover",
   "taskEvent_error": "Error",
   "taskEvent_chunk": "Output",
-  "taskWaitingActionHint": "Action required"
+  "taskWaitingActionHint": "Action required",
+  "stageTaskTab": "Task",
+  "stageTasksSection": "Tasks",
+  "taskDiffTitle": "Changes & Checkpoint",
+  "taskDiffEmpty": "No file changes recorded",
+  "taskDiffRefresh": "Refresh Diff",
+  "taskDiffShowPatch": "Show Patch",
+  "taskDiffHidePatch": "Hide Patch",
+  "taskRollbackBtn": "Rollback",
+  "taskRollbackConfirmTitle": "Rollback changes for \"{title}\"?",
+  "taskRollbackConfirmDesc": "Restores workspace files to the checkpoint taken when this task started."
 }

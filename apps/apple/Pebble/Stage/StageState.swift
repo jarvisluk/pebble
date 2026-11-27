@@ -25,6 +25,8 @@ enum StageStateOps {
             return "doc.text"
         case .desktop:
             return "display"
+        case .task:
+            return "terminal"
         case .browser:
             return "globe"
         case .artifact:
@@ -85,6 +87,35 @@ enum StageStateOps {
         )
     }
 
+    static func taskTab(task: BotTask) -> StageTab {
+        let sub = [task.kind, (task.deviceId ?? "").isEmpty || task.deviceId == "local" ? nil : task.deviceId]
+            .compactMap { $0 }
+            .joined(separator: " · ")
+        return StageTab(
+            id: "task:\(task.id)",
+            kind: .task,
+            rawKind: StageKind.task.rawValue,
+            title: task.displayTitle,
+            subtitle: sub.isEmpty ? nil : sub,
+            botId: task.botId,
+            taskId: task.id,
+            closable: true
+        )
+    }
+
+    static func taskTab(taskId: String, title: String?, botId: String?, defaultTitle: String) -> StageTab {
+        let cleanTitle = (title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return StageTab(
+            id: "task:\(taskId)",
+            kind: .task,
+            rawKind: StageKind.task.rawValue,
+            title: cleanTitle.isEmpty ? defaultTitle : cleanTitle,
+            botId: botId,
+            taskId: taskId,
+            closable: true
+        )
+    }
+
     static func tab(from ref: StageRef, botId: String? = nil, filesTitle: String, desktopTitle: String, newTabTitle: String) -> StageTab {
         let kind = ref.resolvedKind
         switch kind {
@@ -133,6 +164,25 @@ enum StageStateOps {
         case .new:
             let rawTitle = (ref.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             return newTab(title: rawTitle.isEmpty ? newTabTitle : rawTitle)
+        case .task:
+            let rawId = (ref.id ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let resolvedTaskId: String = {
+                if let tid = ref.taskId?.trimmingCharacters(in: .whitespacesAndNewlines), !tid.isEmpty { return tid }
+                if rawId.hasPrefix("task:") { return String(rawId.dropFirst(5)) }
+                return rawId
+            }()
+            let rawTitle = (ref.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let rawSub = (ref.subtitle ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            return StageTab(
+                id: rawId.isEmpty ? "task:\(resolvedTaskId)" : rawId,
+                kind: .task,
+                rawKind: ref.kind,
+                title: rawTitle.isEmpty ? (resolvedTaskId.isEmpty ? "Task" : resolvedTaskId) : rawTitle,
+                subtitle: rawSub.isEmpty ? nil : rawSub,
+                botId: botId,
+                taskId: resolvedTaskId.isEmpty ? nil : resolvedTaskId,
+                closable: ref.closable ?? true
+            )
         case .browser, .artifact, .mcpApp:
             let rawTitle = (ref.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             let rawSub = (ref.subtitle ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -163,6 +213,7 @@ enum StageStateOps {
             url: ev.url,
             resourceUri: ev.resourceUri,
             target: ev.target,
+            taskId: ev.taskId,
             closable: ev.closable,
             createdAt: ev.createdAt
         )

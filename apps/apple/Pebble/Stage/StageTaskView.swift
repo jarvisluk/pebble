@@ -1,19 +1,25 @@
 import SwiftUI
 
-struct TaskInspectorSheet: View {
+struct StageTaskView: View {
     @Environment(HubStore.self) private var hub
-    @Environment(\.dismiss) private var dismiss
+    @Environment(Router.self) private var router
     @Environment(\.palette) private var p
 
     var botId: String
     var taskId: String
-    var onOpenDesktop: (String) -> Void
+    var inWideStage: Bool = false
 
     @State private var fallbackTask: BotTask?
     @State private var followUp = ""
     @State private var sending = false
     @State private var cancelling = false
     @State private var resolvingTakeover = false
+    @State private var diff: TaskDiffResult?
+    @State private var diffLoading = false
+    @State private var diffErr = ""
+    @State private var rollingBack = false
+    @State private var patchOpen = false
+    @State private var confirm: ConfirmItem?
     @State private var err = ""
 
     private var botIndex: Int { hub.bots.firstIndex { $0.id == botId } ?? -1 }
@@ -42,6 +48,11 @@ struct TaskInspectorSheet: View {
             return hub.takeovers.first(where: { $0.botId == botId })
         }
         return nil
+    }
+
+    private var hasWorktreeInfo: Bool {
+        guard let t = task else { return false }
+        return t.isolation == "worktree" || !(t.checkpointRef ?? "").isEmpty || !(t.worktreePath ?? "").isEmpty
     }
 
     private var liveOutputText: String {
@@ -103,89 +114,131 @@ struct TaskInspectorSheet: View {
     }
 
     var body: some View {
-        let cardFill = p.dark ? Color(hex: "#1c1c1e") : p.card
         let t = task
-        HubSheetScaffold(
-            title: t?.displayTitle ?? taskId,
-            closeTitle: hub.t("close"),
-            onClose: { dismiss() }
-        ) {
-            VStack(spacing: 0) {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 14) {
-                        if !err.isEmpty {
-                            StatusText(text: err)
+        let sectionFill = inWideStage ? p.s1 : p.card
+        let cardContent = VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack(alignment: .center, spacing: 10) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(t?.displayTitle ?? taskId)
+                                .font(.system(size: AppFont.title, weight: .semibold))
+                                .foregroundStyle(p.text)
+                                .lineLimit(2)
+                            if let t {
+                                let dev = taskDeviceLabel(t.deviceId, nodes: hub.nodes) ?? hub.t("taskDeviceLocal")
+                                let meta = [taskKindText(t.kind, hub: hub), dev, t.harness]
+                                    .compactMap { $0 }
+                                    .filter { !$0.isEmpty }
+                                    .joined(separator: " · ")
+                                if !meta.isEmpty {
+                                    Text(meta)
+                                        .font(.system(size: AppFont.caption))
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                }
+                            }
                         }
+
+                        Spacer(minLength: 8)
 
                         if let t {
-                            summaryCard(t, cardFill: cardFill)
+                            let vis = taskStatusVisual(t.status, palette: p)
+                            Tag(text: taskStatusText(t.status, hub: hub), bg: vis.bg, fg: vis.fg)
+                            if t.isActive {
+                                Button(hub.t("taskCancelBtn"), role: .destructive) {
+                                    cancelCurrentTask()
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                                .disabled(cancelling)
+                            }
                         }
-
-                        if let apr = matchingApproval {
-                            ApprovalCardView(approval: apr, pal: pal)
-                        }
-
-                        if let q = matchingQuestion {
-                            QuestionCardView(question: q, pal: pal)
-                        }
-
-                        if let to = matchingTakeover {
-                            takeoverActionCard(to, cardFill: cardFill)
-                        }
-
-                        outputCard(cardFill: cardFill)
-
-                        timelineCard(cardFill: cardFill)
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 8)
-                    .padding(.bottom, 20)
-                }
-                .scrollDismissesKeyboard(.interactively)
+                    .padding(.bottom, 2)
 
-                if t?.status != "cancelled" {
-                    followUpBar
+                    if !err.isEmpty {
+                        StatusText(text: err)
+                    }
+
+                    if let t {
+                        summaryCard(t, fill: sectionFill)
+                    }
+
+                    if let apr = matchingApproval {
+                        ApprovalCardView(approval: apr, pal: pal)
+                    }
+
+                    if let q = matchingQuestion {
+                        QuestionCardView(question: q, pal: pal)
+                    }
+
+                    if let to = matchingTakeover {
+                        takeoverActionCard(to, fill: sectionFill)
+                    }
+
+                    outputCard(fill: sectionFill)
+
+                    if hasWorktreeInfo, let t {
+                        diffCard(t, fill: sectionFill)
+                    }
+
+                    timelineCard(fill: sectionFill)
                 }
+                .frame(maxWidth: 760, alignment: .leading)
+                .padding(16)
+                .frame(maxWidth: .infinity)
+            }
+            .scrollDismissesKeyboard(.interactively)
+
+            if t?.status != "cancelled" {
+                followUpBar
             }
         }
+
+        Group {
+            if inWideStage {
+                cardContent
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(p.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    .padding(12)
+            } else {
+                cardContent
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .background(p.page)
+        .confirmAlert($confirm)
         .task(id: taskId) {
             await loadInspectorData()
         }
         .onChange(of: task?.status) { _, _ in
-            Task { await refreshEventsIncremental() }
+            Task {
+                await refreshEventsIncremental()
+                if hasWorktreeInfo && (task?.isTerminal ?? false) {
+                    await loadDiff()
+                }
+            }
         }
         .onChange(of: hub.taskTools[taskId]) { _, _ in
             Task { await refreshEventsIncremental() }
         }
     }
 
-    private func summaryCard(_ t: BotTask, cardFill: Color) -> some View {
-        let vis = taskStatusVisual(t.status, palette: p)
-        let deviceLabel = taskDeviceLabel(t.deviceId, nodes: hub.nodes)
+    private func summaryCard(_ t: BotTask, fill: Color) -> some View {
         let activeTool = t.status == "running" ? (hub.taskTools[t.id] ?? "") : ""
         let dur = formatDurationMs(t.durationMs)
+        let details = [
+            (t.model ?? "").isEmpty ? nil : t.model!,
+            (t.permissionMode ?? "").isEmpty ? nil : t.permissionMode!,
+            (t.isolation ?? "").isEmpty ? nil : t.isolation!,
+            (diff?.branch ?? t.branch ?? "").isEmpty ? nil : (diff?.branch ?? t.branch!),
+            dur.isEmpty ? nil : dur,
+            (t.costUsd ?? 0) > 0 ? String(format: "$%.4f", t.costUsd!) : nil,
+        ].compactMap { $0 }
 
-        return VStack(alignment: .leading, spacing: 10) {
-            FlowLayout(spacing: 6) {
-                Tag(text: taskStatusText(t.status, hub: hub), bg: vis.bg, fg: vis.fg)
-                Tag(text: taskKindText(t.kind, hub: hub), bg: p.s1, fg: .secondary)
-                if let deviceLabel {
-                    Tag(text: deviceLabel, bg: p.lilac, fg: p.lilacInk)
-                } else {
-                    Tag(text: hub.t("taskDeviceLocal"), bg: p.s1, fg: .secondary)
-                }
-                if let h = t.harness, !h.isEmpty {
-                    Tag(text: h, bg: p.s1, fg: .secondary)
-                }
-            }
-
-            let details = [
-                (t.model ?? "").isEmpty ? nil : t.model!,
-                (t.permissionMode ?? "").isEmpty ? nil : t.permissionMode!,
-                dur.isEmpty ? nil : dur,
-                (t.costUsd ?? 0) > 0 ? String(format: "$%.4f", t.costUsd!) : nil,
-            ].compactMap { $0 }
-
+        return VStack(alignment: .leading, spacing: 8) {
             if !details.isEmpty {
                 Text(details.joined(separator: " · "))
                     .font(.system(size: AppFont.caption, design: .monospaced))
@@ -216,25 +269,13 @@ struct TaskInspectorSheet: View {
             if let e = t.error, !e.isEmpty {
                 StatusText(text: e)
             }
-
-            if t.isActive {
-                HStack {
-                    Spacer()
-                    Button(hub.t("taskCancelBtn"), role: .destructive) {
-                        cancelCurrentTask()
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .disabled(cancelling)
-                }
-            }
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(cardFill, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .background(fill, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
-    private func takeoverActionCard(_ to: TakeoverRequest, cardFill: Color) -> some View {
+    private func takeoverActionCard(_ to: TakeoverRequest, fill: Color) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text(hub.t("taskWaitingTakeoverTitle"))
@@ -269,8 +310,7 @@ struct TaskInspectorSheet: View {
 
                 Button(hub.t("taskOpenTakeover")) {
                     let target = (to.target ?? "").isEmpty ? "local" : to.target!
-                    dismiss()
-                    onOpenDesktop(target)
+                    router.openDesktop(target, botId: botId)
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(pal.accent)
@@ -278,10 +318,10 @@ struct TaskInspectorSheet: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(cardFill, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .background(fill, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
-    private func outputCard(cardFill: Color) -> some View {
+    private func outputCard(fill: Color) -> some View {
         let out = liveOutputText
         return VStack(alignment: .leading, spacing: 8) {
             Text(hub.t("taskOutputTitle"))
@@ -298,10 +338,96 @@ struct TaskInspectorSheet: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(cardFill, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .background(fill, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
-    private func timelineCard(cardFill: Color) -> some View {
+    private func diffCard(_ t: BotTask, fill: Color) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Text(hub.t("taskDiffTitle"))
+                    .font(.system(size: AppFont.secondary, weight: .semibold))
+                    .foregroundStyle(p.mute)
+                Spacer()
+                Button(hub.t("taskDiffRefresh")) {
+                    Task { await loadDiff() }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(diffLoading)
+
+                if t.isTerminal, !(diff?.checkpointRef ?? t.checkpointRef ?? "").isEmpty {
+                    Button(hub.t("taskRollbackBtn"), role: .destructive) {
+                        confirm = ConfirmItem(
+                            title: hub.t("taskRollbackConfirmTitle", ["title": t.displayTitle]),
+                            message: hub.t("taskRollbackConfirmDesc")
+                        ) {
+                            await performRollback()
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(rollingBack)
+                }
+            }
+
+            if !diffErr.isEmpty {
+                StatusText(text: diffErr)
+            } else if diffLoading && diff == nil {
+                ProgressView().controlSize(.small)
+            } else if let diff, !diff.files.isEmpty || !diff.patch.isEmpty {
+                ForEach(diff.files) { file in
+                    HStack(spacing: 8) {
+                        Text(file.status ?? "M")
+                            .font(.system(size: AppFont.caption, weight: .bold, design: .monospaced))
+                            .foregroundStyle(p.text2)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(inWideStage ? p.card : p.s1, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        Text(file.path)
+                            .font(.system(size: AppFont.caption, design: .monospaced))
+                            .foregroundStyle(p.text)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Spacer()
+                        let adds = file.additions ?? 0
+                        let dels = file.deletions ?? 0
+                        if adds > 0 || dels > 0 {
+                            Text("+\(adds) -\(dels)")
+                                .font(.system(size: AppFont.caption, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                if !diff.patch.isEmpty {
+                    Button(hub.t(patchOpen ? "taskDiffHidePatch" : "taskDiffShowPatch")) {
+                        patchOpen.toggle()
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+
+                    if patchOpen {
+                        ScrollView(.horizontal, showsIndicators: true) {
+                            Text(diff.patch)
+                                .font(.system(size: AppFont.caption, design: .monospaced))
+                                .foregroundStyle(p.text)
+                                .textSelection(.enabled)
+                                .padding(10)
+                        }
+                        .background(inWideStage ? p.card : p.s1, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    }
+                }
+            } else {
+                Text(hub.t("taskDiffEmpty"))
+                    .font(.system(size: AppFont.secondary))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(fill, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private func timelineCard(fill: Color) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(hub.t("taskTimelineTitle"))
                 .font(.system(size: AppFont.secondary, weight: .semibold))
@@ -349,7 +475,7 @@ struct TaskInspectorSheet: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(cardFill, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .background(fill, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     private var followUpBar: some View {
@@ -360,7 +486,7 @@ struct TaskInspectorSheet: View {
                 .lineLimit(1...4)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
-                .background(p.s1, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .background(inWideStage ? p.s1 : p.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .hubSubmitOnReturn(disabled: sending || followUp.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) {
                     sendFollowUp()
                 }
@@ -379,20 +505,48 @@ struct TaskInspectorSheet: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
-        .background(p.page)
         .overlay(alignment: .top) {
             Rectangle().fill(p.s2).frame(height: 0.5)
         }
     }
 
     private func loadInspectorData() async {
-        if task == nil {
-            if let fetched: BotTask = try? await hub.callAPI("/api/tasks/\(enc(taskId))") {
-                fallbackTask = fetched
-                hub.upsertBotTask(fetched)
-            }
+        fallbackTask = nil
+        diff = nil
+        diffErr = ""
+        patchOpen = false
+        err = ""
+        if let fetched: BotTask = try? await hub.callAPI("/api/tasks/\(enc(taskId))") {
+            fallbackTask = fetched
+            hub.upsertBotTask(fetched)
         }
         _ = try? await hub.fetchTaskEvents(taskId)
+        if hasWorktreeInfo {
+            await loadDiff()
+        }
+    }
+
+    private func loadDiff() async {
+        diffLoading = true
+        defer { diffLoading = false }
+        do {
+            diff = try await hub.fetchTaskDiff(taskId)
+            diffErr = ""
+        } catch {
+            diffErr = errText(error, hub.t("opFailed"))
+        }
+    }
+
+    private func performRollback() async {
+        rollingBack = true
+        defer { rollingBack = false }
+        do {
+            _ = try await hub.rollbackTask(taskId, removeWorktree: false)
+            diffErr = ""
+            await loadDiff()
+        } catch {
+            diffErr = errText(error, hub.t("opFailed"))
+        }
     }
 
     private func refreshEventsIncremental() async {
@@ -450,20 +604,18 @@ struct TaskInspectorSheet: View {
         switch ev.eventType {
         case "status":
             let st = eventField(ev.payload, "status") ?? ""
-            let e = eventField(ev.payload, "error")
             return TimelineRow(
                 id: "ev_\(ev.seq)",
                 eventType: ev.eventType,
                 summary: taskStatusText(st, hub: hub),
-                detail: e,
+                detail: eventField(ev.payload, "error"),
                 createdAt: ev.createdAt
             )
         case "tool_use":
-            let tool = eventField(ev.payload, "tool") ?? ""
             return TimelineRow(
                 id: "ev_\(ev.seq)",
                 eventType: ev.eventType,
-                summary: tool,
+                summary: eventField(ev.payload, "tool") ?? "",
                 detail: nil,
                 createdAt: ev.createdAt
             )
@@ -479,29 +631,26 @@ struct TaskInspectorSheet: View {
             )
         case "approval":
             let tool = eventField(ev.payload, "toolName") ?? eventField(ev.payload, "title") ?? ""
-            let sum = eventField(ev.payload, "summary")
             return TimelineRow(
                 id: "ev_\(ev.seq)",
                 eventType: ev.eventType,
                 summary: tool.isEmpty ? hub.t("approvalTitle") : tool,
-                detail: sum,
+                detail: eventField(ev.payload, "summary"),
                 createdAt: ev.createdAt
             )
         case "question":
-            let title = eventField(ev.payload, "title") ?? hub.t("questionTitle")
             return TimelineRow(
                 id: "ev_\(ev.seq)",
                 eventType: ev.eventType,
-                summary: title,
+                summary: eventField(ev.payload, "title") ?? hub.t("questionTitle"),
                 detail: nil,
                 createdAt: ev.createdAt
             )
         case "takeover":
-            let target = eventField(ev.payload, "target") ?? "local"
             return TimelineRow(
                 id: "ev_\(ev.seq)",
                 eventType: ev.eventType,
-                summary: target,
+                summary: eventField(ev.payload, "target") ?? "local",
                 detail: eventField(ev.payload, "state"),
                 createdAt: ev.createdAt
             )

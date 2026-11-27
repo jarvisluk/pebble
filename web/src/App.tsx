@@ -42,11 +42,13 @@ import {
   createDesktopTab,
   createFilesTab,
   createNewTab,
+  createTaskTab,
   ensureNonEmptyStageState,
   replaceNewTabOrOpen,
   stageTabFromRef,
   upsertTab,
 } from './lib/stageTabs';
+import { upsertTaskList } from './lib/tasks';
 import { Sidebar } from './components/Sidebar';
 import { ChatView } from './components/ChatView';
 import { AppOverlays } from './components/AppOverlays';
@@ -75,7 +77,6 @@ export default function App() {
   const [taskToolMap, setTaskToolMap] = useState<Record<string, string>>({});
   const [taskChunksMap, setTaskChunksMap] = useState<Record<string, string>>({});
   const [taskEventSeqMap, setTaskEventSeqMap] = useState<Record<string, number>>({});
-  const [inspectedTaskId, setInspectedTaskId] = useState<string | null>(null);
   const [filter, setFilter] = useState('');
   const [settings, setSettings] = useState<SettingsData | null>(null);
   const [modelsMap, setModelsMap] = useState<Record<string, string[]>>({});
@@ -322,7 +323,6 @@ export default function App() {
     setMobileSideOpen(false);
     setPanelOpen(false);
     setCollabPeerId(null);
-    setInspectedTaskId(null);
     setCreateOpen(false);
   }, []);
 
@@ -420,7 +420,7 @@ export default function App() {
     }
   }, [activeBotId, activeBot?.desktopTarget]);
   const effectiveNodes = nodesFromEvents ?? nodes;
-  const shadeOpen = mobileSideOpen || panelOpen || Boolean(collabPeerId) || Boolean(inspectedTaskId);
+  const shadeOpen = mobileSideOpen || panelOpen || Boolean(collabPeerId);
 
 
   const openStageShell = useCallback(() => {
@@ -459,6 +459,21 @@ export default function App() {
       openStageShell();
     },
     [openStageShell]
+  );
+
+  const openTaskInStage = useCallback(
+    (botId: string, taskOrId: BotTask | string) => {
+      if (!botId) return;
+      const resolved =
+        typeof taskOrId === 'string'
+          ? (tasksMap[botId] || []).find((item) => item.id === taskOrId) || {
+              id: taskOrId,
+              botId,
+            }
+          : taskOrId;
+      openStageWithTab(botId, createTaskTab(resolved, t), false);
+    },
+    [openStageWithTab, t, tasksMap]
   );
 
   const openStageByRef = useCallback(
@@ -581,7 +596,6 @@ export default function App() {
     createOpen,
     panelOpen,
     collabPeerId,
-    inspectedTaskId,
     mobileSideOpen,
     deskOpen,
     viewRef,
@@ -598,7 +612,6 @@ export default function App() {
     setView,
     setSideWidth,
     setSideResizing,
-    setInspectedTaskId,
   });
 
   if (unboxOpen) {
@@ -813,7 +826,9 @@ export default function App() {
             onSwitchBackLocal={() => void selectDesktopTarget('local')}
             onResolveTakeover={(to) => void handleResolveTakeover(to)}
             onOpenDetail={() => void openPanel()}
-            onInspectTask={(taskId) => setInspectedTaskId(taskId)}
+            onInspectTask={(taskId) => {
+              if (activeBotId) openTaskInStage(activeBotId, taskId);
+            }}
             onOpenCollab={(peerId) => {
               setPanelOpen(false);
               setCollabPeerId(peerId);
@@ -893,6 +908,8 @@ export default function App() {
         msgsMap={msgsMap}
         tasksMap={tasksMap}
         taskToolMap={taskToolMap}
+        taskChunksMap={taskChunksMap}
+        taskEventSeqMap={taskEventSeqMap}
         nodes={effectiveNodes}
         seenIds={seenIdsRef.current}
         toolMap={toolMap}
@@ -942,6 +959,13 @@ export default function App() {
         setCreateOpen={setCreateOpen}
         setStageInsert={setStageInsert}
         setTakeovers={setTakeovers}
+        onConfirm={setConfirmOpts}
+        onTaskUpdated={(task) => {
+          setTasksMap((prev) => ({
+            ...prev,
+            [task.botId]: upsertTaskList(prev[task.botId] || [], task),
+          }));
+        }}
         closeAllOverlays={closeAllOverlays}
         selectBot={selectBot}
         selectDesktopTarget={selectDesktopTarget}
@@ -953,8 +977,7 @@ export default function App() {
         handleSendMessage={handleSendMessage}
         handleInterrupt={handleInterrupt}
         onInspectTask={(taskId) => {
-          setDeskOpen(false);
-          setInspectedTaskId(taskId);
+          if (activeBotId) openTaskInStage(activeBotId, taskId);
         }}
         onOpenPermissions={() => {
           setDeskOpen(false);
@@ -973,13 +996,6 @@ export default function App() {
         bots={bots}
         nodes={effectiveNodes}
         tasksMap={tasksMap}
-        taskToolMap={taskToolMap}
-        taskChunksMap={taskChunksMap}
-        taskEventSeqMap={taskEventSeqMap}
-        inspectedTaskId={inspectedTaskId}
-        approvals={approvals}
-        questions={questions}
-        takeovers={takeovers}
         settings={settings}
         modelsMap={modelsMap}
         routineRefreshSeq={routineRefreshSeq}
@@ -998,7 +1014,6 @@ export default function App() {
         closeAllOverlays={closeAllOverlays}
         setPanelOpen={setPanelOpen}
         setTasksMap={setTasksMap}
-        setInspectedTaskId={setInspectedTaskId}
         showToast={showToast}
         setConfirmOpts={setConfirmOpts}
         setBots={setBots}
@@ -1009,17 +1024,12 @@ export default function App() {
         setSettings={setSettings}
         selectBot={selectBot}
         onOpenBotFiles={(botId) => openStageWithTab(botId, createFilesTab(t), false)}
+        onInspectTask={(botId, taskId) => {
+          if (botId !== activeBotId) void selectBot(botId);
+          openTaskInStage(botId, taskId);
+        }}
         setCollabPeerId={setCollabPeerId}
         setCreateOpen={setCreateOpen}
-        onReplyApproval={handleReplyApproval}
-        onReplyQuestion={handleReplyQuestion}
-        onResolveTakeover={handleResolveTakeover}
-        onOpenDesktopTarget={(target) => {
-          void selectDesktopTarget(target || 'local');
-          setStageKind('desktop');
-          setActiveStageTabId('desktop');
-          setDeskOpen(true);
-        }}
         onLoginSuccess={async () => {
           setLoginOpen(false);
           setUnsupportedCaps(new Set());

@@ -24,22 +24,32 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import ai.pebble.android.data.BotTask
 import ai.pebble.android.data.PebbleStore
+import ai.pebble.android.ui.chat.taskDeviceLabel
+import ai.pebble.android.ui.chat.taskStatusColors
+import ai.pebble.android.ui.chat.taskStatusText
 import ai.pebble.android.ui.theme.LocalPalette
 import ai.pebble.android.ui.theme.PebbleFont
 import ai.pebble.android.ui.theme.PebbleIcons
+import ai.pebble.android.ui.theme.TagPill
 
 @Composable
 internal fun StageNewTabView(
     store: PebbleStore,
+    botId: String,
     canUseFiles: Boolean,
     inWideStage: Boolean,
     onOpenFiles: () -> Unit,
     onOpenDesktop: () -> Unit,
+    onOpenTask: (BotTask) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val p = LocalPalette.current
+    val allTasks = store.tasks[botId].orEmpty()
+    val launcherTasks = (allTasks.filter { it.isActive } + allTasks.filter { it.isTerminal }).take(8)
 
     val content: @Composable () -> Unit = {
         Box(
@@ -86,6 +96,80 @@ internal fun StageNewTabView(
                     inWideStage = inWideStage,
                     onClick = onOpenDesktop,
                 )
+
+                if (launcherTasks.isNotEmpty()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = store.t("stageTasksSection"),
+                            color = p.mute,
+                            fontSize = PebbleFont.caption,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.weight(1f),
+                        )
+                        TagPill("${launcherTasks.size}", p.s1, p.text2)
+                    }
+
+                    launcherTasks.forEach { task ->
+                        val (fg, bg) = taskStatusColors(task.status, p)
+                        val dev = taskDeviceLabel(task.deviceId, store.nodes) ?: store.t("taskDeviceLocal")
+                        val meta = listOfNotNull(dev, task.harness?.takeIf { it.isNotEmpty() }).joinToString(" · ")
+                        val shape = RoundedCornerShape(16.dp)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(shape)
+                                .background(if (inWideStage) p.s1 else p.card)
+                                .border(0.5.dp, p.s2, shape)
+                                .clickable { onOpenTask(task) }
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(34.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(if (inWideStage) p.card else p.s1),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    painter = painterResource(PebbleIcons.List),
+                                    contentDescription = null,
+                                    tint = p.text,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                            }
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(2.dp),
+                            ) {
+                                Text(
+                                    text = task.displayTitle,
+                                    color = p.text,
+                                    fontSize = PebbleFont.cardTitle,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                if (meta.isNotEmpty()) {
+                                    Text(
+                                        text = meta,
+                                        color = p.text2,
+                                        fontSize = PebbleFont.caption,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                            }
+                            TagPill(taskStatusText(task.status, store), bg, fg)
+                        }
+                    }
+                }
             }
         }
     }

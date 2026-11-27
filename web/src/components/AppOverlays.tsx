@@ -6,18 +6,13 @@ import type {
   ChatMessage,
   ConfirmOptions,
   NodeInfo,
-  PendingApproval,
-  PendingQuestion,
   ResolvedLang,
   SettingsData,
-  TakeoverRequest,
 } from '../types';
 import { translate } from '../lib/i18n';
-import { upsertTaskList } from '../lib/tasks';
 import { BotDetailPanel } from './BotDetailPanel';
 import { CollabPanel } from './CollabPanel';
 import { ConfirmModal, CreateBotModal, LoginModal } from './Modals';
-import { TaskInspectorDrawer } from './tasks/TaskInspectorDrawer';
 
 interface AppOverlaysProps {
   shadeOpen: boolean;
@@ -26,13 +21,6 @@ interface AppOverlaysProps {
   bots: BotStatus[];
   nodes: NodeInfo[];
   tasksMap: Record<string, BotTask[]>;
-  taskToolMap: Record<string, string>;
-  taskChunksMap: Record<string, string>;
-  taskEventSeqMap: Record<string, number>;
-  inspectedTaskId: string | null;
-  approvals: PendingApproval[];
-  questions: PendingQuestion[];
-  takeovers: TakeoverRequest[];
   settings: SettingsData | null;
   modelsMap: Record<string, string[]>;
   routineRefreshSeq: number;
@@ -51,7 +39,6 @@ interface AppOverlaysProps {
   closeAllOverlays: () => void;
   setPanelOpen: React.Dispatch<React.SetStateAction<boolean>>;
   setTasksMap: React.Dispatch<React.SetStateAction<Record<string, BotTask[]>>>;
-  setInspectedTaskId: React.Dispatch<React.SetStateAction<string | null>>;
   showToast: (msg: string) => void;
   setConfirmOpts: React.Dispatch<React.SetStateAction<ConfirmOptions | null>>;
   setBots: React.Dispatch<React.SetStateAction<BotStatus[]>>;
@@ -62,17 +49,9 @@ interface AppOverlaysProps {
   setSettings: React.Dispatch<React.SetStateAction<SettingsData | null>>;
   selectBot: (id: string) => Promise<void>;
   onOpenBotFiles: (botId: string) => void;
+  onInspectTask: (botId: string, taskId: string) => void;
   setCollabPeerId: React.Dispatch<React.SetStateAction<string | null>>;
   setCreateOpen: React.Dispatch<React.SetStateAction<boolean>>;
-  onReplyApproval: (
-    id: string,
-    decision: 'allow_once' | 'allow_always' | 'reject',
-    optionId?: string,
-    reason?: string
-  ) => Promise<void>;
-  onReplyQuestion: (id: string, answers: Record<string, unknown>, cancelled: boolean) => Promise<void>;
-  onResolveTakeover: (to: TakeoverRequest) => Promise<void>;
-  onOpenDesktopTarget: (target: string) => void;
   onLoginSuccess: () => Promise<void>;
 }
 
@@ -83,13 +62,6 @@ export const AppOverlays: React.FC<AppOverlaysProps> = ({
   bots,
   nodes,
   tasksMap,
-  taskToolMap,
-  taskChunksMap,
-  taskEventSeqMap,
-  inspectedTaskId,
-  approvals,
-  questions,
-  takeovers,
   settings,
   modelsMap,
   routineRefreshSeq,
@@ -108,7 +80,6 @@ export const AppOverlays: React.FC<AppOverlaysProps> = ({
   closeAllOverlays,
   setPanelOpen,
   setTasksMap,
-  setInspectedTaskId,
   showToast,
   setConfirmOpts,
   setBots,
@@ -119,28 +90,12 @@ export const AppOverlays: React.FC<AppOverlaysProps> = ({
   setSettings,
   selectBot,
   onOpenBotFiles,
+  onInspectTask,
   setCollabPeerId,
   setCreateOpen,
-  onReplyApproval,
-  onReplyQuestion,
-  onResolveTakeover,
-  onOpenDesktopTarget,
   onLoginSuccess,
 }) => {
   const t = (k: string, vars?: Record<string, string | number>) => translate(lang, k, vars);
-
-  const inspectedTask = inspectedTaskId
-    ? Object.values(tasksMap)
-        .flat()
-        .find((item) => item.id === inspectedTaskId) || null
-    : null;
-
-  const handleTaskUpsert = (task: BotTask) => {
-    setTasksMap((prev) => ({
-      ...prev,
-      [task.botId]: upsertTaskList(prev[task.botId] || [], task),
-    }));
-  };
 
   return (
     <>
@@ -171,38 +126,15 @@ export const AppOverlays: React.FC<AppOverlaysProps> = ({
       onTasksLoaded={(botId, list) => {
         setTasksMap((prev) => ({ ...prev, [botId]: list }));
       }}
-      onTaskCreated={handleTaskUpsert}
-      onInspectTask={(taskId) => setInspectedTaskId(taskId)}
+      onInspectTask={(taskId) => {
+        if (panelDetail?.id) onInspectTask(panelDetail.id, taskId);
+      }}
       onSettingsUpdated={setSettings}
       onOpenFiles={(botId) => {
         if (!canUseFiles) return;
         setPanelOpen(false);
         if (botId !== activeBotId) void selectBot(botId);
         onOpenBotFiles(botId);
-      }}
-    />
-
-    <TaskInspectorDrawer
-      open={Boolean(inspectedTaskId)}
-      task={inspectedTask}
-      bots={bots}
-      nodes={nodes}
-      liveTool={inspectedTask ? taskToolMap[inspectedTask.id] : undefined}
-      liveChunk={inspectedTask ? taskChunksMap[inspectedTask.id] || '' : ''}
-      taskRefreshSeq={inspectedTask ? taskEventSeqMap[inspectedTask.id] || 0 : 0}
-      approvals={approvals}
-      questions={questions}
-      takeovers={takeovers}
-      lang={lang}
-      onClose={() => setInspectedTaskId(null)}
-      onToast={showToast}
-      onTaskUpdated={handleTaskUpsert}
-      onReplyApproval={onReplyApproval}
-      onReplyQuestion={onReplyQuestion}
-      onResolveTakeover={onResolveTakeover}
-      onOpenDesktopTarget={(target) => {
-        setInspectedTaskId(null);
-        onOpenDesktopTarget(target);
       }}
     />
 

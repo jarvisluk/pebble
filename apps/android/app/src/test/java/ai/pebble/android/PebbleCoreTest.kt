@@ -16,6 +16,7 @@ import ai.pebble.android.data.StageKind
 import ai.pebble.android.data.StageOpenEvent
 import ai.pebble.android.data.StageRef
 import ai.pebble.android.data.TakeoverRequest
+import ai.pebble.android.data.TaskDiffResult
 import ai.pebble.android.data.countToolCalls
 import ai.pebble.android.data.formatDurationMs
 import ai.pebble.android.data.normalizeAddress
@@ -301,5 +302,34 @@ class PebbleCoreTest {
         st = StageStateOps.close(st, "desktop", newTabTitle = "New Tab")
         assertEquals(1, st.tabs.size)
         assertEquals(StageKind.NEW, st.activeTab?.kind)
+
+        val taskRef = StageRef(id = "task:tsk_1", kind = "task", taskId = "tsk_1", title = "Audit")
+        assertEquals(StageKind.TASK, taskRef.resolvedKind)
+        val taskTab = StageStateOps.tabFromRef(
+            ref = taskRef,
+            botId = "b1",
+            filesTitle = "Files",
+            desktopTitle = "Desktop",
+            newTabTitle = "New Tab",
+        )
+        assertEquals(StageKind.TASK, taskTab.kind)
+        assertEquals("tsk_1", taskTab.taskId)
+        assertEquals("Audit", taskTab.title)
+
+        val diff = HubJson.decodeFromString<TaskDiffResult>(
+            """{"taskId":"tsk_1","branch":"pebble/tsk_1","checkpointRef":"refs/pebble/ckpt/tsk_1","files":[{"path":"README.md","status":"M","additions":2,"deletions":1}],"patch":"diff --git a/README.md b/README.md"}""",
+        )
+        assertEquals("tsk_1", diff.taskId)
+        assertEquals("pebble/tsk_1", diff.branch)
+        assertEquals(1, diff.files.size)
+
+        val stripFiltered = ai.pebble.android.ui.chat.stripTasks(
+            listOf(
+                BotTask(id = "t_run", botId = "b1", kind = "worker", prompt = "run", status = "running"),
+                BotTask(id = "t_wait", botId = "b1", kind = "worker", prompt = "wait", status = "waiting_approval"),
+                BotTask(id = "t_done", botId = "b1", kind = "worker", prompt = "done", status = "completed"),
+            ),
+        )
+        assertEquals(listOf("t_run", "t_wait"), stripFiltered.map { it.id })
     }
 }

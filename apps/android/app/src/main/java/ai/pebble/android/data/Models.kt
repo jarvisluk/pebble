@@ -545,6 +545,11 @@ data class BotTask(
     val model: String? = null,
     val permissionMode: String? = null,
     val workdir: String? = null,
+    val workspaceId: String? = null,
+    val isolation: String? = null,
+    val branch: String? = null,
+    val worktreePath: String? = null,
+    val checkpointRef: String? = null,
     val delivery: String? = null,
     val dependsOn: List<String>? = null,
     val parentTaskId: String? = null,
@@ -606,6 +611,33 @@ data class BotTaskEvent(
 @Serializable data class RunsResp(val runs: List<RoutineRun>? = null)
 @Serializable data class TasksResp(val tasks: List<BotTask>? = null)
 @Serializable data class TaskEventsResp(val events: List<BotTaskEvent>? = null)
+
+@Serializable
+data class TaskDiffFile(
+    val path: String,
+    val status: String? = null,
+    val additions: Int? = null,
+    val deletions: Int? = null,
+)
+
+@Serializable
+data class TaskDiffResult(
+    val taskId: String,
+    val branch: String? = null,
+    val worktreePath: String? = null,
+    val checkpointRef: String? = null,
+    val files: List<TaskDiffFile> = emptyList(),
+    val patch: String = "",
+)
+
+@Serializable
+data class TaskRollbackResult(
+    val taskId: String,
+    val rolledBack: Boolean = false,
+    val removedWorktree: Boolean? = null,
+    val branch: String? = null,
+    val worktreePath: String? = null,
+)
 @Serializable data class ModelsResp(val models: List<String>? = null)
 @Serializable data class TextResp(val text: String? = null)
 @Serializable data class InterruptResp(val interrupted: Boolean? = null)
@@ -632,6 +664,7 @@ enum class StageKind(val raw: String) {
     FILES("files"),
     FILE("file"),
     DESKTOP("desktop"),
+    TASK("task"),
     BROWSER("browser"),
     ARTIFACT("artifact"),
     MCP_APP("mcp_app");
@@ -657,6 +690,7 @@ data class StageRef(
     val url: String? = null,
     val resourceUri: String? = null,
     val target: String? = null,
+    val taskId: String? = null,
     val closable: Boolean? = null,
     val createdAt: String? = null,
 ) {
@@ -673,6 +707,7 @@ data class StageRef(
                     val dest = target?.trim().orEmpty().ifEmpty { "local" }
                     if (dest == "local") "desktop" else "desktop:$dest"
                 }
+                StageKind.TASK -> "task:${taskId.orEmpty().ifEmpty { "default" }}"
                 StageKind.NEW -> "new"
                 StageKind.BROWSER -> "browser:${url.orEmpty().ifEmpty { "default" }}"
                 StageKind.ARTIFACT -> "artifact:${path.orEmpty().ifEmpty { title.orEmpty().ifEmpty { "default" } }}"
@@ -692,6 +727,7 @@ data class StageTab(
     val url: String? = null,
     val resourceUri: String? = null,
     val target: String? = null,
+    val taskId: String? = null,
     val closable: Boolean = true,
 ) {
     val isDesktop: Boolean get() = kind == StageKind.DESKTOP
@@ -750,6 +786,7 @@ data class StageOpenEvent(
     val url: String? = null,
     val resourceUri: String? = null,
     val target: String? = null,
+    val taskId: String? = null,
     val closable: Boolean? = null,
     val autoOpen: Boolean? = null,
     val createdAt: String? = null,
