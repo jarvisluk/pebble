@@ -45,13 +45,13 @@ struct BotDetailView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     desktopPreviewCard
+                    RoutinesSection(botId: botId)
                     BotTasksSection(
                         botId: botId,
                         onSelectTask: { task in
                             router.openTask(botId: botId, task: task)
                         }
                     )
-                    RoutinesSection(botId: botId)
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 6)

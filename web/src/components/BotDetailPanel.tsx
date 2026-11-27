@@ -298,6 +298,15 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
               onToast={onToast}
             />
 
+            <BotRoutinesSection
+              open={open}
+              botId={detail.id}
+              routineRefreshSeq={routineRefreshSeq}
+              lang={lang}
+              onToast={onToast}
+              onConfirm={onConfirm}
+            />
+
             <BotTasksSection
               open={open}
               detail={detail}
@@ -306,15 +315,6 @@ export const BotDetailPanel: React.FC<BotDetailPanelProps> = ({
               lang={lang}
               onTasksLoaded={onTasksLoaded}
               onInspectTask={onInspectTask}
-            />
-
-            <BotRoutinesSection
-              open={open}
-              botId={detail.id}
-              routineRefreshSeq={routineRefreshSeq}
-              lang={lang}
-              onToast={onToast}
-              onConfirm={onConfirm}
             />
 
             <BotTechDetailsSection

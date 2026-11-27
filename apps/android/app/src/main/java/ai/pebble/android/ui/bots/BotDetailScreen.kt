@@ -348,20 +348,20 @@ fun BotDetailScreen(
                 }
             }
 
-            // Tasks & Activity
-            BotTasksBlock(
-                store = store,
-                botId = botId,
-                onSelectTask = onOpenTask,
-                onError = { err = it },
-            )
-
             // Routines
             RoutinesBlock(
                 store = store,
                 botId = botId,
                 onCreate = { creatingRoutine = true },
                 onEdit = { editingRoutine = it },
+                onError = { err = it },
+            )
+
+            // Tasks & Activity
+            BotTasksBlock(
+                store = store,
+                botId = botId,
+                onSelectTask = onOpenTask,
                 onError = { err = it },
             )
 
