@@ -363,4 +363,13 @@ func TestRoutinePermissionModeForwarding(t *testing.T) {
 	if last.OnPermission != nil {
 		t.Fatal("expected unattended routine to have OnPermission == nil")
 	}
+
+	// Verify routine execution is unified into bot_tasks with kind="routine".
+	tasks, err := h.ListTasks("ops", state.TaskListFilter{Kind: state.TaskKindRoutine})
+	if err != nil || len(tasks) != 1 {
+		t.Fatalf("expected 1 routine BotTask, got %+v err=%v", tasks, err)
+	}
+	if tasks[0].ID != res.ID || tasks[0].RoutineID != "ro-check" || tasks[0].Status != state.TaskStatusCompleted {
+		t.Fatalf("unexpected routine BotTask: %+v (run=%+v)", tasks[0], res)
+	}
 }

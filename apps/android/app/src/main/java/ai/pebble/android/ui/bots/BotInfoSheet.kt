@@ -456,19 +456,6 @@ fun BotInfoSheet(
                         memLoading && m == null -> CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = p.accent)
                         m?.installed != true -> {
                             Text(store.t("hostNoMagpie"), color = p.text2, fontSize = PebbleFont.body)
-                            TextButton(
-                                onClick = {
-                                    scope.launch {
-                                        runCatching {
-                                            store.installMagpie()
-                                            loadMem()
-                                        }.onFailure { err = errText(it, store.t("opFailed")) }
-                                    }
-                                },
-                                contentPadding = PaddingValues(0.dp),
-                            ) {
-                                Text(store.t("mpInstallOnHost"), color = pal.accent, fontSize = PebbleFont.body)
-                            }
                         }
                         m.available != true -> {
                             Text(store.t("magpieNoResp"), color = p.danger, fontSize = PebbleFont.body)

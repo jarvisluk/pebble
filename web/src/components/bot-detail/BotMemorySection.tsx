@@ -1,26 +1,21 @@
 import React, { useEffect, useState } from 'react';
-import type { MemoryResponse, ResolvedLang, SettingsData } from '../../types';
+import type { MemoryResponse, ResolvedLang } from '../../types';
 import { api } from '../../lib/api';
 import { translate } from '../../lib/i18n';
 import { formatStamp } from '../../lib/theme';
-import { MagpieInstallBanner } from '../MagpieInstallBanner';
 
 interface BotMemorySectionProps {
   open: boolean;
   botId: string;
-  settings: SettingsData | null;
   lang: ResolvedLang;
   onToast: (msg: string) => void;
-  onSettingsUpdated?: (s: SettingsData) => void;
 }
 
 export const BotMemorySection: React.FC<BotMemorySectionProps> = ({
   open,
   botId,
-  settings,
   lang,
   onToast,
-  onSettingsUpdated,
 }) => {
   const t = (k: string, vars?: Record<string, string | number>) => translate(lang, k, vars);
   const [memData, setMemData] = useState<MemoryResponse | null>(null);
@@ -154,21 +149,7 @@ export const BotMemorySection: React.FC<BotMemorySectionProps> = ({
       {memLoading && !memData ? (
         <div className="set-card-desc">{t('loadingEllipsis')}</div>
       ) : !memData || !memData.installed ? (
-        <div className="note">
-          <MagpieInstallBanner
-            lang={lang}
-            hint={t('memNotInstalled')}
-            installCmds={settings?.magpie?.install}
-            onToast={onToast}
-            onInstalled={async () => {
-              if (onSettingsUpdated) {
-                const fresh = await api<SettingsData>('/api/settings?fresh=1');
-                onSettingsUpdated(fresh);
-              }
-              await loadMemories(botId);
-            }}
-          />
-        </div>
+        <div className="set-card-desc">{t('memNotInstalled')}</div>
       ) : !memData.available ? (
         <div className="set-card-desc">
           {t('memUnavailable')}

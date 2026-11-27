@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useState } from 'react';
 import type { MemoryResponse, ResolvedLang, SettingsData } from '../../types';
 import { api } from '../../lib/api';
 import { translate } from '../../lib/i18n';
-import { MagpieInstallBanner } from '../MagpieInstallBanner';
 
 interface MemoryTabProps {
   active: boolean;
@@ -10,7 +9,6 @@ interface MemoryTabProps {
   lang: ResolvedLang;
   onToast: (msg: string) => void;
   onSettingsUpdated: (s: SettingsData) => void;
-  onAfterMagpieInstall: (fresh: SettingsData) => void;
   onDirtyChange: (dirty: boolean) => void;
   saveRef: React.MutableRefObject<(() => Promise<boolean>) | null>;
   resetRef: React.MutableRefObject<(() => void) | null>;
@@ -32,7 +30,6 @@ export const MemoryTab: React.FC<MemoryTabProps> = ({
   lang,
   onToast,
   onSettingsUpdated,
-  onAfterMagpieInstall,
   onDirtyChange,
   saveRef,
   resetRef,
@@ -150,8 +147,6 @@ export const MemoryTab: React.FC<MemoryTabProps> = ({
     if (active) void loadGlobalMemories();
   }, [active]);
 
-  const mp = settings?.magpie;
-
   return (
     <div id="sTabMemory" className="tab-pane tab-anim">
       <section className="set-card">
@@ -218,19 +213,6 @@ export const MemoryTab: React.FC<MemoryTabProps> = ({
         {memData?.installed && memData.semantic && !memData.semantic.active && (
           <div className="mem-semantic-hint">
             <span>{t('memSemanticHintOff')}</span>
-            <button
-              type="button"
-              className="mp"
-              onClick={async () => {
-                try {
-                  await api('/api/magpie/open', { method: 'POST' });
-                } catch (e) {
-                  if (e instanceof Error && e.message !== 'unauthorized') setMemErr(e.message);
-                }
-              }}
-            >
-              {t('openMagpie')}
-            </button>
           </div>
         )}
         {memAddOpen && (
@@ -391,19 +373,7 @@ export const MemoryTab: React.FC<MemoryTabProps> = ({
         </div>
         <div id="sMemList" className="stack6">
           {!memData || !memData.installed ? (
-            <div className="note">
-              <MagpieInstallBanner
-                lang={lang}
-                hint={t('memNotInstalled')}
-                installCmds={mp?.install}
-                onToast={onToast}
-                onInstalled={async () => {
-                  const fresh = await api<SettingsData>('/api/settings?fresh=1');
-                  onAfterMagpieInstall(fresh);
-                  await loadGlobalMemories();
-                }}
-              />
-            </div>
+            <div className="set-card-desc">{t('memNotInstalled')}</div>
           ) : !memData.available ? (
             <div className="set-card-desc">
               {t('memUnavailable')}

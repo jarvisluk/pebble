@@ -16,6 +16,7 @@ final class LiveActivityManager {
     @ObservationIgnored private var botActivities: [String: Activity<PebbleActivityAttributes>] = [:]
     @ObservationIgnored private var botStartedAt: [String: Double] = [:]
     @ObservationIgnored private var botSteps: [String: Int] = [:]
+    @ObservationIgnored private var botTaskCounts: [String: Int] = [:]
     @ObservationIgnored private var activeApprovalBots: Set<String> = []
     @ObservationIgnored private var desktopActivities: [String: Activity<PebbleActivityAttributes>] = [:]
     @ObservationIgnored private var tokenTasks: [String: Task<Void, Never>] = [:]
@@ -53,7 +54,8 @@ final class LiveActivityManager {
                 stepCount: 0,
                 startedAt: now,
                 summary: nil,
-                takeoverReason: nil
+                takeoverReason: nil,
+                activeTaskCount: botTaskCounts[bot.id]
             )
             if let act = try? Activity.request(
                 attributes: attrs,
@@ -98,7 +100,30 @@ final class LiveActivityManager {
             stepCount: steps,
             startedAt: started,
             summary: nil,
-            takeoverReason: nil
+            takeoverReason: nil,
+            activeTaskCount: botTaskCounts[botId]
+        )
+        Task {
+            await act.update(.init(state: state, staleDate: nil))
+        }
+    }
+
+    func handleTasks(botId: String, tasks: [BotTask]) {
+        let count = tasks.filter(\.isActive).count
+        botTaskCounts[botId] = count
+        guard activitiesEnabled, let act = botActivities[botId] else { return }
+        let started = botStartedAt[botId] ?? Date().timeIntervalSince1970
+        let steps = botSteps[botId] ?? 0
+        let state = PebbleActivityAttributes.ContentState(
+            phase: activeApprovalBots.contains(botId) ? "approval" : "running",
+            statusText: activeApprovalBots.contains(botId)
+                ? (L.lang == "en" ? "Approval required" : "等待批准") // i18n:allow-cjk
+                : (L.lang == "en" ? "Thinking…" : "正在思考"), // i18n:allow-cjk
+            stepCount: steps,
+            startedAt: started,
+            summary: nil,
+            takeoverReason: nil,
+            activeTaskCount: count > 0 ? count : nil
         )
         Task {
             await act.update(.init(state: state, staleDate: nil))
@@ -186,7 +211,8 @@ final class LiveActivityManager {
                 stepCount: steps,
                 startedAt: started,
                 summary: body,
-                takeoverReason: nil
+                takeoverReason: nil,
+                activeTaskCount: botTaskCounts[botId]
             )
             Task { await act.update(.init(state: state, staleDate: nil)) }
         }
@@ -202,7 +228,8 @@ final class LiveActivityManager {
                 stepCount: steps,
                 startedAt: started,
                 summary: nil,
-                takeoverReason: nil
+                takeoverReason: nil,
+                activeTaskCount: botTaskCounts[botId]
             )
             Task { await act.update(.init(state: state, staleDate: nil)) }
         }
@@ -230,6 +257,7 @@ final class LiveActivityManager {
     func startObservingTokens() {}
     func handleBotStatus(_ bot: BotStatus) {}
     func handleToolUse(botId: String, tool: String) {}
+    func handleTasks(botId: String, tasks: [BotTask]) {}
     func handleTakeovers(_ items: [TakeoverRequest]) {}
     func handleApprovals(_ items: [PendingApproval], bots: [BotStatus] = []) {}
 }

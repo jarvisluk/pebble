@@ -20,8 +20,6 @@ extension SettingsModelsTab {
     @ViewBuilder
     var enginesSection: some View {
         let installed = installedHarnesses
-        let connected = installed.filter { $0.magpie?.connected == true }
-        let native = installed.filter { $0.magpie?.connected != true }
         let available = uninstalledHarnesses
 
         if installed.isEmpty {
@@ -40,90 +38,54 @@ extension SettingsModelsTab {
                 Text(hub.t("enginesIntro"))
             }
         } else {
-            if !connected.isEmpty {
-                Section {
-                    ForEach(connected) { h in
-                        installedEngineRow(h)
-                    }
-                } header: {
-                    HStack {
-                        Text("\(hub.t("harnessGroupConnected")) (\(connected.count))")
-                            .foregroundStyle(p.sageInk)
-                        Spacer()
-                        recheckHeaderButton
-                    }
-                } footer: {
-                    if native.isEmpty {
-                        Text(hub.t("enginesIntro"))
-                    }
+            Section {
+                ForEach(installed) { h in
+                    installedEngineRow(h)
                 }
-            }
-
-            if !native.isEmpty || !available.isEmpty {
-                Section {
-                    ForEach(native) { h in
-                        installedEngineRow(h)
-                    }
-                    if !available.isEmpty {
-                        DisclosureGroup(hub.t("enginesMoreAvailable", ["n": available.count]), isExpanded: $moreEnginesOpen) {
-                            ForEach(available) { h in
-                                uninstalledEngineRow(h)
-                            }
+                if !available.isEmpty {
+                    DisclosureGroup(hub.t("enginesMoreAvailable", ["n": available.count]), isExpanded: $moreEnginesOpen) {
+                        ForEach(available) { h in
+                            uninstalledEngineRow(h)
                         }
                     }
-                } header: {
-                    HStack {
-                        Text("\(hub.t("harnessGroupNative")) (\(native.count))")
-                        Spacer()
-                        if connected.isEmpty {
-                            recheckHeaderButton
-                        }
-                    }
-                } footer: {
-                    Text(hub.t("enginesIntro"))
                 }
+            } header: {
+                HStack {
+                    Text("\(hub.t("enginesInstalled")) (\(installed.count))")
+                    Spacer()
+                    recheckHeaderButton
+                }
+            } footer: {
+                Text(hub.t("enginesIntro"))
             }
         }
     }
 
     @ViewBuilder
     private func installedEngineRow(_ h: HarnessInfo) -> some View {
-        let mpConnected = h.magpie?.connected == true
         let loginTask = loginTasks[h.id]
         let loggingIn = loginTask?.state == "running"
         let needsLogin = h.requiresLogin == true && h.authStatus != "ready"
+        let authReady = h.authStatus == "ready"
 
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
                         Circle()
-                            .fill(mpConnected ? p.sageInk : needsLogin ? p.danger : p.mute.opacity(0.45))
+                            .fill(authReady ? p.sageInk : needsLogin ? p.danger : p.mute.opacity(0.45))
                             .frame(width: 7, height: 7)
                         Text(h.title)
                             .font(.system(size: AppFont.body, weight: .semibold))
                             .lineLimit(1)
                     }
-                    if mpConnected {
-                        let modelDesc = (h.magpie?.model ?? "").isEmpty ? hub.t("mpConnected") : h.magpie!.model!
-                        Text(modelDesc)
-                            .font(.system(size: AppFont.caption, design: .monospaced))
-                            .foregroundStyle(p.sageInk)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                    } else if let nativeModel = h.magpie?.nativeModel, !nativeModel.isEmpty {
-                        Text(nativeModel)
-                            .font(.system(size: AppFont.caption, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                    } else if let sum = h.summary, !sum.isEmpty {
+                    if let sum = h.summary, !sum.isEmpty {
                         Text(sum)
                             .font(.system(size: AppFont.caption))
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                     } else {
-                        Text(h.authStatus == "ready" ? hub.t("engineReady") : h.id)
+                        Text(authReady ? hub.t("engineReady") : h.id)
                             .font(.system(size: AppFont.caption))
                             .foregroundStyle(.secondary)
                             .lineLimit(1)

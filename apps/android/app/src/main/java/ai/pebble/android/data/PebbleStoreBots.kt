@@ -173,3 +173,123 @@ internal suspend fun PebbleStore.fetchRoutineRunsImpl(botId: String, rid: String
     api.call<RunsResp>(
         "/api/bots/${encodeURIComponent(botId)}/routine-runs?routineId=${encodeURIComponent(rid)}&limit=$limit"
     ).runs.orEmpty()
+
+// MARK: BotTasks
+
+internal fun PebbleStore.upsertBotTaskImpl(task: BotTask) {
+    val list = tasks[task.botId].orEmpty().toMutableList()
+    val idx = list.indexOfFirst { it.id == task.id }
+    if (idx >= 0) {
+        list[idx] = task
+    } else {
+        list.add(0, task)
+    }
+    tasks[task.botId] = list
+}
+
+internal suspend fun PebbleStore.fetchBotTasksImpl(
+    botId: String,
+    kind: String? = null,
+    status: String? = null,
+    limit: Int = 50,
+): List<BotTask> {
+    val params = mutableListOf("limit=$limit")
+    if (!kind.isNullOrBlank()) params.add("kind=${encodeURIComponent(kind)}")
+    if (!status.isNullOrBlank()) params.add("status=${encodeURIComponent(status)}")
+    val list = api.call<TasksResp>(
+        "/api/bots/${encodeURIComponent(botId)}/tasks?${params.joinToString("&")}"
+    ).tasks.orEmpty()
+    if (kind.isNullOrBlank() && status.isNullOrBlank()) {
+        tasks[botId] = list
+    }
+    return list
+}
+
+internal suspend fun PebbleStore.spawnBotTaskImpl(
+    botId: String,
+    title: String? = null,
+    prompt: String,
+    kind: String = "worker",
+    deviceId: String = "local",
+    harness: String? = null,
+    model: String? = null,
+    permissionMode: String? = null,
+    workdir: String? = null,
+    delivery: String = "receipt",
+): BotTask {
+    val body = mutableMapOf<String, Any?>(
+        "prompt" to prompt,
+        "kind" to kind.ifBlank { "worker" },
+        "deviceId" to deviceId.ifBlank { "local" },
+        "delivery" to delivery.ifBlank { "receipt" },
+    )
+    title?.trim()?.takeIf { it.isNotEmpty() }?.let { body["title"] = it }
+    harness?.trim()?.takeIf { it.isNotEmpty() }?.let { body["harness"] = it }
+    model?.trim()?.takeIf { it.isNotEmpty() }?.let { body["model"] = it }
+    permissionMode?.trim()?.takeIf { it.isNotEmpty() }?.let { body["permissionMode"] = it }
+    workdir?.trim()?.takeIf { it.isNotEmpty() }?.let { body["workdir"] = it }
+    val created = api.call<BotTask>("/api/bots/${encodeURIComponent(botId)}/tasks", method = "POST", body = body)
+    upsertBotTask(created)
+    return created
+}
+
+internal suspend fun PebbleStore.fetchTaskEventsImpl(
+    taskId: String,
+    afterSeq: Long = 0L,
+    limit: Int = 200,
+): List<BotTaskEvent> {
+    val qs = buildString {
+        append("?limit=").append(limit)
+        if (afterSeq > 0L) append("&afterSeq=").append(afterSeq)
+    }
+    val incoming = api.call<TaskEventsResp>("/api/tasks/${encodeURIComponent(taskId)}/events$qs").events.orEmpty()
+    if (afterSeq <= 0L) {
+        taskEvents[taskId] = incoming
+        return incoming
+    }
+    if (incoming.isNotEmpty()) {
+        val existing = taskEvents[taskId].orEmpty().toMutableList()
+        val seen = existing.map { it.seq }.toHashSet()
+        for (ev in incoming) {
+            if (seen.add(ev.seq)) existing.add(ev)
+        }
+        existing.sortBy { it.seq }
+        taskEvents[taskId] = existing
+    }
+    return taskEvents[taskId].orEmpty()
+}
+
+internal suspend fun PebbleStore.sendToTaskImpl(taskId: String, message: String): BotTask {
+    val updated = api.call<BotTask>(
+        "/api/tasks/${encodeURIComponent(taskId)}/send",
+        method = "POST",
+        body = mapOf("message" to message),
+    )
+    upsertBotTask(updated)
+    return updated
+}
+
+internal suspend fun PebbleStore.cancelTaskImpl(taskId: String): BotTask {
+    val updated = api.call<BotTask>(
+        "/api/tasks/${encodeURIComponent(taskId)}/cancel",
+        method = "POST",
+    )
+    upsertBotTask(updated)
+    taskTools.remove(taskId)
+    return updated
+}
+
+internal suspend fun PebbleStore.fetchTaskDiffImpl(taskId: String): TaskDiffResult {
+    return api.call("/api/tasks/${encodeURIComponent(taskId)}/diff")
+}
+
+internal suspend fun PebbleStore.rollbackTaskImpl(
+    taskId: String,
+    removeWorktree: Boolean = false,
+): TaskRollbackResult {
+    return api.call(
+        "/api/tasks/${encodeURIComponent(taskId)}/rollback",
+        method = "POST",
+        body = mapOf("removeWorktree" to removeWorktree),
+    )
+}

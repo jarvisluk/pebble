@@ -330,8 +330,6 @@ export const UnboxPage: React.FC<UnboxPageProps> = ({
               {safeStep === 'harness' && (
                 <StepHarness
                   t={t}
-                  lang={lang}
-                  settings={settings}
                   harnesses={harnesses}
                   selectedHarness={selectedHarness}
                   onSelectHarness={setSelectedHarness}
@@ -340,11 +338,8 @@ export const UnboxPage: React.FC<UnboxPageProps> = ({
                   models={models}
                   loadingModels={loadingModels}
                   busy={busy}
-                  onBusyChange={setBusy}
                   onRecheck={() => void recheck()}
-                  onSettingsUpdated={onSettingsUpdated}
                   onFetchModels={fetchModels}
-                  onLoadModels={onLoadModels}
                   onLoadSettings={onLoadSettings}
                   onResetModels={onResetModels}
                   onToast={onToast}

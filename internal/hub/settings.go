@@ -4,7 +4,6 @@ import (
 	"bot-hub/internal/config"
 	"errors"
 	"fmt"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -253,49 +252,5 @@ func (h *Hub) SetDesktopWorker(harnessKind, model string) error {
 	}
 	h.cfg.DesktopHarness = harnessKind
 	h.cfg.DesktopModel = model
-	return nil
-}
-
-// MagpieWebURL returns the configured Magpie web address, falling back to
-// MAGPIE_WEB_URL, the variable `magpie web` itself reads.
-func (h *Hub) MagpieWebURL() string {
-	h.lanesMu.RLock()
-	u := h.cfg.MagpieWebURL
-	h.lanesMu.RUnlock()
-	if u == "" {
-		u = strings.TrimSpace(os.Getenv("MAGPIE_WEB_URL"))
-	}
-	return u
-}
-
-// ValidateMagpieWebURL normalizes and validates a Magpie web URL (empty clears it).
-func ValidateMagpieWebURL(raw string) (string, error) {
-	u := strings.TrimSpace(raw)
-	if u != "" {
-		parsed, err := url.Parse(u)
-		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
-			return "", fmt.Errorf("Magpie URL must start with http:// or https://")
-		}
-	}
-	return u, nil
-}
-
-// SetMagpieWebURL persists the Magpie web address; empty clears it.
-func (h *Hub) SetMagpieWebURL(raw string) error {
-	u, err := ValidateMagpieWebURL(raw)
-	if err != nil {
-		return err
-	}
-	h.lanesMu.Lock()
-	defer h.lanesMu.Unlock()
-	if h.cfg.ConfigPath != "" {
-		if err := config.UpdateRaw(h.cfg, func(c *config.HubConfig) error {
-			c.MagpieWebURL = u
-			return nil
-		}); err != nil {
-			return fmt.Errorf("save config: %w", err)
-		}
-	}
-	h.cfg.MagpieWebURL = u
 	return nil
 }

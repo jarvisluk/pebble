@@ -55,7 +55,6 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -78,14 +77,12 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import ai.pebble.android.data.BotStatus
 import ai.pebble.android.data.HubException
 import ai.pebble.android.data.MemoryItem
 import ai.pebble.android.data.MemoryList
 import ai.pebble.android.data.PebbleStore
 import ai.pebble.android.data.RoutineItem
-import ai.pebble.android.data.RoutineRun
 import ai.pebble.android.data.errText
 import ai.pebble.android.data.resolveDefaultModel
 import ai.pebble.android.ui.settings.ModelInputWithMenu
@@ -185,8 +182,6 @@ internal fun RoutinesBlock(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val list = store.routines[botId].orEmpty()
-    var runsOpen by remember(botId) { mutableStateOf("") }
-    val runsMap = remember(botId) { mutableStateMapOf<String, List<RoutineRun>>() }
     var confirm by remember(botId) { mutableStateOf<ConfirmItem?>(null) }
 
     ConfirmAlertDialog(item = confirm, onDismiss = { confirm = null })
@@ -241,7 +236,6 @@ internal fun RoutinesBlock(
                         if (!rt.webhookUrl.isNullOrEmpty()) store.t("rtWebhookPushTag") else null,
                         rt.model?.takeIf { it.isNotEmpty() },
                     ).joinToString(" · ")
-                    val isOpen = runsOpen == rt.id
                     var menuOpen by remember { mutableStateOf(false) }
 
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -293,22 +287,6 @@ internal fun RoutinesBlock(
                             ) {
                                 Text(if (running) store.t("rtRunningBtn") else store.t("rtRunNow"), fontSize = PebbleFont.secondary, color = p.text)
                             }
-                            OutlinedButton(
-                                onClick = {
-                                    if (isOpen) {
-                                        runsOpen = ""
-                                    } else {
-                                        runsOpen = rt.id
-                                        scope.launch {
-                                            runCatching { store.fetchRoutineRuns(botId, rt.id, limit = 6) }
-                                                .getOrNull()?.let { runsMap[rt.id] = it }
-                                        }
-                                    }
-                                },
-                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                            ) {
-                                Text(if (isOpen) store.t("rtRunsHide") else store.t("rtRunsBtn"), fontSize = PebbleFont.secondary, color = p.text)
-                            }
                             Box {
                                 IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(32.dp)) {
                                     Icon(painterResource(PebbleIcons.MoreVert), contentDescription = store.t("moreActions"), tint = p.text2)
@@ -349,42 +327,6 @@ internal fun RoutinesBlock(
                                             }
                                         },
                                     )
-                                }
-                            }
-                        }
-
-                        if (isOpen) {
-                            val listRuns = runsMap[rt.id].orEmpty()
-                            if (listRuns.isEmpty()) {
-                                Text(store.t("rtRunsEmpty"), color = p.mute, fontSize = PebbleFont.secondary)
-                            } else {
-                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    listRuns.forEach { r ->
-                                        val rs = when (r.status) {
-                                            "ok" -> store.t("rtStatusOk")
-                                            "silent" -> store.t("rtStatusSilent")
-                                            else -> store.t("rtStatusError")
-                                        }
-                                        Column(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .clip(RoundedCornerShape(10.dp))
-                                                .background(p.s1)
-                                                .padding(10.dp),
-                                            verticalArrangement = Arrangement.spacedBy(2.dp),
-                                        ) {
-                                            Text(
-                                                text = "$rs · ${r.trigger.orEmpty()} · ${String.format(Locale.US, "%.1fs", (r.durationMs ?: 0.0) / 1000.0)}",
-                                                color = p.text2,
-                                                fontSize = PebbleFont.caption,
-                                            )
-                                            if (!r.error.isNullOrEmpty()) {
-                                                Text(r.error, color = p.danger, fontSize = PebbleFont.secondary)
-                                            } else if (!r.output.isNullOrEmpty()) {
-                                                Text(r.output, color = p.text, fontSize = PebbleFont.secondary, maxLines = 3, overflow = TextOverflow.Ellipsis)
-                                            }
-                                        }
-                                    }
                                 }
                             }
                         }

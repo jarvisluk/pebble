@@ -8,8 +8,6 @@ struct RoutinesSection: View {
     @State private var editing: RoutineItem?
     @State private var creating = false
     @State private var err = ""
-    @State private var runsOpen = ""
-    @State private var runs: [String: [RoutineRun]] = [:]
     @State private var confirm: ConfirmItem?
 
     private var list: [RoutineItem] { hub.routines[botId] ?? [] }
@@ -88,7 +86,6 @@ struct RoutinesSection: View {
         let deliv = rt.mainDelivery == "notify" ? hub.t("rtDeliveryNotify") : rt.mainDelivery == "none" ? hub.t("rtDeliveryNone") : hub.t("rtDeliveryReceipt")
         let running = rt.running ?? false
         let status = running ? hub.t("rtStatusRunning") : statusText(rt.lastRun?.status)
-        let open = runsOpen == rt.id
         let rtPermLabel = rt.permissionMode == "auto" ? hub.t("permMode_auto") : rt.permissionMode == "plan" ? hub.t("permMode_plan") : ""
         let meta = [trig, deliv, rtPermLabel, (rt.webhookUrl ?? "").isEmpty ? "" : hub.t("rtWebhookPushTag"), rt.model ?? ""].filter { !$0.isEmpty }.joined(separator: " · ")
         return VStack(alignment: .leading, spacing: 6) {
@@ -114,11 +111,6 @@ struct RoutinesSection: View {
                     Task { do { try await hub.runRoutine(botId, rt.id) } catch { err = errText(error, hub.t("rtRunFailed")) } }
                 }
                 .disabled(running)
-                Button(open ? hub.t("rtRunsHide") : hub.t("rtRunsBtn")) {
-                    if open { runsOpen = ""; return }
-                    runsOpen = rt.id
-                    Task { if let l = try? await hub.fetchRoutineRuns(botId, rt.id, limit: 6) { runs[rt.id] = l } }
-                }
                 Menu {
                     Button(hub.t("edit"), systemImage: "pencil") { editing = rt }
                     if rt.webhookTrigger == true, let path = rt.webhookPath, !path.isEmpty {
@@ -142,24 +134,6 @@ struct RoutinesSection: View {
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
-            if open {
-                let l = runs[rt.id] ?? []
-                if l.isEmpty {
-                    Text(hub.t("rtRunsEmpty")).font(.system(size: AppFont.secondary)).foregroundStyle(.secondary)
-                } else {
-                    ForEach(l) { r in
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("\(statusText(r.status).isEmpty ? hub.t("rtStatusError") : statusText(r.status)) · \(r.trigger ?? "") · \(String(format: "%.1fs", (r.durationMs ?? 0) / 1000))")
-                                .font(.system(size: AppFont.secondary)).foregroundStyle(.secondary)
-                            if let e = r.error, !e.isEmpty {
-                                Text(e).font(.system(size: AppFont.secondary)).foregroundStyle(p.danger)
-                            } else if let o = r.output, !o.isEmpty {
-                                Text(o).font(.system(size: AppFont.secondary)).lineLimit(3)
-                            }
-                        }
-                    }
-                }
-            }
         }
         .padding(.vertical, 4)
     }

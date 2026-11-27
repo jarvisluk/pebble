@@ -17,6 +17,7 @@ type SyncMessageRow struct {
 	Recipient    string  `json:"recipient,omitempty"`
 	Text         string  `json:"text"`
 	MediaJSON    string  `json:"mediaJson,omitempty"`
+	StageJSON    string  `json:"stageJson,omitempty"`
 	ToolsJSON    string  `json:"toolsJson,omitempty"`
 	DurationMs   int64   `json:"durationMs,omitempty"`
 	CostUSD      float64 `json:"costUsd,omitempty"`
@@ -67,7 +68,7 @@ func (s *Store) ExportMessagesSince(afterRowID int64, limit int) ([]SyncMessageR
 	}
 	rows, err := s.db.Query(`
 		SELECT id, msg_uid, session_id, bot_id, turn, role, sender, recipient,
-		       text, media_json, tools_json, duration_ms, cost_usd,
+		       text, media_json, stage_json, tools_json, duration_ms, cost_usd,
 		       input_tokens, output_tokens, created_at
 		FROM messages
 		WHERE id > ?
@@ -85,7 +86,7 @@ func (s *Store) ExportMessagesSince(afterRowID int64, limit int) ([]SyncMessageR
 		var r SyncMessageRow
 		if err := rows.Scan(
 			&r.RowID, &r.MsgUID, &r.SessionID, &r.BotID, &r.Turn, &r.Role,
-			&r.Sender, &r.Recipient, &r.Text, &r.MediaJSON, &r.ToolsJSON,
+			&r.Sender, &r.Recipient, &r.Text, &r.MediaJSON, &r.StageJSON, &r.ToolsJSON,
 			&r.DurationMs, &r.CostUSD, &r.InputTokens, &r.OutputTokens, &r.CreatedAt,
 		); err != nil {
 			return nil, afterRowID, err
@@ -112,9 +113,9 @@ func (s *Store) ImportMessages(rows []SyncMessageRow) (int, error) {
 	stmt, err := tx.Prepare(`
 		INSERT OR IGNORE INTO messages(
 			msg_uid, session_id, bot_id, turn, role, sender, recipient,
-			text, media_json, tools_json, duration_ms, cost_usd,
+			text, media_json, stage_json, tools_json, duration_ms, cost_usd,
 			input_tokens, output_tokens, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		return 0, err
@@ -137,7 +138,7 @@ func (s *Store) ImportMessages(rows []SyncMessageRow) (int, error) {
 		}
 		res, err := stmt.Exec(
 			uid, r.SessionID, r.BotID, r.Turn, r.Role, r.Sender, r.Recipient,
-			r.Text, mediaJSON, toolsJSON, r.DurationMs, r.CostUSD,
+			r.Text, mediaJSON, r.StageJSON, toolsJSON, r.DurationMs, r.CostUSD,
 			r.InputTokens, r.OutputTokens, r.CreatedAt,
 		)
 		if err != nil {
@@ -251,9 +252,12 @@ func (s *Store) HasRoutineSlotKey(slotKey string) bool {
 	if s == nil || s.db == nil || strings.TrimSpace(slotKey) == "" {
 		return false
 	}
+	sk := strings.TrimSpace(slotKey)
 	var dummy int
-	err := s.db.QueryRow(`SELECT 1 FROM routine_runs WHERE slot_key = ? LIMIT 1`, strings.TrimSpace(slotKey)).Scan(&dummy)
-	return err == nil
+	if err := s.db.QueryRow(`SELECT 1 FROM routine_runs WHERE slot_key = ? LIMIT 1`, sk).Scan(&dummy); err == nil {
+		return true
+	}
+	return s.db.QueryRow(`SELECT 1 FROM bot_tasks WHERE slot_key = ? LIMIT 1`, sk).Scan(&dummy) == nil
 }
 
 // RecentMessagesForHandoff returns up to limit recent user/assistant messages for botID in chronological order.

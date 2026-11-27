@@ -5,6 +5,7 @@ import type {
   PendingApproval,
   PendingQuestion,
   ResolvedLang,
+  StageRef,
 } from '../../types';
 import { translate } from '../../lib/i18n';
 import { renderMarkdownHtml } from '../../lib/markdown';
@@ -12,6 +13,7 @@ import { botColor, countToolCalls, formatClockTime, formatDurationMs, formatStam
 import { ApprovalCard } from '../ApprovalCard';
 import { BotAvatar } from '../BotAvatar';
 import { QuestionCard } from '../QuestionCard';
+import { StageJumpCard } from '../stage/StageJumpCard';
 import { MessageAttachments } from './MessageAttachments';
 
 export type TimelineEntry =
@@ -31,6 +33,7 @@ interface ChatMessageListProps {
   lang: ResolvedLang;
   onOpenCreate: () => void;
   onOpenCollab?: (peerId: string) => void;
+  onOpenStageRef?: (ref: StageRef) => void;
   onPreviewImage: (media: import('../../types').MessageMedia) => void;
   onReplyApproval: (
     id: string,
@@ -54,6 +57,7 @@ export const ChatMessageList: React.FC<ChatMessageListProps> = ({
   lang,
   onOpenCreate,
   onOpenCollab,
+  onOpenStageRef,
   onPreviewImage,
   onReplyApproval,
   onReplyQuestion,
@@ -195,6 +199,16 @@ export const ChatMessageList: React.FC<ChatMessageListProps> = ({
                       {mediaEl}
                     </div>
                     {foot && <div className="foot">{foot}</div>}
+                  </div>
+                );
+              } else if (m.role === 'stage' && m.stage) {
+                body = (
+                  <div className={`msg bot stage-jump-row${fresh}`}>
+                    <StageJumpCard
+                      stageRef={m.stage}
+                      lang={lang}
+                      onOpen={(ref) => onOpenStageRef?.(ref)}
+                    />
                   </div>
                 );
               } else {

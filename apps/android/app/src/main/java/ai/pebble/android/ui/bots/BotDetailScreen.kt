@@ -78,19 +78,19 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import ai.pebble.android.data.BotStatus
+import ai.pebble.android.data.BotTask
 import ai.pebble.android.data.HubException
 import ai.pebble.android.data.MemoryItem
 import ai.pebble.android.data.MemoryList
 import ai.pebble.android.data.PebbleStore
 import ai.pebble.android.data.RoutineItem
-import ai.pebble.android.data.RoutineRun
 import ai.pebble.android.data.errText
 import ai.pebble.android.data.resolveDefaultModel
 import ai.pebble.android.ui.settings.ModelInputWithMenu
 import ai.pebble.android.ui.settings.localizedMemoryKind
 import ai.pebble.android.ui.settings.settingsHarnessList
+import ai.pebble.android.ui.chat.BotTasksBlock
 import ai.pebble.android.ui.desktop.H264SurfaceView
 import ai.pebble.android.ui.theme.BotAppearancePicker
 import ai.pebble.android.ui.theme.PebbleFont
@@ -123,6 +123,7 @@ fun BotDetailScreen(
     botId: String,
     onClose: () -> Unit,
     onOpenDesktop: (String) -> Unit,
+    onOpenTask: (BotTask) -> Unit,
 ) {
     val p = LocalPalette.current
 
@@ -139,6 +140,7 @@ fun BotDetailScreen(
         if (store.desktopTargets.isEmpty()) {
             runCatching { store.refreshDesktopTargets() }
         }
+        runCatching { store.fetchBotTasks(botId) }
         runCatching { store.fetchRoutines(botId) }
     }
 
@@ -352,6 +354,14 @@ fun BotDetailScreen(
                 botId = botId,
                 onCreate = { creatingRoutine = true },
                 onEdit = { editingRoutine = it },
+                onError = { err = it },
+            )
+
+            // Tasks & Activity
+            BotTasksBlock(
+                store = store,
+                botId = botId,
+                onSelectTask = onOpenTask,
                 onError = { err = it },
             )
 

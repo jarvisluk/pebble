@@ -109,6 +109,7 @@ extension HubStore {
             let list = data.bots ?? []
             bots = list
             msgs = [:]; last = [:]; unread = [:]; tools = [:]; routines = [:]
+            tasks = [:]; taskEvents = [:]; taskTools = [:]; taskStreamText = [:]
             resetModelsCache()
             usingStandby = isStandby
             connState = .connected
@@ -118,6 +119,14 @@ extension HubStore {
                 Task {
                     if let r: MessagesResp = try? await client.call("/api/bots/\(enc(b.id))/messages?limit=1"),
                        let m = r.messages?.last, seq == connSeq { last[b.id] = m }
+                }
+                Task {
+                    if let t: TasksResp = try? await client.call("/api/bots/\(enc(b.id))/tasks?limit=50"),
+                       seq == connSeq {
+                        let taskList = t.tasks ?? []
+                        tasks[b.id] = taskList
+                        LiveActivityManager.shared.handleTasks(botId: b.id, tasks: taskList)
+                    }
                 }
             }
             Task { if let s: SettingsData = try? await client.call("/api/settings"), seq == connSeq { settings = s } }
@@ -291,6 +300,7 @@ extension HubStore {
             let list = data.bots ?? []
             bots = list
             msgs = [:]; last = [:]; unread = [:]; tools = [:]; routines = [:]
+            tasks = [:]; taskEvents = [:]; taskTools = [:]; taskStreamText = [:]
             resetModelsCache()
             connState = .connected
             connError = ""
@@ -299,6 +309,14 @@ extension HubStore {
                 Task {
                     if let r: MessagesResp = try? await client.call("/api/bots/\(enc(b.id))/messages?limit=1"),
                        let m = r.messages?.last, seq == connSeq { last[b.id] = m }
+                }
+                Task {
+                    if let t: TasksResp = try? await client.call("/api/bots/\(enc(b.id))/tasks?limit=50"),
+                       seq == connSeq {
+                        let taskList = t.tasks ?? []
+                        tasks[b.id] = taskList
+                        LiveActivityManager.shared.handleTasks(botId: b.id, tasks: taskList)
+                    }
                 }
             }
             Task { if let s: SettingsData = try? await client.call("/api/settings"), seq == connSeq { settings = s } }
@@ -338,6 +356,10 @@ extension HubStore {
         tools = [:]
         models = [:]
         routines = [:]
+        tasks = [:]
+        taskEvents = [:]
+        taskTools = [:]
+        taskStreamText = [:]
         takeovers = []
         questions = []
         approvals = []

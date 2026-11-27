@@ -25,7 +25,7 @@ func runSettingsCmd(ctx context.Context, args []string, cwd string, stdout, stde
 	switch action {
 	case "get":
 		fs := newSubFlagSet("settings get", stderr, &co)
-		fresh := fs.Bool("fresh", false, "bypass cache and probe harnesses/Magpie live")
+		fresh := fs.Bool("fresh", false, "bypass cache and probe harnesses live")
 		if err := fs.Parse(rest); err != nil {
 			return err
 		}
@@ -43,7 +43,6 @@ func runSettingsCmd(ctx context.Context, args []string, cwd string, stdout, stde
 	case "models":
 		fs := newSubFlagSet("settings models", stderr, &co)
 		harnessName := fs.String("harness", "", "target harness ID (defaults to current bot's harness)")
-		source := fs.String("source", "", "model catalog source (optional: magpie)")
 		if err := fs.Parse(rest); err != nil {
 			return err
 		}
@@ -75,10 +74,6 @@ func runSettingsCmd(ctx context.Context, args []string, cwd string, stdout, stde
 
 		q := url.Values{}
 		q.Set("harness", targetHarness)
-		src := strings.TrimSpace(*source)
-		if src != "" {
-			q.Set("source", src)
-		}
 		body, err := c.DoJSON(ctx, http.MethodGet, "/api/models?"+q.Encode(), nil)
 		if err != nil {
 			return err
@@ -94,11 +89,9 @@ func runSettingsCmd(ctx context.Context, args []string, cwd string, stdout, stde
 		}
 		outBytes, err := json.Marshal(struct {
 			Harness string   `json:"harness"`
-			Source  string   `json:"source,omitempty"`
 			Models  []string `json:"models"`
 		}{
 			Harness: targetHarness,
-			Source:  src,
 			Models:  mDoc.Models,
 		})
 		if err != nil {
@@ -122,8 +115,6 @@ func runSettingsCmd(ctx context.Context, args []string, cwd string, stdout, stde
 		clearDeskHarness := fs.Bool("clear-desktop-harness", false, "clear desktop worker harness")
 		deskModel := fs.String("desktop-model", "", "desktop worker model")
 		clearDeskModel := fs.Bool("clear-desktop-model", false, "clear desktop worker model")
-		magpieWebURL := fs.String("magpie-web-url", "", "Magpie web URL")
-		clearMagpieWebURL := fs.Bool("clear-magpie-web-url", false, "clear Magpie web URL")
 		sharedUserMD := fs.String("shared-user-md", "", "shared _shared/USER.md markdown content")
 		sharedUserMDFile := fs.String("shared-user-md-file", "", "path to markdown file for _shared/USER.md")
 		dryRun := fs.Bool("dry-run", false, "validate and preview impact without applying changes")
@@ -205,19 +196,6 @@ func runSettingsCmd(ctx context.Context, args []string, cwd string, stdout, stde
 			payload["desktopModel"] = v
 		} else if *clearDeskModel {
 			payload["desktopModel"] = ""
-		}
-
-		if visited["magpie-web-url"] && *clearMagpieWebURL {
-			return errors.New("cannot specify both --magpie-web-url and --clear-magpie-web-url")
-		}
-		if visited["magpie-web-url"] {
-			v := strings.TrimSpace(*magpieWebURL)
-			if v == "" {
-				return errors.New("--magpie-web-url cannot be empty (use --clear-magpie-web-url to clear)")
-			}
-			payload["magpieWebUrl"] = v
-		} else if *clearMagpieWebURL {
-			payload["magpieWebUrl"] = ""
 		}
 
 		userMD, hasUserMD, err := readTextInput(*sharedUserMD, *sharedUserMDFile, cwd, visited["shared-user-md"], visited["shared-user-md-file"], "shared-user-md")

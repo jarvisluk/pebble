@@ -19,7 +19,6 @@ type agyACPProc struct {
 	*lineProc
 	binary         string
 	workspace      string
-	viaMagpie      bool
 	skipPerms      bool
 	agent          string
 	sessionID      string
@@ -34,25 +33,24 @@ type agyACPProc struct {
 	activePerms    map[string]context.CancelFunc
 }
 
-func (h *AgyHarness) acpProcFor(ctx context.Context, bin string, opts RunOptions, viaMagpie, skipPerms bool) (*agyACPProc, func(), error) {
+func (h *AgyHarness) acpProcFor(ctx context.Context, bin string, opts RunOptions, skipPerms bool) (*agyACPProc, func(), error) {
 	bot := opts.Bot
 	return h.acpPool.acquire(
 		bot.ID,
 		func(p *agyACPProc) bool {
 			return p.binary == bin &&
 				p.workspace == bot.Workspace &&
-				p.viaMagpie == viaMagpie &&
 				p.skipPerms == skipPerms &&
 				p.agent == bot.Agent &&
 				p.sessionID == opts.SessionID
 		},
 		func() (*agyACPProc, error) {
-			return h.startACPProc(ctx, bin, opts, viaMagpie, skipPerms)
+			return h.startACPProc(ctx, bin, opts, skipPerms)
 		},
 	)
 }
 
-func (h *AgyHarness) startACPProc(ctx context.Context, bin string, opts RunOptions, viaMagpie, skipPerms bool) (*agyACPProc, error) {
+func (h *AgyHarness) startACPProc(ctx context.Context, bin string, opts RunOptions, skipPerms bool) (*agyACPProc, error) {
 	bot := opts.Bot
 	if err := writeAgyWorkspaceFiles(bot.Workspace, opts); err != nil {
 		return nil, err
@@ -66,13 +64,7 @@ func (h *AgyHarness) startACPProc(ctx context.Context, bin string, opts RunOptio
 		args = append(args, "--agent", strings.TrimSpace(bot.Agent))
 	}
 
-	var cmd *exec.Cmd
-	if viaMagpie {
-		runArgs := append([]string{"agy", "run", "--"}, args...)
-		cmd = exec.Command(magpieBin(), runArgs...)
-	} else {
-		cmd = exec.Command(bin, args...)
-	}
+	cmd := exec.Command(bin, args...)
 	cmd.Dir = bot.Workspace
 	cmd.Env = procEnv(cmd, opts)
 
@@ -84,7 +76,6 @@ func (h *AgyHarness) startACPProc(ctx context.Context, bin string, opts RunOptio
 		lineProc:       lp,
 		binary:         bin,
 		workspace:      bot.Workspace,
-		viaMagpie:      viaMagpie,
 		skipPerms:      skipPerms,
 		agent:          bot.Agent,
 		availableModes: make(map[string]bool),
@@ -369,12 +360,11 @@ func agyTargetACPMode(available map[string]bool, permMode string) string {
 func (h *AgyHarness) runACPTurn(ctx context.Context, bin string, opts RunOptions, started time.Time) (res *TurnResult, fallback bool, err error) {
 	bot := opts.Bot
 	mode := EffectivePermissionMode(opts)
-	viaMagpie := h.viaMagpie(ctx, bot.Model)
 	skipPerms := mode == config.PermissionModeAuto
 
 	var p *agyACPProc
 	if opts.Ephemeral {
-		p, err = h.startACPProc(ctx, bin, opts, viaMagpie, skipPerms)
+		p, err = h.startACPProc(ctx, bin, opts, skipPerms)
 		if err != nil {
 			if errors.Is(err, errLegacyStreamJSON) {
 				return nil, true, nil
@@ -384,7 +374,7 @@ func (h *AgyHarness) runACPTurn(ctx context.Context, bin string, opts RunOptions
 		defer p.kill()
 	} else {
 		var release func()
-		p, release, err = h.acpProcFor(ctx, bin, opts, viaMagpie, skipPerms)
+		p, release, err = h.acpProcFor(ctx, bin, opts, skipPerms)
 		if err != nil {
 			if errors.Is(err, errLegacyStreamJSON) {
 				return nil, true, nil
@@ -427,32 +417,28 @@ func (h *AgyHarness) runACPTurn(ctx context.Context, bin string, opts RunOptions
 
 	modelID := strings.TrimSpace(bot.Model)
 	if modelID != "" && p.appliedModel != modelID {
-		if viaMagpie && strings.HasPrefix(modelID, "magpie/") {
-			p.appliedModel = modelID
-		} else {
-			mCtx, mCancel := context.WithTimeout(ctx, 5*time.Second)
-			_, mErr := p.call(mCtx, "session/set_model", map[string]any{
+		mCtx, mCancel := context.WithTimeout(ctx, 5*time.Second)
+		_, mErr := p.call(mCtx, "session/set_model", map[string]any{
+			"sessionId": p.sessionID,
+			"modelId":   modelID,
+		}, nil)
+		mCancel()
+		if mErr != nil {
+			cCtx, cCancel := context.WithTimeout(ctx, 5*time.Second)
+			_, cErr := p.call(cCtx, "session/set_config_option", map[string]any{
 				"sessionId": p.sessionID,
-				"modelId":   modelID,
+				"configId":  "model",
+				"value":     modelID,
 			}, nil)
-			mCancel()
-			if mErr != nil {
-				cCtx, cCancel := context.WithTimeout(ctx, 5*time.Second)
-				_, cErr := p.call(cCtx, "session/set_config_option", map[string]any{
-					"sessionId": p.sessionID,
-					"configId":  "model",
-					"value":     modelID,
-				}, nil)
-				cCancel()
-				if cErr != nil {
-					if !strings.Contains(mErr.Error(), "-32601") && !strings.Contains(cErr.Error(), "-32601") {
-						dropProc()
-						return nil, false, fmt.Errorf("agy set model %q: %w", modelID, mErr)
-					}
+			cCancel()
+			if cErr != nil {
+				if !strings.Contains(mErr.Error(), "-32601") && !strings.Contains(cErr.Error(), "-32601") {
+					dropProc()
+					return nil, false, fmt.Errorf("agy set model %q: %w", modelID, mErr)
 				}
 			}
-			p.appliedModel = modelID
 		}
+		p.appliedModel = modelID
 	}
 
 	var promptBlocks []map[string]any

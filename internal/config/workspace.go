@@ -44,10 +44,10 @@ func PlatformInstructionsText() string {
 		"  - `recall_session(...)`: read sliced messages from `previous` / `active` / `<sessionId>` (keep slices small; fetch single oversized messages by `messageId`). If `pebble session list` returns a `magpieSession`, pass it to `magpie-sessions__read_session` for raw tool transcripts.",
 		"  - `desktop_task(goal, ...)` & `request_takeover(reason, ...)`: delegate multi-step GUI tasks to the visible desktop worker, or pause for human QR/2FA/CAPTCHA/payment takeover (omit `nodeId` to use this bot's bound screen `desktopTarget` or the active desktop target).",
 		"  - `node_exec(command, ...)` & `node_file(op, path, ...)`: run shell commands or read/write/list files on connected remote nodes.",
-		"  - `open_stage(kind, path?, title?, url?)`: open a Stage UI panel (`files`, `desktop`, `browser`, `artifact`, `mcp-app`).",
+		"  - `open_stage(kind, path?, taskId?, title?, subtitle?, url?, target?, autoOpen?)`: submit a Stage side tab (`file`, `files`, `desktop`, `task`, `browser`, `artifact`, `mcp-app`) and post a clickable jump card in chat (`autoOpen` defaults to `false`).",
 		"- **Full `pebble` CLI (auto-reads current bot context from env or workspace config)**:",
 		"  - **Bots & Self-Edit**: `pebble bot list | get [--id <id>] | create --id <id> --name <name> [--harness opencode|codebuddy|qoder|codex|claude|grok|trae|pi|dsh|agy] [--model <m>] [--force] | update [--id <id>] [--model <m> | --inherit-model] [--harness <h>] [--name ...] [--description ...] [--instructions-file AGENTS.md] [--desktop-target <t>] [--browser-mode auto|isolated|attach] [--dry-run] [--force] | delete --id <id> [--confirm-self] | message <id> <msg> | send [--text \"...\"] [--image <path>] [--file <path>]`.",
-		"  - **Settings & Models**: `pebble settings get [--fresh] | models [--harness <h>] [--source magpie] | set [--default-harness <h>] [--default-model <m> | --clear-default-model] [--harness-model <h>=<m>] [--clear-harness-model <h>] [--desktop-harness <h> | --clear-desktop-harness] [--desktop-model <m> | --clear-desktop-model] [--magpie-web-url <url> | --clear-magpie-web-url] [--shared-user-md \"...\" | --shared-user-md-file <path>] [--dry-run] [--force]`.",
+		"  - **Settings & Models**: `pebble settings get [--fresh] | models [--harness <h>] | set [--default-harness <h>] [--default-model <m> | --clear-default-model] [--harness-model <h>=<m>] [--clear-harness-model <h>] [--desktop-harness <h> | --clear-desktop-harness] [--desktop-model <m> | --clear-desktop-model] [--shared-user-md \"...\" | --shared-user-md-file <path>] [--dry-run] [--force]`.",
 		"  - **Sessions**: `pebble session list [--bot <id|*>] [--query ...] | recall [--id previous|active|<sid>] | rotate [--handoff \"...\"]` (rotate regularly on harnesses without native `billion-context` compression like `agy`, `dsh`).",
 		"  - **Routines**: `pebble routine list | upsert --name <n> --prompt <p> [--every-minutes N | --daily-at HH:MM] [--main-delivery receipt|notify|none] | delete --id <r> | run --id <r>` (isolated ephemeral turns with `AGENTS.md` + `memory/`).",
 		"  - **Nodes & Desktop**: `pebble node list | exec --command <cmd> | file --op read|write|list --path <p>` and `pebble desktop targets | task --goal <g> | takeover --reason <r>`.",
@@ -135,7 +135,7 @@ func EnsureWorkspace(bot *BotConfig, cfg *HubConfig, customInstructions string) 
 	}
 
 	// Write workspace-local opencode.json so the bot automatically gets pebble MCP tools
-	// and _shared/PEBBLE.md instructions without clobbering global Magpie config.
+	// and _shared/PEBBLE.md instructions without touching global configs.
 	if err := ensureOpenCodeMCPConfig(bot, cfg); err != nil {
 		return err
 	}

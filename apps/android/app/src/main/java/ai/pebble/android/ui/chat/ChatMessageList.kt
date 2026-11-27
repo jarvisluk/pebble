@@ -141,6 +141,7 @@ internal fun ChatMessageList(
     isEmptyMessages: Boolean,
     onCollabClick: (String) -> Unit,
     onPreviewMedia: (MessageMedia) -> Unit,
+    onOpenStageRef: (ai.pebble.android.data.StageRef) -> Unit = {},
 ) {
     val p = LocalPalette.current
     val messagesIsEmpty = isEmptyMessages
@@ -255,6 +256,7 @@ internal fun ChatMessageList(
                             onPreviewMedia = onPreviewMedia,
                             botId = botId,
                             inSidebar = inDesktopSidebar,
+                            onOpenStageRef = onOpenStageRef,
                         )
                     }
                 }

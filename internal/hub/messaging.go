@@ -372,6 +372,82 @@ func (h *Hub) MessageBot(ctx context.Context, fromBotID, toBotID, message string
 	return res, nil
 }
 
+// MessageBotAsync dispatches a cross-bot message asynchronously via a worker BotTask
+// and returns immediately without blocking the caller.
+func (h *Hub) MessageBotAsync(ctx context.Context, fromBotID, toBotID, message string, hop int) (*state.BotTask, error) {
+	if fromBotID == toBotID {
+		return nil, fmt.Errorf("bot %q cannot message itself", fromBotID)
+	}
+	h.hopsMu.Lock()
+	if active, ok := h.hops[fromBotID]; ok && active > hop {
+		hop = active
+	}
+	h.hopsMu.Unlock()
+	if hop >= MaxBotHopDepth {
+		return nil, fmt.Errorf("bot-to-bot hop limit reached (%d); refusing to avoid runaway loop", MaxBotHopDepth)
+	}
+	if _, ok := h.GetBot(toBotID); !ok {
+		return nil, fmt.Errorf("target bot %q not found", toBotID)
+	}
+
+	var fromSessID string
+	var fromTurn int
+	if fromBotID != "" {
+		if _, ok := h.GetBot(fromBotID); ok {
+			if h.store != nil {
+				if rec, ok := h.store.Get(fromBotID); ok {
+					fromSessID = rec.ID
+					fromTurn = rec.TurnCount + 1
+				}
+			}
+			h.appendMessage(state.ChatMessage{
+				BotID:     fromBotID,
+				SessionID: fromSessID,
+				Turn:      fromTurn,
+				Role:      "bot_out",
+				From:      "bot:" + fromBotID,
+				To:        "bot:" + toBotID,
+				Text:      message,
+			})
+		}
+	}
+
+	wrappedPrompt := fmt.Sprintf("[Message from bot:%s]\n%s", fromBotID, message)
+	return h.SpawnTask(ctx, TaskSpawnRequest{
+		BotID:    toBotID,
+		Kind:     state.TaskKindWorker,
+		Title:    fmt.Sprintf("Message from %s", fromBotID),
+		Prompt:   wrappedPrompt,
+		Delivery: state.TaskDeliverySilent,
+		Hop:      hop + 1,
+		OnFinished: func(t state.BotTask) {
+			if fromBotID == "" {
+				return
+			}
+			if _, ok := h.GetBot(fromBotID); !ok {
+				return
+			}
+			replyText := strings.TrimSpace(t.Output)
+			if replyText == "" && t.Error != "" {
+				replyText = "Error: " + t.Error
+			}
+			if replyText != "" {
+				h.appendMessage(state.ChatMessage{
+					BotID:      fromBotID,
+					SessionID:  fromSessID,
+					Turn:       fromTurn,
+					Role:       "bot_in",
+					From:       "bot:" + toBotID,
+					To:         "bot:" + fromBotID,
+					Text:       replyText,
+					DurationMs: t.DurationMs,
+					CostUSD:    t.CostUSD,
+				})
+			}
+		},
+	})
+}
+
 // Send enqueues a turn on the bot's single-lane serialized goroutine.
 // Different bots execute concurrently without blocking each other.
 func (h *Hub) Send(ctx context.Context, botID, prompt string, opts SendOptions) (*harness.TurnResult, error) {
@@ -478,6 +554,9 @@ func (h *Hub) Interrupt(botID string) (bool, error) {
 		interrupted = true
 	}
 	if h.cancelIsolatedByBot(botID) > 0 {
+		interrupted = true
+	}
+	if h.cancelTasksByBot(botID) > 0 {
 		interrupted = true
 	}
 	if interrupted {

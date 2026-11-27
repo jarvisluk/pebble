@@ -301,11 +301,11 @@ func TestCLISettingsAndGuardrails(t *testing.T) {
 		t.Fatalf("settings get --fresh failed: code=%d query=%q err=%s", code, gotSettingsGetQuery, errOut)
 	}
 
-	// settings models auto-detects current bot harness ("claude"), plus explicit --harness & --source.
+	// settings models auto-detects current bot harness ("claude"), plus explicit --harness.
 	if out, errOut, code := run("settings", "models"); code != 0 || !strings.Contains(out, `"harness": "claude"`) || !strings.Contains(out, `"sonnet"`) || gotModelsQuery != "harness=claude" {
 		t.Fatalf("settings models auto failed: code=%d query=%q out=%s err=%s", code, gotModelsQuery, out, errOut)
 	}
-	if out, errOut, code := run("settings", "models", "--harness", "opencode", "--source", "magpie"); code != 0 || !strings.Contains(out, `"source": "magpie"`) || gotModelsQuery != "harness=opencode&source=magpie" {
+	if out, errOut, code := run("settings", "models", "--harness", "opencode"); code != 0 || !strings.Contains(out, `"harness": "opencode"`) || gotModelsQuery != "harness=opencode" {
 		t.Fatalf("settings models explicit failed: code=%d query=%q out=%s err=%s", code, gotModelsQuery, out, errOut)
 	}
 
@@ -318,7 +318,6 @@ func TestCLISettingsAndGuardrails(t *testing.T) {
 		"--clear-harness-model", "claude",
 		"--desktop-harness", "opencode",
 		"--desktop-model", "m-fast",
-		"--magpie-web-url", "https://magpie.local",
 		"--shared-user-md-file", "user-prefs.md",
 		"--dry-run",
 	); code != 0 {
@@ -329,7 +328,7 @@ func TestCLISettingsAndGuardrails(t *testing.T) {
 	}
 	if gotSettingsPatch["defaultHarness"] != "opencode" || gotSettingsPatch["defaultModel"] != "m1" ||
 		gotSettingsPatch["desktopHarness"] != "opencode" || gotSettingsPatch["desktopModel"] != "m-fast" ||
-		gotSettingsPatch["magpieWebUrl"] != "https://magpie.local" || gotSettingsPatch["sharedUserMd"] != "# Prefs\nConcise.\n" {
+		gotSettingsPatch["sharedUserMd"] != "# Prefs\nConcise.\n" {
 		t.Fatalf("unexpected settings patch payload: %#v", gotSettingsPatch)
 	}
 	patchMap, _ := gotSettingsPatch["defaultModelsPatch"].(map[string]any)
@@ -343,12 +342,11 @@ func TestCLISettingsAndGuardrails(t *testing.T) {
 		"--clear-default-model",
 		"--clear-desktop-harness",
 		"--clear-desktop-model",
-		"--clear-magpie-web-url",
 		"--force",
 	); code != 0 {
 		t.Fatalf("settings set clear failed: code=%d err=%s", code, errOut)
 	}
-	if gotSettingsQuery != "" || gotSettingsPatch["defaultModel"] != "" || gotSettingsPatch["desktopHarness"] != "" || gotSettingsPatch["desktopModel"] != "" || gotSettingsPatch["magpieWebUrl"] != "" {
+	if gotSettingsQuery != "" || gotSettingsPatch["defaultModel"] != "" || gotSettingsPatch["desktopHarness"] != "" || gotSettingsPatch["desktopModel"] != "" {
 		t.Fatalf("unexpected clear settings payload/query: query=%q payload=%#v", gotSettingsQuery, gotSettingsPatch)
 	}
 
@@ -362,7 +360,6 @@ func TestCLISettingsAndGuardrails(t *testing.T) {
 		{"settings", "set", "--harness-model", "opencode=m1", "--clear-harness-model", "opencode"},
 		{"settings", "set", "--desktop-model", ""},
 		{"settings", "set", "--desktop-model", "m1", "--clear-desktop-model"},
-		{"settings", "set", "--magpie-web-url", ""},
 	}
 	for _, tc := range badSettingsCases {
 		if _, _, code := run(tc...); code == 0 {
@@ -413,5 +410,81 @@ func TestCLISettingsAndGuardrails(t *testing.T) {
 		if _, _, code := run(tc...); code == 0 {
 			t.Fatalf("expected computer_use role to block %v", tc)
 		}
+	}
+}
+
+func TestCLITaskCommands(t *testing.T) {
+	var gotSpawn, gotSend, gotApprove, gotRollback map[string]any
+	var gotCancelPath string
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/bots/assistant/tasks":
+			_, _ = w.Write([]byte(`{"tasks":[{"id":"tsk_1","status":"running"}]}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/bots/assistant/tasks":
+			_ = json.NewDecoder(r.Body).Decode(&gotSpawn)
+			_, _ = w.Write([]byte(`{"id":"tsk_new","botId":"assistant","status":"queued"}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/tasks/tsk_1":
+			_, _ = w.Write([]byte(`{"id":"tsk_1","status":"completed","output":"ok"}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/tasks/tsk_1/events":
+			_, _ = w.Write([]byte(`{"events":[{"seq":1,"eventType":"status"}]}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/tasks/tsk_1/diff":
+			_, _ = w.Write([]byte(`{"taskId":"tsk_1","branch":"pebble/task-tsk_1","files":[{"path":"a.txt","status":"M"}],"patch":"diff"}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/tasks/tsk_1/rollback":
+			_ = json.NewDecoder(r.Body).Decode(&gotRollback)
+			_, _ = w.Write([]byte(`{"taskId":"tsk_1","rolledBack":true,"removedWorktree":true}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/tasks/tsk_1/send":
+			_ = json.NewDecoder(r.Body).Decode(&gotSend)
+			_, _ = w.Write([]byte(`{"id":"tsk_1","status":"queued"}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/tasks/tsk_1/cancel":
+			gotCancelPath = r.URL.Path
+			_, _ = w.Write([]byte(`{"id":"tsk_1","status":"cancelled"}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/approvals/apr_9/reply":
+			_ = json.NewDecoder(r.Body).Decode(&gotApprove)
+			_, _ = w.Write([]byte(`{"ok":true,"items":[]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer api.Close()
+
+	ws := t.TempDir()
+	run := func(args ...string) (string, string, int) {
+		var out, errBuf bytes.Buffer
+		full := append([]string{args[0], args[1], "--hub-url", api.URL, "--bot-id", "assistant"}, args[2:]...)
+		code := runCommand(context.Background(), full, ws, &out, &errBuf)
+		return out.String(), errBuf.String(), code
+	}
+
+	if out, errOut, code := run("task", "list", "--kind", "worker"); code != 0 || !strings.Contains(out, "tsk_1") {
+		t.Fatalf("task list failed: code=%d out=%s err=%s", code, out, errOut)
+	}
+	if out, errOut, code := run("task", "spawn", "--title", "Audit", "--delivery", "wake", "--device", "studio", "--workspace-id", "repo", "--isolation", "worktree", "--depends-on", "tsk_0", "--prompt", "run checks"); code != 0 || !strings.Contains(out, "tsk_new") {
+		t.Fatalf("task spawn failed: code=%d out=%s err=%s", code, out, errOut)
+	}
+	if gotSpawn["title"] != "Audit" || gotSpawn["delivery"] != "wake" || gotSpawn["prompt"] != "run checks" ||
+		gotSpawn["deviceId"] != "studio" || gotSpawn["workspaceId"] != "repo" || gotSpawn["isolation"] != "worktree" {
+		t.Fatalf("unexpected task spawn payload: %#v", gotSpawn)
+	}
+	if out, errOut, code := run("task", "get", "tsk_1"); code != 0 || !strings.Contains(out, "completed") {
+		t.Fatalf("task get failed: code=%d out=%s err=%s", code, out, errOut)
+	}
+	if out, errOut, code := run("task", "read", "tsk_1"); code != 0 || !strings.Contains(out, `"events"`) {
+		t.Fatalf("task read failed: code=%d out=%s err=%s", code, out, errOut)
+	}
+	if _, errOut, code := run("task", "send", "--id", "tsk_1", "--message", "continue"); code != 0 || gotSend["message"] != "continue" {
+		t.Fatalf("task send failed: code=%d payload=%#v err=%s", code, gotSend, errOut)
+	}
+	if _, errOut, code := run("task", "cancel", "tsk_1"); code != 0 || gotCancelPath != "/api/tasks/tsk_1/cancel" {
+		t.Fatalf("task cancel failed: code=%d path=%q err=%s", code, gotCancelPath, errOut)
+	}
+	if _, errOut, code := run("task", "approve", "--id", "apr_9", "--decision", "allow_once"); code != 0 || gotApprove["decision"] != "allow_once" || gotApprove["callerBotId"] != "assistant" {
+		t.Fatalf("task approve failed: code=%d payload=%#v err=%s", code, gotApprove, errOut)
+	}
+	if out, errOut, code := run("task", "diff", "tsk_1"); code != 0 || !strings.Contains(out, "pebble/task-tsk_1") {
+		t.Fatalf("task diff failed: code=%d out=%s err=%s", code, out, errOut)
+	}
+	if out, errOut, code := run("task", "rollback", "--id", "tsk_1", "--remove-worktree"); code != 0 || gotRollback["removeWorktree"] != true || !strings.Contains(out, "rolledBack") {
+		t.Fatalf("task rollback failed: code=%d payload=%#v out=%s err=%s", code, gotRollback, out, errOut)
 	}
 }

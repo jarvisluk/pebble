@@ -22,6 +22,13 @@ extension HubStore {
         last[id] = nil
         unread[id] = nil
         tools[id] = nil
+        if let removedTasks = tasks.removeValue(forKey: id) {
+            for t in removedTasks {
+                taskEvents.removeValue(forKey: t.id)
+                taskTools.removeValue(forKey: t.id)
+                taskStreamText.removeValue(forKey: t.id)
+            }
+        }
     }
 
     func pushIncoming(_ botId: String, _ msg: ChatMessage) {
@@ -180,6 +187,35 @@ extension HubStore {
                     if let r: RoutinesResp = try? await self.callAPI("/api/bots/\(enc(bid))/routines") {
                         self.routines[bid] = r.routines ?? []
                     }
+                }
+            }
+        case "task_created":
+            if let task = decodeAny(p, as: BotTask.self) {
+                taskStreamText[task.id] = ""
+                upsertBotTask(task)
+            }
+        case "task_updated":
+            if let task = decodeAny(p, as: BotTask.self) {
+                upsertBotTask(task)
+                if !task.isActive || task.status != "running" {
+                    taskTools.removeValue(forKey: task.id)
+                }
+            }
+        case "task_completed":
+            if let task = decodeAny(p, as: BotTask.self) {
+                upsertBotTask(task)
+                taskTools.removeValue(forKey: task.id)
+                taskStreamText.removeValue(forKey: task.id)
+            }
+        case "task_chunk":
+            if let taskId = p["taskId"] as? String, let chunk = p["chunk"] as? String, !chunk.isEmpty {
+                taskStreamText[taskId, default: ""] += chunk
+            }
+        case "task_tool_use":
+            if let taskId = p["taskId"] as? String {
+                let tool = (p["tool"] as? String) ?? ""
+                if taskTools[taskId] != tool {
+                    taskTools[taskId] = tool
                 }
             }
         case "update_status":

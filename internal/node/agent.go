@@ -2,6 +2,7 @@ package node
 
 import (
 	"bot-hub/internal/desktop"
+	"bot-hub/internal/harness"
 	"bot-hub/internal/protocol"
 	"bytes"
 	"context"
@@ -10,12 +11,15 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"runtime"
 	"slices"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/coder/websocket"
 )
 
 const (
@@ -27,25 +31,34 @@ const (
 
 // AgentOptions configures a remote device node worker.
 type AgentOptions struct {
-	NodeID      string
-	Name        string
-	BaseURL     string
-	Token       string
-	Permissions []string
-	Enabled     bool
-	HTTPClient  *http.Client
-	OnState     func()
+	NodeID            string
+	Name              string
+	BaseURL           string
+	Token             string
+	Permissions       []string
+	Enabled           bool
+	HTTPClient        *http.Client
+	OnState           func()
+	Workspaces        []NodeWorkspace
+	MaxPermissionMode string
+	HarnessRegistry   *harness.Registry
+	DisableWS         bool
+	ProbeHarnesses    func(context.Context, *harness.Registry) []NodeHarnessInfo
 }
 
 // AgentStatus describes the live connection state of the local node agent.
 type AgentStatus struct {
-	Enabled     bool     `json:"enabled"`
-	Connected   bool     `json:"connected"`
-	Status      string   `json:"status"` // disabled | connecting | connected | waiting_auth | error
-	Error       string   `json:"error,omitempty"`
-	NodeID      string   `json:"nodeId"`
-	Name        string   `json:"name"`
-	Permissions []string `json:"permissions"`
+	Enabled           bool              `json:"enabled"`
+	Connected         bool              `json:"connected"`
+	Status            string            `json:"status"` // disabled | connecting | connected | waiting_auth | error
+	Transport         string            `json:"transport,omitempty"`
+	Error             string            `json:"error,omitempty"`
+	NodeID            string            `json:"nodeId"`
+	Name              string            `json:"name"`
+	Permissions       []string          `json:"permissions"`
+	Harnesses         []NodeHarnessInfo `json:"harnesses,omitempty"`
+	Workspaces        []NodeWorkspace   `json:"workspaces,omitempty"`
+	MaxPermissionMode string            `json:"maxPermissionMode,omitempty"`
 }
 
 // DefaultIdentity derives a stable node ID and display name from the OS hostname.
@@ -80,34 +93,55 @@ func DefaultIdentity() (id, name string) {
 	return id, name
 }
 
-// Agent runs on a secondary machine, long-polling the hub for commands and
-// executing permitted actions inside the local GUI session.
+// Agent runs on a secondary machine, connecting to the hub over WebSocket
+// (with HTTP long-poll fallback) to execute permitted actions and remote agent turns.
 type Agent struct {
-	nodeID   string
-	baseURL  string
-	hostname string
-	homeDir  string
-	client   *http.Client
-	onState  func()
+	nodeID         string
+	baseURL        string
+	hostname       string
+	homeDir        string
+	client         *http.Client
+	onState        func()
+	disableWS      bool
+	probeHarnesses func(context.Context, *harness.Registry) []NodeHarnessInfo
 
-	mu         sync.Mutex
-	enabled    bool
-	name       string
-	perms      []string
-	token      string
-	status     string
-	errMsg     string
-	connected  bool
-	loopCancel context.CancelFunc
-	loopDone   chan struct{}
-	wakeCh     chan struct{}
-	closed     bool
+	mu                sync.Mutex
+	enabled           bool
+	name              string
+	perms             []string
+	token             string
+	status            string
+	transport         string
+	errMsg            string
+	connected         bool
+	workspaces        []NodeWorkspace
+	maxPermissionMode string
+	harnesses         []NodeHarnessInfo
+	harnessRegistry   *harness.Registry
+	ownsRegistry      bool
+	loopCancel        context.CancelFunc
+	loopDone          chan struct{}
+	taskBaseCtx       context.Context
+	taskBaseCancel    context.CancelFunc
+	wakeCh            chan struct{}
+	closed            bool
+
+	wsMu          sync.Mutex
+	wsActive      *wsConn
+	outboundQueue []WSFrame
+
+	tasksMu sync.Mutex
+	tasks   map[string]*remoteAgentTask
+
+	promptsMu        sync.Mutex
+	pendingApprovals map[string]chan AgentApprovalResponse
+	pendingQuestions map[string]chan AgentQuestionResponse
 
 	deskMu sync.Mutex
 	desk   *desktop.EnginePool
 }
 
-// NewAgent initializes a node Agent and starts polling if opts.Enabled is true.
+// NewAgent initializes a node Agent and starts connecting if opts.Enabled is true.
 func NewAgent(opts AgentOptions) *Agent {
 	defID, defName := DefaultIdentity()
 	id := strings.TrimSpace(opts.NodeID)
@@ -125,19 +159,30 @@ func NewAgent(opts AgentOptions) *Agent {
 		client = &http.Client{Timeout: 40 * time.Second}
 	}
 	perms := ValidPerms(opts.Permissions)
+	taskCtx, taskCancel := context.WithCancel(context.Background())
 	a := &Agent{
-		nodeID:   id,
-		baseURL:  strings.TrimRight(strings.TrimSpace(opts.BaseURL), "/"),
-		hostname: host,
-		homeDir:  home,
-		client:   client,
-		onState:  opts.OnState,
-		enabled:  opts.Enabled,
-		name:     name,
-		perms:    perms,
-		token:    strings.TrimSpace(opts.Token),
-		status:   "disabled",
-		wakeCh:   make(chan struct{}, 1),
+		nodeID:            id,
+		baseURL:           strings.TrimRight(strings.TrimSpace(opts.BaseURL), "/"),
+		hostname:          host,
+		homeDir:           home,
+		client:            client,
+		onState:           opts.OnState,
+		disableWS:         opts.DisableWS,
+		probeHarnesses:    opts.ProbeHarnesses,
+		enabled:           opts.Enabled,
+		name:              name,
+		perms:             perms,
+		token:             strings.TrimSpace(opts.Token),
+		status:            "disabled",
+		workspaces:        NormalizeWorkspaces(opts.Workspaces, home),
+		maxPermissionMode: normalizeCeilingMode(opts.MaxPermissionMode),
+		harnessRegistry:   opts.HarnessRegistry,
+		taskBaseCtx:       taskCtx,
+		taskBaseCancel:    taskCancel,
+		wakeCh:            make(chan struct{}, 1),
+		tasks:             make(map[string]*remoteAgentTask),
+		pendingApprovals:  make(map[string]chan AgentApprovalResponse),
+		pendingQuestions:  make(map[string]chan AgentQuestionResponse),
 	}
 	if opts.Enabled {
 		a.Configure(true, name, perms)
@@ -156,14 +201,53 @@ func (a *Agent) Status() AgentStatus {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return AgentStatus{
-		Enabled:     a.enabled,
-		Connected:   a.connected,
-		Status:      a.status,
-		Error:       a.errMsg,
-		NodeID:      a.nodeID,
-		Name:        a.name,
-		Permissions: append([]string(nil), a.perms...),
+		Enabled:           a.enabled,
+		Connected:         a.connected,
+		Status:            a.status,
+		Transport:         a.transport,
+		Error:             a.errMsg,
+		NodeID:            a.nodeID,
+		Name:              a.name,
+		Permissions:       append([]string(nil), a.perms...),
+		Harnesses:         append([]NodeHarnessInfo(nil), a.harnesses...),
+		Workspaces:        append([]NodeWorkspace(nil), a.workspaces...),
+		MaxPermissionMode: a.maxPermissionMode,
 	}
+}
+
+// SetWorkspaces updates the authorized workspaces advertised by this node.
+func (a *Agent) SetWorkspaces(ws []NodeWorkspace) {
+	norm := NormalizeWorkspaces(ws, a.homeDir)
+	a.mu.Lock()
+	a.workspaces = norm
+	connected := a.connected
+	a.mu.Unlock()
+	if connected {
+		a.pushLiveHello()
+	}
+}
+
+// SetMaxPermissionMode updates the device-side permission mode ceiling.
+func (a *Agent) SetMaxPermissionMode(mode string) {
+	norm := normalizeCeilingMode(mode)
+	a.mu.Lock()
+	a.maxPermissionMode = norm
+	connected := a.connected
+	a.mu.Unlock()
+	if connected {
+		a.pushLiveHello()
+	}
+}
+
+func (a *Agent) pushLiveHello() {
+	a.wsMu.Lock()
+	wsc := a.wsActive
+	a.wsMu.Unlock()
+	if wsc == nil {
+		return
+	}
+	hello := a.buildHelloPayload(context.Background())
+	_ = wsc.writeFrame(context.Background(), FrameHello, hello)
 }
 
 // SetToken updates the bearer token used for hub requests and wakes waiting polls.
@@ -211,9 +295,12 @@ func (a *Agent) Configure(enabled bool, name string, perms []string) {
 	}
 
 	if !enabled {
+		a.cancelAllTasks("node agent disabled")
+		a.closeActiveWS("node disabled")
 		a.sendDisconnect()
 		a.mu.Lock()
 		a.status = "disabled"
+		a.transport = ""
 		a.connected = false
 		a.errMsg = ""
 		a.mu.Unlock()
@@ -229,6 +316,9 @@ func (a *Agent) Configure(enabled bool, name string, perms []string) {
 		cancel()
 		return
 	}
+	if a.taskBaseCtx == nil || a.taskBaseCtx.Err() != nil {
+		a.taskBaseCtx, a.taskBaseCancel = context.WithCancel(context.Background())
+	}
 	a.status = "connecting"
 	a.connected = false
 	a.errMsg = ""
@@ -240,7 +330,8 @@ func (a *Agent) Configure(enabled bool, name string, perms []string) {
 	go a.loop(ctx, done)
 }
 
-// Close stops polling and sends a best-effort disconnect notice to the hub.
+// Close stops connections, cancels active remote agent tasks, and sends a
+// best-effort disconnect notice to the hub.
 func (a *Agent) Close() {
 	a.mu.Lock()
 	if a.closed {
@@ -252,10 +343,21 @@ func (a *Agent) Close() {
 	a.enabled = false
 	cancel := a.loopCancel
 	done := a.loopDone
+	taskCancel := a.taskBaseCancel
 	a.loopCancel = nil
 	a.loopDone = nil
+	a.taskBaseCancel = nil
+	reg := a.harnessRegistry
+	ownsReg := a.ownsRegistry
+	a.harnessRegistry = nil
+	a.ownsRegistry = false
 	a.mu.Unlock()
 
+	a.cancelAllTasks("node agent closed")
+	if taskCancel != nil {
+		taskCancel()
+	}
+	a.closeActiveWS("node closing")
 	if cancel != nil {
 		cancel()
 	}
@@ -264,6 +366,9 @@ func (a *Agent) Close() {
 	}
 	if wasEnabled {
 		a.sendDisconnect()
+	}
+	if ownsReg && reg != nil {
+		reg.Close()
 	}
 	a.deskMu.Lock()
 	d := a.desk
@@ -311,8 +416,72 @@ func (a *Agent) hasPerm(perm string) bool {
 	return slices.Contains(a.perms, perm)
 }
 
+func (a *Agent) setTransport(tr string) {
+	a.mu.Lock()
+	a.transport = tr
+	a.mu.Unlock()
+}
+
+func (a *Agent) closeActiveWS(reason string) {
+	a.wsMu.Lock()
+	wsc := a.wsActive
+	a.wsActive = nil
+	a.wsMu.Unlock()
+	if wsc != nil {
+		wsc.closeNormal(reason)
+	}
+}
+
 func (a *Agent) loop(ctx context.Context, done chan struct{}) {
 	defer close(done)
+	if a.disableWS {
+		a.runPollLoop(ctx)
+		return
+	}
+	backoff := 2 * time.Second
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+		wsUnsupported, statusCode, err := a.runWSOnce(ctx)
+		if ctx.Err() != nil {
+			return
+		}
+		if wsUnsupported {
+			a.runPollLoop(ctx)
+			return
+		}
+		if statusCode == http.StatusUnauthorized {
+			a.setState("waiting_auth", false, "Waiting to sign in to primary host")
+			select {
+			case <-time.After(2 * time.Second):
+			case <-a.wakeCh:
+			case <-ctx.Done():
+				return
+			}
+			continue
+		}
+		if err != nil {
+			a.setState("error", false, err.Error())
+		} else {
+			a.setState("connecting", false, "")
+			backoff = 2 * time.Second
+		}
+		select {
+		case <-time.After(backoff):
+		case <-a.wakeCh:
+			backoff = 2 * time.Second
+		case <-ctx.Done():
+			return
+		}
+		if err != nil && backoff < 8*time.Second {
+			backoff *= 2
+		}
+	}
+}
+
+func (a *Agent) runPollLoop(ctx context.Context) {
+	a.setTransport("poll")
 	backoff := 2 * time.Second
 	for {
 		if ctx.Err() != nil {
@@ -356,12 +525,195 @@ func (a *Agent) loop(ctx context.Context, done chan struct{}) {
 	}
 }
 
+func (a *Agent) wsEndpointURL() (string, error) {
+	u, err := url.Parse(a.baseURL)
+	if err != nil {
+		return "", err
+	}
+	switch u.Scheme {
+	case "http":
+		u.Scheme = "ws"
+	case "https":
+		u.Scheme = "wss"
+	case "ws", "wss":
+	default:
+		return "", fmt.Errorf("unsupported base URL scheme %q", u.Scheme)
+	}
+	u.Path = strings.TrimRight(u.Path, "/") + "/api/nodes/ws"
+	return u.String(), nil
+}
+
+func (a *Agent) runWSOnce(ctx context.Context) (wsUnsupported bool, statusCode int, err error) {
+	wsURL, err := a.wsEndpointURL()
+	if err != nil {
+		return false, 0, err
+	}
+	_, _, token := a.snapshot()
+	hdr := http.Header{}
+	if token != "" {
+		hdr.Set("Authorization", "Bearer "+token)
+	}
+	dialCtx, dialCancel := context.WithTimeout(ctx, 15*time.Second)
+	rawConn, resp, err := websocket.Dial(dialCtx, wsURL, &websocket.DialOptions{
+		HTTPClient: a.client,
+		HTTPHeader: hdr,
+	})
+	dialCancel()
+	if err != nil {
+		code := 0
+		if resp != nil {
+			code = resp.StatusCode
+			if resp.Body != nil {
+				_ = resp.Body.Close()
+			}
+		}
+		if code == http.StatusNotFound || code == http.StatusMethodNotAllowed || code == http.StatusNotImplemented {
+			return true, code, err
+		}
+		return false, code, err
+	}
+	defer rawConn.CloseNow()
+
+	wsc := newWSConn(rawConn)
+	hello := a.buildHelloPayload(ctx)
+	if err := wsc.writeFrame(ctx, FrameHello, hello); err != nil {
+		return false, 0, err
+	}
+
+	ackCtx, ackCancel := context.WithTimeout(ctx, wsHelloTimeout)
+	ackFrame, err := wsc.readFrame(ackCtx)
+	ackCancel()
+	if err != nil {
+		return false, 0, err
+	}
+	if ackFrame.Type != FrameHelloAck {
+		return false, 0, fmt.Errorf("expected %s, got %s", FrameHelloAck, ackFrame.Type)
+	}
+	var ack WSHelloAckPayload
+	if err := json.Unmarshal(ackFrame.Payload, &ack); err != nil {
+		return false, 0, err
+	}
+	if !ack.OK {
+		if ack.Error == "" {
+			ack.Error = "node registration rejected"
+		}
+		return false, 0, errors.New(ack.Error)
+	}
+
+	a.wsMu.Lock()
+	a.wsActive = wsc
+	queued := append([]WSFrame(nil), a.outboundQueue...)
+	a.outboundQueue = nil
+	a.wsMu.Unlock()
+
+	defer func() {
+		a.wsMu.Lock()
+		if a.wsActive == wsc {
+			a.wsActive = nil
+		}
+		a.wsMu.Unlock()
+	}()
+
+	a.setTransport("ws")
+	a.setState("connected", true, "")
+
+	for _, f := range queued {
+		if werr := wsc.writeRawFrame(ctx, f); werr != nil {
+			a.enqueueOutbound(f)
+			return false, 0, werr
+		}
+	}
+
+	connCtx, connCancel := context.WithCancel(ctx)
+	defer connCancel()
+
+	go func() {
+		ticker := time.NewTicker(wsKeepalivePeriod)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-connCtx.Done():
+				return
+			case <-ticker.C:
+				_ = wsc.writeFrame(connCtx, FramePing, WSPingPayload{Timestamp: time.Now().UnixMilli()})
+			}
+		}
+	}()
+
+	for {
+		frame, rerr := wsc.readFrame(connCtx)
+		if rerr != nil {
+			return false, 0, rerr
+		}
+		switch frame.Type {
+		case FramePing:
+			var p WSPingPayload
+			_ = json.Unmarshal(frame.Payload, &p)
+			_ = wsc.writeFrame(connCtx, FramePong, p)
+		case FramePong:
+		case FrameRPCCall:
+			var cmd Command
+			if json.Unmarshal(frame.Payload, &cmd) == nil {
+				go a.runWSCommand(connCtx, wsc, cmd)
+			}
+		case FrameAgentStart:
+			var req AgentStartRequest
+			if json.Unmarshal(frame.Payload, &req) == nil {
+				go a.handleAgentStart(req)
+			}
+		case FrameAgentSend:
+			var req AgentSendRequest
+			if json.Unmarshal(frame.Payload, &req) == nil {
+				go a.handleAgentSend(req)
+			}
+		case FrameAgentCancel:
+			var req AgentCancelRequest
+			if json.Unmarshal(frame.Payload, &req) == nil {
+				a.handleAgentCancel(req)
+			}
+		case FrameAgentApprovalResp:
+			var resp AgentApprovalResponse
+			if json.Unmarshal(frame.Payload, &resp) == nil {
+				a.deliverApprovalResponse(resp)
+			}
+		case FrameAgentQuestionResp:
+			var resp AgentQuestionResponse
+			if json.Unmarshal(frame.Payload, &resp) == nil {
+				a.deliverQuestionResponse(resp)
+			}
+		}
+	}
+}
+
+func (a *Agent) runWSCommand(parentCtx context.Context, wsc *wsConn, cmd Command) {
+	timeout := time.Duration(cmd.TimeoutSec) * time.Second
+	if timeout <= 0 {
+		timeout = 60 * time.Second
+	}
+	if timeout > 5*time.Minute {
+		timeout = 5 * time.Minute
+	}
+	ctx, cancel := context.WithTimeout(parentCtx, timeout)
+	defer cancel()
+
+	res := a.execute(ctx, cmd)
+	res.CallID = cmd.CallID
+	res.NodeID = a.nodeID
+	_ = wsc.writeFrame(parentCtx, FrameRPCResult, res)
+}
+
 func (a *Agent) capabilities() []string {
 	caps := []string{
 		protocol.CapNodeExecEnv,
 		protocol.CapNodeBrowserProfile,
 		protocol.CapNodeDesktopPermissions,
 		protocol.CapNodeDesktopPower,
+	}
+	if !a.disableWS {
+		caps = append(caps, protocol.CapNodeWS)
+	}
+	if a.hasPerm(PermAgent) {
+		caps = append(caps, protocol.CapNodeAgentExec, protocol.CapNodeWorkspaces)
 	}
 	if runtime.GOOS == "linux" && a.desktopPool().VirtualSupported() {
 		caps = append(caps, protocol.CapNodeVirtualSlots)

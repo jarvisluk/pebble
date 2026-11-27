@@ -212,15 +212,6 @@ func TestSetupInstallAndLoginRoutes(t *testing.T) {
 		t.Fatalf("expected 400 for bad install target, got %d", badRec.Code)
 	}
 
-	// Disallowed magpie as harness id returns 400.
-	badMagpie := httptest.NewRequest(http.MethodPost, "/api/harnesses/magpie/install", nil)
-	badMagpie.Host = "127.0.0.1:3789"
-	badMagpieRec := httptest.NewRecorder()
-	mux.ServeHTTP(badMagpieRec, badMagpie)
-	if badMagpieRec.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 for magpie via harness route, got %d", badMagpieRec.Code)
-	}
-
 	// GET install status for opencode returns idle by default.
 	getInst := httptest.NewRequest(http.MethodGet, "/api/harnesses/opencode/install", nil)
 	getInst.Host = "127.0.0.1:3789"
@@ -228,15 +219,6 @@ func TestSetupInstallAndLoginRoutes(t *testing.T) {
 	mux.ServeHTTP(getInstRec, getInst)
 	if getInstRec.Code != http.StatusOK {
 		t.Fatalf("GET install status failed: %d %s", getInstRec.Code, getInstRec.Body.String())
-	}
-
-	// GET magpie install status returns 200.
-	getMp := httptest.NewRequest(http.MethodGet, "/api/magpie/install", nil)
-	getMp.Host = "127.0.0.1:3789"
-	getMpRec := httptest.NewRecorder()
-	mux.ServeHTTP(getMpRec, getMp)
-	if getMpRec.Code != http.StatusOK {
-		t.Fatalf("GET magpie install status failed: %d %s", getMpRec.Code, getMpRec.Body.String())
 	}
 
 	// POST login for opencode (does not require login) returns 400.
@@ -270,11 +252,6 @@ func (c catalogNoopHarness) Close() {}
 
 func TestSettingsPatchDryRunValidationAndBotRoutes(t *testing.T) {
 	tmp := t.TempDir()
-	// Isolate from host Magpie and PATH so DetectHarness("opencode") and catalog models are deterministic.
-	t.Setenv("MAGPIE_BIN", filepath.Join(tmp, "missing-magpie"))
-	harness.InvalidateMagpieCache()
-	t.Cleanup(harness.InvalidateMagpieCache)
-
 	binDir := t.TempDir()
 	fakeOC := filepath.Join(binDir, "opencode")
 	if err := os.WriteFile(fakeOC, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {

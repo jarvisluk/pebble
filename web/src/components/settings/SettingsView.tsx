@@ -135,15 +135,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     [onLoadModels]
   );
 
-  const handleAfterMagpieInstall = useCallback(
-    (fresh: SettingsData) => {
-      onSettingsUpdated(fresh);
-      onResetModels();
-      preloadAllModels(fresh.harnesses, true);
-    },
-    [onSettingsUpdated, onResetModels, preloadAllModels]
-  );
-
   const titleKey =
     tab === 'remote'
       ? 'tabRemote'
@@ -170,10 +161,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     };
     pushH(list.find((h) => h.id === defHarness));
     for (const h of list) {
-      if ((!anyInstalled || h.installed) && !h.magpie?.connected) pushH(h);
-    }
-    for (const h of list) {
-      if ((!anyInstalled || h.installed) && h.magpie?.connected) pushH(h);
+      if (!anyInstalled || h.installed) pushH(h);
     }
     for (const h of list) {
       if (!anyInstalled || (models[h.id]?.length ?? 0) > 0) pushH(h);
@@ -181,11 +169,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     const seen = new Set<string>();
     const out: { value: string; label: string }[] = [];
     for (const h of ordered) {
-      const tag = h.magpie?.connected ? `${h.label} · Magpie` : h.label;
       for (const m of models[h.id] || []) {
         if (seen.has(m)) continue;
         seen.add(m);
-        out.push({ value: m, label: `${m} (${tag})` });
+        out.push({ value: m, label: `${m} (${h.label})` });
       }
     }
     return out;
@@ -285,7 +272,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               lang={lang}
               onToast={onToast}
               onSettingsUpdated={onSettingsUpdated}
-              onAfterMagpieInstall={handleAfterMagpieInstall}
               onDirtyChange={setMemoryDirty}
               saveRef={memorySaveRef}
               resetRef={memoryResetRef}

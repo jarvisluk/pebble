@@ -15,10 +15,11 @@ interface ChatHeaderProps {
   takeovers: TakeoverRequest[];
   activeDeskTarget?: ActiveDesktopTarget;
   deskOpen: boolean;
+  hasUnreadLatestStage?: boolean;
   lang: ResolvedLang;
   onOpenMenu: () => void;
   onToggleDesktop: () => void;
-  onOpenFiles?: () => void;
+  onOpenStage?: () => void;
   onOpenDesktopTarget: (target: string) => void;
   onSwitchBackLocal?: () => void;
   onResolveTakeover: (to: TakeoverRequest) => void;
@@ -34,10 +35,11 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({
   takeovers,
   activeDeskTarget,
   deskOpen,
+  hasUnreadLatestStage = false,
   lang,
   onOpenMenu,
   onToggleDesktop,
-  onOpenFiles,
+  onOpenStage,
   onOpenDesktopTarget,
   onSwitchBackLocal,
   onResolveTakeover,
@@ -47,6 +49,8 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({
 }) => {
   const t = (k: string, vars?: Record<string, string | number>) => translate(lang, k, vars);
   const firstTakeover = takeovers[0] || null;
+  const latestTitle = activeBot?.latestStage?.title || activeBot?.latestStage?.path || '';
+  const stageLabel = latestTitle ? t('stageLatestTab', { title: latestTitle }) : t('stageOpenWorkspace');
 
   return (
     <>
@@ -105,15 +109,15 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({
           </button>
         ) : (
           <>
-            {onOpenFiles && (
+            {onOpenStage && (
               <button
-                id="filesBtn"
+                id="stageBtn"
                 type="button"
-                className="ghost"
-                aria-label={t('workspaceFiles')}
-                title={t('workspaceFiles')}
+                className={`ghost${hasUnreadLatestStage ? ' has-badge' : ''}`}
+                aria-label={stageLabel}
+                title={stageLabel}
                 disabled={!activeBot}
-                onClick={onOpenFiles}
+                onClick={onOpenStage}
               >
                 <svg
                   viewBox="0 0 24 24"
@@ -123,8 +127,10 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({
                   strokeLinecap="round"
                   strokeLinejoin="round"
                 >
-                  <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+                  <rect x="3" y="4" width="18" height="16" rx="3" />
+                  <path d="M15 4v16" />
                 </svg>
+                <span className="stage-dot" hidden={!hasUnreadLatestStage} />
               </button>
             )}
             <button

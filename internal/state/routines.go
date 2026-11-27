@@ -195,15 +195,26 @@ func (s *Store) MarkReceiptsInjected(ids []string) error {
 		placeholders[i] = "?"
 		args = append(args, id)
 	}
-	_, err := s.db.Exec(`UPDATE routine_runs SET injected_at = ? WHERE injected_at = '' AND id IN (`+strings.Join(placeholders, ",")+`)`, args...)
+	inClause := strings.Join(placeholders, ",")
+	if _, err := s.db.Exec(`UPDATE routine_runs SET injected_at = ? WHERE injected_at = '' AND id IN (`+inClause+`)`, args...); err != nil {
+		return err
+	}
+	_, err := s.db.Exec(`UPDATE bot_tasks SET injected_at = ? WHERE injected_at = '' AND id IN (`+inClause+`)`, args...)
 	return err
 }
 
 func (s *Store) DismissPendingReceipts(botID string) error {
-	_, err := s.db.Exec(`
+	if _, err := s.db.Exec(`
 		UPDATE routine_runs
 		SET injected_at = 'dismissed'
 		WHERE bot_id = ? AND delivery = 'receipt' AND status = 'ok' AND injected_at = ''
+	`, botID); err != nil {
+		return err
+	}
+	_, err := s.db.Exec(`
+		UPDATE bot_tasks
+		SET injected_at = 'dismissed'
+		WHERE bot_id = ? AND delivery = 'receipt' AND status = 'completed' AND injected_at = ''
 	`, botID)
 	return err
 }
