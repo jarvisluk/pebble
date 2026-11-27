@@ -44,6 +44,7 @@ const (
 	OriginSession = "session"
 
 	CoexistenceAuto       = "auto"
+	CoexistenceIsolated   = "isolated"
 	CoexistencePebbleOnly = "pebble_only"
 	CoexistenceDual       = "dual"
 

@@ -27,7 +27,8 @@ func (s *Store) ImportFromMagpie(ctx context.Context, opts ImportOpts) (*ImportR
 
 	magpieDir := strings.TrimSpace(opts.MagpieDir)
 	if magpieDir == "" {
-		magpieDir = strings.TrimSpace(s.cfg.MagpieConfigDir)
+		cfg, _ := s.runtimeConfig()
+		magpieDir = strings.TrimSpace(cfg.MagpieConfigDir)
 	}
 	if magpieDir == "" {
 		magpieDir = DefaultMagpieConfigDir()

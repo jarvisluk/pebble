@@ -190,28 +190,6 @@ func BuildDreamPrompt(input DreamPromptInput) string {
 	return b.String()
 }
 
-// ParseDreamPlan parses a DreamPlan JSON payload from raw LLM output, tolerating fenced JSON blocks.
-func ParseDreamPlan(raw string) (*DreamPlan, error) {
-	cleaned := extractJSONPayload(raw)
-	if cleaned == "" {
-		return nil, fmt.Errorf("%w: empty dream plan output", ErrInvalidRequest)
-	}
-	var plan DreamPlan
-	if err := json.Unmarshal([]byte(cleaned), &plan); err != nil {
-		return nil, fmt.Errorf("%w: parse dream plan json: %v", ErrInvalidRequest, err)
-	}
-	for i := range plan.Operations {
-		act := strings.ToUpper(strings.TrimSpace(plan.Operations[i].Action))
-		switch act {
-		case DreamActionAdd, DreamActionUpdate, DreamActionSupersede, DreamActionArchive, DreamActionNoop:
-			plan.Operations[i].Action = act
-		default:
-			return nil, fmt.Errorf("%w: unsupported dream action %q", ErrInvalidRequest, plan.Operations[i].Action)
-		}
-	}
-	return &plan, nil
-}
-
 // ApplyDreamPlan safely applies a parsed DreamPlan, enforcing SecretGuard, pin protection,
 // memory_dismissed protection, global candidate status, MEMORY.md rebuild, and audit diary append.
 func (s *Store) ApplyDreamPlan(ctx context.Context, scope, botID string, plan *DreamPlan, now time.Time) (*DreamApplyResult, error) {
@@ -249,15 +227,36 @@ func (s *Store) ApplyDreamPlan(ctx context.Context, scope, botID string, plan *D
 			continue
 		}
 
-		// Determine effective operation scope/botID.
+		// Enforce scope & bot ownership boundary for ADD operations.
 		opScope := normScope
 		opBotID := botID
-		if strings.EqualFold(strings.TrimSpace(op.Scope), ScopeGlobal) {
-			opScope = ScopeGlobal
-			opBotID = ""
-		} else if strings.TrimSpace(op.BotID) != "" && validateBotID(op.BotID) == nil {
-			opScope = ScopeBot
-			opBotID = strings.TrimSpace(op.BotID)
+		if act == DreamActionAdd {
+			reqScope := strings.ToLower(strings.TrimSpace(op.Scope))
+			reqBotID := strings.TrimSpace(op.BotID)
+			if normScope == ScopeGlobal {
+				if (reqScope != "" && reqScope != ScopeGlobal) || reqBotID != "" {
+					res.Blocked++
+					res.Warnings = append(res.Warnings, fmt.Sprintf("blocked ADD: global dream cannot write into bot %q", reqBotID))
+					continue
+				}
+				opScope = ScopeGlobal
+				opBotID = ""
+			} else {
+				// Bot-scoped dream may write into its own bot or propose a global candidate (never another bot).
+				if reqBotID != "" && reqBotID != botID {
+					res.Blocked++
+					res.Warnings = append(res.Warnings, fmt.Sprintf("blocked ADD: dream for bot %q cannot write into bot %q", botID, reqBotID))
+					continue
+				}
+				if reqScope == ScopeGlobal {
+					opScope = ScopeGlobal
+					opBotID = ""
+				} else if reqScope != "" && reqScope != ScopeBot {
+					res.Blocked++
+					res.Warnings = append(res.Warnings, fmt.Sprintf("blocked ADD: invalid scope %q", op.Scope))
+					continue
+				}
+			}
 		}
 
 		// SecretGuard check on all textual fields.
@@ -323,6 +322,11 @@ func (s *Store) ApplyDreamPlan(ctx context.Context, scope, botID string, plan *D
 				res.Warnings = append(res.Warnings, fmt.Sprintf("UPDATE %s skipped: %v", targetID, loadErr))
 				continue
 			}
+			if !dreamOwnsItem(normScope, botID, existingFM) {
+				res.Blocked++
+				res.Warnings = append(res.Warnings, fmt.Sprintf("blocked UPDATE %s: item outside dream scope (%s/%s)", targetID, normScope, botID))
+				continue
+			}
 			if existingFM.Pin {
 				res.Blocked++
 				res.Warnings = append(res.Warnings, fmt.Sprintf("blocked UPDATE %s: item is pinned", targetID))
@@ -376,6 +380,11 @@ func (s *Store) ApplyDreamPlan(ctx context.Context, scope, botID string, plan *D
 			if loadErr != nil {
 				res.Skipped++
 				res.Warnings = append(res.Warnings, fmt.Sprintf("SUPERSEDE %s skipped: %v", targetID, loadErr))
+				continue
+			}
+			if !dreamOwnsItem(normScope, botID, existingFM) {
+				res.Blocked++
+				res.Warnings = append(res.Warnings, fmt.Sprintf("blocked SUPERSEDE %s: item outside dream scope (%s/%s)", targetID, normScope, botID))
 				continue
 			}
 			if existingFM.Pin {
@@ -435,6 +444,11 @@ func (s *Store) ApplyDreamPlan(ctx context.Context, scope, botID string, plan *D
 			if loadErr != nil {
 				res.Skipped++
 				res.Warnings = append(res.Warnings, fmt.Sprintf("ARCHIVE %s skipped: %v", targetID, loadErr))
+				continue
+			}
+			if !dreamOwnsItem(normScope, botID, existingFM) {
+				res.Blocked++
+				res.Warnings = append(res.Warnings, fmt.Sprintf("blocked ARCHIVE %s: item outside dream scope (%s/%s)", targetID, normScope, botID))
 				continue
 			}
 			if existingFM.Pin {

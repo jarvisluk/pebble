@@ -173,9 +173,10 @@ func (s *Store) Status(ctx context.Context) (*StatusSummary, error) {
 	semantic := s.semanticStatus(ctx)
 	dreams := s.listRecentDreams(ctx, 10)
 
+	cfg, _ := s.runtimeConfig()
 	return &StatusSummary{
 		Backend:      BackendPebble,
-		Config:       s.cfg.summary(),
+		Config:       cfg.summary(),
 		DocCount:     docCount,
 		ChunkCount:   chunkCount,
 		Counts:       counts,

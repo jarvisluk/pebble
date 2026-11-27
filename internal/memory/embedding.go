@@ -234,10 +234,11 @@ func (s *Store) SyncEmbeddings(ctx context.Context) (int, error) {
 }
 
 func (s *Store) syncEmbeddingsLocked(ctx context.Context) (int, error) {
-	if s.embedClient == nil || !s.embedClient.Ready() || s.db == nil {
+	_, embedClient := s.runtimeConfig()
+	if embedClient == nil || !embedClient.Ready() || s.db == nil {
 		return 0, nil
 	}
-	model := s.embedClient.Model()
+	model := embedClient.Model()
 
 	type pendingChunk struct {
 		chunkID string
@@ -287,7 +288,7 @@ func (s *Store) syncEmbeddingsLocked(ctx context.Context) (int, error) {
 		for i, p := range batch {
 			inputs[i] = p.text
 		}
-		vecs, err := s.embedClient.Embed(ctx, inputs)
+		vecs, err := embedClient.Embed(ctx, inputs)
 		if err != nil {
 			return embedded, err
 		}
@@ -317,11 +318,12 @@ func (s *Store) syncEmbeddingsLocked(ctx context.Context) (int, error) {
 }
 
 func (s *Store) semanticStatus(ctx context.Context) *SemanticStatus {
+	cfg, embedClient := s.runtimeConfig()
 	st := &SemanticStatus{
-		Enabled: s.cfg.Semantic.Enabled,
-		Model:   strings.TrimSpace(s.cfg.Semantic.Model),
+		Enabled: cfg.Semantic.Enabled,
+		Model:   strings.TrimSpace(cfg.Semantic.Model),
 	}
-	if s.embedClient != nil && s.embedClient.Ready() {
+	if embedClient != nil && embedClient.Ready() {
 		st.ModelReady = true
 	}
 	if s.db != nil {

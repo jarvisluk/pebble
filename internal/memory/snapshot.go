@@ -26,9 +26,10 @@ func (s *Store) BuildSnapshot(ctx context.Context, opts SnapshotOpts) (string, e
 		_, _ = s.SyncFromDisk(ctx)
 	}
 
+	cfg, _ := s.runtimeConfig()
 	maxChars := opts.MaxChars
 	if maxChars <= 0 {
-		maxChars = s.cfg.SnapshotMaxChars
+		maxChars = cfg.SnapshotMaxChars
 	}
 	if maxChars <= 0 {
 		maxChars = DefaultSnapshotMaxChars
@@ -40,7 +41,7 @@ func (s *Store) BuildSnapshot(ctx context.Context, opts SnapshotOpts) (string, e
 	now = now.UTC()
 
 	botID := strings.TrimSpace(opts.BotID)
-	coexistMode := NormalizeCoexistence(firstNonEmpty(opts.Coexistence, s.cfg.Coexistence))
+	coexistMode := NormalizeCoexistence(firstNonEmpty(opts.Coexistence, cfg.Coexistence))
 	harnessHasMagpie := s.HarnessHasMagpieMemory(ctx, opts.Harness)
 	coexistActive := coexistMode == CoexistenceAuto && harnessHasMagpie
 

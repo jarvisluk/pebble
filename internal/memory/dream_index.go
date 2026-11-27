@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +10,28 @@ import (
 	"strings"
 	"time"
 )
+
+// ParseDreamPlan parses a DreamPlan JSON payload from raw LLM output, tolerating fenced JSON blocks.
+func ParseDreamPlan(raw string) (*DreamPlan, error) {
+	cleaned := extractJSONPayload(raw)
+	if cleaned == "" {
+		return nil, fmt.Errorf("%w: empty dream plan output", ErrInvalidRequest)
+	}
+	var plan DreamPlan
+	if err := json.Unmarshal([]byte(cleaned), &plan); err != nil {
+		return nil, fmt.Errorf("%w: parse dream plan json: %v", ErrInvalidRequest, err)
+	}
+	for i := range plan.Operations {
+		act := strings.ToUpper(strings.TrimSpace(plan.Operations[i].Action))
+		switch act {
+		case DreamActionAdd, DreamActionUpdate, DreamActionSupersede, DreamActionArchive, DreamActionNoop:
+			plan.Operations[i].Action = act
+		default:
+			return nil, fmt.Errorf("%w: unsupported dream action %q", ErrInvalidRequest, plan.Operations[i].Action)
+		}
+	}
+	return &plan, nil
+}
 
 // RebuildIndex deterministically rebuilds global or bot MEMORY.md from active items,
 // strictly enforcing line and byte budgets (100 lines / 4KB global, 150 lines / 6KB bot).
@@ -79,6 +102,13 @@ func (s *Store) ApplyFlushNote(ctx context.Context, scope, botID, note string, n
 		Daily:        true,
 		Date:         now.UTC().Format("2006-01-02"),
 	})
+}
+
+func dreamOwnsItem(normScope, botID string, fm Frontmatter) bool {
+	if normScope == ScopeGlobal {
+		return fm.Scope == ScopeGlobal && fm.BotID == ""
+	}
+	return fm.Scope == ScopeBot && fm.BotID == botID
 }
 
 func dreamNewItemStatus(scope string, confidence float64) string {
