@@ -17,10 +17,12 @@ type Store struct {
 	workspacesDir string
 	stateStore    *state.Store
 	db            *sql.DB
-	cfg           Config
+
+	cfgMu       sync.RWMutex
+	cfg         Config
+	embedClient *EmbeddingClient
 
 	mu          sync.Mutex
-	embedClient *EmbeddingClient
 	magpieCache *magpieDetectCache
 	clock       func() time.Time
 }
@@ -66,17 +68,28 @@ func (s *Store) UpdateConfig(cfg Config) {
 	if s == nil {
 		return
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.cfg = cfg
+	var nextClient *EmbeddingClient
 	if cfg.Semantic.Enabled && strings.TrimSpace(cfg.Semantic.BaseURL) != "" {
-		s.embedClient = NewEmbeddingClient(cfg.Semantic)
-	} else {
-		s.embedClient = nil
+		nextClient = NewEmbeddingClient(cfg.Semantic)
 	}
+	s.cfgMu.Lock()
+	s.cfg = cfg
+	s.embedClient = nextClient
+	s.cfgMu.Unlock()
 	if s.magpieCache != nil {
 		s.magpieCache.invalidate()
 	}
+}
+
+func (s *Store) runtimeConfig() (Config, *EmbeddingClient) {
+	if s == nil {
+		return Config{}, nil
+	}
+	s.cfgMu.RLock()
+	cfg := s.cfg
+	client := s.embedClient
+	s.cfgMu.RUnlock()
+	return cfg, client
 }
 
 func (s *Store) now() time.Time {
@@ -321,14 +334,14 @@ func (s *Store) Patch(ctx context.Context, id string, req PatchReq) (*Item, erro
 	if err != nil {
 		return nil, err
 	}
-	if req.Title != nil {
-		fm.Title = DeriveTitle(*req.Title, body)
-	}
 	if req.Text != nil {
 		body = strings.TrimSpace(*req.Text)
 		if body == "" {
 			return nil, fmt.Errorf("%w: memory text cannot be empty", ErrInvalidRequest)
 		}
+	}
+	if req.Title != nil {
+		fm.Title = DeriveTitle(*req.Title, body)
 	}
 	if req.Kind != nil {
 		fm.Kind = NormalizeKind(*req.Kind)

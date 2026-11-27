@@ -179,7 +179,8 @@ func (s *Store) Reindex(ctx context.Context) (SyncStats, error) {
 	if err != nil {
 		return stats, err
 	}
-	if s.embedClient != nil && s.cfg.Semantic.Enabled {
+	cfg, embedClient := s.runtimeConfig()
+	if embedClient != nil && cfg.Semantic.Enabled {
 		_, _ = s.syncEmbeddingsLocked(ctx)
 	}
 	return stats, nil

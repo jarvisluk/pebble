@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -176,6 +177,15 @@ func TestCRUDIndexJailZeroChurnAndReindex(t *testing.T) {
 		t.Fatalf("Patch failed: %+v err=%v", patched, err)
 	}
 
+	// Patch with empty Title + new Text derives Title from the new Text (not old body).
+	emptyTitle := ""
+	newText := "SQLite WAL Mode v2\nAlways keep SQLite in WAL mode with busy_timeout=5000."
+	patchedTitle, err := ms.Patch(ctx, itemID, PatchReq{Title: &emptyTitle, Text: &newText})
+	if err != nil || patchedTitle.Title != "SQLite WAL Mode v2" {
+		t.Fatalf("expected title derived from new text, got %+v err=%v", patchedTitle, err)
+	}
+	patched = patchedTitle
+
 	// Verify zero-churn invariant: reads bump SQLite memory_stats without touching Markdown file.
 	infoBefore, err := os.Stat(absItemPath)
 	if err != nil {
@@ -310,4 +320,66 @@ func TestSaveSimilarExistingDetection(t *testing.T) {
 		t.Fatalf("expected CJK SimilarExisting to include %s, got %+v", cjk1.Item.ID, cjk2.SimilarExisting)
 	}
 	_ = time.Second
+}
+
+func TestConcurrentUpdateConfigAndReads(t *testing.T) {
+	ms, _, _ := newTestStore(t, Config{Coexistence: CoexistenceAuto})
+	ctx := context.Background()
+
+	if _, err := ms.Save(ctx, SaveReq{
+		Scope: ScopeBot, BotID: "ops", Kind: KindFact,
+		Title: "Concurrency Check", Text: "Ensure runtime config updates do not race with reads.",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	baseMagpieDir := ms.cfg.MagpieConfigDir
+	var wg sync.WaitGroup
+	wg.Add(4)
+
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 40; i++ {
+			mode := CoexistenceAuto
+			enabled := false
+			if i%2 == 1 {
+				mode = CoexistenceIsolated
+				enabled = true
+			}
+			ms.UpdateConfig(Config{
+				Coexistence:      mode,
+				SnapshotMaxChars: 3000 + i,
+				MagpieConfigDir:  baseMagpieDir,
+				Semantic: EmbeddingConfig{
+					Enabled: enabled,
+					BaseURL: "",
+					Model:   "mock-model",
+				},
+			})
+		}
+	}()
+
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 40; i++ {
+			_, _ = ms.Search(ctx, SearchOpts{Scope: ScopeBot, BotID: "ops", Query: "Concurrency"})
+		}
+	}()
+
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 40; i++ {
+			_, _ = ms.BuildSnapshot(ctx, SnapshotOpts{BotID: "ops", Harness: "claude"})
+		}
+	}()
+
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 40; i++ {
+			_, _ = ms.Status(ctx)
+			_ = ms.DetectMagpieMemory(ctx)
+		}
+	}()
+
+	wg.Wait()
 }

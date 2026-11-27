@@ -208,13 +208,14 @@ func (s *Store) retrieveCandidates(ctx context.Context, opts SearchOpts, query s
 	// 4. Optional Tier 1 semantic cosine search.
 	vecActive := false
 	vecErr := ""
-	if s.embedClient != nil && s.embedClient.Ready() {
-		qVec, err := s.embedClient.EmbedQuery(ctx, query)
+	_, embedClient := s.runtimeConfig()
+	if embedClient != nil && embedClient.Ready() {
+		qVec, err := embedClient.EmbedQuery(ctx, query)
 		if err != nil {
 			vecErr = err.Error()
 		} else if len(qVec) > 0 {
 			_, _ = s.SyncEmbeddings(ctx)
-			vecActive = s.runVectorScan(ctx, qVec, filterClause, baseArgs, opts.Tags, cands)
+			vecActive = s.runVectorScan(ctx, embedClient.Model(), qVec, filterClause, baseArgs, opts.Tags, cands)
 		}
 	}
 
@@ -331,13 +332,16 @@ func (s *Store) runLikeSearch(
 
 func (s *Store) runVectorScan(
 	ctx context.Context,
+	model string,
 	queryVec []float32,
 	filterClause string,
 	baseArgs []any,
 	reqTags []string,
 	cands map[string]*searchCandidate,
 ) bool {
-	model := s.embedClient.Model()
+	if strings.TrimSpace(model) == "" {
+		return false
+	}
 	args := make([]any, 0, len(baseArgs)+1)
 	args = append(args, model)
 	args = append(args, baseArgs...)

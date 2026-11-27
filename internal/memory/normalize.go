@@ -91,9 +91,11 @@ func NormalizeAuthor(author string) string {
 	}
 }
 
-// NormalizeCoexistence normalizes coexistence policy.
+// NormalizeCoexistence normalizes coexistence policy ("auto", "isolated", or legacy aliases).
 func NormalizeCoexistence(mode string) string {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case CoexistenceIsolated:
+		return CoexistenceIsolated
 	case CoexistencePebbleOnly:
 		return CoexistencePebbleOnly
 	case CoexistenceDual:

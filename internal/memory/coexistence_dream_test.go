@@ -204,7 +204,31 @@ func TestMagpieDetectImportAndCoexistenceSnapshot(t *testing.T) {
 		t.Fatal("expected BuildSnapshot output to be deterministic")
 	}
 
-	// Under pebble_only coexistence, imported global item IS included and no Magpie read-only directive needed.
+	// Under isolated coexistence (canonical mode shared with Web/Apple/Android/Hub),
+	// imported global items are NOT omitted even on a Magpie-injected harness like "claude",
+	// and StatusSummary reports coexistence="isolated".
+	if got := NormalizeCoexistence("isolated"); got != CoexistenceIsolated {
+		t.Fatalf("NormalizeCoexistence(\"isolated\") = %q, want %q", got, CoexistenceIsolated)
+	}
+	ms.UpdateConfig(Config{Coexistence: CoexistenceIsolated, MagpieConfigDir: magpieDir})
+	stIso, err := ms.Status(ctx)
+	if err != nil || stIso.Config.Coexistence != CoexistenceIsolated {
+		t.Fatalf("expected Status.Config.Coexistence=%q, got %+v err=%v", CoexistenceIsolated, stIso, err)
+	}
+	snapIsolated, err := ms.BuildSnapshot(ctx, SnapshotOpts{
+		BotID: "ops", Harness: "claude", Coexistence: CoexistenceIsolated, MaxChars: 4000, Now: now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(snapIsolated, "Prefer short direct replies") {
+		t.Fatalf("expected imported global item under isolated mode:\n%s", snapIsolated)
+	}
+	if strings.Contains(snapIsolated, "treat ambient Magpie memory as read-only") {
+		t.Fatalf("unexpected auto coexistence directive under isolated mode:\n%s", snapIsolated)
+	}
+
+	// Legacy pebble_only alias remains compatible.
 	snapPebbleOnly, err := ms.BuildSnapshot(ctx, SnapshotOpts{
 		BotID: "ops", Harness: "pi", Coexistence: CoexistencePebbleOnly, MaxChars: 4000, Now: now,
 	})
@@ -335,5 +359,77 @@ func TestDreamConsolidationGuardsCursorAndFlush(t *testing.T) {
 	flushRes, err := ms.ApplyFlushNote(ctx, ScopeBot, "dev", "Decided to keep REST for external API and gRPC internally.", now)
 	if err != nil || flushRes == nil || flushRes.Item.Origin != OriginDaily {
 		t.Fatalf("ApplyFlushNote failed: res=%+v err=%v", flushRes, err)
+	}
+}
+
+func TestDreamCrossBotAndCrossScopeIsolation(t *testing.T) {
+	ms, _, _ := newTestStore(t, Config{})
+	ctx := context.Background()
+	now := time.Date(2026, 11, 27, 23, 30, 0, 0, time.UTC)
+
+	botBItem, err := ms.Save(ctx, SaveReq{
+		Scope: ScopeBot, BotID: "botB", Kind: KindFact,
+		Title: "BotB Secret Plan", Text: "Original BotB note.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	globalItem, err := ms.Save(ctx, SaveReq{
+		Scope: ScopeGlobal, Kind: KindFact,
+		Title: "Global Note", Text: "Original global note.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Dream scoped to botA attempts to ADD into botB and UPDATE/SUPERSEDE/ARCHIVE botB & global items.
+	maliciousPlan := &DreamPlan{
+		Summary: "Attempt cross-scope mutations",
+		Operations: []DreamOp{
+			{Action: DreamActionAdd, Scope: ScopeBot, BotID: "botB", Kind: KindFact, Title: "Injected", Text: "Should be blocked."},
+			{Action: DreamActionUpdate, ID: botBItem.Item.ID, Text: "Tampered BotB note."},
+			{Action: DreamActionSupersede, ID: botBItem.Item.ID, Text: "Superseded BotB note."},
+			{Action: DreamActionArchive, ID: botBItem.Item.ID},
+			{Action: DreamActionUpdate, ID: globalItem.Item.ID, Text: "Tampered global note."},
+			{Action: DreamActionArchive, ID: globalItem.Item.ID},
+		},
+	}
+
+	res, err := ms.ApplyDreamPlan(ctx, ScopeBot, "botA", maliciousPlan, now)
+	if err != nil {
+		t.Fatalf("ApplyDreamPlan failed: %v", err)
+	}
+	if res.Added != 0 || res.Updated != 0 || res.Superseded != 0 || res.Archived != 0 || res.Blocked != 6 {
+		t.Fatalf("expected all 6 cross-scope ops blocked, got %+v", res)
+	}
+
+	// Verify botB and global items remain untouched and botB has only its 1 original item.
+	gotB, err := ms.Get(ctx, GetOpts{ID: botBItem.Item.ID})
+	if err != nil || gotB.Item.Text != "Original BotB note." || gotB.Item.Status != StatusActive {
+		t.Fatalf("botB item was mutated: %+v err=%v", gotB, err)
+	}
+	gotG, err := ms.Get(ctx, GetOpts{ID: globalItem.Item.ID})
+	if err != nil || gotG.Item.Text != "Original global note." || gotG.Item.Status != StatusActive {
+		t.Fatalf("global item was mutated: %+v err=%v", gotG, err)
+	}
+	listB, err := ms.Search(ctx, SearchOpts{Scope: ScopeBot, BotID: "botB", Status: "all"})
+	if err != nil || len(listB.Items) != 1 {
+		t.Fatalf("expected botB to still have exactly 1 item, got %+v err=%v", listB, err)
+	}
+
+	// Global Dream run cannot ADD into a bot or mutate a bot item.
+	globalPlan := &DreamPlan{
+		Summary: "Global dream trying to mutate botB",
+		Operations: []DreamOp{
+			{Action: DreamActionAdd, Scope: ScopeBot, BotID: "botB", Kind: KindFact, Text: "Blocked bot write."},
+			{Action: DreamActionUpdate, ID: botBItem.Item.ID, Text: "Blocked bot update."},
+		},
+	}
+	resG, err := ms.ApplyDreamPlan(ctx, ScopeGlobal, "", globalPlan, now)
+	if err != nil {
+		t.Fatalf("global ApplyDreamPlan failed: %v", err)
+	}
+	if resG.Blocked != 2 || resG.Added != 0 || resG.Updated != 0 {
+		t.Fatalf("expected global dream cross-bot ops blocked, got %+v", resG)
 	}
 }

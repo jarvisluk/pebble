@@ -71,7 +71,8 @@ func (s *Store) DetectMagpieMemory(ctx context.Context) MagpieStatus {
 	dir := ""
 	explicitDir := false
 	if s != nil {
-		dir = strings.TrimSpace(s.cfg.MagpieConfigDir)
+		cfg, _ := s.runtimeConfig()
+		dir = strings.TrimSpace(cfg.MagpieConfigDir)
 		explicitDir = dir != ""
 	}
 	if dir == "" {

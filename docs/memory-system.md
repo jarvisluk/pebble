@@ -93,7 +93,7 @@ When creating a new durable item (`Save` without `ID`), Pebble computes lexical 
 - **Detection (`DetectMagpieMemory`)**: Inspects `~/.config/magpie/library.json` (the `magpie-memory` MCP entry's `agents` list) and `~/.config/magpie/memory/index.json` (or `m_*.md` fallback) with a 30s TTL cache. Exposes `HarnessHasMagpieMemory(harnessKind)`.
 - **Coexistence Modes**:
   - `auto` (default): When the bot's active harness has `magpie-memory` injected, `BuildSnapshot` omits global items with `source_author: "magpie_import"` from the rendered global summary and appends a concise 2-line single-source boundary directive (use Pebble for bot/team memory, treat ambient Magpie memory as read-only, never double-write; private bots must never write to external `magpie-memory`).
-  - `pebble_only` / `dual`: Disables automatic Magpie omission while preserving private-session boundaries.
+  - `isolated` (with legacy aliases `pebble_only` / `dual`): Disables automatic Magpie omission while preserving private-session boundaries.
 - **Direct Importer (`ImportFromMagpie`)**: Reads `~/.config/magpie/memory/m_*.md` directly without spawning subprocesses:
   - `mode="bots_only"` (default): Migrates items tagged `#bot:<id>` into `workspaces/<bot>/memory/items/`.
   - `mode="all"`: Also migrates active `scope: global` items into `workspaces/_shared/memory/items/`.
@@ -123,5 +123,5 @@ Exported DTO JSON shapes in `internal/memory`:
 
 Typical Wave-2 wiring surfaces:
 - **HTTP API**: `GET /api/memory`, `POST /api/memory`, `GET /api/memory/{id}`, `PATCH /api/memory/{id}`, `DELETE /api/memory/{id}`, `GET/PUT /api/memory/index`, `GET /api/memory/status`, `POST /api/memory/reindex`, `POST /api/memory/import/magpie`, `POST /api/memory/dream`.
-- **MCP Tools**: `recall_memory` (L1 compact `Search`), `get_memory` (L2 `Get`), `save_memory` (`Save`), `forget_memory` (`Forget`).
+- **MCP Tools**: `recall_memory` (L1 compact `Search`), `read_memory` (L2 `Get`), `save_memory` (`Save`), `forget_memory` (`Forget`).
 - **CLI**: `pebble memory search|get|save|patch|forget|index|status|reindex|import-magpie|dream`.
