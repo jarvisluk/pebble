@@ -424,6 +424,7 @@ func TestCLIMemoryCommands(t *testing.T) {
 		gotSaveBody    map[string]any
 		gotDeletePath  string
 		gotDeleteQuery string
+		gotStatusQuery string
 		gotDreamBody   map[string]any
 		gotImportBody  map[string]any
 	)
@@ -438,6 +439,7 @@ func TestCLIMemoryCommands(t *testing.T) {
 			gotSearchQuery = r.URL.RawQuery
 			_, _ = w.Write([]byte(`{"backend":"pebble","installed":true,"available":true,"items":[{"id":"mem_1","title":"Note"}]}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/api/memory/status":
+			gotStatusQuery = r.URL.RawQuery
 			_, _ = w.Write([]byte(`{"backend":"pebble","docCount":3,"chunkCount":5}`))
 		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/memory/"):
 			gotGetPath = r.URL.Path
@@ -522,6 +524,9 @@ func TestCLIMemoryCommands(t *testing.T) {
 	}
 	if out, errOut, code := run("memory", "status", "--bot", "coder"); code != 0 || !strings.Contains(out, `"docCount": 3`) {
 		t.Fatalf("memory status failed: code=%d out=%s err=%s", code, out, errOut)
+	}
+	if !strings.Contains(gotStatusQuery, "callerBotId=coder") || !strings.Contains(gotStatusQuery, "botId=coder") {
+		t.Fatalf("unexpected memory status query: %q", gotStatusQuery)
 	}
 	if out, errOut, code := run("memory", "dream", "--bot", "coder"); code != 0 || !strings.Contains(out, `"clean"`) {
 		t.Fatalf("memory dream failed: code=%d out=%s err=%s", code, out, errOut)

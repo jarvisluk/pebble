@@ -124,6 +124,9 @@ func (h *Hub) runDreamForBot(ctx context.Context, bot config.BotConfig, dreamMod
 		res.Error = err.Error()
 		return res
 	}
+	if bot.PrivateSessions {
+		sanitizePrivateBotDreamPlan(plan, bot.ID)
+	}
 	now := time.Now().UTC()
 	applied, err := h.memory.ApplyDreamPlan(ctx, memory.ScopeBot, bot.ID, plan, now)
 	if err != nil {
@@ -151,6 +154,22 @@ func (h *Hub) runDreamForBot(ctx context.Context, bot config.BotConfig, dreamMod
 	res.IndexLines = applied.IndexLines
 	res.Applied = applied
 	return res
+}
+
+// sanitizePrivateBotDreamPlan prevents a private bot's Dream consolidation from
+// promoting or writing any memory outside its own bot scope (such as global _shared/memory).
+func sanitizePrivateBotDreamPlan(plan *memory.DreamPlan, botID string) {
+	if plan == nil {
+		return
+	}
+	for i := range plan.Operations {
+		op := &plan.Operations[i]
+		if strings.EqualFold(strings.TrimSpace(op.Scope), memory.ScopeGlobal) ||
+			(strings.TrimSpace(op.BotID) != "" && strings.TrimSpace(op.BotID) != botID) {
+			op.Scope = memory.ScopeBot
+			op.BotID = botID
+		}
+	}
 }
 
 func (h *Hub) collectDreamMessages(botID string, sinceRowID int64) (excerpts []string, maxRowID int64, lastSessionID string, count int) {

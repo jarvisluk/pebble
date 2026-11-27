@@ -174,10 +174,18 @@ func TestHTTPMemoryEndpointsAndSettingsRedaction(t *testing.T) {
 		t.Fatalf("expected ${HTTP_TEST_EMBED_KEY} preserved on disk:\n%s", string(diskCfg))
 	}
 
-	// 8. POST /api/memory/dream, POST /api/memory/reindex, POST /api/memory/import/magpie, DELETE /api/memory/{id}.
+	// 8. POST /api/memory/dream, privacy on GET /api/memory/status, POST /api/memory/reindex, POST /api/memory/import/magpie, DELETE /api/memory/{id}.
 	dreamRec := do(http.MethodPost, "/api/memory/dream", `{"botId":"a"}`)
 	if dreamRec.Code != http.StatusOK || !strings.Contains(dreamRec.Body.String(), `"http dream ok"`) {
 		t.Fatalf("POST /api/memory/dream failed: %d %s", dreamRec.Code, dreamRec.Body.String())
+	}
+	forbSt := do(http.MethodGet, "/api/memory/status?botId=a&callerBotId=b", "")
+	if forbSt.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for caller b fetching private bot a status, got %d %s", forbSt.Code, forbSt.Body.String())
+	}
+	filtSt := do(http.MethodGet, "/api/memory/status?callerBotId=b", "")
+	if filtSt.Code != http.StatusOK || strings.Contains(filtSt.Body.String(), "http dream ok") || strings.Contains(filtSt.Body.String(), `"botId":"a"`) {
+		t.Fatalf("private bot a dream leaked into unfiltered status for caller b: %d %s", filtSt.Code, filtSt.Body.String())
 	}
 	reindexRec := do(http.MethodPost, "/api/memory/reindex", `{}`)
 	if reindexRec.Code != http.StatusOK || !strings.Contains(reindexRec.Body.String(), `"docsIndexed":`) || !strings.Contains(reindexRec.Body.String(), `"chunksIndexed":`) {

@@ -130,7 +130,10 @@ func ownerBotFromMemoryPath(rawPath string) string {
 	p := filepath.ToSlash(strings.TrimSpace(rawPath))
 	p = strings.TrimPrefix(p, "./")
 	p = strings.TrimPrefix(p, "workspaces/")
-	parts := strings.Split(p, "/")
+	cleaned := filepath.ToSlash(filepath.Clean(p))
+	cleaned = strings.TrimPrefix(cleaned, "./")
+	cleaned = strings.TrimPrefix(cleaned, "workspaces/")
+	parts := strings.Split(cleaned, "/")
 	if len(parts) < 2 {
 		return ""
 	}
@@ -168,6 +171,19 @@ func (h *Hub) MemorySearch(ctx context.Context, callerBotID string, opts memory.
 	return h.memory.Search(ctx, opts)
 }
 
+func (h *Hub) memoryItemOwnerBot(ctx context.Context, id string) string {
+	id = strings.TrimSpace(id)
+	if id == "" || h.store == nil || h.store.DB() == nil {
+		return ""
+	}
+	if h.memory != nil {
+		_, _ = h.memory.SyncFromDisk(ctx)
+	}
+	var botID string
+	_ = h.store.DB().QueryRowContext(ctx, `SELECT bot_id FROM memory_docs WHERE doc_id = ? LIMIT 1`, id).Scan(&botID)
+	return strings.TrimSpace(botID)
+}
+
 // MemoryGet retrieves an L2 memory item or line-sliced memory file with privacy enforcement.
 func (h *Hub) MemoryGet(ctx context.Context, callerBotID string, opts memory.GetOpts) (*memory.GetResult, error) {
 	if h.memory == nil {
@@ -185,6 +201,11 @@ func (h *Hub) MemoryGet(ctx context.Context, callerBotID string, opts memory.Get
 	}
 	if owner := ownerBotFromMemoryPath(opts.Path); owner != "" && h.isPrivateFor(owner, callerBotID) {
 		return nil, fmt.Errorf("%w: bot %q memory is private", ErrForbidden, owner)
+	}
+	if id := strings.TrimSpace(opts.ID); id != "" {
+		if owner := h.memoryItemOwnerBot(ctx, id); owner != "" && h.isPrivateFor(owner, callerBotID) {
+			return nil, fmt.Errorf("%w: bot %q memory is private", ErrForbidden, owner)
+		}
 	}
 	res, err := h.memory.Get(ctx, opts)
 	if err != nil {
@@ -215,22 +236,14 @@ func (h *Hub) MemorySave(ctx context.Context, callerBotID string, req MemorySave
 		}
 	}
 	if id := strings.TrimSpace(req.ID); id != "" {
-		existing, err := h.memory.Get(ctx, memory.GetOpts{ID: id})
-		if err != nil {
-			return nil, err
-		}
-		if existing.Item != nil && existing.Item.BotID != "" && h.isPrivateFor(existing.Item.BotID, callerBotID) {
-			return nil, fmt.Errorf("%w: bot %q memory is private", ErrForbidden, existing.Item.BotID)
+		if owner := h.memoryItemOwnerBot(ctx, id); owner != "" && h.isPrivateFor(owner, callerBotID) {
+			return nil, fmt.Errorf("%w: bot %q memory is private", ErrForbidden, owner)
 		}
 	}
 	supersedes := strings.TrimSpace(req.Supersedes)
 	if supersedes != "" {
-		oldItem, err := h.memory.Get(ctx, memory.GetOpts{ID: supersedes})
-		if err != nil {
-			return nil, err
-		}
-		if oldItem.Item != nil && oldItem.Item.BotID != "" && h.isPrivateFor(oldItem.Item.BotID, callerBotID) {
-			return nil, fmt.Errorf("%w: bot %q memory is private", ErrForbidden, oldItem.Item.BotID)
+		if owner := h.memoryItemOwnerBot(ctx, supersedes); owner != "" && h.isPrivateFor(owner, callerBotID) {
+			return nil, fmt.Errorf("%w: bot %q memory is private", ErrForbidden, owner)
 		}
 	}
 
@@ -256,12 +269,8 @@ func (h *Hub) MemoryPatch(ctx context.Context, callerBotID, id string, req memor
 	if h.memory == nil {
 		return nil, errors.New("memory store unavailable")
 	}
-	existing, err := h.memory.Get(ctx, memory.GetOpts{ID: id})
-	if err != nil {
-		return nil, err
-	}
-	if existing.Item != nil && existing.Item.BotID != "" && h.isPrivateFor(existing.Item.BotID, strings.TrimSpace(callerBotID)) {
-		return nil, fmt.Errorf("%w: bot %q memory is private", ErrForbidden, existing.Item.BotID)
+	if owner := h.memoryItemOwnerBot(ctx, id); owner != "" && h.isPrivateFor(owner, strings.TrimSpace(callerBotID)) {
+		return nil, fmt.Errorf("%w: bot %q memory is private", ErrForbidden, owner)
 	}
 	return h.memory.Patch(ctx, id, req)
 }
@@ -271,12 +280,8 @@ func (h *Hub) MemoryForget(ctx context.Context, callerBotID, id string, opts mem
 	if h.memory == nil {
 		return nil, errors.New("memory store unavailable")
 	}
-	existing, err := h.memory.Get(ctx, memory.GetOpts{ID: id})
-	if err != nil {
-		return nil, err
-	}
-	if existing.Item != nil && existing.Item.BotID != "" && h.isPrivateFor(existing.Item.BotID, strings.TrimSpace(callerBotID)) {
-		return nil, fmt.Errorf("%w: bot %q memory is private", ErrForbidden, existing.Item.BotID)
+	if owner := h.memoryItemOwnerBot(ctx, id); owner != "" && h.isPrivateFor(owner, strings.TrimSpace(callerBotID)) {
+		return nil, fmt.Errorf("%w: bot %q memory is private", ErrForbidden, owner)
 	}
 	return h.memory.Forget(ctx, id, opts)
 }
@@ -315,15 +320,20 @@ func (h *Hub) MemoryWriteIndex(ctx context.Context, callerBotID, scope, botID, c
 	return h.memory.WriteIndex(ctx, scope, botID, content)
 }
 
-// MemoryStatus returns memory index metrics, redacted config, coexistence state, and recent dreams.
-func (h *Hub) MemoryStatus(ctx context.Context, botID string) (*MemoryStatusResponse, error) {
+// MemoryStatus returns memory index metrics, redacted config, coexistence state, and recent dreams
+// while enforcing privateSessions isolation for cross-bot callers.
+func (h *Hub) MemoryStatus(ctx context.Context, callerBotID, botID string) (*MemoryStatusResponse, error) {
 	if h.memory == nil {
 		return nil, errors.New("memory store unavailable")
 	}
+	callerBotID = strings.TrimSpace(callerBotID)
 	botID = strings.TrimSpace(botID)
 	if botID != "" {
 		if _, ok := h.GetBot(botID); !ok {
 			return nil, fmt.Errorf("bot %q not found: %w", botID, ErrBotNotFound)
+		}
+		if h.isPrivateFor(botID, callerBotID) {
+			return nil, fmt.Errorf("%w: bot %q memory is private", ErrForbidden, botID)
 		}
 	}
 	st, err := h.memory.Status(ctx)
@@ -347,6 +357,25 @@ func (h *Hub) MemoryStatus(ctx context.Context, botID string) (*MemoryStatusResp
 			}
 		}
 		recent = filtered
+	} else if callerBotID != "" {
+		excluded := h.privateBotIDsExcept(callerBotID)
+		if len(excluded) > 0 {
+			if list, err := h.memory.Search(ctx, memory.SearchOpts{
+				Scope:          memory.ScopeAll,
+				ExcludedBotIDs: excluded,
+				Limit:          1,
+			}); err == nil && list != nil {
+				counts = list.Counts
+			}
+			filtered := make([]memory.DreamRecord, 0, len(recent))
+			for _, rec := range recent {
+				if rec.BotID != "" && h.isPrivateFor(rec.BotID, callerBotID) {
+					continue
+				}
+				filtered = append(filtered, rec)
+			}
+			recent = filtered
+		}
 	}
 	return &MemoryStatusResponse{
 		Backend:      st.Backend,

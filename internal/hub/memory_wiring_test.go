@@ -187,6 +187,14 @@ func TestPrivateBotMemoryIsolationAndSettingsPersistence(t *testing.T) {
 	if _, err := h.MemoryGet(context.Background(), "b", memory.GetOpts{Path: "a/memory/MEMORY.md"}); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("expected ErrForbidden on get by path, got %v", err)
 	}
+	if _, err := h.MemoryGet(context.Background(), "b", memory.GetOpts{Path: "b/../a/memory/MEMORY.md"}); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("expected ErrForbidden on traversal get by path, got %v", err)
+	}
+	var statCount int
+	_ = h.store.DB().QueryRow(`SELECT COUNT(*) FROM memory_stats`).Scan(&statCount)
+	if statCount != 0 {
+		t.Fatalf("expected traversal blocked before reading/recording memory_stats, got %d rows", statCount)
+	}
 	newTitle := "Hijacked"
 	if _, err := h.MemoryPatch(context.Background(), "b", saved.Item.ID, memory.PatchReq{Title: &newTitle}); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("expected ErrForbidden on patch, got %v", err)
@@ -208,6 +216,47 @@ func TestPrivateBotMemoryIsolationAndSettingsPersistence(t *testing.T) {
 	}
 	if len(allForB.Items) != 0 {
 		t.Fatalf("private bot memory leaked into scope=all search for b: %+v", allForB.Items)
+	}
+
+	// Private bot Dream attempting scope="global" ADD must stay inside private bot "a" and never touch _shared/memory.
+	capH.mu.Lock()
+	capH.dreamOut = `{"summary":"private secret dream summary","operations":[{"action":"ADD","scope":"global","kind":"fact","title":"Private secret","text":"never share globally"}]}`
+	capH.mu.Unlock()
+	dreamRes, err := h.RunMemoryDream(context.Background(), "a", true)
+	if err != nil || len(dreamRes) != 1 || dreamRes[0].Error != "" || dreamRes[0].Applied == nil || dreamRes[0].Applied.Added != 1 {
+		t.Fatalf("expected private bot dream to succeed within bot scope, got %+v err=%v", dreamRes, err)
+	}
+	globalList, err := h.MemorySearch(context.Background(), "", memory.SearchOpts{Scope: memory.ScopeGlobal, Status: "all"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(globalList.Items) != 0 {
+		t.Fatalf("private bot Dream leaked item into global scope: %+v", globalList.Items)
+	}
+	botAList, err := h.MemorySearch(context.Background(), "a", memory.SearchOpts{Scope: memory.ScopeBot, BotID: "a", Query: "never share globally"})
+	if err != nil || len(botAList.Items) != 1 {
+		t.Fatalf("expected sanitized private dream item stored in bot a scope, got %+v err=%v", botAList, err)
+	}
+
+	// MemoryStatus enforces privateSessions isolation for cross-bot callers.
+	if _, err := h.MemoryStatus(context.Background(), "b", "a"); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("expected ErrForbidden on MemoryStatus(b, a), got %v", err)
+	}
+	stForB, err := h.MemoryStatus(context.Background(), "b", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stForB.Counts.Active != 0 || stForB.Counts.Bot != 0 {
+		t.Fatalf("expected private bot a excluded from aggregate counts for caller b, got %+v", stForB.Counts)
+	}
+	for _, rec := range stForB.RecentDreams {
+		if rec.BotID == "a" || strings.Contains(rec.Summary, "private secret dream summary") {
+			t.Fatalf("private bot a dream leaked in MemoryStatus for caller b: %+v", rec)
+		}
+	}
+	stForHuman, err := h.MemoryStatus(context.Background(), "", "")
+	if err != nil || stForHuman.Counts.Active < 2 || len(stForHuman.RecentDreams) == 0 {
+		t.Fatalf("expected human caller to see full status, got %+v err=%v", stForHuman, err)
 	}
 
 	// Settings persistence: preserve ${TEST_HUB_EMBED_KEY} on redacted/empty apiKey and fire schedule sync.

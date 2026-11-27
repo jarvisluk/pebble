@@ -286,7 +286,8 @@ func (s *HTTPServer) handleMemoryIndexPut(w http.ResponseWriter, r *http.Request
 func (s *HTTPServer) handleMemoryStatus(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
-	st, err := s.hub.MemoryStatus(ctx, r.URL.Query().Get("botId"))
+	q := r.URL.Query()
+	st, err := s.hub.MemoryStatus(ctx, q.Get("callerBotId"), q.Get("botId"))
 	if err != nil {
 		writeMemoryErr(w, err)
 		return

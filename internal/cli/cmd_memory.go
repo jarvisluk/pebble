@@ -308,9 +308,16 @@ func runMemoryCmd(ctx context.Context, args []string, cwd string, stdout, stderr
 			return err
 		}
 		c := resolveClient(co, cwd)
-		path := "/api/memory/status"
+		q := url.Values{}
 		if b := strings.TrimSpace(*botID); b != "" {
-			path += "?botId=" + url.QueryEscape(b)
+			q.Set("botId", b)
+		}
+		if c.SelfBotID() != "" {
+			q.Set("callerBotId", c.SelfBotID())
+		}
+		path := "/api/memory/status"
+		if enc := q.Encode(); enc != "" {
+			path += "?" + enc
 		}
 		body, err := c.DoJSON(ctx, http.MethodGet, path, nil)
 		if err != nil {
