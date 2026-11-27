@@ -78,18 +78,10 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import ai.pebble.android.data.BotStatus
-import ai.pebble.android.data.HubException
-import ai.pebble.android.data.MemoryItem
-import ai.pebble.android.data.MemoryList
 import ai.pebble.android.data.PebbleStore
-import ai.pebble.android.data.RoutineItem
-import ai.pebble.android.data.RoutineRun
 import ai.pebble.android.data.errText
 import ai.pebble.android.data.resolveDefaultModel
-import ai.pebble.android.ui.settings.ModelInputWithMenu
-import ai.pebble.android.ui.settings.localizedMemoryKind
 import ai.pebble.android.ui.settings.settingsHarnessList
 import ai.pebble.android.ui.desktop.H264SurfaceView
 import ai.pebble.android.ui.theme.BotAppearancePicker
@@ -145,11 +137,6 @@ fun BotInfoSheet(
     var saving by remember(botId) { mutableStateOf(false) }
     var err by remember(botId) { mutableStateOf("") }
     var confirm by remember(botId) { mutableStateOf<ConfirmItem?>(null) }
-
-    var mem by remember(botId) { mutableStateOf<MemoryList?>(null) }
-    var memLoading by remember(botId) { mutableStateOf(false) }
-    var memText by remember(botId) { mutableStateOf("") }
-    var memSaving by remember(botId) { mutableStateOf(false) }
 
     val index = store.bots.indexOfFirst { it.id == botId }
     val bot = if (index >= 0) store.bots[index] else null
@@ -246,13 +233,6 @@ fun BotInfoSheet(
         }
     }
 
-    suspend fun loadMem() {
-        memLoading = true
-        runCatching { store.fetchMemories(scope = "project", botId = botId, limit = 30) }
-            .getOrNull()?.let { mem = it }
-        memLoading = false
-    }
-
     LaunchedEffect(botId) {
         val src = detail ?: bot
         editName = src?.name ?: botId
@@ -267,7 +247,6 @@ fun BotInfoSheet(
         editBrowserMode = src?.browserMode.orEmpty()
         editPermMode = store.clampPermissionMode(src?.permissionMode, src?.harness)
         loading = true
-        scope.launch { loadMem() }
         scope.launch { runCatching { store.refreshDesktopTargets() } }
         scope.launch {
             if (store.settings == null) runCatching { store.loadSettings() }
@@ -445,94 +424,13 @@ fun BotInfoSheet(
             }
 
             // Bot Memory
-            SectionHeader(store.t("botMemory"))
-            SectionCard {
-                Column(
-                    modifier = Modifier.padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    val m = mem
-                    when {
-                        memLoading && m == null -> CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = p.accent)
-                        m?.installed != true -> {
-                            Text(store.t("hostNoMagpie"), color = p.text2, fontSize = PebbleFont.body)
-                        }
-                        m.available != true -> {
-                            Text(store.t("magpieNoResp"), color = p.danger, fontSize = PebbleFont.body)
-                        }
-                        else -> {
-                            val items = m.items.orEmpty()
-                            if (items.isEmpty()) {
-                                Text(store.t("noBotMemories"), color = p.mute, fontSize = PebbleFont.secondary)
-                            } else {
-                                items.forEachIndexed { idx, item ->
-                                    if (idx > 0) CardDivider()
-                                    MemoryItemRow(
-                                        store = store,
-                                        item = item,
-                                        onDelete = {
-                                            confirm = ConfirmItem(
-                                                title = store.t("deleteMemTitle"),
-                                                message = store.t("deleteMemConfirm"),
-                                            ) {
-                                                scope.launch {
-                                                    runCatching { store.deleteMemory(item.id) }
-                                                    loadMem()
-                                                }
-                                            }
-                                        },
-                                    )
-                                }
-                            }
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.Bottom,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                OutlinedTextField(
-                                    value = memText,
-                                    onValueChange = { memText = it },
-                                    placeholder = { Text(store.t("botMemPh")) },
-                                    minLines = 1,
-                                    maxLines = 4,
-                                    shape = PebbleDimens.rowShape,
-                                    colors = pebbleFieldColors(),
-                                    modifier = Modifier.weight(1f),
-                                )
-                                Button(
-                                    onClick = {
-                                        val txt = memText.trim()
-                                        if (txt.isEmpty()) return@Button
-                                        memSaving = true
-                                        scope.launch {
-                                            try {
-                                                store.saveMemory(
-                                                    mapOf(
-                                                        "scope" to "project",
-                                                        "botId" to botId,
-                                                        "kind" to "fact",
-                                                        "text" to txt,
-                                                    ),
-                                                )
-                                                memText = ""
-                                                loadMem()
-                                            } catch (e: Throwable) {
-                                                err = errText(e, store.t("saveBotMemFailed"))
-                                            } finally {
-                                                memSaving = false
-                                            }
-                                        }
-                                    },
-                                    enabled = !memSaving && memText.trim().isNotEmpty(),
-                                    colors = ButtonDefaults.buttonColors(containerColor = pal.accent, contentColor = pal.onAccent),
-                                ) {
-                                    Text(store.t("saveMemory"), fontSize = PebbleFont.secondary)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            BotMemorySection(
+                store = store,
+                botId = botId,
+                pal = pal,
+                onError = { err = it },
+                onConfirm = { confirm = it },
+            )
 
             BotTechDetailsCard(
                 store = store,

@@ -1,16 +1,13 @@
 package channel
 
 import (
-	"bot-hub/internal/harness"
 	"bot-hub/internal/hub"
 	"bot-hub/internal/state"
-	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 )
 
 func (s *HTTPServer) handleReset(w http.ResponseWriter, r *http.Request) {
@@ -121,58 +118,4 @@ func (s *HTTPServer) serveSessionRecall(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 	writeJSON(w, http.StatusOK, res)
-}
-
-func (s *HTTPServer) handleMemorySearch(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
-	defer cancel()
-	q := r.URL.Query()
-	limit := 30
-	if raw := q.Get("limit"); raw != "" {
-		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
-			limit = n
-		}
-	}
-	res, err := s.hub.MemorySearch(ctx, q.Get("scope"), q.Get("botId"), q.Get("query"), q.Get("kind"), limit)
-	if err != nil {
-		status := http.StatusBadRequest
-		if errors.Is(err, hub.ErrBotNotFound) {
-			status = http.StatusNotFound
-		}
-		writeJSON(w, status, map[string]any{"error": err.Error()})
-		return
-	}
-	writeJSON(w, http.StatusOK, res)
-}
-
-func (s *HTTPServer) handleMemorySave(w http.ResponseWriter, r *http.Request) {
-	var req harness.MagpieMemorySaveReq
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<18)).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json body"})
-		return
-	}
-	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
-	defer cancel()
-	msg, err := s.hub.MemorySave(ctx, req)
-	if err != nil {
-		status := http.StatusBadRequest
-		if errors.Is(err, hub.ErrBotNotFound) {
-			status = http.StatusNotFound
-		}
-		writeJSON(w, status, map[string]any{"error": err.Error()})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": msg})
-}
-
-func (s *HTTPServer) handleMemoryDelete(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
-	defer cancel()
-	msg, err := s.hub.MemoryForget(ctx, id)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": msg})
 }

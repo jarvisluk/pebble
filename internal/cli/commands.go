@@ -51,6 +51,8 @@ func runCommand(ctx context.Context, args []string, cwd string, stdout, stderr i
 		err = runRoutineCmd(ctx, rest, cwd, stdout, stderr)
 	case "task":
 		err = runTaskCmd(ctx, rest, cwd, stdout, stderr)
+	case "memory":
+		err = runMemoryCmd(ctx, rest, cwd, stdout, stderr)
 	case "node":
 		err = runNodeCmd(ctx, rest, cwd, stdout, stderr)
 	case "desktop":

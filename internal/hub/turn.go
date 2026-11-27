@@ -124,17 +124,20 @@ func (h *Hub) platformInstructionsPath() string {
 	return filepath.Join(sharedDir, config.PlatformInstructionsFilename)
 }
 
-func (h *Hub) buildTurnPrompt(bot config.BotConfig, prompt string, isFirstTurn bool, platPath string, pendingReceipts []state.RoutineRun) string {
-	return h.buildTurnPromptWithTasks(bot, prompt, isFirstTurn, platPath, pendingReceipts, nil)
+func (h *Hub) buildTurnPrompt(bot config.BotConfig, prompt string, isFirstTurn bool, platPath string, pendingReceipts []state.RoutineRun, memorySnapshot string) string {
+	return h.buildTurnPromptWithTasks(bot, prompt, isFirstTurn, platPath, pendingReceipts, nil, memorySnapshot)
 }
 
-func (h *Hub) buildTurnPromptWithTasks(bot config.BotConfig, prompt string, isFirstTurn bool, platPath string, pendingReceipts []state.RoutineRun, pendingTasks []state.BotTask) string {
+func (h *Hub) buildTurnPromptWithTasks(bot config.BotConfig, prompt string, isFirstTurn bool, platPath string, pendingReceipts []state.RoutineRun, pendingTasks []state.BotTask, memorySnapshot string) string {
 	// Slash commands must stay at the start of the prompt so harnesses recognize them.
 	if strings.HasPrefix(strings.TrimSpace(prompt), "/") {
 		return prompt
 	}
 	var prefixParts []string
 	if isFirstTurn {
+		if strings.TrimSpace(memorySnapshot) != "" {
+			prefixParts = append(prefixParts, strings.TrimSpace(memorySnapshot))
+		}
 		if h.store != nil {
 			if prev, ok := h.store.LatestArchivedSession(bot.ID); ok {
 				details := []string{fmt.Sprintf("%d turns", prev.TurnCount), "status=" + prev.Status}
@@ -318,6 +321,11 @@ func (h *Hub) executeTurn(ctx context.Context, lane *botLane, bot config.BotConf
 	if apiToken != "" {
 		extraEnv["PEBBLE_API_TOKEN"] = apiToken
 	}
+	if h.memoryDisableClaudeAutoMemory() {
+		if _, overridden := bot.Env["CLAUDE_CODE_DISABLE_AUTO_MEMORY"]; !overridden {
+			extraEnv["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] = "1"
+		}
+	}
 	for k, v := range h.botBrowserEnv(bot) {
 		if k != "" && v != "" {
 			extraEnv[k] = v
@@ -366,7 +374,11 @@ func (h *Hub) executeTurn(ctx context.Context, lane *botLane, bot config.BotConf
 			pendingReceipts, _ = h.store.ListPendingReceipts(bot.ID, 5)
 			pendingTasks, _ = h.store.ListPendingTaskReceipts(bot.ID, 5)
 		}
-		effectivePrompt := h.buildTurnPromptWithTasks(bot, prompt, sess.TurnCount == 0, platPath, pendingReceipts, pendingTasks)
+		var memSnapshot string
+		if sess.TurnCount == 0 && !strings.HasPrefix(strings.TrimSpace(prompt), "/") {
+			memSnapshot = h.buildMemorySnapshot(ctx, bot, 0)
+		}
+		effectivePrompt := h.buildTurnPromptWithTasks(bot, prompt, sess.TurnCount == 0, platPath, pendingReceipts, pendingTasks, memSnapshot)
 
 		var toolMu sync.Mutex
 		var toolOrder []string
@@ -491,6 +503,7 @@ func (h *Hub) executeTurn(ctx context.Context, lane *botLane, bot config.BotConf
 					Text: fmt.Sprintf("Execution failed (%s): %v", firstLineSummary(prompt, 80), err),
 				})
 				_, _, _ = h.store.ArchiveSessionByID(sess.ID, "error", err.Error(), "")
+				h.triggerSessionFlushAsync(bot.ID, sess.ID, "session_overflow")
 				h.appendMessage(state.ChatMessage{
 					BotID: bot.ID, SessionID: sess.ID, Turn: turnNum,
 					Role: "system", From: "system",
@@ -616,6 +629,9 @@ func (h *Hub) executeTurn(ctx context.Context, lane *botLane, bot config.BotConf
 					Role: "system", From: "system",
 					Text: fmt.Sprintf("Session archived (%s). The next turn will start a new session.", sess.ID),
 				})
+				if handoff == "" && turnNum >= 3 {
+					h.triggerSessionFlushAsync(bot.ID, sess.ID, "session_rotate")
+				}
 			}
 		}
 		return res, nil

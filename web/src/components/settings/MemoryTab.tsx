@@ -1,7 +1,22 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import type { MemoryResponse, ResolvedLang, SettingsData } from '../../types';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import type {
+  MemoryResponse,
+  MemoryStatus,
+  MemoryStatusFilter,
+  ResolvedLang,
+  SettingsData,
+} from '../../types';
 import { api } from '../../lib/api';
 import { translate } from '../../lib/i18n';
+import {
+  fetchMemoryStatus,
+  listMemories,
+  MEMORY_KINDS,
+} from '../../lib/memoryApi';
+import { MemoryAddForm } from '../memory/MemoryAddForm';
+import { MemoryIndexEditor } from '../memory/MemoryIndexEditor';
+import { MemoryItemRow } from '../memory/MemoryItemRow';
+import { MemorySettingsCard } from '../memory/MemorySettingsCard';
 
 interface MemoryTabProps {
   active: boolean;
@@ -14,14 +29,12 @@ interface MemoryTabProps {
   resetRef: React.MutableRefObject<(() => void) | null>;
 }
 
-const MEM_KINDS = [
-  ['fact', 'kindFact'],
-  ['preference', 'kindPreference'],
-  ['rule', 'kindRule'],
-  ['reference', 'kindReference'],
-  ['profile', 'kindProfile'],
-  ['procedure', 'kindProcedure'],
-  ['episode', 'kindEpisode'],
+const STATUS_TABS: readonly [MemoryStatusFilter, string][] = [
+  ['active', 'memStatusActive'],
+  ['candidate', 'memStatusCandidate'],
+  ['superseded', 'memStatusSuperseded'],
+  ['archived', 'memStatusArchived'],
+  ['all', 'memStatusAll'],
 ] as const;
 
 export const MemoryTab: React.FC<MemoryTabProps> = ({
@@ -42,31 +55,38 @@ export const MemoryTab: React.FC<MemoryTabProps> = ({
   const [userMdSaving, setUserMdSaving] = useState(false);
   const [userMdErr, setUserMdErr] = useState('');
 
+  const [memConfigDirty, setMemConfigDirty] = useState(false);
+  const memConfigSaveRef = useRef<(() => Promise<boolean>) | null>(null);
+  const memConfigResetRef = useRef<(() => void) | null>(null);
+
   const [memData, setMemData] = useState<MemoryResponse | null>(null);
+  const [memStatusData, setMemStatusData] = useState<MemoryStatus | null>(null);
+  const [memLoading, setMemLoading] = useState(false);
   const [memStatus, setMemStatus] = useState('');
   const [memStatusClass, setMemStatusClass] = useState('');
   const [memScope, setMemScope] = useState<'global' | 'all'>('global');
+  const [memStatusFilter, setMemStatusFilter] = useState<MemoryStatusFilter>('active');
   const [memFilterKind, setMemFilterKind] = useState('');
   const [memQuery, setMemQuery] = useState('');
+  const [indexRefreshSeq, setIndexRefreshSeq] = useState(0);
+
   const [memAddOpen, setMemAddOpen] = useState(false);
-  const [memKind, setMemKind] = useState('fact');
-  const [memTags, setMemTags] = useState('');
-  const [memText, setMemText] = useState('');
   const [memErr, setMemErr] = useState('');
 
-  const isDirty = Boolean(
+  const userMdDirty = Boolean(
     settings &&
       userMdTouched &&
       sharedUserMd.replace(/\s+$/, '') !== baseUserMd.replace(/\s+$/, '')
   );
+  const anyDirty = userMdDirty || memConfigDirty;
 
   useEffect(() => {
     if (!userMdTouched) setSharedUserMd(baseUserMd);
   }, [baseUserMd, userMdTouched]);
 
   useEffect(() => {
-    onDirtyChange(isDirty);
-  }, [isDirty, onDirtyChange]);
+    onDirtyChange(anyDirty);
+  }, [anyDirty, onDirtyChange]);
 
   useEffect(() => () => onDirtyChange(false), [onDirtyChange]);
 
@@ -96,33 +116,56 @@ export const MemoryTab: React.FC<MemoryTabProps> = ({
     }
   }, [lang, sharedUserMd, onSettingsUpdated, onToast]);
 
+  const saveAllDirty = useCallback(async (): Promise<boolean> => {
+    let ok = true;
+    if (userMdDirty) {
+      ok = (await saveUserMd()) && ok;
+    }
+    if (memConfigDirty && memConfigSaveRef.current) {
+      ok = (await memConfigSaveRef.current()) && ok;
+    }
+    return ok;
+  }, [userMdDirty, memConfigDirty, saveUserMd]);
+
+  const resetAll = useCallback(() => {
+    resetUserMd();
+    memConfigResetRef.current?.();
+  }, [resetUserMd]);
+
   useEffect(() => {
-    saveRef.current = saveUserMd;
-    resetRef.current = resetUserMd;
+    saveRef.current = saveAllDirty;
+    resetRef.current = resetAll;
     return () => {
       saveRef.current = null;
       resetRef.current = null;
     };
-  }, [saveRef, resetRef, saveUserMd, resetUserMd]);
+  }, [saveRef, resetRef, saveAllDirty, resetAll]);
 
   const loadGlobalMemories = useCallback(
-    async (override?: { scope?: 'global' | 'all'; kind?: string; query?: string }) => {
+    async (override?: {
+      scope?: 'global' | 'all';
+      status?: MemoryStatusFilter;
+      kind?: string;
+      query?: string;
+    }) => {
       setMemErr('');
+      setMemLoading(true);
       setMemStatus(translate(lang, 'loading'));
       setMemStatusClass('');
       try {
         const sc = override?.scope ?? memScope;
+        const st = override?.status ?? memStatusFilter;
         const kd = override?.kind !== undefined ? override.kind : memFilterKind;
         const q = (override?.query !== undefined ? override.query : memQuery).trim();
-        const params = new URLSearchParams({ scope: sc, limit: '30' });
-        if (q) params.set('query', q);
-        if (kd) params.set('kind', kd);
-        const d = await api<MemoryResponse>(`/api/memory?${params.toString()}`);
+        const d = await listMemories({
+          scope: sc,
+          status: st,
+          kind: kd || undefined,
+          query: q || undefined,
+          limit: 50,
+        });
         setMemData(d);
-        if (!d.installed) {
-          setMemStatus(translate(lang, 'notLoaded'));
-          setMemStatusClass('');
-        } else if (!d.available) {
+        if (d.available === false) {
           setMemStatus(translate(lang, 'notConnected'));
           setMemStatusClass('bad');
         } else {
@@ -138,15 +181,36 @@ export const MemoryTab: React.FC<MemoryTabProps> = ({
         setMemStatus(translate(lang, 'failed'));
         setMemStatusClass('bad');
         if (e instanceof Error && e.message !== 'unauthorized') setMemErr(e.message);
+      } finally {
+        setMemLoading(false);
       }
     },
-    [lang, memScope, memFilterKind, memQuery]
+    [lang, memScope, memStatusFilter, memFilterKind, memQuery]
   );
 
+  const loadMemoryStatus = useCallback(async () => {
+    try {
+      const st = await fetchMemoryStatus();
+      setMemStatusData(st);
+    } catch {
+      // Status endpoint may be unavailable on older servers; keep UI resilient.
+    }
+  }, []);
+
+  const refreshAll = useCallback(async () => {
+    await Promise.all([loadGlobalMemories(), loadMemoryStatus()]);
+    setIndexRefreshSeq((s) => s + 1);
+  }, [loadGlobalMemories, loadMemoryStatus]);
+
   useEffect(() => {
-    if (active) void loadGlobalMemories();
+    if (!active) return;
+    void loadGlobalMemories();
+    void loadMemoryStatus();
   }, [active]);
 
+  const counts = memData?.counts ?? memStatusData?.counts;
+  const candidateCount = counts?.candidate ?? 0;
+  const semanticInfo = memData?.semantic ?? memStatusData?.semantic;
   return (
     <div id="sTabMemory" className="tab-pane tab-anim">
       <section className="set-card">
@@ -159,7 +223,7 @@ export const MemoryTab: React.FC<MemoryTabProps> = ({
             type="button"
             id="sUserMdSave"
             className="mp go"
-            disabled={!isDirty || userMdSaving}
+            disabled={!userMdDirty || userMdSaving}
             onClick={() => void saveUserMd()}
           >
             {userMdSaving ? t('saving') : t('save')}
@@ -184,19 +248,36 @@ export const MemoryTab: React.FC<MemoryTabProps> = ({
         {userMdErr && <div className="msg-err">{userMdErr}</div>}
       </section>
 
+      <MemoryIndexEditor
+        scope="global"
+        active={active}
+        refreshSeq={indexRefreshSeq}
+        lang={lang}
+        onToast={onToast}
+      />
+
       <section className="set-card" id="sMemCard">
         <div className="set-card-hd">
-          <h2>{t('magpieGlobalMem')}</h2>
-          <div className="row-inline-sm row-wrap">
-            {memData?.installed && memData.semantic && (
-              <span id="sMemSemanticBadge" className={`mp ${memData.semantic.active ? 'ok' : ''}`}>
-                {t(memData.semantic.active ? 'memSemanticOn' : 'memSemanticOff')}
+          <div>
+            <h2>{t('magpieGlobalMem')}</h2>
+            <span className="set-card-desc">{t('magpieGlobalMemDesc')}</span>
+          </div>
+          <div className="mem-card-hd-acts">
+            {semanticInfo?.active && (
+              <span id="sMemSemanticBadge" className="mp ok">
+                {t('memSemanticOn')}
               </span>
             )}
             <span id="sMemStatus" className={`mp ${memStatusClass}`}>
               {memStatus || t('notLoaded')}
             </span>
-            <button type="button" id="sMemRefresh" className="mp" onClick={() => void loadGlobalMemories()}>
+            <button
+              type="button"
+              id="sMemRefresh"
+              className="mp"
+              disabled={memLoading}
+              onClick={() => void refreshAll()}
+            >
               {t('refresh')}
             </button>
             <button
@@ -209,92 +290,22 @@ export const MemoryTab: React.FC<MemoryTabProps> = ({
             </button>
           </div>
         </div>
-        <p className="set-card-desc">{t('magpieGlobalMemDesc')}</p>
-        {memData?.installed && memData.semantic && !memData.semantic.active && (
-          <div className="mem-semantic-hint">
-            <span>{t('memSemanticHintOff')}</span>
-          </div>
-        )}
         {memAddOpen && (
-          <div id="sMemAddBox" className="add-prov mem-add">
-            <div className="two">
-              <div className="fld">
-                <label>{t('memType')}</label>
-                <select id="sMemKind" value={memKind} onChange={(e) => setMemKind(e.target.value)}>
-                  {MEM_KINDS.map(([k, lblKey]) => (
-                    <option key={k} value={k}>
-                      {t(lblKey)}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="fld">
-                <label dangerouslySetInnerHTML={{ __html: t('tagsOptional') }} />
-                <input
-                  id="sMemTags"
-                  placeholder={t('tagsPh')}
-                  value={memTags}
-                  onChange={(e) => setMemTags(e.target.value)}
-                />
-              </div>
-            </div>
-            <div className="fld">
-              <label>{t('memContent')}</label>
-              <textarea
-                id="sMemText"
-                rows={3}
-                className="ta-md ta-font"
-                placeholder={t('globalMemPh')}
-                value={memText}
-                onChange={(e) => setMemText(e.target.value)}
-              />
-            </div>
-            <div className="row-end-sm">
-              <button
-                type="button"
-                id="sMemAddCancel"
-                className="mp"
-                onClick={() => {
-                  setMemAddOpen(false);
-                  setMemErr('');
-                }}
-              >
-                {t('cancel')}
-              </button>
-              <button
-                type="button"
-                id="sMemAddSubmit"
-                className="mp go"
-                onClick={async () => {
-                  const text = memText.trim();
-                  if (!text) {
-                    setMemErr(t('memContentReq'));
-                    return;
-                  }
-                  const tags = memTags
-                    .split(/[,，]/) // i18n:allow-cjk
-                    .map((s) => s.trim())
-                    .filter(Boolean);
-                  setMemErr('');
-                  try {
-                    await api('/api/memory', {
-                      method: 'POST',
-                      body: { scope: 'global', kind: memKind, text, tags },
-                    });
-                    setMemText('');
-                    setMemTags('');
-                    setMemAddOpen(false);
-                    onToast(t('globalMemSaved'));
-                    await loadGlobalMemories();
-                  } catch (e) {
-                    if (e instanceof Error && e.message !== 'unauthorized') setMemErr(e.message);
-                  }
-                }}
-              >
-                {t('saveMemory')}
-              </button>
-            </div>
-          </div>
+          <MemoryAddForm
+            lang={lang}
+            onError={setMemErr}
+            onCancel={() => {
+              setMemAddOpen(false);
+              setMemErr('');
+            }}
+            onSaved={async (similarLen) => {
+              setMemAddOpen(false);
+              onToast(
+                similarLen > 0 ? t('memSimilarHint', { n: similarLen }) : t('globalMemSaved')
+              );
+              await refreshAll();
+            }}
+          />
         )}
 
         <div className="mem-filters">
@@ -333,18 +344,39 @@ export const MemoryTab: React.FC<MemoryTabProps> = ({
             }}
           >
             <option value="">{t('memKindAll')}</option>
-            {MEM_KINDS.map(([k, lblKey]) => (
+            {MEMORY_KINDS.map(([k, lblKey]) => (
               <option key={k} value={k}>
                 {t(lblKey)}
               </option>
             ))}
           </select>
         </div>
+
+        <div className="mem-scope-seg self-start" role="group" aria-label={t('memStatusAria')}>
+          {STATUS_TABS.map(([st, lblKey]) => (
+            <button
+              key={st}
+              type="button"
+              id={`sMemStatus_${st}`}
+              className={`mp${memStatusFilter === st ? ' on' : ''}`}
+              onClick={() => {
+                setMemStatusFilter(st);
+                void loadGlobalMemories({ status: st });
+              }}
+            >
+              <span>{t(lblKey)}</span>
+              {st === 'candidate' && candidateCount > 0 && (
+                <span className="mem-badge-n">{candidateCount}</span>
+              )}
+            </button>
+          ))}
+        </div>
+
         <div className="mem-bar">
           <input
             id="sMemQuery"
             className="note-in"
-            placeholder={memData?.semantic?.active ? t('searchSemanticMemPh') : t('searchGlobalMemPh')}
+            placeholder={semanticInfo?.active ? t('searchSemanticMemPh') : t('searchGlobalMemPh')}
             value={memQuery}
             onChange={(e) => setMemQuery(e.target.value)}
             onKeyDown={(e) => {
@@ -367,70 +399,58 @@ export const MemoryTab: React.FC<MemoryTabProps> = ({
               {t('memClearSearch')}
             </button>
           )}
-          <button type="button" id="sMemSearchBtn" className="mp" onClick={() => void loadGlobalMemories()}>
+          <button
+            type="button"
+            id="sMemSearchBtn"
+            className="mp"
+            onClick={() => void loadGlobalMemories()}
+          >
             {t('search')}
           </button>
         </div>
+
         <div id="sMemList" className="stack6">
-          {!memData || !memData.installed ? (
-            <div className="set-card-desc">{t('memNotInstalled')}</div>
-          ) : !memData.available ? (
+          {memLoading && !memData ? (
+            <div className="set-card-desc">{t('loadingEllipsis')}</div>
+          ) : memData?.available === false ? (
             <div className="set-card-desc">
               {t('memUnavailable')}
               {memData.error ? `: ${memData.error}` : ''}
             </div>
-          ) : !(memData.items || []).length ? (
+          ) : !(memData?.items || []).length ? (
             <div className="set-card-desc">{t('memEmpty')}</div>
           ) : (
-            (memData.items || []).map((it) => {
-              const tags = (it.tags || []).filter((tag) => !tag.startsWith('bot:'));
-              const tm = it.updatedAt ? it.updatedAt.replace('T', ' ').slice(0, 16) : '';
-              return (
-                <div key={it.id} className="mem-row">
-                  <div className="mem-top">
-                    <div className="mem-meta">
-                      {it.kind && <span className="mp ok">{it.kind}</span>}
-                      {memScope === 'all' && it.scope && (
-                        <span className="mp">
-                          {it.scope === 'everywhere' || it.scope === 'global'
-                            ? t('memScopeEverywhere')
-                            : t('memScopeProject')}
-                        </span>
-                      )}
-                      {tags.map((tg) => (
-                        <span key={tg} className="mp">
-                          #{tg}
-                        </span>
-                      ))}
-                      {tm && <span className="mem-time">{tm}</span>}
-                    </div>
-                    <button
-                      type="button"
-                      className="mp bad"
-                      onClick={async () => {
-                        setMemErr('');
-                        try {
-                          await api(`/api/memory/${encodeURIComponent(it.id)}`, { method: 'DELETE' });
-                          onToast(t('memDeleted'));
-                          await loadGlobalMemories();
-                        } catch (e) {
-                          if (e instanceof Error && e.message !== 'unauthorized') setMemErr(e.message);
-                        }
-                      }}
-                    >
-                      {t('delBtn')}
-                    </button>
-                  </div>
-                  <div className="mem-txt">{it.text}</div>
-                </div>
-              );
-            })
+            (memData?.items || []).map((it) => (
+              <MemoryItemRow
+                key={it.id}
+                item={it}
+                lang={lang}
+                showScope={memScope === 'all'}
+                showStatus={memStatusFilter === 'all'}
+                onMutated={refreshAll}
+                onToast={onToast}
+                onError={setMemErr}
+              />
+            ))
           )}
         </div>
         <div id="sMemErr" className="msg-err">
           {memErr}
         </div>
       </section>
+
+      <MemorySettingsCard
+        settings={settings}
+        memStatus={memStatusData}
+        magpieInfo={memData?.magpie}
+        lang={lang}
+        onToast={onToast}
+        onSettingsUpdated={onSettingsUpdated}
+        onRefreshAll={refreshAll}
+        onConfigDirtyChange={setMemConfigDirty}
+        saveConfigRef={memConfigSaveRef}
+        resetConfigRef={memConfigResetRef}
+      />
     </div>
   );
 };

@@ -26,11 +26,6 @@ struct BotInfoSheet: View {
     @State private var err = ""
     @State private var confirm: ConfirmItem?
 
-    @State private var mem: MemoryList?
-    @State private var memLoading = false
-    @State private var memText = ""
-    @State private var memSaving = false
-
     private var index: Int { hub.bots.firstIndex { $0.id == botId } ?? -1 }
     private var bot: BotStatus? { index >= 0 ? hub.bots[index] : nil }
     private var active: BotStatus? { detail ?? bot }
@@ -129,7 +124,7 @@ struct BotInfoSheet: View {
                     LabeledContent(hub.t("statCost"), value: String(format: "$%.4f", active?.session?.totalCostUsd ?? 0))
                 }
 
-                memorySection(pal)
+                BotMemorySectionView(botId: botId, accent: pal.accent, error: $err, confirm: $confirm)
 
                 Section {
                     DisclosureGroup(hub.t("techDetails"), isExpanded: $techOpen) {
@@ -275,7 +270,6 @@ struct BotInfoSheet: View {
         editBrowserMode = src?.browserMode ?? ""
         editPermMode = hub.clampPermissionMode(src?.permissionMode, harnessId: src?.harness)
         loading = true
-        Task { await loadMem() }
         Task { _ = try? await hub.refreshDesktopTargets() }
         Task {
             if hub.settings == nil { _ = try? await hub.loadSettings() }
@@ -328,98 +322,5 @@ struct BotInfoSheet: View {
             } catch { err = errText(error, hub.t("saveFailed")) }
             saving = false
         }
-    }
-
-    private func loadMem() async {
-        memLoading = true
-        if let m = try? await hub.fetchMemories(scope: "project", botId: botId, limit: 30) { mem = m }
-        memLoading = false
-    }
-
-    private func memorySection(_ pal: (accent: Color, text: Color, soft: Color)) -> some View {
-        Section(hub.t("botMemory")) {
-            if memLoading && mem == nil {
-                ProgressView()
-            } else if mem?.installed != true {
-                Text(hub.t("hostNoMagpie")).foregroundStyle(.secondary)
-            } else if mem?.available != true {
-                Text(hub.t("magpieNoResp")).foregroundStyle(p.danger)
-            } else {
-                if (mem?.items ?? []).isEmpty {
-                    Text(hub.t("noBotMemories")).foregroundStyle(.secondary)
-                }
-                ForEach(mem?.items ?? []) { it in
-                    MemoryRow(item: it) { askDelete(it) }
-                }
-                HStack(alignment: .center, spacing: 8) {
-                    TextField("", text: $memText, prompt: Text(hub.t("botMemPh")), axis: .vertical)
-                        .labelsHidden()
-                        .lineLimit(1...5)
-                    let memReady = !memText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    if memSaving {
-                        ProgressView().controlSize(.small)
-                    } else if memReady {
-                        Button(hub.t("saveMemory")) { addMem() }
-                            .buttonStyle(HubPrimaryButtonStyle())
-                    } else {
-                        Button(hub.t("saveMemory")) { addMem() }
-                            .buttonStyle(.bordered).controlSize(.small)
-                            .disabled(true)
-                    }
-                }
-            }
-        }
-    }
-
-    private func askDelete(_ it: MemoryItem) {
-        confirm = ConfirmItem(title: hub.t("deleteMemTitle"), message: hub.t("deleteMemConfirm")) {
-            try? await hub.deleteMemory(it.id)
-            await loadMem()
-        }
-    }
-
-    private func addMem() {
-        let txt = memText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !txt.isEmpty else { return }
-        memSaving = true
-        Task {
-            do {
-                try await hub.saveMemory(["scope": "project", "botId": botId, "kind": "fact", "text": txt])
-                memText = ""
-                await loadMem()
-            } catch { err = errText(error, hub.t("saveBotMemFailed")) }
-            memSaving = false
-        }
-    }
-}
-
-/// 记忆条目：右滑或右键删除。
-struct MemoryRow: View {
-    @Environment(HubStore.self) private var hub
-    @Environment(\.palette) private var p
-    var item: MemoryItem
-    var showTags = false
-    var showScope = false
-    var onDelete: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 6) {
-                Text(localizedMemoryKind(item.kind, hub: hub)).font(.system(size: AppFont.secondary, weight: .semibold)).foregroundStyle(p.sageInk)
-                if showScope, let sc = item.scope, !sc.isEmpty {
-                    Text(sc == "everywhere" || sc == "global" ? hub.t("memScopeEverywhere") : hub.t("memScopeProject"))
-                        .font(.system(size: AppFont.caption))
-                        .foregroundStyle(.secondary)
-                }
-                if showTags {
-                    ForEach((item.tags ?? []).filter { !$0.hasPrefix("bot:") }, id: \.self) { tag in
-                        Text("#\(tag)").font(.system(size: AppFont.secondary)).foregroundStyle(.secondary)
-                    }
-                }
-            }
-            Text(item.text ?? "").font(.system(size: AppFont.body)).textSelection(.enabled)
-        }
-        .swipeActions { Button(hub.t("delete"), role: .destructive, action: onDelete) }
-        .contextMenu { Button(hub.t("delete"), systemImage: "trash", role: .destructive, action: onDelete) }
     }
 }

@@ -152,7 +152,7 @@ func (s *Server) handle(ctx context.Context, req rpcRequest) rpcResponse {
 }
 
 func toolDefinitions() []map[string]any {
-	return []map[string]any{
+	defs := []map[string]any{
 		{
 			"name":        "send_message",
 			"description": "Send a visible message (text, images, and/or files) to the user in Pebble. Your ordinary text output is internal and hidden from the user; call this tool whenever you want the user to see a reply, progress update, image, or file.",
@@ -609,9 +609,13 @@ func toolDefinitions() []map[string]any {
 			},
 		},
 	}
+	return append(defs, memoryToolDefinitions()...)
 }
 
 func (s *Server) callTool(ctx context.Context, name string, rawArgs json.RawMessage) (string, bool) {
+	if text, isErr, handled := s.callMemoryTool(ctx, name, rawArgs); handled {
+		return text, isErr
+	}
 	selfBotID := s.client.SelfBotID()
 	switch name {
 	case "send_message":

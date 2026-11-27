@@ -77,17 +77,9 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import ai.pebble.android.data.BotStatus
-import ai.pebble.android.data.HubException
-import ai.pebble.android.data.MemoryItem
-import ai.pebble.android.data.MemoryList
 import ai.pebble.android.data.PebbleStore
 import ai.pebble.android.data.RoutineItem
 import ai.pebble.android.data.errText
-import ai.pebble.android.data.resolveDefaultModel
-import ai.pebble.android.ui.settings.ModelInputWithMenu
-import ai.pebble.android.ui.settings.localizedMemoryKind
-import ai.pebble.android.ui.settings.settingsHarnessList
 import ai.pebble.android.ui.desktop.H264SurfaceView
 import ai.pebble.android.ui.theme.BotAppearancePicker
 import ai.pebble.android.ui.theme.PebbleFont
@@ -122,51 +114,6 @@ internal fun DetailRow(label: String, value: String) {
     ) {
         Text(label, color = p.text2, fontSize = PebbleFont.body, modifier = Modifier.weight(1f))
         Text(value, color = p.text, fontSize = PebbleFont.body, fontWeight = FontWeight.Medium)
-    }
-}
-
-@Composable
-fun MemoryItemRow(
-    store: PebbleStore,
-    item: MemoryItem,
-    showTags: Boolean = false,
-    showScope: Boolean = false,
-    onDelete: () -> Unit,
-) {
-    val p = LocalPalette.current
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 6.dp),
-        verticalAlignment = Alignment.Top,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(localizedMemoryKind(item.kind, store), color = p.sageInk, fontSize = PebbleFont.secondary, fontWeight = FontWeight.SemiBold)
-                if (showScope && !item.scope.isNullOrEmpty()) {
-                    Text(
-                        text = if (item.scope == "everywhere" || item.scope == "global") store.t("memScopeEverywhere") else store.t("memScopeProject"),
-                        color = p.mute,
-                        fontSize = PebbleFont.caption,
-                    )
-                }
-                if (showTags) {
-                    item.tags.orEmpty().filterNot { it.startsWith("bot:") }.forEach { tag ->
-                        Text("#$tag", color = p.mute, fontSize = PebbleFont.caption)
-                    }
-                }
-            }
-            SelectionContainer {
-                Text(item.text.orEmpty(), color = p.text, fontSize = PebbleFont.body)
-            }
-        }
-        TextButton(
-            onClick = onDelete,
-            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
-        ) {
-            Text(store.t("delete"), color = p.danger, fontSize = PebbleFont.secondary)
-        }
     }
 }
 

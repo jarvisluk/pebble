@@ -65,6 +65,10 @@ func TestMCPStdioToolsFlow(t *testing.T) {
 		"request_takeover": true,
 		"recall_session":   true,
 		"open_stage":       true,
+		"recall_memory":    true,
+		"read_memory":      true,
+		"save_memory":      true,
+		"forget_memory":    true,
 		"task_spawn":       true,
 		"task_status":      true,
 		"task_read":        true,
@@ -290,6 +294,92 @@ func TestMCPSendMessageTool(t *testing.T) {
 	files, ok := gotBody["files"].([]any)
 	if !ok || len(files) != 2 {
 		t.Fatalf("expected 2 files forwarded, got %#v", gotBody["files"])
+	}
+}
+
+func TestMCPMemoryToolsAndComputerUseBlock(t *testing.T) {
+	var (
+		gotRecallQuery string
+		gotReadPath    string
+		gotReadQuery   string
+		gotSavePayload map[string]any
+		gotDeletePath  string
+		gotDeleteQuery string
+	)
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/memory":
+			gotRecallQuery = r.URL.RawQuery
+			_, _ = w.Write([]byte(`{"backend":"pebble","installed":true,"available":true,"items":[{"id":"mem_1","title":"Rule","snippet":"always test"}]}`))
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/memory/"):
+			gotReadPath = r.URL.Path
+			gotReadQuery = r.URL.RawQuery
+			_, _ = w.Write([]byte(`{"path":"assistant/memory/items/rule-1.md","content":"always test","startLine":1,"endLine":1,"totalLines":1}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/memory":
+			gotSavePayload = map[string]any{}
+			_ = json.NewDecoder(r.Body).Decode(&gotSavePayload)
+			_, _ = w.Write([]byte(`{"ok":true,"id":"mem_2","item":{"id":"mem_2","text":"saved"}}`))
+		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/api/memory/"):
+			gotDeletePath = r.URL.Path
+			gotDeleteQuery = r.URL.RawQuery
+			_, _ = w.Write([]byte(`{"ok":true,"id":"mem_1","action":"deleted"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer api.Close()
+
+	input := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"recall_memory","arguments":{"query":"deploy","tags":["ops","prod"],"includeSessions":true,"limit":10}}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"read_memory","arguments":{"path":"MEMORY.md","startLine":1,"endLine":20}}}`,
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"save_memory","arguments":{"text":"Use blue-green deploys","title":"Deploy policy","kind":"rule","tags":["ops"],"pin":true,"supersedes":"mem_1"}}}`,
+		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"forget_memory","arguments":{"id":"mem_1","reason":"superseded","hardDelete":true}}}`,
+		"",
+	}, "\n")
+
+	var out bytes.Buffer
+	srv := NewServer(api.URL, "assistant")
+	if err := srv.ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatalf("ServeStdio failed: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 4 {
+		t.Fatalf("expected 4 responses, got %d:\n%s", len(lines), out.String())
+	}
+	if !strings.Contains(gotRecallQuery, "compact=1") || !strings.Contains(gotRecallQuery, "callerBotId=assistant") ||
+		!strings.Contains(gotRecallQuery, "includeSessions=1") || !strings.Contains(gotRecallQuery, "tags=ops%2Cprod") {
+		t.Fatalf("unexpected recall_memory query: %q", gotRecallQuery)
+	}
+	if gotReadPath != "/api/memory/_" || !strings.Contains(gotReadQuery, "path=MEMORY.md") ||
+		!strings.Contains(gotReadQuery, "botId=assistant") || !strings.Contains(gotReadQuery, "startLine=1") {
+		t.Fatalf("unexpected read_memory request: path=%q query=%q", gotReadPath, gotReadQuery)
+	}
+	if gotSavePayload["scope"] != "bot" || gotSavePayload["botId"] != "assistant" ||
+		gotSavePayload["callerBotId"] != "assistant" || gotSavePayload["supersedes"] != "mem_1" ||
+		gotSavePayload["sourceAuthor"] != "agent" || gotSavePayload["pin"] != true {
+		t.Fatalf("unexpected save_memory payload: %#v", gotSavePayload)
+	}
+	if gotDeletePath != "/api/memory/mem_1" || !strings.Contains(gotDeleteQuery, "hard=1") || !strings.Contains(gotDeleteQuery, "callerBotId=assistant") {
+		t.Fatalf("unexpected forget_memory request: path=%q query=%q", gotDeletePath, gotDeleteQuery)
+	}
+
+	// computer_use role hides and rejects all 4 memory tools.
+	t.Setenv("PEBBLE_MCP_ROLE", "computer_use")
+	cuSrv := NewServer(api.URL, "assistant")
+	cuInput := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"recall_memory","arguments":{"query":"x"}}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"save_memory","arguments":{"text":"x"}}}`,
+		"",
+	}, "\n")
+	var cuOut bytes.Buffer
+	if err := cuSrv.ServeStdio(context.Background(), strings.NewReader(cuInput), &cuOut); err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range strings.Split(strings.TrimSpace(cuOut.String()), "\n") {
+		if !strings.Contains(line, `"isError":true`) {
+			t.Fatalf("expected computer_use to reject memory tool, got: %s", line)
+		}
 	}
 }
 

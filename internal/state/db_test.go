@@ -157,6 +157,54 @@ func TestPushDeviceStore(t *testing.T) {
 	}
 }
 
+func TestOpenSQLiteCreatesMemoryTablesIdempotently(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "hub.db")
+	// Simulate an older hub.db without memory tables.
+	legacy, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := legacy.Exec(`CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);`); err != nil {
+		_ = legacy.Close()
+		t.Fatal(err)
+	}
+	_ = legacy.Close()
+
+	store, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewStore failed on legacy db: %v", err)
+	}
+	defer store.Close()
+
+	if store.DB() == nil {
+		t.Fatal("expected Store.DB() to return non-nil *sql.DB")
+	}
+
+	wantTables := []string{
+		"memory_docs",
+		"memory_chunks",
+		"memory_fts_uni",
+		"memory_fts_tri",
+		"memory_embeddings",
+		"memory_stats",
+		"memory_dismissed",
+	}
+	for _, tbl := range wantTables {
+		var name string
+		if err := store.DB().QueryRow(`SELECT name FROM sqlite_master WHERE name = ?`, tbl).Scan(&name); err != nil {
+			t.Fatalf("expected table %s to exist: %v", tbl, err)
+		}
+	}
+
+	// Reopening must remain idempotent.
+	_ = store.Close()
+	store2, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("second NewStore open failed: %v", err)
+	}
+	defer store2.Close()
+}
+
 func TestOpenSQLiteMigratesLegacyBotTasksWorktreeColumns(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "state.db")
 	legacyDB, err := sql.Open("sqlite", dbPath)

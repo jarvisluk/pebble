@@ -116,31 +116,6 @@ internal suspend fun PebbleStore.deleteBotImpl(botId: String) {
     removeBotState(botId)
 }
 
-// MARK: Memory
-
-internal suspend fun PebbleStore.fetchMemoriesImpl(
-    scope: String,
-    botId: String? = null,
-    query: String = "",
-    kind: String = "",
-    limit: Int = 0,
-): MemoryList {
-    val params = mutableListOf("scope=${encodeURIComponent(scope)}")
-    if (!botId.isNullOrBlank()) params.add("botId=${encodeURIComponent(botId)}")
-    if (query.trim().isNotEmpty()) params.add("query=${encodeURIComponent(query.trim())}")
-    if (kind.trim().isNotEmpty()) params.add("kind=${encodeURIComponent(kind.trim())}")
-    if (limit > 0) params.add("limit=$limit")
-    return api.call("/api/memory?${params.joinToString("&")}")
-}
-
-internal suspend fun PebbleStore.saveMemoryImpl(body: Map<String, Any?>) {
-    api.rawText("/api/memory", method = "POST", body = body)
-}
-
-internal suspend fun PebbleStore.deleteMemoryImpl(id: String) {
-    api.rawText("/api/memory/${encodeURIComponent(id)}", method = "DELETE")
-}
-
 // MARK: Routines
 
 internal suspend fun PebbleStore.fetchRoutinesImpl(botId: String): List<RoutineItem> {

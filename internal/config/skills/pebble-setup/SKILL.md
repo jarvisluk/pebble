@@ -112,10 +112,14 @@ Note: `pebble settings set` rejects empty strings for `--default-harness`, `--de
 
 ## Complete Pebble Interface Reference
 
-### 1. Built-in MCP Tools (`pebble` MCP, 8 primitives)
+### 1. Built-in MCP Tools (`pebble` MCP, 12 primitives)
 
 - `send_message(text?, images?, files?)`: Send visible Markdown text, local images, and/or files to the user in Pebble. Ordinary text output is internal trace hidden from the user (except when replying to another bot via `message_bot`, where ordinary text is the reply).
 - `message_bot(botId, message)`: Send a message/task to another bot and wait for its reply (enforces `hop <= 4` loop protection; recorded in both timelines).
+- `recall_memory(query?, scope?, botId?, kind?, tags?, status?, includeSessions?, limit?)`: Search Pebble's native Markdown memory index (returns compact L1 hits; set `includeSessions=true` to also fuse historical chat sessions).
+- `read_memory(id?, path?, botId?, startLine?, endLine?)`: Read a complete L2 memory item by `id` or a line-sliced workspace memory file (`path` jailed to `_shared/USER.md` and `<owner>/memory/`).
+- `save_memory(text, title?, scope?, kind?, tags?, why?, id?, pin?, validFrom?, supersedes?, daily?)`: Create/update a durable memory item (`scope="bot"` default, or `"global"`) or append to today's working log (`daily=true`). Enforces SecretGuard (rejects plaintext API keys/tokens).
+- `forget_memory(id, reason?, hardDelete?)`: Soft-archive (default) or hard-delete a memory item.
 - `recall_session(sessionId?, botId?, tail?, offset?, limit?, query?, maxChars?, messageId?)`: Read sliced messages from `previous`, `active`, or `<sessionId>` (keep slices small; fetch oversized single messages via `messageId`). If `pebble session list` returns a `magpieSession`, pass it to `magpie-sessions__read_session` for raw tool transcripts.
 - `desktop_task(goal, nodeId?, app?, timeoutSec?)`: Delegate multi-step visible desktop GUI or visible-browser tasks to an isolated computer-use worker (omit `nodeId` to use this bot's bound `desktopTarget` or the active desktop target).
 - `request_takeover(reason, nodeId?, app?)`: Pause automation and request human intervention in Remote Desktop (QR login, 2FA, CAPTCHA, payment) until resumed.
@@ -124,6 +128,17 @@ Note: `pebble settings set` rejects empty strings for `--default-harness`, `--de
 - `open_stage(kind, path?, taskId?, title?, subtitle?, url?, target?, autoOpen?)`: Submit a side tab in the user's Stage UI (`file` | `files` | `desktop` | `task` | `browser` | `artifact` | `mcp-app`) and post a clickable jump card in chat (`autoOpen` defaults to `false`).
 
 ### 2. Full `pebble` CLI Reference
+
+- **Memory**:
+  - `pebble memory search [--query <q>] [--scope global|bot|all] [--bot <id>] [--kind <k>] [--tags a,b] [--status active|candidate|superseded|archived|all] [--include-sessions] [--compact] [--limit N]`
+  - `pebble memory list [--scope global|bot|all] [--bot <id>] [--kind <k>] [--tags a,b] [--status <s>] [--limit N]`
+  - `pebble memory get [--id <id>] [--path <p>] [--bot <id>] [--start-line N] [--end-line N]`
+  - `pebble memory save [--id <id>] [--scope bot|global] [--bot <id>] [--kind <k>] [--title <t>] [--text "..." | --text-file <path>] [--why "..."] [--tags a,b] [--pin] [--valid-from <ts>] [--supersedes <id>] [--daily]`
+  - `pebble memory forget --id <id> [--reason "..."] [--hard] [--dismiss]`
+  - `pebble memory status [--bot <id>]`
+  - `pebble memory dream [--bot <id>] [--force=true|false]`
+  - `pebble memory reindex`
+  - `pebble memory import-magpie [--mode bots_only|all] [--bot <id>] [--dry-run]`
 
 - **Bots**:
   - `pebble bot list`
@@ -159,9 +174,10 @@ Note: `pebble settings set` rejects empty strings for `--default-harness`, `--de
 ### 3. Workspace, Memory & Automation Conventions
 
 - **Shared Context & Durable Memory**:
-  - `_shared/USER.md`: Hub-wide user preferences shared across all bots.
-  - `AGENTS.md`: This bot's role and workspace instructions.
-  - `memory/`: Local durable notes; when Magpie Memory tools (`memory_search` / `memory_save`) are available, store global preferences with `scope="global"` and bot notes with `scope="project"` + tag `bot:<your-bot-id>`.
+  - `_shared/USER.md`: Hub-wide user preferences shared across all bots (read-only by the memory engine; update via `pebble settings set --shared-user-md-file`).
+  - `_shared/memory/` and `<bot>/memory/`: Native Pebble file-first Markdown memory (`MEMORY.md`, `items/`, `daily/`, `dreams/`) indexed in SQLite for hybrid search. Use `recall_memory`, `read_memory`, `save_memory`, `forget_memory` (or `pebble memory ...`).
+  - `AGENTS.md`: This bot's role and workspace instructions (never modified by the memory engine).
+  - **Magpie Coexistence Single-Source Boundary**: When ambient Magpie Memory tools (`memory_search` / `memory_save`) are also present on a harness, treat Magpie memory as read-only and never double-write the same fact to both systems. Store bot-scoped and team notes in Pebble; bots with `privateSessions=true` must never write to external Magpie memory.
 - **Local Desktop & Browser CLI**:
   - Desktop GUI (`agent-desktop`): inspect via accessibility-tree `snapshot` and act via `@ref` instead of blind coordinates.
   - Browser (`agent-browser`): `AGENT_BROWSER_SESSION` (`bot-<id>`) and `AGENT_BROWSER_PROFILE` (when `browserMode=isolated`) are pre-set per bot. Always pass `--session <bot-id>` inside shared-server harnesses such as `opencode`. Prefer `agent-browser --auto-connect --pin-tab` in `auto`/`attach` mode; use headless (or `--headed` when takeover is needed) in `isolated` mode.

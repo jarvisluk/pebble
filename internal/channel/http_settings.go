@@ -3,6 +3,7 @@ package channel
 import (
 	"bot-hub/internal/config"
 	"bot-hub/internal/harness"
+	"bot-hub/internal/hub"
 	"context"
 	"encoding/json"
 	"net"
@@ -20,8 +21,9 @@ type settingsBody struct {
 	DefaultModelsPatch    map[string]string `json:"defaultModelsPatch,omitempty"`
 	DesktopHarness        *string           `json:"desktopHarness,omitempty"`
 	DesktopModel          *string           `json:"desktopModel,omitempty"`
-	SharedUserMD          *string           `json:"sharedUserMd,omitempty"`
-	OnboardingCompleted   *bool             `json:"onboardingCompleted,omitempty"`
+	SharedUserMD          *string                `json:"sharedUserMd,omitempty"`
+	OnboardingCompleted   *bool                  `json:"onboardingCompleted,omitempty"`
+	Memory                *hub.MemoryConfigPatch `json:"memory,omitempty"`
 }
 
 // DesktopResetFunc is registered by the native desktop host (bot-hub-desktop)
@@ -74,6 +76,7 @@ func (s *HTTPServer) handleSettings(w http.ResponseWriter, r *http.Request) {
 		"defaultModel":          defaultModel,
 		"defaultModels":         defaultModels,
 		"sharedUserMd":          s.hub.SharedUserMD(),
+		"memory":                s.hub.MemoryConfig(),
 		"harnesses":             harnesses,
 		"canResetDesktopMode":   DesktopResetFunc != nil,
 		"onboarding": map[string]any{
@@ -184,6 +187,12 @@ func (s *HTTPServer) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	if body.DesktopModel != nil {
 		nextDeskModel = strings.TrimSpace(*body.DesktopModel)
 		if err := config.ValidateModelID(nextDeskModel); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
+	}
+	if body.Memory != nil {
+		if err := s.hub.ValidateMemoryConfigPatch(*body.Memory); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
 			return
 		}
@@ -301,6 +310,12 @@ func (s *HTTPServer) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.OnboardingCompleted != nil {
 		if err := s.hub.SetOnboardingCompleted(*body.OnboardingCompleted); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
+	}
+	if body.Memory != nil {
+		if err := s.hub.SetMemoryConfig(*body.Memory); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
 			return
 		}

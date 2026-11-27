@@ -35,18 +35,24 @@ func PlatformInstructionsText() string {
 		"",
 		"- **Workspace Model**: `1 Bot = 1 Workspace = 1 Active Session`. Keep replies concise and direct.",
 		"- **User Output Convention**: Your ordinary text output is internal working trace and is hidden from the user. Always call `send_message(text?, images?, files?)` (or `pebble bot send`) to deliver replies, progress updates, local images, or files to the user. If a background task or routine needs no user notification, simply end without calling `send_message`. When replying to another bot via `message_bot`, reply directly in ordinary text (no `send_message` needed).",
-		"- **Shared Context & Memory**:",
-		"  - Read `_shared/USER.md` for hub-wide user preferences.",
-		"  - When Magpie Memory tools (`memory_search` / `memory_save`) are available, store cross-project preferences with `scope=\"global\"` and this bot's durable notes with `scope=\"project\"` and tag `bot:<your-bot-id>` (and pass that tag when searching so sibling workspaces inside a git repo never mix). Otherwise store durable notes in `memory/`.",
-		"- **MCP Core Tools (`pebble` MCP, 8 runtime primitives)**:",
+		"- **Shared Context & Native Memory**:",
+		"  - Read `_shared/USER.md` for hub-wide user preferences; session startup injects a deterministic Frozen Memory Snapshot (`_shared/USER.md`, curated `MEMORY.md`, recent 48h daily headings).",
+		"  - Use Pebble's native memory tools (`recall_memory`, `read_memory`, `save_memory`, `forget_memory`) or `pebble memory` CLI for durable memories stored in `_shared/memory/` (global) and `<bot>/memory/` (bot).",
+		"  - **Magpie Coexistence Boundary**: When ambient Magpie Memory tools (`memory_search` / `memory_save`) are also present, treat Magpie memory as read-only and never double-write the same fact to both systems. Always store bot-scoped and team notes in Pebble; bots with `privateSessions=true` must never write to external Magpie memory.",
+		"- **MCP Core Tools (`pebble` MCP, 12 runtime primitives)**:",
 		"  - `send_message(text?, images?, files?)`: send visible text, local images, and/or files to the user.",
 		"  - `message_bot(botId, message)`: collaborate with another bot.",
+		"  - `recall_memory(query?, scope?, botId?, kind?, tags?, status?, includeSessions?, limit?)`: hybrid search over Pebble memories (compact L1 hits; set `includeSessions=true` to fuse past chats).",
+		"  - `read_memory(id?, path?, botId?, startLine?, endLine?)`: read full L2 memory item or line-sliced memory file.",
+		"  - `save_memory(text, title?, scope?, kind?, tags?, why?, id?, pin?, validFrom?, supersedes?, daily?)`: create/update durable memory or append to today's daily log (`daily=true`).",
+		"  - `forget_memory(id, reason?, hardDelete?)`: archive (or hard-delete) an obsolete memory item.",
 		"  - `recall_session(...)`: read sliced messages from `previous` / `active` / `<sessionId>` (keep slices small; fetch single oversized messages by `messageId`). If `pebble session list` returns a `magpieSession`, pass it to `magpie-sessions__read_session` for raw tool transcripts.",
 		"  - `desktop_task(goal, ...)` & `request_takeover(reason, ...)`: delegate multi-step GUI tasks to the visible desktop worker, or pause for human QR/2FA/CAPTCHA/payment takeover (omit `nodeId` to use this bot's bound screen `desktopTarget` or the active desktop target).",
 		"  - `node_exec(command, ...)` & `node_file(op, path, ...)`: run shell commands or read/write/list files on connected remote nodes.",
 		"  - `open_stage(kind, path?, taskId?, title?, subtitle?, url?, target?, autoOpen?)`: submit a Stage side tab (`file`, `files`, `desktop`, `task`, `browser`, `artifact`, `mcp-app`) and post a clickable jump card in chat (`autoOpen` defaults to `false`).",
 		"- **Full `pebble` CLI (auto-reads current bot context from env or workspace config)**:",
 		"  - **Bots & Self-Edit**: `pebble bot list | get [--id <id>] | create --id <id> --name <name> [--harness opencode|codebuddy|qoder|codex|claude|grok|trae|pi|dsh|agy] [--model <m>] [--force] | update [--id <id>] [--model <m> | --inherit-model] [--harness <h>] [--name ...] [--description ...] [--instructions-file AGENTS.md] [--desktop-target <t>] [--browser-mode auto|isolated|attach] [--dry-run] [--force] | delete --id <id> [--confirm-self] | message <id> <msg> | send [--text \"...\"] [--image <path>] [--file <path>]`.",
+		"  - **Memory**: `pebble memory search | list | get | save | forget | status | dream | reindex | import-magpie`.",
 		"  - **Settings & Models**: `pebble settings get [--fresh] | models [--harness <h>] | set [--default-harness <h>] [--default-model <m> | --clear-default-model] [--harness-model <h>=<m>] [--clear-harness-model <h>] [--desktop-harness <h> | --clear-desktop-harness] [--desktop-model <m> | --clear-desktop-model] [--shared-user-md \"...\" | --shared-user-md-file <path>] [--dry-run] [--force]`.",
 		"  - **Sessions**: `pebble session list [--bot <id|*>] [--query ...] | recall [--id previous|active|<sid>] | rotate [--handoff \"...\"]` (rotate regularly on harnesses without native `billion-context` compression like `agy`, `dsh`).",
 		"  - **Routines**: `pebble routine list | upsert --name <n> --prompt <p> [--every-minutes N | --daily-at HH:MM] [--main-delivery receipt|notify|none] | delete --id <r> | run --id <r>` (isolated ephemeral turns with `AGENTS.md` + `memory/`).",
@@ -100,8 +106,13 @@ func EnsureWorkspace(bot *BotConfig, cfg *HubConfig, customInstructions string) 
 	if _, err := EnsurePlatformInstructions(cfg.SharedDir); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Join(bot.Workspace, "memory"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(cfg.SharedDir, "memory", "items"), 0o755); err != nil {
 		return err
+	}
+	for _, sub := range []string{"items", "daily", "dreams"} {
+		if err := os.MkdirAll(filepath.Join(bot.Workspace, "memory", sub), 0o755); err != nil {
+			return err
+		}
 	}
 
 	sharedLink := filepath.Join(bot.Workspace, "_shared")
