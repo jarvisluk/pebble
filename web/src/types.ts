@@ -157,6 +157,7 @@ export interface SettingsData {
   defaultPermissionMode?: PermissionMode;
   defaultModels?: Record<string, string>;
   sharedUserMd?: string;
+  memory?: MemoryConfig;
   desktopHarness?: string;
   desktopModel?: string;
   canResetDesktopMode?: boolean;
@@ -274,12 +275,55 @@ export interface TailscaleStatus {
   apiToken?: string;
 }
 
+export type MemoryItemStatus = 'active' | 'candidate' | 'superseded' | 'archived' | string;
+export type MemoryStatusFilter = 'active' | 'candidate' | 'superseded' | 'archived' | 'all';
+export type MemoryKind =
+  | 'fact'
+  | 'preference'
+  | 'rule'
+  | 'decision'
+  | 'reference'
+  | 'profile'
+  | 'procedure'
+  | 'episode'
+  | string;
+
+export interface MemoryMagpieInfo {
+  installed: boolean;
+  hasLegacyItems?: boolean;
+  legacyCount?: number;
+  injectedHarnesses?: string[];
+}
+
+export interface MemoryCounts {
+  active: number;
+  candidate: number;
+  superseded: number;
+  archived: number;
+}
+
 export interface MemoryItem {
   id: string;
-  kind?: string;
+  path?: string;
   scope?: string;
-  tags?: string[];
+  botId?: string;
+  kind?: MemoryKind;
+  title?: string;
   text: string;
+  snippet?: string;
+  why?: string;
+  tags?: string[];
+  status?: MemoryItemStatus;
+  pin?: boolean;
+  confidence?: number;
+  validFrom?: string;
+  validUntil?: string;
+  supersededBy?: string;
+  sourceSession?: string;
+  sourceAuthor?: string;
+  origin?: string;
+  score?: number;
+  createdAt?: string;
   updatedAt?: string;
 }
 
@@ -292,11 +336,94 @@ export interface MemorySemanticStatus {
 }
 
 export interface MemoryResponse {
+  backend?: string;
   installed?: boolean;
   available?: boolean;
   error?: string;
+  magpie?: MemoryMagpieInfo;
   semantic?: MemorySemanticStatus;
+  counts?: MemoryCounts;
   items?: MemoryItem[];
+}
+
+export interface MemoryDreamConfig {
+  enabled?: boolean;
+  dailyAt?: string;
+  model?: string;
+  minNewMessages?: number;
+}
+
+export interface MemoryEmbeddingConfig {
+  enabled?: boolean;
+  baseUrl?: string;
+  apiKey?: string;
+  hasApiKey?: boolean;
+  model?: string;
+}
+
+export interface MemoryConfig {
+  enabled?: boolean;
+  coexistence?: 'auto' | 'isolated' | string;
+  snapshotMaxChars?: number;
+  disableClaudeAutoMemory?: boolean;
+  dream?: MemoryDreamConfig;
+  embedding?: MemoryEmbeddingConfig;
+}
+
+export interface MemoryIndexDoc {
+  ok?: boolean;
+  path?: string;
+  content: string;
+  lines: number;
+  maxLines: number;
+}
+
+export interface MemoryDreamEntry {
+  botId?: string;
+  date: string;
+  path?: string;
+  summary?: string;
+  updatedAt?: string;
+}
+
+export interface MemoryStatus {
+  backend?: string;
+  config?: MemoryConfig;
+  docCount?: number;
+  chunkCount?: number;
+  counts?: MemoryCounts;
+  semantic?: MemorySemanticStatus;
+  magpie?: MemoryMagpieInfo;
+  recentDreams?: MemoryDreamEntry[];
+}
+
+export interface MemorySaveResponse {
+  ok?: boolean;
+  id?: string;
+  item?: MemoryItem;
+  similarExisting?: MemoryItem[];
+}
+
+export interface MemoryPatchResponse {
+  ok?: boolean;
+  item?: MemoryItem;
+}
+
+export interface MemoryDreamResponse {
+  ok?: boolean;
+  results?: unknown;
+}
+
+export interface MemoryReindexResponse {
+  ok?: boolean;
+  docsIndexed?: number;
+  chunksIndexed?: number;
+}
+
+export interface MemoryImportResponse {
+  ok?: boolean;
+  imported?: number;
+  skipped?: number;
 }
 
 export interface RoutineRun {
