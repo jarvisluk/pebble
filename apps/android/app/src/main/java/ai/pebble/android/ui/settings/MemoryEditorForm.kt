@@ -67,7 +67,9 @@ fun MemoryEditorForm(
 
     var title by remember(initial?.id) { mutableStateOf(initial?.title.orEmpty()) }
     var kind by remember(initial?.id) { mutableStateOf(initial?.kind?.ifBlank { "fact" } ?: "fact") }
-    var text by remember(initial?.id) { mutableStateOf(initial?.text.orEmpty()) }
+    var text by remember(initial?.id) {
+        mutableStateOf(initial?.text?.takeIf { it.isNotBlank() } ?: initial?.snippet.orEmpty())
+    }
     var tagsRaw by remember(initial?.id) {
         mutableStateOf(initial?.tags.orEmpty().filterNot { it.startsWith("bot:") }.joinToString(", "))
     }

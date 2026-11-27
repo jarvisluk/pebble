@@ -106,22 +106,33 @@ fun MemorySettingsTab(
         }
     }
 
-    val userMdDirty = run {
-        val s = store.settings ?: return@run false
-        userMdTouched && rtrim(userMd) != rtrim(s.sharedUserMd.orEmpty())
+    fun currentBaseCfg(): MemoryConfig? = store.settings?.memory ?: memStatus?.config
+
+    fun isUserMdDirty(): Boolean {
+        val s = store.settings ?: return false
+        return userMdTouched && rtrim(userMd) != rtrim(s.sharedUserMd.orEmpty())
     }
-    val indexDirty = indexTouched && rtrim(indexText) != rtrim(indexDoc?.content.orEmpty())
-    val baseCfg = store.settings?.memory ?: memStatus?.config
-    val configDirty = cfgTouched && (
-        cfgCoexistence != (baseCfg?.coexistence?.takeIf { it == "auto" || it == "isolated" } ?: "auto") ||
-            cfgDreamEnabled != (baseCfg?.dream?.enabled ?: true) ||
-            cfgDreamDailyAt.trim() != (baseCfg?.dream?.dailyAt.orEmpty().ifBlank { "03:00" }) ||
-            cfgDreamModel.trim() != baseCfg?.dream?.model.orEmpty().trim() ||
-            cfgEmbEnabled != (baseCfg?.embedding?.enabled == true) ||
-            cfgEmbBaseUrl.trim() != baseCfg?.embedding?.baseUrl.orEmpty().trim() ||
-            cfgEmbModel.trim() != baseCfg?.embedding?.model.orEmpty().trim() ||
-            cfgEmbApiKey.trim().isNotEmpty()
-        )
+
+    fun isIndexDirty(): Boolean =
+        indexTouched && rtrim(indexText) != rtrim(indexDoc?.content.orEmpty())
+
+    fun isConfigDirty(): Boolean {
+        val cfg = currentBaseCfg()
+        return cfgTouched && (
+            cfgCoexistence != (cfg?.coexistence?.takeIf { it == "auto" || it == "isolated" } ?: "auto") ||
+                cfgDreamEnabled != (cfg?.dream?.enabled ?: true) ||
+                cfgDreamDailyAt.trim() != (cfg?.dream?.dailyAt.orEmpty().ifBlank { "03:00" }) ||
+                cfgDreamModel.trim() != cfg?.dream?.model.orEmpty().trim() ||
+                cfgEmbEnabled != (cfg?.embedding?.enabled == true) ||
+                cfgEmbBaseUrl.trim() != cfg?.embedding?.baseUrl.orEmpty().trim() ||
+                cfgEmbModel.trim() != cfg?.embedding?.model.orEmpty().trim() ||
+                cfgEmbApiKey.trim().isNotEmpty()
+            )
+    }
+
+    val userMdDirty = isUserMdDirty()
+    val indexDirty = isIndexDirty()
+    val configDirty = isConfigDirty()
 
     suspend fun loadIndex() {
         runCatching { store.fetchMemoryIndex(scope = "global") }.getOrNull()?.let { doc ->
@@ -191,6 +202,7 @@ fun MemorySettingsTab(
         onSaved("")
         busy = "mem:config"
         return try {
+            val baseCfg = currentBaseCfg()
             val dreamMap = mutableMapOf<String, Any?>(
                 "enabled" to cfgDreamEnabled,
                 "dailyAt" to cfgDreamDailyAt.trim().ifEmpty { "03:00" },
@@ -264,9 +276,9 @@ fun MemorySettingsTab(
     DisposableEffect(Unit) {
         router.settingsSaveAction = {
             var ok = true
-            if (userMdDirty) ok = ok && saveUserMd()
-            if (indexDirty) ok = ok && saveIndex()
-            if (configDirty) ok = ok && saveConfig()
+            if (isUserMdDirty()) ok = ok && saveUserMd()
+            if (isIndexDirty()) ok = ok && saveIndex()
+            if (isConfigDirty()) ok = ok && saveConfig()
             ok
         }
         router.settingsDiscardAction = {
@@ -275,7 +287,7 @@ fun MemorySettingsTab(
             indexTouched = false
             indexText = indexDoc?.content.orEmpty()
             cfgTouched = false
-            syncConfig(store.settings?.memory ?: memStatus?.config)
+            syncConfig(currentBaseCfg())
         }
         onDispose {
             router.settingsDirty = false
